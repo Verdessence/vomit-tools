@@ -5,6 +5,6 @@ CMakeLists.txt.user*
 *.autosave
 
 # Kept local, not published
-/.github/
+/.github/workflows/build.yml
 /docs/
 /tests/
