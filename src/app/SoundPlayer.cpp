@@ -130,31 +130,34 @@ std::shared_ptr<const xv::audio::Clip> SoundPlayer::load(const std::string& game
 	return clip;
 }
 
-bool SoundPlayer::start(std::shared_ptr<const xv::audio::Clip> clip, const PlayRequest& request) {
+xv::audio::Engine::Voice SoundPlayer::start(std::shared_ptr<const xv::audio::Clip> clip, const PlayRequest& request, double startSeconds) {
 	if (!clip || !engine_) {
-		return false;
+		return 0;
 	}
 	xv::audio::PlayParams params;
 	params.volume = static_cast<float>(request.volume);
 	params.pitch = static_cast<float>(request.pitch / 100.0);
 	params.loop = request.loop;
 	params.delaySeconds = request.delaySeconds;
+	params.startSeconds = startSeconds;
 	// "position random" puts each sound somewhere around the listener; a stereo pan stands in for that.
 	if (request.randomPosition) {
 		params.pan = std::uniform_real_distribution<float>{-0.8f, 0.8f}(randomEngine());
 	}
-	if (engine_->play(std::move(clip), params) == 0) {
+	const auto voice = engine_->play(std::move(clip), params);
+	if (voice == 0) {
 		emit failed(tr("Could not play %1").arg(QString::fromStdString(request.wave)));
-		return false;
+		return 0;
 	}
 	setActive(true);
-	return true;
+	return voice;
 }
 
-bool SoundPlayer::playData(const QString& name, std::span<const std::byte> bytes, bool loop) {
+bool SoundPlayer::playData(const QString& name, std::span<const std::byte> bytes, bool loop, double startSeconds) {
 	if (!available()) {
 		return false;
 	}
+	stop();
 	QString error;
 	auto clip = decodeCached("file:" + name.toStdString() + ':' + std::to_string(bytes.size()), bytes, &error);
 	if (!clip) {
@@ -164,7 +167,8 @@ bool SoundPlayer::playData(const QString& name, std::span<const std::byte> bytes
 	PlayRequest request;
 	request.wave = name.toStdString();
 	request.loop = loop;
-	if (!start(std::move(clip), request)) {
+	lastVoice_ = start(std::move(clip), request, startSeconds);
+	if (lastVoice_ == 0) {
 		return false;
 	}
 	emit started(describe(request));
@@ -186,7 +190,9 @@ bool SoundPlayer::play(const PlayRequest& request, const std::filesystem::path& 
 		emit failed(tr("%1 is a sentence or voice stream, not a sound file").arg(QString::fromStdString(request.wave)));
 		return false;
 	}
-	if (!start(load(request.gamePath, localRoot), request)) {
+	stop();
+	lastVoice_ = start(load(request.gamePath, localRoot), request);
+	if (lastVoice_ == 0) {
 		return false;
 	}
 	emit started(describe(request));
@@ -206,8 +212,9 @@ bool SoundPlayer::playSoundscape(const xv::sound::SoundscapePlan& plan, const QS
 	simulationRoot_ = localRoot;
 	simulationName_ = name;
 	int loops = 0;
+	lastVoice_ = 0;
 	for (const PlayRequest& request : simulation_->start()) {
-		loops += start(load(request.gamePath, localRoot), request);
+		loops += start(load(request.gamePath, localRoot), request) != 0 ? 1 : 0;
 	}
 	const auto randoms = std::ranges::count_if(plan.rules, [](const auto& rule) { return rule.kind == xv::sound::SoundscapeRule::Kind::Random; });
 	clock_.start();
@@ -223,7 +230,7 @@ void SoundPlayer::tick() {
 	if (simulation_) {
 		const double elapsed = static_cast<double>(clock_.restart()) / 1000.0;
 		for (const PlayRequest& request : simulation_->advance(elapsed)) {
-			if (start(load(request.gamePath, simulationRoot_), request)) {
+			if (start(load(request.gamePath, simulationRoot_), request) != 0) {
 				emit started(tr("%1: %2").arg(simulationName_, describe(request)));
 			}
 		}
@@ -234,8 +241,13 @@ void SoundPlayer::tick() {
 	}
 }
 
+std::optional<double> SoundPlayer::position(xv::audio::Engine::Voice voice) {
+	return engine_ && voice != 0 ? engine_->position(voice) : std::nullopt;
+}
+
 void SoundPlayer::stop() {
 	simulation_.reset();
+	lastVoice_ = 0;
 	if (engine_) {
 		engine_->stopAll();
 	}

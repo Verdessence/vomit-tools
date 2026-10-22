@@ -22,6 +22,7 @@
 #include <QPushButton>
 #include <QRegularExpression>
 #include <QSaveFile>
+#include <QSet>
 #include <QSettings>
 #include <QSlider>
 #include <QSortFilterProxyModel>
@@ -37,14 +38,19 @@
 #include <QUrl>
 #include <QVBoxLayout>
 
+#include "AboutDialog.h"
 #include "FileViews.h"
 #include "FolderBrowser.h"
+#include "ImageFiles.h"
 #include "KvCard.h"
 #include "QtPaths.h"
+#include "SkyDocument.h"
+#include "SkyEditor.h"
 #include "SoundDocument.h"
 #include "SoundEditor.h"
 #include "SoundPlayer.h"
 #include "VfsModel.h"
+#include "sky/Sky.h"
 #include "sound/SoundLint.h"
 
 namespace fs = std::filesystem;
@@ -55,6 +61,7 @@ namespace {
 constexpr auto LAST_GAME_KEY = "lastGameInfo";
 constexpr auto RECENT_KEY = "recentPaths";
 constexpr auto VOLUME_KEY = "volume";
+constexpr auto SKY_EXPORT_KEY = "skyExportFolder";
 constexpr int RECENT_LIMIT = 12;
 
 QString writeFolderKey(const fs::path& gameInfo) {
@@ -138,6 +145,38 @@ std::span<const std::byte> asBytes(const QByteArray& data) {
 	return {reinterpret_cast<const std::byte*>(data.constData()), static_cast<std::size_t>(data.size())};
 }
 
+// The sky a face file on disk belongs to, when it clearly is one: it sits in a skybox folder, or
+// at least half of its faces are beside it (a lone "brick_up.png" is just an image).
+std::optional<xv::sky::SkyFiles> skyFilesFor(const QString& path) {
+	auto files = xv::sky::findSkyFiles(toPath(path));
+	if (files && (files->inSkyboxFolder || files->count() >= 3)) {
+		return files;
+	}
+	return std::nullopt;
+}
+
+QString skyOrigin(const xv::sky::SkyFiles& files) {
+	for (const auto& face : files.faces) {
+		if (!face.empty()) {
+			return QDir::cleanPath(toQString(face.parent_path())) + u'/' + QString::fromStdString(files.name);
+		}
+	}
+	return {};
+}
+
+// The sky a skybox material or texture belongs to: materials/skybox/sky_dustrt.vmt is sky_dust.
+QString skyNameFor(const QString& gamePath) {
+	const QString path = gamePath.toLower();
+	if (!path.startsWith(u"materials/skybox/") || !(path.endsWith(u".vmt") || path.endsWith(u".vtf"))) {
+		return {};
+	}
+	const QString base = QFileInfo{path}.completeBaseName();
+	if (base.size() <= 2 || !xv::sky::faceFromFileName(base.toStdString())) {
+		return {};
+	}
+	return base.left(base.size() - 2);
+}
+
 } // namespace
 
 MainWindow::MainWindow(QWidget* parent, xv::audio::Engine::Output audio)
@@ -166,12 +205,14 @@ MainWindow::MainWindow(QWidget* parent, xv::audio::Engine::Output audio)
 	tree_->setUniformRowHeights(true);
 	tree_->header()->setSectionResizeMode(VfsModel::NameColumn, QHeaderView::Stretch);
 	tree_->header()->setStretchLastSection(false);
-	tree_->setToolTip(tr("The game's files as the engine sees them. Double-click a soundscape or soundscript to edit it"));
+	tree_->setToolTip(tr("The game's files as the engine sees them. Double-click a soundscape, soundscript or sky material to edit it"));
 	connect(tree_->selectionModel(), &QItemSelectionModel::currentChanged, this, &MainWindow::previewFile);
 	connect(tree_, &QTreeView::activated, this, [this](const QModelIndex& proxyIndex) {
 		const QString path = filter_->mapToSource(proxyIndex).data(VfsModel::PathRole).toString();
 		if (xv::sound::fileKindForPath(path.toStdString()) != FileKind::Unknown) {
 			openSoundFile(path);
+		} else if (const QString sky = skyNameFor(path); !sky.isEmpty()) {
+			openSky(sky);
 		}
 	});
 
@@ -195,8 +236,8 @@ MainWindow::MainWindow(QWidget* parent, xv::audio::Engine::Output audio)
 	auto* previewLayout = new QVBoxLayout(previewHost_);
 	previewLayout->setContentsMargins(0, 0, 0, 0);
 	previewLayout->addWidget(placeholder(tr("Open a game, a folder or a file from the File menu, or drop files and folders here.\n\n"
-	                                        "Soundscapes (soundscapes_*.txt) and soundscripts (game_sounds_*.txt) open in the editor; "
-	                                        "sounds, particles and other files show here.")));
+	                                        "Soundscapes (soundscapes_*.txt) and soundscripts (game_sounds_*.txt) open in the editor, and skies "
+	                                        "in the skybox editor (File → New Skybox); sounds, textures, particles and other files show here.")));
 
 	tabs_ = new QTabWidget;
 	tabs_->setDocumentMode(true);
@@ -207,7 +248,8 @@ MainWindow::MainWindow(QWidget* parent, xv::audio::Engine::Output audio)
 	connect(tabs_, &QTabWidget::tabCloseRequested, this, &MainWindow::closeTab);
 	connect(tabs_, &QTabWidget::currentChanged, this, [this] {
 		SoundEditor* editor = currentEditor();
-		undoGroup_->setActiveStack(editor ? editor->document()->undoStack() : nullptr);
+		SkyEditor* sky = currentSky();
+		undoGroup_->setActiveStack(editor ? editor->document()->undoStack() : sky ? sky->document()->undoStack() : nullptr);
 		updateTitle();
 	});
 
@@ -234,13 +276,12 @@ MainWindow::MainWindow(QWidget* parent, xv::audio::Engine::Output audio)
 	statusBar()->addPermanentWidget(gameLabel_);
 	updateGameLabel();
 
-	buildMenus();
-	menuBar()->actions().constLast()->menu()->addAction(mountsDock->toggleViewAction());
+	buildMenus(mountsDock->toggleViewAction());
 }
 
 MainWindow::~MainWindow() = default;
 
-void MainWindow::buildMenus() {
+void MainWindow::buildMenus(QAction* searchPathsToggle) {
 	auto* file = menuBar()->addMenu(tr("&File"));
 	file->addAction(tr("&Open File…"), QKeySequence::Open, this, &MainWindow::chooseFiles);
 	file->addAction(tr("Open &Folder…"), QKeySequence{Qt::CTRL | Qt::SHIFT | Qt::Key_O}, this, &MainWindow::chooseFolder);
@@ -251,19 +292,27 @@ void MainWindow::buildMenus() {
 	file->addSeparator();
 	file->addAction(tr("New &Soundscape File…"), this, [this] { newSoundFile(FileKind::Soundscape); });
 	file->addAction(tr("New Sound&script File…"), this, [this] { newSoundFile(FileKind::Soundscript); });
+	file->addAction(tr("New S&kybox"), this, [this] { newSky(); });
+	auto* skies = file->addMenu(tr("Open Sk&y from Game"));
+	connect(skies, &QMenu::aboutToShow, this, [this, skies] { fillSkyMenu(skies); });
 	file->addSeparator();
+	// For a sky, saving is exporting its VTFs and VMTs.
 	file->addAction(tr("&Save"), QKeySequence::Save, this, [this] {
 		if (SoundEditor* editor = currentEditor()) {
 			save(editor);
+		} else if (SkyEditor* sky = currentSky()) {
+			exportSky(sky, false);
 		}
 	});
 	file->addAction(tr("Save &As…"), QKeySequence::SaveAs, this, [this] {
 		if (SoundEditor* editor = currentEditor()) {
 			saveAs(editor);
+		} else if (SkyEditor* sky = currentSky()) {
+			exportSky(sky, true);
 		}
 	});
 	file->addAction(tr("&Close Tab"), QKeySequence::Close, this, [this] {
-		if (currentEditor()) {
+		if (currentEditor() || currentSky()) {
 			closeTab(tabs_->currentIndex());
 		}
 	});
@@ -289,6 +338,11 @@ void MainWindow::buildMenus() {
 		}
 	});
 	game->addSeparator();
+	game->addAction(searchPathsToggle);
+
+	auto* help = menuBar()->addMenu(tr("&Help"));
+	help->addAction(tr("&About vomit-tools"), this, [this] { AboutDialog{this}.exec(); });
+	help->addAction(tr("About &Qt"), qApp, &QApplication::aboutQt);
 }
 
 void MainWindow::buildPlaybackBar() {
@@ -383,6 +437,21 @@ void MainWindow::fillRecentMenu(QMenu* menu) {
 	menu->addAction(tr("Clear"), this, [] { QSettings{}.remove(RECENT_KEY); });
 }
 
+void MainWindow::fillSkyMenu(QMenu* menu) {
+	menu->clear();
+	if (!game_) {
+		menu->addAction(tr("Open a game first"))->setEnabled(false);
+		return;
+	}
+	const auto names = xv::sky::skyNames(*fileSystem_);
+	if (names.empty()) {
+		menu->addAction(tr("This game has no skies"))->setEnabled(false);
+	}
+	for (const std::string& name : names) {
+		menu->addAction(QString::fromStdString(name), this, [this, sky = QString::fromStdString(name)] { openSky(sky); });
+	}
+}
+
 void MainWindow::addRecent(const QString& path) {
 	QSettings settings;
 	QStringList recent = settings.value(RECENT_KEY).toStringList();
@@ -406,11 +475,9 @@ void MainWindow::chooseGameInfo() {
 void MainWindow::chooseFiles() {
 	const QString start = folders_->folder().isEmpty() && game_ ? toQString(game_->gameDir) : folders_->folder();
 	const QStringList files = QFileDialog::getOpenFileNames(this, tr("Open File"), start,
-		tr("Soundscapes and soundscripts (*.txt);;Sounds (*.wav *.mp3);;Particles (*.pcf *.dmx);;"
+		tr("Soundscapes and soundscripts (*.txt);;Sounds (*.wav *.mp3);;Sky faces and textures (*.vmt *.vtf *.png *.tga *.jpg *.jpeg *.bmp *.psd *.hdr);;Particles (*.pcf *.dmx);;"
 		   "KeyValues (*.txt *.vmt *.vdf *.res);;Game info (gameinfo.txt);;All files (*)"));
-	for (const QString& file : files) {
-		openPath(file);
-	}
+	openPaths(files);
 }
 
 void MainWindow::chooseFolder() {
@@ -433,6 +500,21 @@ void MainWindow::openPath(const QString& path) {
 		openGame(path);
 	} else {
 		openDiskFile(path);
+	}
+}
+
+void MainWindow::openPaths(const QStringList& paths) {
+	QSet<QString> skies;
+	for (const QString& path : paths) {
+		if (const auto files = QFileInfo{path}.isFile() ? skyFilesFor(path) : std::nullopt) {
+			if (!skies.contains(skyOrigin(*files))) {
+				skies.insert(skyOrigin(*files));
+				addRecent(path);
+				openSkyFiles(*files);
+			}
+			continue;
+		}
+		openPath(path);
 	}
 }
 
@@ -558,12 +640,12 @@ void MainWindow::setPreview(QWidget* view) {
 	layout->addWidget(view);
 }
 
-QWidget* MainWindow::withEditButton(QWidget* view, FileKind kind, const std::function<void()>& open) {
+QWidget* MainWindow::withEditButton(QWidget* view, const QString& text, const QString& button, const std::function<void()>& open) {
 	auto* wrapper = new QWidget;
 	auto* bar = new QHBoxLayout;
 	bar->setContentsMargins(6, 6, 6, 0);
-	bar->addWidget(new QLabel(tr("This is a %1 file.").arg(kindName(kind))));
-	auto* edit = new QPushButton(tr("Open in Editor"));
+	bar->addWidget(new QLabel(text));
+	auto* edit = new QPushButton(button);
 	connect(edit, &QPushButton::clicked, this, open);
 	bar->addWidget(edit);
 	bar->addStretch();
@@ -588,7 +670,9 @@ void MainWindow::previewFile(const QModelIndex& proxyIndex) {
 	}
 	QWidget* view = createFileView(path, source, *bytes, player_);
 	if (const FileKind kind = xv::sound::fileKindForPath(path.toStdString()); kind != FileKind::Unknown) {
-		view = withEditButton(view, kind, [this, path] { openSoundFile(path); });
+		view = withEditButton(view, tr("This is a %1 file.").arg(kindName(kind)), tr("Open in Editor"), [this, path] { openSoundFile(path); });
+	} else if (const QString sky = skyNameFor(path); !sky.isEmpty()) {
+		view = withEditButton(view, tr("This is part of the sky %1.").arg(sky), tr("Open Sky in Editor"), [this, sky] { openSky(sky); });
 	}
 	setPreview(view);
 	tabs_->setCurrentWidget(previewHost_);
@@ -602,10 +686,15 @@ void MainWindow::previewDiskFile(const QString& path) {
 	}
 	const QFileInfo info{path};
 	QWidget* view = createFileView(info.fileName(), QDir::toNativeSeparators(info.absolutePath()), asBytes(*data), player_);
-	if (info.suffix().compare(u"txt", Qt::CaseInsensitive) == 0) {
+	if (const auto sky = skyFilesFor(path)) {
+		const auto face = xv::sky::faceFromFileName(info.fileName().toStdString());
+		view = withEditButton(view, tr("This is the %1 face of the sky %2 (%3 of its 6 faces are here).")
+			.arg(face ? QString::fromUtf8(xv::sky::suffix(*face)) : QString{}, QString::fromStdString(sky->name)).arg(sky->count()),
+			tr("Open Sky in Editor"), [this, path] { openDiskFile(path); });
+	} else if (info.suffix().compare(u"txt", Qt::CaseInsensitive) == 0) {
 		const FileKind kind = xv::sound::guessFileKind(info.fileName().toStdString(), xv::kv1::parse(data->toStdString()).document);
 		if (kind != FileKind::Unknown) {
-			view = withEditButton(view, kind, [this, path] { openDiskFile(path); });
+			view = withEditButton(view, tr("This is a %1 file.").arg(kindName(kind)), tr("Open in Editor"), [this, path] { openDiskFile(path); });
 		}
 	}
 	setPreview(view);
@@ -620,6 +709,10 @@ void MainWindow::openDiskFile(const QString& path) {
 	}
 	autoMountFor(path);
 	addRecent(path);
+	if (const auto sky = skyFilesFor(path)) {
+		openSkyFiles(*sky);
+		return;
+	}
 	const fs::path file = toPath(info.absoluteFilePath());
 	if (SoundEditor* editor = editorForDisk(file)) {
 		tabs_->setCurrentWidget(editor);
@@ -686,6 +779,195 @@ SoundEditor* MainWindow::editorForDisk(const fs::path& file) const {
 
 SoundEditor* MainWindow::currentEditor() const {
 	return qobject_cast<SoundEditor*>(tabs_->currentWidget());
+}
+
+SkyEditor* MainWindow::currentSky() const {
+	return qobject_cast<SkyEditor*>(tabs_->currentWidget());
+}
+
+SkyEditor* MainWindow::newSky(SkyDocument* document) {
+	if (!document) {
+		document = new SkyDocument;
+	}
+	auto* editor = new SkyEditor(document);
+	undoGroup_->addStack(document->undoStack());
+	const int index = tabs_->addTab(editor, QString{});
+	const auto updateTab = [this, editor] {
+		const SkyDocument* doc = editor->document();
+		const QString name = doc->name().isEmpty() ? tr("New Sky") : tr("Sky: %1").arg(doc->name());
+		tabs_->setTabText(tabs_->indexOf(editor), (doc->isModified() && doc->complete() ? QStringLiteral("*") : QString{}) + name);
+		updateTitle();
+	};
+	connect(document, &SkyDocument::modifiedChanged, this, updateTab);
+	connect(document, &SkyDocument::nameChanged, this, updateTab);
+	connect(document, &SkyDocument::facesChanged, this, updateTab);
+	connect(editor, &SkyEditor::exportRequested, this, [this, editor] { exportSky(editor, false); });
+	connect(editor, &SkyEditor::exportToRequested, this, [this, editor] { exportSky(editor, true); });
+	updateTab();
+	tabs_->setTabToolTip(index, tr("Skybox editor"));
+	tabs_->setCurrentWidget(editor);
+	return editor;
+}
+
+SkyEditor* MainWindow::openSky(const QString& name) {
+	for (int i = 0; i < tabs_->count(); i++) {
+		if (auto* sky = qobject_cast<SkyEditor*>(tabs_->widget(i)); sky && sky->document()->name() == name && !sky->document()->isModified()) {
+			tabs_->setCurrentWidget(sky);
+			return sky;
+		}
+	}
+	QApplication::setOverrideCursor(Qt::WaitCursor);
+	const auto loaded = xv::sky::loadSky(*fileSystem_, name.toStdString());
+	QApplication::restoreOverrideCursor();
+	if (std::ranges::all_of(loaded.cube.faces, &xv::texture::Image::empty)) {
+		QStringList problems;
+		for (const std::string& problem : loaded.problems) {
+			problems << QString::fromStdString(problem);
+		}
+		QMessageBox::warning(this, tr("Open Sky"), tr("Could not open the sky %1:\n\n%2").arg(name, problems.join(u'\n')));
+		return nullptr;
+	}
+	auto* document = new SkyDocument;
+	std::array<std::optional<SkyDocument::Slot>, 6> faces;
+	for (xv::sky::Face face : xv::sky::FACES) {
+		const std::size_t i = xv::sky::indexOf(face);
+		if (!loaded.cube.faces[i].empty()) {
+			faces[i] = SkyDocument::Slot{std::make_shared<const xv::texture::Image>(loaded.cube.faces[i]), QString::fromStdString(loaded.textures[i]), {}, loaded.cube.transforms[i]};
+		}
+	}
+	document->setName(name);
+	document->setSlots(faces, tr("Open %1").arg(name));
+	document->undoStack()->clear();
+	document->markExported(); // it's what the game already has
+	SkyEditor* editor = newSky(document);
+	if (!loaded.problems.empty()) {
+		statusBar()->showMessage(QString::fromStdString(loaded.problems.front()), 10000);
+	}
+	return editor;
+}
+
+SkyEditor* MainWindow::openSkyFiles(const xv::sky::SkyFiles& files) {
+	const QString origin = skyOrigin(files);
+	for (int i = 0; i < tabs_->count(); i++) {
+		if (auto* sky = qobject_cast<SkyEditor*>(tabs_->widget(i)); sky && sky->document()->origin() == origin) {
+			tabs_->setCurrentWidget(sky);
+			return sky;
+		}
+	}
+	QApplication::setOverrideCursor(Qt::WaitCursor);
+	const auto loaded = xv::sky::loadSkyFiles(files, game_ ? fileSystem_.get() : nullptr);
+	QApplication::restoreOverrideCursor();
+	if (std::ranges::all_of(loaded.cube.faces, &xv::texture::Image::empty)) {
+		QMessageBox::warning(this, tr("Open Sky"), tr("None of the faces of %1 could be read:\n\n%2")
+			.arg(QString::fromStdString(files.name), QString::fromStdString(loaded.problems.empty() ? std::string{} : loaded.problems.front())));
+		return nullptr;
+	}
+	auto* document = new SkyDocument;
+	std::array<std::optional<SkyDocument::Slot>, 6> faces;
+	for (xv::sky::Face face : xv::sky::FACES) {
+		const std::size_t i = xv::sky::indexOf(face);
+		if (!loaded.cube.faces[i].empty()) {
+			faces[i] = SkyDocument::Slot{std::make_shared<const xv::texture::Image>(loaded.cube.faces[i]), toQString(files.faces[i]), {}, loaded.cube.transforms[i]};
+		}
+	}
+	document->setName(QString::fromStdString(files.name));
+	document->setSlots(faces, tr("Open %1").arg(QString::fromStdString(files.name)));
+	document->undoStack()->clear();
+	document->markExported(); // nothing changed yet
+	document->setOrigin(origin);
+	// A sky from <folder>/materials/skybox is exported back into <folder>.
+	for (const auto& face : files.faces) {
+		const fs::path skybox = face.parent_path();
+		if (!face.empty() && files.inSkyboxFolder && QString::fromStdU16String(skybox.parent_path().filename().u16string()).compare(u"materials", Qt::CaseInsensitive) == 0) {
+			document->setExportFolder(skybox.parent_path().parent_path());
+			break;
+		}
+	}
+	SkyEditor* editor = newSky(document);
+	if (!loaded.problems.empty()) {
+		statusBar()->showMessage(QString::fromStdString(loaded.problems.front()), 10000);
+	}
+	return editor;
+}
+
+bool MainWindow::exportSky(SkyEditor* editor, bool chooseFolder) {
+	SkyDocument* document = editor->document();
+	if (!editor->canExport()) {
+		QStringList errors;
+		for (const auto& issue : editor->issues()) {
+			if (issue.severity == SkyEditor::Issue::Severity::Error) {
+				errors << QStringLiteral("• ") + issue.message;
+			}
+		}
+		tabs_->setCurrentWidget(editor);
+		QMessageBox::warning(this, tr("Export Sky"), tr("The sky can't be exported yet:\n\n%1").arg(errors.join(u'\n')));
+		return false;
+	}
+	fs::path folder;
+	if (!chooseFolder && !document->exportFolder().empty()) {
+		folder = document->exportFolder();
+	} else if (chooseFolder || !game_) {
+		QSettings settings;
+		const QString start = settings.value(SKY_EXPORT_KEY, game_ ? toQString(writeFolder()) : QDir::homePath()).toString();
+		const QString picked = QFileDialog::getExistingDirectory(this, tr("Export Sky To (a game, mod or custom/ folder; files go under materials/skybox)"), start);
+		if (picked.isEmpty()) {
+			return false;
+		}
+		settings.setValue(SKY_EXPORT_KEY, picked);
+		folder = toPath(picked);
+	} else {
+		folder = writeFolder();
+	}
+
+	// A sky of the same name elsewhere in the game gets replaced for every map that uses it.
+	const std::string material = "materials/skybox/" + document->name().toStdString() + "rt.vmt";
+	if (const xv::vfs::Mount* mount = game_ ? fileSystem_->resolve(material) : nullptr) {
+		const auto disk = mount->diskPath(material);
+		const fs::path relative = disk ? disk->lexically_normal().lexically_relative(folder.lexically_normal()) : fs::path{};
+		const bool ours = !relative.empty() && *relative.begin() != "..";
+		if (!ours && QMessageBox::question(this, tr("Export Sky"),
+				tr("The game already has a sky named %1 (in %2). Exporting under that name replaces it for every map that uses it, "
+				   "as long as the export folder is one of the game's search paths.\n\nExport anyway?")
+					.arg(document->name(), toQString(mount->location()))) != QMessageBox::Yes) {
+			return false;
+		}
+	}
+
+	std::error_code ec;
+	const bool newFolder = !fs::exists(folder, ec);
+	QApplication::setOverrideCursor(Qt::WaitCursor);
+	const auto files = xv::sky::exportSky(document->cube(), document->exportOptions());
+	QApplication::restoreOverrideCursor();
+	if (files.empty()) {
+		QMessageBox::critical(this, tr("Export Sky"), tr("The sky could not be encoded."));
+		return false;
+	}
+	// Replacing files this sky didn't just write (the ones it was opened from, say) is asked first.
+	const auto existing = std::ranges::count_if(files, [&folder, &ec](const auto& file) { return fs::exists(folder / xv::vfs::fromUtf8(file.path), ec); });
+	if (existing > 0 && document->lastExportFolder() != folder && QMessageBox::question(this, tr("Export Sky"),
+			tr("%1 of the sky's files already exist in %2 and will be replaced.\n\nExport anyway?")
+				.arg(existing).arg(toQString(folder / "materials" / "skybox"))) != QMessageBox::Yes) {
+		return false;
+	}
+	for (const auto& file : files) {
+		const fs::path target = folder / xv::vfs::fromUtf8(file.path);
+		fs::create_directories(target.parent_path(), ec);
+		QSaveFile out(toQString(target));
+		if (!out.open(QIODevice::WriteOnly) || out.write(reinterpret_cast<const char*>(file.data.data()), static_cast<qint64>(file.data.size())) != static_cast<qint64>(file.data.size()) || !out.commit()) {
+			QMessageBox::critical(this, tr("Export Sky"), tr("Could not write %1:\n%2").arg(toQString(target), out.errorString()));
+			return false;
+		}
+	}
+	document->markExported();
+	document->setLastExportFolder(folder);
+	// The game only scans custom/ folders when it starts.
+	editor->showExported(toQString(folder / "materials" / "skybox") + (newFolder && game_ && !chooseFolder
+		? tr(" (a new folder: restart the game once so it finds it)") : QString{}));
+	statusBar()->showMessage(tr("Exported %1 files for the sky %2").arg(files.size()).arg(document->name()), 8000);
+	if (game_) {
+		remount();
+	}
+	return true;
 }
 
 SoundEditor* MainWindow::openSoundFile(const QString& gamePath) {
@@ -887,7 +1169,31 @@ bool MainWindow::confirmClose(SoundEditor* editor) {
 	return answer == QMessageBox::Discard;
 }
 
+bool MainWindow::confirmClose(SkyEditor* editor) {
+	const SkyDocument* document = editor->document();
+	if (!document->isModified() || std::ranges::none_of(xv::sky::FACES, [document](xv::sky::Face face) { return document->slot(face).image != nullptr; })) {
+		return true;
+	}
+	tabs_->setCurrentWidget(editor);
+	const auto answer = QMessageBox::question(this, tr("Unexported changes"),
+		tr("The sky %1 has changes that haven't been exported. Export them now?").arg(document->name().isEmpty() ? tr("(unnamed)") : document->name()),
+		QMessageBox::Save | QMessageBox::Discard | QMessageBox::Cancel, QMessageBox::Save);
+	if (answer == QMessageBox::Save) {
+		return exportSky(editor, false);
+	}
+	return answer == QMessageBox::Discard;
+}
+
 bool MainWindow::closeTab(int index) {
+	if (auto* sky = qobject_cast<SkyEditor*>(tabs_->widget(index))) {
+		if (!confirmClose(sky)) {
+			return false;
+		}
+		undoGroup_->removeStack(sky->document()->undoStack());
+		tabs_->removeTab(tabs_->indexOf(sky));
+		sky->deleteLater();
+		return true;
+	}
 	auto* editor = qobject_cast<SoundEditor*>(tabs_->widget(index));
 	if (!editor) {
 		return true;
@@ -907,6 +1213,10 @@ void MainWindow::closeEvent(QCloseEvent* event) {
 			event->ignore();
 			return;
 		}
+		if (auto* sky = qobject_cast<SkyEditor*>(tabs_->widget(i)); sky && !confirmClose(sky)) {
+			event->ignore();
+			return;
+		}
 	}
 	player_->stop();
 	event->accept();
@@ -920,9 +1230,11 @@ void MainWindow::dragEnterEvent(QDragEnterEvent* event) {
 }
 
 void MainWindow::dropEvent(QDropEvent* event) {
+	QStringList paths;
 	for (const QUrl& url : event->mimeData()->urls()) {
-		openPath(url.toLocalFile());
+		paths << url.toLocalFile();
 	}
+	openPaths(paths);
 	event->acceptProposedAction();
 }
 
@@ -934,6 +1246,8 @@ void MainWindow::updateTitle() {
 	if (SoundEditor* editor = currentEditor()) {
 		const SoundDocument* document = editor->document();
 		title.prepend((document->isModified() ? QStringLiteral("*") : QString{}) + document->fileName() + QStringLiteral(" — "));
+	} else if (SkyEditor* sky = currentSky()) {
+		title.prepend(tabs_->tabText(tabs_->indexOf(sky)) + QStringLiteral(" — "));
 	}
 	setWindowTitle(title);
 }

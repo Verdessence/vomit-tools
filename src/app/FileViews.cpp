@@ -2,6 +2,7 @@
 #include "FileViews.h"
 
 #include <algorithm>
+#include <cmath>
 #include <deque>
 #include <functional>
 #include <memory>
@@ -17,13 +18,16 @@
 #include <QPushButton>
 #include <QListWidget>
 #include <QLocale>
+#include <QMouseEvent>
 #include <QPlainTextEdit>
 #include <QSplitter>
 #include <QTabWidget>
 #include <QTextBlock>
+#include <QTimer>
 #include <QTreeWidget>
 #include <QVBoxLayout>
 
+#include "ImageFiles.h"
 #include "SoundPlayer.h"
 #include "audio/Audio.h"
 #include "dmx/Dmx.h"
@@ -54,6 +58,7 @@ public:
 			: QWidget(parent) {
 		setMinimumHeight(120);
 		setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
+		setObjectName(QStringLiteral("waveform"));
 		if (!clip) {
 			return;
 		}
@@ -74,6 +79,16 @@ public:
 		}
 	}
 
+	// Where playback is, 0-1 across the sound; nullopt hides the playhead.
+	void setPlayhead(std::optional<double> fraction) {
+		if (fraction != playhead_) {
+			playhead_ = fraction;
+			update();
+		}
+	}
+	// Called with the 0-1 position clicked.
+	std::function<void(double)> onSeek;
+
 protected:
 	void paintEvent(QPaintEvent*) override {
 		QPainter painter{this};
@@ -83,6 +98,13 @@ protected:
 		painter.drawLine(0, middle, width(), middle);
 		if (peaks_.empty()) {
 			return;
+		}
+		// The part already played is shaded, as in Audacity.
+		const int played = playhead_ ? static_cast<int>(*playhead_ * width()) : -1;
+		if (played > 0) {
+			QColor shade = palette().color(QPalette::Highlight);
+			shade.setAlpha(40);
+			painter.fillRect(0, 0, played, height(), shade);
 		}
 		painter.setPen(palette().color(QPalette::Highlight));
 		for (int x = 0; x < width(); x++) {
@@ -102,11 +124,22 @@ protected:
 			painter.drawLine(x, 0, x, height());
 			painter.drawText(x + 4, 14, QObject::tr("loop"));
 		}
+		if (played >= 0) {
+			painter.setPen(QPen{palette().color(QPalette::Text), 2});
+			painter.drawLine(played, 0, played, height());
+		}
+	}
+
+	void mousePressEvent(QMouseEvent* event) override {
+		if (event->button() == Qt::LeftButton && onSeek && !peaks_.empty() && width() > 0) {
+			onSeek(std::clamp(event->position().x() / width(), 0.0, 1.0));
+		}
 	}
 
 private:
 	std::vector<std::pair<float, float>> peaks_;
 	std::optional<double> loop_;
+	std::optional<double> playhead_;
 };
 
 QString formatName(std::uint16_t format) {
@@ -314,23 +347,66 @@ AudioView::AudioView(const QString& path, const QString& source, std::span<const
 	layout->addWidget(title);
 	layout->addWidget(new QLabel(details.join(QStringLiteral(" · "))));
 
+	auto* waveform = new WaveformView(clip);
 	if (player) {
 		const auto data = std::make_shared<std::vector<std::byte>>(bytes.begin(), bytes.end());
+		const double duration = clip ? clip->seconds() : 0.0; // 0 for files too big to decode up front
 		auto* buttons = new QHBoxLayout;
 		auto* play = new QPushButton(tr("▶ Play"));
 		auto* loop = new QPushButton(tr("⟳ Play Looped"));
 		auto* stop = new QPushButton(tr("■ Stop"));
+		auto* time = new QLabel;
+		time->setFont(QFontDatabase::systemFont(QFontDatabase::FixedFont));
 		loop->setToolTip(tr("Loop the way playlooping does: from the loop point (or the start) to the end"));
-		connect(play, &QPushButton::clicked, this, [player, path, data] { player->playData(path, *data, false); });
-		connect(loop, &QPushButton::clicked, this, [player, path, data] { player->playData(path, *data, true); });
+		waveform->setToolTip(tr("Click to play from that point"));
+		waveform->setCursor(Qt::PointingHandCursor);
+
+		// The playhead follows the voice this view started, until it ends or another sound replaces it.
+		struct Playback {
+			xv::audio::Engine::Voice voice = 0;
+			bool loop = false;
+		};
+		const auto state = std::make_shared<Playback>();
+		auto* timer = new QTimer(this);
+		timer->setInterval(30);
+		const auto clock = [](double seconds) {
+			return QStringLiteral("%1:%2").arg(static_cast<int>(seconds) / 60).arg(std::fmod(seconds, 60.0), 5, 'f', 2, u'0');
+		};
+		const auto showTime = [time, clock, duration](std::optional<double> at) {
+			const QString now = at ? clock(*at) : QStringLiteral("–:––.––");
+			time->setText(duration > 0 ? QStringLiteral("%1 / %2").arg(now, clock(duration)) : now);
+		};
+		showTime(std::nullopt);
+		const auto begin = [player, path, data, state, timer](bool looped, double from) {
+			if (player->playData(path, *data, looped, from)) {
+				*state = {player->lastVoice(), looped};
+				timer->start();
+			}
+		};
+		connect(timer, &QTimer::timeout, this, [player, state, timer, waveform, showTime, duration] {
+			const auto at = player->position(state->voice);
+			if (!at) {
+				timer->stop();
+				waveform->setPlayhead(std::nullopt);
+				showTime(std::nullopt);
+				return;
+			}
+			waveform->setPlayhead(duration > 0 ? std::optional{std::min(*at / duration, 1.0)} : std::nullopt);
+			showTime(*at);
+		});
+		connect(play, &QPushButton::clicked, this, [begin] { begin(false, 0.0); });
+		connect(loop, &QPushButton::clicked, this, [begin] { begin(true, 0.0); });
 		connect(stop, &QPushButton::clicked, player, &SoundPlayer::stop);
+		waveform->onSeek = [begin, state, duration](double fraction) { begin(state->loop, fraction * duration); };
 		buttons->addWidget(play);
 		buttons->addWidget(loop);
 		buttons->addWidget(stop);
+		buttons->addSpacing(12);
+		buttons->addWidget(time);
 		buttons->addStretch();
 		layout->addLayout(buttons);
 	}
-	layout->addWidget(new WaveformView(clip), 1);
+	layout->addWidget(waveform, 1);
 }
 
 FileInfoView::FileInfoView(const QString& path, const QString& source, std::size_t size, QWidget* parent)
@@ -342,8 +418,61 @@ FileInfoView::FileInfoView(const QString& path, const QString& source, std::size
 	layout->addStretch();
 }
 
+namespace {
+
+// An image scaled to fit (never enlarged past twice its size), centred, over a checkerboard.
+class FittedImage : public QWidget {
+public:
+	explicit FittedImage(QImage image)
+			: image_(std::move(image)) {
+		setMinimumSize(64, 64);
+	}
+
+protected:
+	void paintEvent(QPaintEvent*) override {
+		QPainter painter(this);
+		const QSize fitted = image_.size().scaled(size().boundedTo(image_.size() * 2), Qt::KeepAspectRatio);
+		const QRect target{QPoint{(width() - fitted.width()) / 2, (height() - fitted.height()) / 2}, fitted};
+		for (int y = target.top(); y < target.bottom(); y += 8) {
+			for (int x = target.left(); x < target.right(); x += 8) {
+				const QRect cell = QRect(x, y, 8, 8).intersected(target);
+				painter.fillRect(cell, ((x - target.left()) / 8 + (y - target.top()) / 8) % 2 ? QColor(200, 200, 200) : QColor(240, 240, 240));
+			}
+		}
+		painter.setRenderHint(QPainter::SmoothPixmapTransform, fitted.width() < image_.width());
+		painter.drawImage(target, image_);
+	}
+
+private:
+	QImage image_;
+};
+
+} // namespace
+
+ImageView::ImageView(const QString& path, const QString& source, std::span<const std::byte> bytes, QWidget* parent)
+		: QWidget(parent) {
+	QString error;
+	const auto image = decodeImageFile(path, bytes, &error);
+	auto* layout = new QVBoxLayout(this);
+	auto* title = new QLabel(tr("<b>%1</b>%2").arg(path.toHtmlEscaped(), source.isEmpty() ? QString{} : tr(" · read from %1").arg(source.toHtmlEscaped())));
+	title->setWordWrap(true);
+	layout->addWidget(title);
+	auto* details = new QLabel(image ? describeImageFile(path, bytes) : tr("can't decode: %1").arg(error));
+	details->setWordWrap(true);
+	details->setTextInteractionFlags(Qt::TextSelectableByMouse);
+	layout->addWidget(details);
+	if (image) {
+		layout->addWidget(new FittedImage(toQImage(*image)), 1);
+	} else {
+		layout->addStretch();
+	}
+}
+
 QWidget* createFileView(const QString& path, const QString& source, std::span<const std::byte> bytes, SoundPlayer* player, QWidget* parent) {
 	const QString suffix = QFileInfo{path}.suffix().toLower();
+	if (isImageFile(path)) {
+		return new ImageView(path, source, bytes, parent);
+	}
 	if (suffix == u"wav" || suffix == u"mp3") {
 		return new AudioView(path, source, bytes, player, parent);
 	}

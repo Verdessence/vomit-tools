@@ -3,13 +3,14 @@
 #include <QCommandLineParser>
 #include <QSettings>
 
+#include "AboutDialog.h"
 #include "MainWindow.h"
 
 int main(int argc, char* argv[]) {
 	QApplication app{argc, argv};
 	QApplication::setApplicationName(QStringLiteral("vomit-tools"));
 	QApplication::setOrganizationName(QStringLiteral("vomit-tools"));
-	QApplication::setApplicationVersion(QStringLiteral(VOMIT_TOOLS_VERSION));
+	QApplication::setApplicationVersion(AboutDialog::versionText());
 
 	QCommandLineParser parser;
 	parser.setApplicationDescription(QStringLiteral("Soundscape, skybox and particle editors for Source engine games"));
@@ -31,9 +32,7 @@ int main(int argc, char* argv[]) {
 			window.openGame(game);
 		}
 	}
-	for (const QString& path : paths) {
-		window.openPath(path);
-	}
+	window.openPaths(paths);
 	for (const QString& file : parser.values(edit)) {
 		window.openSoundFile(file);
 	}

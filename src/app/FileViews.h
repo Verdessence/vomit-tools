@@ -35,6 +35,15 @@ public:
 	AudioView(const QString& path, const QString& source, std::span<const std::byte> bytes, SoundPlayer* player, QWidget* parent = nullptr);
 };
 
+// VTFs and image files: the picture, fitted to the view over a checkerboard where it's
+// transparent, and its size and format.
+class ImageView : public QWidget {
+	Q_OBJECT
+
+public:
+	ImageView(const QString& path, const QString& source, std::span<const std::byte> bytes, QWidget* parent = nullptr);
+};
+
 // Anything without a dedicated view.
 class FileInfoView : public QWidget {
 	Q_OBJECT

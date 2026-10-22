@@ -33,6 +33,7 @@ struct PlayParams {
 	float pan = 0.0f;    // -1 left to 1 right
 	bool loop = false;   // play to the end, then repeat from loopStart (or the start) until stopped
 	double delaySeconds = 0.0;
+	double startSeconds = 0.0; // where in the clip to begin
 };
 
 class Engine {
@@ -57,6 +58,9 @@ public:
 	void stop(Voice voice);
 	void stopAll();
 	[[nodiscard]] bool playing(Voice voice);
+	// Where a voice is in its clip, in seconds of the clip (pitch doesn't change the scale);
+	// nullopt once it has finished or been stopped.
+	[[nodiscard]] std::optional<double> position(Voice voice);
 	// Voices still playing; finished one-shots are released first.
 	[[nodiscard]] std::size_t voiceCount();
 	void setVolume(float volume);

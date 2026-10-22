@@ -5,6 +5,8 @@ add_library(vomit_tools_core STATIC
         dmx/Dmx.h
         kv1/Kv1.cpp
         kv1/Kv1.h
+        sky/Sky.cpp
+        sky/Sky.h
         sound/SoundConstants.cpp
         sound/SoundConstants.h
         sound/SoundLint.cpp
@@ -15,6 +17,10 @@ add_library(vomit_tools_core STATIC
         sound/SoundSchema.h
         sound/Wav.cpp
         sound/Wav.h
+        texture/Image.cpp
+        texture/Image.h
+        texture/Vtf.cpp
+        texture/Vtf.h
         util/Numbers.h
         vfs/Steam.cpp
         vfs/Steam.h
@@ -23,5 +29,10 @@ add_library(vomit_tools_core STATIC
 add_library(vomit_tools::core ALIAS vomit_tools_core)
 
 target_include_directories(vomit_tools_core PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
-target_link_libraries(vomit_tools_core PRIVATE sourcepp::vpkpp vomit_tools_miniaudio)
+target_link_libraries(vomit_tools_core PRIVATE sourcepp::vpkpp vomit_tools_miniaudio vomit_tools_stb Threads::Threads)
 vomit_tools_set_warnings(vomit_tools_core)
+
+# stb's implementations (stb is fetched in cmake/Dependencies.cmake), built once and without our
+# warning flags.
+add_library(vomit_tools_stb STATIC texture/StbImplementation.c)
+target_include_directories(vomit_tools_stb SYSTEM PUBLIC "${stb_SOURCE_DIR}")

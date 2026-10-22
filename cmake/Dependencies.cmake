@@ -6,7 +6,8 @@ if(VOMIT_TOOLS_BUILD_APP OR VOMIT_TOOLS_BUILD_TESTS)
     qt_standard_project_setup()
 endif()
 
-# sourcepp (MIT): only vpkpp is needed for now. vtfpp gets switched on with the skybox editor.
+# sourcepp (MIT): only vpkpp is used. VTF reading and writing is our own (src/core/texture): skies
+# need a handful of formats, and vtfpp would add compressonator, bcdec and more remote fetches.
 # For offline builds, point FETCHCONTENT_SOURCE_DIR_SOURCEPP at a local checkout.
 set(SOURCEPP_LIBS_START_ENABLED   OFF CACHE INTERNAL "")
 set(SOURCEPP_USE_VPKPP            ON  CACHE INTERNAL "")
@@ -36,3 +37,13 @@ target_link_libraries(vomit_tools_miniaudio PRIVATE Threads::Threads ${CMAKE_DL_
 if(UNIX AND NOT APPLE)
     target_link_libraries(vomit_tools_miniaudio PRIVATE m)
 endif()
+
+# stb (public domain / MIT): image loading (PNG, JPEG, TGA, BMP, PSD, HDR), resizing and DXT
+# compression, for the skybox editor. Pinned to the last commit before stb_image_resize2 moved to
+# its own repository. Its implementations are compiled in src/core (vomit_tools_stb).
+FetchContent_Declare(stb
+        URL https://github.com/nothings/stb/archive/2c980bb59875b0d32144a71867fbdebb2f77cd20.tar.gz
+        URL_HASH SHA256=9a955b1b49a4410088a2e0ee2a9c057c3c907d0c1d75454144cb980aca0ba515
+        DOWNLOAD_EXTRACT_TIMESTAMP ON
+        SOURCE_SUBDIR do-not-add-subdirectory)
+FetchContent_MakeAvailable(stb)

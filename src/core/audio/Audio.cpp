@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "Audio.h"
 
+#include <algorithm>
 #include <map>
 
 #include <miniaudio.h>
@@ -153,6 +154,10 @@ Engine::Voice Engine::play(std::shared_ptr<const Clip> clip, const PlayParams& p
 	if (params.loop) {
 		ma_data_source_set_loop_point_in_pcm_frames(&playing->buffer, c.loopStart.value_or(0), c.frames());
 	}
+	if (params.startSeconds > 0) {
+		const auto frame = static_cast<ma_uint64>(params.startSeconds * c.sampleRate);
+		ma_audio_buffer_seek_to_pcm_frame(&playing->buffer, std::min<ma_uint64>(frame, c.frames() - 1));
+	}
 	if (ma_sound_init_from_data_source(&impl_->engine, &playing->buffer, MA_SOUND_FLAG_NO_SPATIALIZATION, nullptr, &playing->sound) != MA_SUCCESS) {
 		ma_audio_buffer_uninit(&playing->buffer);
 		return 0;
@@ -192,6 +197,19 @@ void Engine::stopAll() {
 bool Engine::playing(Voice voice) {
 	impl_->releaseFinished();
 	return impl_->voices.contains(voice);
+}
+
+std::optional<double> Engine::position(Voice voice) {
+	impl_->releaseFinished();
+	const auto it = impl_->voices.find(voice);
+	if (it == impl_->voices.end()) {
+		return std::nullopt;
+	}
+	ma_uint64 cursor = 0;
+	if (ma_data_source_get_cursor_in_pcm_frames(&it->second->buffer, &cursor) != MA_SUCCESS) {
+		return std::nullopt;
+	}
+	return static_cast<double>(cursor) / it->second->clip->sampleRate;
 }
 
 std::size_t Engine::voiceCount() {

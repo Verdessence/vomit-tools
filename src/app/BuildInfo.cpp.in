@@ -1,0 +1,9 @@
+// Generated from src/app/BuildInfo.cpp.in by cmake/BuildInfo.cmake; edits are overwritten.
+#include "BuildInfo.h"
+
+namespace buildinfo {
+
+const char* const version = "@VERSION@";
+const char* const commit = "@COMMIT@";
+
+} // namespace buildinfo

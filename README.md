@@ -2,8 +2,8 @@
 
 Soundscape, skybox and particle editors for Source engine games, as one Qt 6 app for Linux and Windows.
 
-**Status:** the soundscape and soundscript editor works, with sound previews. The skybox and
-particle editors come next.
+**Status:** the soundscape and soundscript editor works, with sound previews, and the skybox
+creator makes skies from six images. The particle editor comes next.
 
 ## Opening things
 
@@ -16,7 +16,8 @@ command line (`vomit-tools <file|folder|gameinfo.txt>...`):
 - **A folder:** **File → Open Folder** opens a mod folder, a `custom/` folder or anything else in
   the **Folder** tab.
 - **A file:** **File → Open File** opens a file. Soundscapes and soundscripts open in the editor,
-  under any name (the file name or the entries decide); other files show in the preview.
+  under any name (the file name or the entries decide); other files show in the preview, VTFs and
+  images included.
 - **Recent:** **File → Open Recent** lists recent games, folders and files.
 
 A game isn't required. When a file or folder belongs to one (a `gameinfo.txt` sits in it or above
@@ -51,7 +52,9 @@ sounds are looked for beside the file: for `mymod/scripts/soundscapes_x.txt`, un
     random sounds at their intervals, nested soundscapes with their volume and position overrides.
     Positions, distance falloff and DSP aren't simulated; `random` positions are panned instead.
   - **▶ beside a wave** plays the file as it is.
-  - **Sound files** in either browser show a waveform with the loop point, and can be played once or looped.
+  - **Sound files** in either browser show a waveform with the loop point, and can be played once or
+    looped. A playhead follows playback; click the waveform to play from that point.
+  - **One sound at a time:** starting a preview stops whatever was playing.
   - **Status bar:** stop and volume controls.
 - **Lossless saving:** saving changes only what you edited; comments, spacing and line endings
   are kept byte for byte. Undo and redo work the same way.
@@ -65,12 +68,50 @@ sounds are looked for beside the file: for `mymod/scripts/soundscapes_x.txt`, un
 To hear a soundscape in game: restart the game, load a map, then `sv_cheats 1` and
 `playsoundscape <name>`. For soundscripts, `playgamesound <name>`.
 
+## Skybox creator
+
+- **Starting:**
+  - **File → New Skybox** for a new sky.
+  - **File → Open Sky from Game** for any sky the game has. Double-clicking a `materials/skybox/` file
+    in the **Game** tab opens its sky too.
+  - **Opening one face file** opens its whole sky. That's any of `sky_x_rt.vtf`, `.vmt` or an image,
+    whether dropped, opened from **File → Open File**, or double-clicked in the **Folder** tab. The
+    other faces are found beside it, and materials follow their `$basetexture`. A file counts as a sky
+    face when it sits in a `skybox` folder or at least three of its faces are there.
+  - **Export** then writes back to the folder the sky came from, after asking before replacing files.
+- **Faces:** drop six images on the cross, or use **Load Faces…**. Files named `…rt`, `…bk`, `…lf`,
+  `…ft`, `…up` and `…dn` go to their face by themselves. PNG, JPEG, TGA, BMP, PSD, HDR and VTF are
+  read. Right-click a face to turn or mirror it.
+- **The cross** is laid out the way the faces join in game: rt (east) in the middle, up above it, dn
+  below it, and going right from rt: ft, lf, bk.
+- **Preview:** the sky from inside, the way a player sees it, in a square view. Drag to look around, scroll to zoom. The
+  angles are Source's: the readout (`setang -20 30 0`) typed into the console (with `sv_cheats 1`)
+  looks the same way in game.
+- **Checks:**
+  - missing faces
+  - faces the game can't use (not square, or sides that aren't a power of two)
+  - faces that don't meet their neighbours
+  - up and down faces turned the wrong way, which other tools often produce. Double-click the check to
+    turn the face right.
+- **Export** (Ctrl+S) writes `materials/skybox/<name><face>.vtf` and `.vmt` for all six faces to the
+  write folder; **Export To…** writes them anywhere.
+  - Format: uncompressed BGR888 (no banding) or DXT1 (a sixth of the size).
+  - Face size: anything from 256 to 4096. Mipmaps are optional.
+  - Then, in game: `sv_skyname <name>`.
+- **Test Pattern:** six labelled faces for checking a sky in game. Each edge names the face that
+  should be across it, and `setang 0 0 0` faces RT.
+
+The faces' orientation comes from the game's own skies. In all of them, the pixels on either side of
+each cube edge match under it, and the sun drawn in a map's sky sits where its `light_environment`
+puts the sun.
+
 ## Building
 
 You need CMake 3.25+, a C++20 compiler and Qt 6.5+ (Core, Widgets, Test).
-[sourcepp](https://github.com/craftablescience/sourcepp) and [miniaudio](https://miniaud.io) are fetched
-at configure time; to build offline, point `FETCHCONTENT_SOURCE_DIR_SOURCEPP` and
-`FETCHCONTENT_SOURCE_DIR_MINIAUDIO` at local copies.
+[sourcepp](https://github.com/craftablescience/sourcepp), [miniaudio](https://miniaud.io) and
+[stb](https://github.com/nothings/stb) are fetched at configure time; to build offline, point
+`FETCHCONTENT_SOURCE_DIR_SOURCEPP`, `FETCHCONTENT_SOURCE_DIR_MINIAUDIO` and `FETCHCONTENT_SOURCE_DIR_STB`
+at local copies.
 
 ### Linux
 
@@ -107,7 +148,9 @@ Linux Qt of the same version for the host tools. Instructions are in
 | `src/core/vfs` | gameinfo.txt search paths, VPK and folder mounts, Steam library detection |
 | `src/core/sound` | Sound constants, soundscape/soundscript schema, linter, WAV loop points, playback planning |
 | `src/core/audio` | Decoding (WAV PCM/ADPCM, MP3) and playback on [miniaudio](https://miniaud.io) |
-| `src/app` | Qt app: game and folder browsers, sound editor (cards, value pickers, playback), document tabs |
+| `src/core/texture` | VTF 7.0–7.5 reading and 7.1/7.2 writing, DXT and other formats; image loading on [stb](https://github.com/nothings/stb) |
+| `src/core/sky` | Sky faces and their orientation, preview rendering, seam checks, export, loading the game's skies |
+| `src/app` | Qt app: game and folder browsers, sound editor (cards, value pickers, playback), skybox creator, document tabs |
 
 ## License
 
