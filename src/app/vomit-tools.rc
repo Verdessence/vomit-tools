@@ -1,0 +1,2 @@
+// Embeds the application manifest for MinGW builds (MSVC takes vomit-tools.manifest directly).
+1 24 "vomit-tools.manifest"

@@ -1,0 +1,10 @@
+/build*/
+/.cache/
+/compile_commands.json
+CMakeLists.txt.user*
+*.autosave
+
+# Kept local, not published
+/.github/
+/docs/
+/tests/
