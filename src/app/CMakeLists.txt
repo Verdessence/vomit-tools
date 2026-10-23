@@ -14,6 +14,8 @@ add_library(vomit_tools_ui STATIC
         KvCard.h
         MainWindow.cpp
         MainWindow.h
+        MenuPicker.cpp
+        MenuPicker.h
         ParticleDocument.cpp
         ParticleDocument.h
         ParticleEditor.cpp

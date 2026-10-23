@@ -13,6 +13,8 @@
 #include <algorithm>
 #include <cmath>
 #include <functional>
+#include <numbers>
+#include <optional>
 #include <set>
 
 #include <QCheckBox>
@@ -304,8 +306,9 @@ CParticlePreview::CParticlePreview( QWidget *pParent )
 	connect( m_pGrid, &QCheckBox::toggled, this, &CParticlePreview::Redraw );
 	m_pBounds = new QCheckBox( tr( "Bounds" ) );
 	m_pBounds->setObjectName( QStringLiteral( "particleBounds" ) );
-	m_pBounds->setToolTip( tr( "Each system's bounding box (yellow) and where its particles are now (grey). "
-							   "The game culls a system whose box is out of view" ) );
+	m_pBounds->setToolTip( tr( "Each system's bounding box (yellow), where its particles are now (grey), and the "
+							   "spheres and boxes its particles start in (blue). The game culls a system whose box is out of view.\n"
+							   "The selected operator's shape shows either way" ) );
 	connect( m_pBounds, &QCheckBox::toggled, this, &CParticlePreview::Redraw );
 	auto *pFrame = new QToolButton;
 	pFrame->setText( tr( "Frame" ) );
@@ -913,6 +916,7 @@ void CParticlePreview::PaintOverlays( QPainter &painter )
 	{
 		PaintBounds( painter, camera );
 	}
+	PaintShapes( painter, camera );
 	// The control points the systems use, as handles.
 	for ( int nIndex : GetUsedControlPoints() )
 	{
@@ -985,6 +989,120 @@ void CParticlePreview::PaintBounds( QPainter &painter, const particles::CCamera 
 			vecHigh = { std::max( vecHigh.m_flX, p.m_vecPosition.m_flX + p.m_flRadius ), std::max( vecHigh.m_flY, p.m_vecPosition.m_flY + p.m_flRadius ), std::max( vecHigh.m_flZ, p.m_vecPosition.m_flZ + p.m_flRadius ) };
 		}
 		box( vecLow, vecHigh, QPen( QColor( 200, 200, 200, 120 ), 1.0, Qt::DashLine ) );
+	} );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: The operator selected in the editor: its emission shape shows even without Bounds.
+//-----------------------------------------------------------------------------
+void CParticlePreview::SetSelectedElement( std::int32_t nElement )
+{
+	if ( nElement != m_nSelectedElement )
+	{
+		m_nSelectedElement = nElement;
+		Redraw();
+	}
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Where the position initializers put particles, around their control points: a
+//          sphere's outer (and inner) shell as three rings, squashed by its bias the way the
+//          initializer squashes it; a box; an offset's range as a dashed box. All of them with
+//          Bounds on, the selected one brighter either way.
+//-----------------------------------------------------------------------------
+void CParticlePreview::PaintShapes( QPainter &painter, const particles::CCamera &camera )
+{
+	const auto project = [ &camera ]( CVec3 v ) -> std::optional<QPointF> {
+		if ( const auto p = camera.Project( v ) )
+		{
+			return QPointF{ ( *p )[ 0 ], ( *p )[ 1 ] };
+		}
+		return std::nullopt;
+	};
+	const auto polyline = [ & ]( const std::vector<CVec3> &points ) {
+		for ( std::size_t i = 0; i + 1 < points.size(); i++ )
+		{
+			const auto a = project( points[ i ] );
+			const auto b = project( points[ i + 1 ] );
+			if ( a && b )
+			{
+				painter.drawLine( *a, *b );
+			}
+		}
+	};
+	const auto box = [ & ]( CVec3 vecLow, CVec3 vecHigh ) {
+		const auto corner = [ & ]( int i ) { return CVec3{ ( i & 1 ) ? vecHigh.m_flX : vecLow.m_flX, ( i & 2 ) ? vecHigh.m_flY : vecLow.m_flY, ( i & 4 ) ? vecHigh.m_flZ : vecLow.m_flZ }; };
+		for ( int a = 0; a < 8; a++ )
+		{
+			for ( int nBit : { 1, 2, 4 } )
+			{
+				if ( !( a & nBit ) )
+				{
+					polyline( { corner( a ), corner( a | nBit ) } );
+				}
+			}
+		}
+	};
+	const auto sphere = [ & ]( CVec3 vecCenter, float flRadius, CVec3 vecBias, CVec3 vecAbsolute ) {
+		constexpr int SEGMENTS = 48;
+		for ( int nPlane = 0; nPlane < 3; nPlane++ )
+		{
+			std::vector<CVec3> ring;
+			for ( int i = 0; i <= SEGMENTS; i++ )
+			{
+				const float flAngle = 2.0f * std::numbers::pi_v<float> * static_cast<float>( i ) / SEGMENTS;
+				const float c = std::cos( flAngle );
+				const float d = std::sin( flAngle );
+				CVec3 v = nPlane == 0 ? CVec3{ c, d, 0 } : nPlane == 1 ? CVec3{ c, 0, d }
+																	   : CVec3{ 0, c, d };
+				v = { v.m_flX * vecBias.m_flX, v.m_flY * vecBias.m_flY, v.m_flZ * vecBias.m_flZ };
+				v = { vecAbsolute.m_flX != 0.0f ? std::abs( v.m_flX ) : v.m_flX, vecAbsolute.m_flY != 0.0f ? std::abs( v.m_flY ) : v.m_flY, vecAbsolute.m_flZ != 0.0f ? std::abs( v.m_flZ ) : v.m_flZ };
+				ring.push_back( vecCenter + v * flRadius );
+			}
+			polyline( ring );
+		}
+	};
+	const bool bAll = m_pBounds->isChecked();
+	painter.setBrush( Qt::NoBrush );
+	ForEachInstance( m_pSimulation->GetRoot(), [ & ]( const particles::CSimulation::Instance_t &instance ) {
+		for ( const particles::CCompiledOperator &op : instance.m_pDefinition->operators )
+		{
+			const bool bSelected = op.m_nElement >= 0 && op.m_nElement == m_nSelectedElement;
+			if ( op.m_nCategory != particles::Category_t::CATEGORY_INITIALIZERS || !( bAll || bSelected ) )
+			{
+				continue;
+			}
+			const QColor color = bSelected ? QColor( 120, 210, 255, 230 ) : QColor( 90, 170, 255, 140 );
+			const qreal flWidth = bSelected ? 1.5 : 1.0;
+			painter.setPen( QPen( color, flWidth ) );
+			if ( op.m_szFunction == "Position Within Sphere Random" )
+			{
+				const CVec3 vecCenter = m_pSimulation->ControlPoint( op.Integer( "control_point_number" ) );
+				const CVec3 vecBias = op.Vector( "distance_bias", { 1, 1, 1 } );
+				const CVec3 vecAbsolute = op.Vector( "distance_bias_absolute_value" );
+				const float flMax = op.Number( "distance_max" );
+				const float flMin = op.Number( "distance_min" );
+				sphere( vecCenter, flMax, vecBias, vecAbsolute );
+				if ( flMin > 0.0f && flMin < flMax )
+				{
+					painter.setPen( QPen( color, flWidth, Qt::DashLine ) );
+					sphere( vecCenter, flMin, vecBias, vecAbsolute );
+				}
+			}
+			else if ( op.m_szFunction == "Position Within Box Random" )
+			{
+				const CVec3 vecCenter = m_pSimulation->ControlPoint( op.Integer( "control point number" ) );
+				box( vecCenter + op.Vector( "min" ), vecCenter + op.Vector( "max" ) );
+			}
+			else if ( op.m_szFunction == "Position Modify Offset Random" )
+			{
+				// Added to wherever the particle was put; shown around its control point.
+				const CVec3 vecCenter = m_pSimulation->ControlPoint( op.Integer( "control_point_number" ) );
+				const float flScale = op.Flag( "offset proportional to radius 0/1" ) ? instance.m_pDefinition->m_flRadius : 1.0f;
+				painter.setPen( QPen( color, flWidth, Qt::DashLine ) );
+				box( vecCenter + op.Vector( "offset min" ) * flScale, vecCenter + op.Vector( "offset max" ) * flScale );
+			}
+		}
 	} );
 }
 

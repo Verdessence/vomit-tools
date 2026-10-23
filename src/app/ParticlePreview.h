@@ -76,6 +76,8 @@ public:
 	void DragTo( xv::CVec3 vecPosition );
 	void EndDrag();
 	[[nodiscard]] int GetDragged() const { return m_Drag.m_nIndex; }
+	// The operator selected in the editor: its emission shape shows even without Bounds.
+	void SetSelectedElement( std::int32_t nElement );
 	// Whether a "Set Control Point Positions" operator of the shown systems places a point.
 	[[nodiscard]] bool IsPlacedByFile( int nIndex ) const;
 	// Puts a dragged point into the file at location, measured the way the operator measures it:
@@ -139,6 +141,9 @@ private:
 	// Asks for the picture to be drawn again.
 	void Redraw();
 	void PaintBounds( QPainter &painter, const xv::particles::CCamera &camera );
+	// Where the position initializers put particles: spheres, boxes and offset ranges, around
+	// their control points.
+	void PaintShapes( QPainter &painter, const xv::particles::CCamera &camera );
 	void PaintCounts( QPainter &painter );
 	// The camera as it maps onto the canvas (the picture itself may be drawn smaller).
 	[[nodiscard]] xv::particles::CCamera GetCanvasCamera() const;
@@ -152,6 +157,7 @@ private:
 	ControlPoints_t m_ControlPoints{};
 	Drag_t m_Drag;
 	Placer_t m_pfnPlace;
+	std::int32_t m_nSelectedElement = -1;
 	xv::particles::CCamera m_Camera;
 	bool m_bCameraSet = false;
 	QImage m_Image;

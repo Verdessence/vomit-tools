@@ -20,6 +20,14 @@
   - 55 of the 57 functions CS:S and HL2 use now run; 279 of their 288 systems run completely.
   - The two left need a model: Position on Model Random and Movement Lock to Bone.
   - An operator's tooltip says where the preview's version falls short.
+- **Velocity kept:** placing a particle (Position Within Sphere Random) no longer drops the speed an
+  earlier initializer such as Velocity Random gave it.
+- **Emission shapes:** the selected position initializer's sphere (with its inner shell and bias),
+  box or offset range shows around its control point; with **Bounds**, every one does.
+
+### Skybox editor
+- **File → Open Sky from Game** lists the skies in a searchable list that fits on the screen,
+  instead of a menu that ran off it.
 
 ## 0.4.0 — The Particle (2026-10-23)
 

@@ -449,10 +449,6 @@ std::string_view PreviewNote( Category_t nCategory, std::string_view szFunction 
 	{
 		return "Sets the points of every child system; the group ID isn't used";
 	}
-	if ( nCategory == Category_t::CATEGORY_INITIALIZERS && szFunction == "Velocity Random" )
-	{
-		return "Not checked against a game's files yet: no stock file here uses it";
-	}
 	return {};
 }
 
@@ -967,7 +963,9 @@ void CSimulation::Initialize( Instance_t &instance, Particle_t &p, const CCompil
 		const float flDistance = Lerp( op.Number( "distance_min" ), op.Number( "distance_max" ), r( 3 ) );
 		p.m_vecPosition = vecCenter + vecDirection * flDistance;
 		const float flSpeed = RandomRange( op.Number( "speed_min" ), op.Number( "speed_max" ), r( 4 ), op.Number( "speed_random_exponent", 1.0f ) );
-		p.m_vecVelocity = Normalized( vecDirection ) * flSpeed + randomVector( op.Vector( "speed_in_local_coordinate_system_min" ), op.Vector( "speed_in_local_coordinate_system_max" ), 5 );
+		// Placing a particle keeps the speed earlier initializers gave it (the game keeps speed as
+		// the step from the previous position, which moves along with it).
+		p.m_vecVelocity += Normalized( vecDirection ) * flSpeed + randomVector( op.Vector( "speed_in_local_coordinate_system_min" ), op.Vector( "speed_in_local_coordinate_system_max" ), 5 );
 	}
 	else if ( f == "Position Within Box Random" )
 	{

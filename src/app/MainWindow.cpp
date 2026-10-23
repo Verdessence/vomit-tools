@@ -52,6 +52,7 @@
 #include "FolderBrowser.h"
 #include "ImageFiles.h"
 #include "KvCard.h"
+#include "MenuPicker.h"
 #include "ParticleDocument.h"
 #include "ParticleSearch.h"
 #include "QtPaths.h"
@@ -620,15 +621,14 @@ void CMainWindow::FillSkyMenu( QMenu *pMenu )
 		pMenu->addAction( tr( "Open a game first" ) )->setEnabled( false );
 		return;
 	}
-	const auto names = xv::sky::SkyNames( *m_pFileSystem );
-	if ( names.empty() )
+	// A game can have hundreds of skies: a searchable list, not a menu that runs off the screen.
+	std::vector<PickerItem_t> items;
+	for ( const std::string &szName : xv::sky::SkyNames( *m_pFileSystem ) )
 	{
-		pMenu->addAction( tr( "This game has no skies" ) )->setEnabled( false );
+		const QString szSky = QString::fromStdString( szName );
+		items.push_back( { szSky, {}, [ this, szSky ] { OpenSky( szSky ); } } );
 	}
-	for ( const std::string &szName : names )
-	{
-		pMenu->addAction( QString::fromStdString( szName ), this, [ this, szSky = QString::fromStdString( szName ) ] { OpenSky( szSky ); } );
-	}
+	FillPicker( pMenu, std::move( items ), tr( "This game has no skies" ) );
 }
 
 //-----------------------------------------------------------------------------

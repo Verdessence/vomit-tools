@@ -131,6 +131,8 @@ puts the sun.
     - Moves undo like any other edit. **Reset CPs** puts the view's points back.
   - A panel in the corner shows each system's particles against its `max_particles`, orange when
     it's full. **Bounds** shows each system's bounding box and where its particles really are.
+  - The selected position initializer's sphere, box or offset range shows around its control
+    point; with **Bounds**, every one does.
   - Play/pause, restart, speeds from 0.1× to 2×, looping and a ground grid. It draws on the graphics
     card where Qt can (**GPU**), in software otherwise.
   - Edits show at once, without starting the effect over.

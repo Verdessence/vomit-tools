@@ -46,6 +46,7 @@
 #include <QWidgetAction>
 
 #include "ParticleDocument.h"
+#include "MenuPicker.h"
 #include "ParticlePreview.h"
 #include "QtPaths.h"
 #include "particles/Simulation.h"
@@ -184,84 +185,6 @@ const std::vector<PropertyGroup_t> &SystemGroups()
 		{ QT_TRANSLATE_NOOP( "ParticleEditor", "Simulation" ), { "maximum time step", "maximum sim tick rate", "minimum sim tick rate", "minimum rendered frames", "time to sleep when not drawn", "Sort particles", "batch particle systems", "view model effect", "group id", "preventNameBasedLookup" } },
 	};
 	return groups;
-}
-
-struct PickerItem_t
-{
-	QString m_szText;
-	QString m_szTip;
-	std::function<void()> m_pfnRun;
-};
-
-//-----------------------------------------------------------------------------
-// Purpose: A submenu holding a search box over a list, no taller than a quarter of the screen:
-//          long lists
-//          (25 initializers, hundreds of systems) as plain menus run off the screen.
-//-----------------------------------------------------------------------------
-QMenu *AddPicker( QMenu *pParent, const QString &szTitle, std::vector<PickerItem_t> items, const QString &szEmpty )
-{
-	QMenu *pSub = pParent->addMenu( szTitle );
-	if ( items.empty() )
-	{
-		pSub->addAction( szEmpty )->setEnabled( false );
-		return pSub;
-	}
-	auto pShared = std::make_shared<std::vector<PickerItem_t>>( std::move( items ) );
-	auto *pBox = new QWidget;
-	auto *pLayout = new QVBoxLayout( pBox );
-	pLayout->setContentsMargins( 4, 4, 4, 4 );
-	pLayout->setSpacing( 4 );
-	auto *pFilter = new QLineEdit;
-	pFilter->setPlaceholderText( QObject::tr( "Search…" ) );
-	pFilter->setClearButtonEnabled( true );
-	auto *pList = new QListWidget;
-	pList->setObjectName( QStringLiteral( "picker" ) );
-	for ( std::size_t i = 0; i < pShared->size(); i++ )
-	{
-		auto *pItem = new QListWidgetItem( ( *pShared )[ i ].m_szText, pList );
-		pItem->setToolTip( ( *pShared )[ i ].m_szTip );
-		pItem->setData( Qt::UserRole, static_cast<int>( i ) );
-	}
-	const QScreen *pScreen = pParent->screen();
-	const int nQuarter = pScreen ? pScreen->availableGeometry().height() / 4 : 240;
-	const int nRows = pList->sizeHintForRow( 0 ) * pList->count() + 2 * pList->frameWidth() + 2;
-	pList->setFixedHeight( std::min( nQuarter, nRows ) );
-	pList->setMinimumWidth( std::max( 240, pList->sizeHintForColumn( 0 ) + 32 ) );
-	pLayout->addWidget( pFilter );
-	pLayout->addWidget( pList );
-
-	const auto choose = [ pShared ]( QListWidgetItem *pItem ) {
-		if ( !pItem )
-		{
-			return;
-		}
-		const auto pfnRun = ( *pShared )[ static_cast<std::size_t>( pItem->data( Qt::UserRole ).toInt() ) ].m_pfnRun;
-		while ( QWidget *pPopup = QApplication::activePopupWidget() )
-		{
-			pPopup->close();
-		}
-		pfnRun();
-	};
-	QObject::connect( pList, &QListWidget::itemClicked, pList, choose );
-	QObject::connect( pList, &QListWidget::itemActivated, pList, choose );
-	QObject::connect( pFilter, &QLineEdit::textChanged, pList, [ pList ]( const QString &szText ) {
-		QListWidgetItem *pFirst = nullptr;
-		for ( int i = 0; i < pList->count(); i++ )
-		{
-			QListWidgetItem *pItem = pList->item( i );
-			pItem->setHidden( !pItem->text().contains( szText, Qt::CaseInsensitive ) );
-			pFirst = pFirst || pItem->isHidden() ? pFirst : pItem;
-		}
-		pList->setCurrentItem( pFirst );
-	} );
-	QObject::connect( pFilter, &QLineEdit::returnPressed, pList, [ pList, choose ] {
-		choose( pList->currentItem() && !pList->currentItem()->isHidden() ? pList->currentItem() : nullptr );
-	} );
-	auto *pAction = new QWidgetAction( pSub );
-	pAction->setDefaultWidget( pBox );
-	pSub->addAction( pAction );
-	QObject::connect( pSub, &QMenu::aboutToShow, pFilter, [ pFilter ] { pFilter->setFocus(); } );
-	return pSub;
 }
 
 //-----------------------------------------------------------------------------
@@ -1090,6 +1013,7 @@ const particles::AttributeInfo_t *CParticleEditor::DefaultFor( std::int32_t nEle
 //-----------------------------------------------------------------------------
 void CParticleEditor::RebuildProperties()
 {
+	m_pPreview->SetSelectedElement( m_nElement );
 	// Keep the keyboard where it was across the rebuild (Tab from one field to the next commits the
 	// first, which rebuilds the panel).
 	QString szFocusedAttribute;
