@@ -62,7 +62,9 @@ void FillPicker( QMenu *pSub, std::vector<PickerItem_t> items, const QString &sz
 		{
 			pPopup->close();
 		}
-		pfnRun();
+		// After the click is over: what runs may show a dialog or refill the menu, deleting this
+		// list while it is still handling the mouse.
+		QTimer::singleShot( 0, qApp, pfnRun );
 	};
 	QObject::connect( pList, &QListWidget::itemClicked, pList, choose );
 	QObject::connect( pList, &QListWidget::itemActivated, pList, choose );

@@ -66,6 +66,8 @@ public:
 	CParticleEditor *OpenParticleFile( const QString &szGamePath );
 	// Shows the search over every particle system, with query typed in.
 	CParticleSearch *FindParticleSystem( const QString &szQuery = {} );
+	// Closes a tab, asking first about unsaved changes. Returns false when the user keeps it.
+	bool CloseTab( int nIndex );
 
 protected:
 	void closeEvent( QCloseEvent *pEvent ) override;
@@ -92,7 +94,6 @@ private:
 	bool Save( CSoundEditor *pEditor );
 	bool SaveAs( CSoundEditor *pEditor );
 	bool WriteDocument( CSoundEditor *pEditor, const std::filesystem::path &target );
-	bool CloseTab( int nIndex );
 	bool ConfirmClose( CSoundEditor *pEditor );
 	bool ConfirmClose( CSkyEditor *pEditor );
 	bool ConfirmClose( CParticleEditor *pEditor );

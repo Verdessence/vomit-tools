@@ -202,6 +202,9 @@ std::optional<CImage> DecodeTexture( std::span<const std::byte> bytes, std::stri
 	return vtf ? vtf->Decode( 0, 0, 0, &szError ) : std::nullopt;
 }
 
+// Cube maps read once per sky, by game path: one can be a hundred megabytes.
+using CubeMaps_t = std::map<std::string, std::optional<texture::CVtf>>;
+
 //-----------------------------------------------------------------------------
 // Purpose: One face from its material: its texture transform, and the first of its textures that
 //          reads
@@ -209,7 +212,7 @@ std::optional<CImage> DecodeTexture( std::span<const std::byte> bytes, std::stri
 //          on).
 //          Returns what went wrong if none does.
 //-----------------------------------------------------------------------------
-std::optional<std::string> LoadMaterialFace( LoadedSky_t &sky, Face_t nFace, const std::string &szMaterialPath, std::string_view szText, const Reader_t &pfnRead )
+std::optional<std::string> LoadMaterialFace( LoadedSky_t &sky, Face_t nFace, const std::string &szMaterialPath, std::string_view szText, const Reader_t &pfnRead, CubeMaps_t &cubeMaps )
 {
 	const kv1::CDocument document = kv1::Parse( szText ).m_Document;
 	const auto root = std::ranges::find_if( document.m_Roots, &kv1::CNode::IsBlock );
@@ -239,6 +242,41 @@ std::optional<std::string> LoadMaterialFace( LoadedSky_t &sky, Face_t nFace, con
 			continue;
 		}
 		sky.m_Cube.Face( nFace ) = std::move( *image );
+		sky.m_Textures[ IndexOf( nFace ) ] = szVtfPath;
+		return std::nullopt;
+	}
+	// A sky drawn from a cube map (WindowImposter and the like): its face for this side.
+	if ( const kv1::CNode *pEnvmap = root->Find( "$envmap" ); !firstProblem && pEnvmap && pEnvmap->IsPair() )
+	{
+		if ( Lower( pEnvmap->GetValue() ) == "env_cubemap" )
+		{
+			return szMaterialPath + " reflects the map's nearest cube map (env_cubemap), which only the map has";
+		}
+		const std::string szVtfPath = vfs::NormalizePath( "materials/" + pEnvmap->GetValue() + ".vtf" );
+		auto [ it, bNew ] = cubeMaps.try_emplace( szVtfPath );
+		std::string szError = "missing";
+		if ( bNew )
+		{
+			if ( const auto bytes = pfnRead( szVtfPath ) )
+			{
+				it->second = texture::ReadVtf( *bytes, &szError );
+			}
+		}
+		if ( !it->second )
+		{
+			return szVtfPath + ": " + szError;
+		}
+		if ( !IsCubeMap( *it->second ) )
+		{
+			return szVtfPath + " is not a cube map";
+		}
+		auto image = CubeMapFace( *it->second, nFace, &szError );
+		if ( !image )
+		{
+			return szVtfPath + ": " + szError;
+		}
+		sky.m_Cube.Face( nFace ) = std::move( *image );
+		sky.m_Cube.m_Transforms[ IndexOf( nFace ) ] = {}; // the cube map's faces are whole squares
 		sky.m_Textures[ IndexOf( nFace ) ] = szVtfPath;
 		return std::nullopt;
 	}
@@ -786,6 +824,7 @@ std::vector<std::string> SkyNames( const vfs::CFileSystem &fileSystem )
 LoadedSky_t LoadSky( const vfs::CFileSystem &fileSystem, std::string_view szName )
 {
 	LoadedSky_t sky;
+	CubeMaps_t cubeMaps;
 	const Reader_t pfnRead = [ &fileSystem ]( const std::string &szPath ) { return fileSystem.Read( szPath ); };
 	for ( Face_t nFace : FACES )
 	{
@@ -817,7 +856,7 @@ LoadedSky_t LoadSky( const vfs::CFileSystem &fileSystem, std::string_view szName
 			}
 			continue;
 		}
-		if ( auto problem = LoadMaterialFace( sky, nFace, szMaterialPath, *text, pfnRead ) )
+		if ( auto problem = LoadMaterialFace( sky, nFace, szMaterialPath, *text, pfnRead, cubeMaps ) )
 		{
 			sky.m_Problems.push_back( std::move( *problem ) );
 		}
@@ -902,6 +941,7 @@ std::optional<CSkyFiles> FindSkyFiles( const std::filesystem::path &file )
 LoadedSky_t LoadSkyFiles( const CSkyFiles &files, const vfs::CFileSystem *pFileSystem )
 {
 	LoadedSky_t sky;
+	CubeMaps_t cubeMaps;
 	for ( Face_t nFace : FACES )
 	{
 		const std::filesystem::path &path = files.m_Faces[ IndexOf( nFace ) ];
@@ -935,7 +975,7 @@ LoadedSky_t LoadSkyFiles( const CSkyFiles &files, const vfs::CFileSystem *pFileS
 				return pFileSystem ? pFileSystem->Read( szGamePath ) : std::nullopt;
 			};
 			const std::string szText{ reinterpret_cast<const char *>( bytes->data() ), bytes->size() };
-			if ( auto problem = LoadMaterialFace( sky, nFace, szShown, szText, pfnRead ) )
+			if ( auto problem = LoadMaterialFace( sky, nFace, szShown, szText, pfnRead, cubeMaps ) )
 			{
 				// Its texture can't be found: a VTF beside the material will do.
 				std::filesystem::path beside = path;
@@ -963,6 +1003,49 @@ LoadedSky_t LoadSkyFiles( const CSkyFiles &files, const vfs::CFileSystem *pFileS
 		sky.m_Textures[ IndexOf( nFace ) ] = szShown;
 	}
 	return sky;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: A VTF with the six faces of a cube.
+//-----------------------------------------------------------------------------
+bool IsCubeMap( const texture::CVtf &vtf )
+{
+	return vtf.m_Info.m_nFaces >= 6;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: One face of a cube map, turned into the way a sky face is drawn.
+//
+//          The faces are stored in the order rt lf bk ft up dn (the names Valve's tools give the
+//          six images a cube map is built from). How each is turned was found from the files: the
+//          ones Valve builds repeat each edge's texels on both faces it joins, and under this
+//          table all twelve seams of materials/editor/cubemap.vtf and shadertest/cubemap.vtf
+//          meet exactly (under 0.6 of 255 at full size), the stock maps' cube maps closely, and a
+//          user's WindowImposter sky stands upright all round. Quarter turns are clockwise, the
+//          mirror (left to right) comes after the turn, as texture::Oriented does them.
+//-----------------------------------------------------------------------------
+std::optional<CImage> CubeMapFace( const texture::CVtf &vtf, Face_t nFace, std::string *pError )
+{
+	struct Stored_t
+	{
+		int m_nIndex;
+		int m_nQuarterTurns;
+	};
+	static constexpr std::array<Stored_t, 6> STORED{ {
+		{ 0, 1 }, // rt
+		{ 2, 2 }, // bk
+		{ 1, 3 }, // lf
+		{ 3, 0 }, // ft
+		{ 4, 1 }, // up
+		{ 5, 1 }, // dn
+	} };
+	const Stored_t &stored = STORED[ IndexOf( nFace ) ];
+	auto image = vtf.Decode( 0, 0, stored.m_nIndex, pError );
+	if ( !image )
+	{
+		return std::nullopt;
+	}
+	return texture::Oriented( *image, stored.m_nQuarterTurns, true );
 }
 
 } // namespace xv::sky

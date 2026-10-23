@@ -28,6 +28,11 @@
 ### Skybox editor
 - **File → Open Sky from Game** lists the skies in a searchable list that fits on the screen,
   instead of a menu that ran off it.
+- **Fixed a crash** when picking a sky from that list could not open it: the warning showed while
+  the list was still handling the click. What's picked now runs after the click.
+- **Cube-map skies:** a sky whose materials only name a cube map (`$envmap`, as WindowImposter skies
+  do) opens from that cube map's faces, HDR ones included. The face order and turns were worked out
+  from Valve's own cube maps, whose seams then meet exactly.
 
 ## 0.4.0 — The Particle (2026-10-23)
 

@@ -185,6 +185,13 @@ struct OutputFile_t
 // The VTF and VMT of every face (12 files). Faces are encoded in parallel. Empty if a face is missing.
 [[nodiscard]] std::vector<OutputFile_t> ExportSky( const CCube &cube, const ExportOptions_t &options );
 
+// Cube maps (VTFs with the ENVMAP flag, such as a WindowImposter sky's $envmap) hold the six faces
+// in the order rt lf bk ft up dn, each turned and mirrored from how a sky face is drawn. Sky.cpp
+// says how this was established.
+[[nodiscard]] bool IsCubeMap( const texture::CVtf &vtf );
+// One face of a cube map as a sky face image (the largest mip), or nullopt with error set.
+[[nodiscard]] std::optional<texture::CImage> CubeMapFace( const texture::CVtf &vtf, Face_t nFace, std::string *pError = nullptr );
+
 // Reading skies from a game
 // The sky names the game has materials for (every skybox/<name>rt.vmt), sorted.
 [[nodiscard]] std::vector<std::string> SkyNames( const vfs::CFileSystem &fileSystem );
