@@ -10,6 +10,8 @@
 #pragma once
 
 #include <array>
+#include <cstdint>
+#include <functional>
 #include <map>
 #include <memory>
 #include <string>
@@ -30,13 +32,18 @@ class QToolButton;
 
 // A live view of one particle system and the systems it spawns: drag to turn around it, right-drag
 // to move, scroll to zoom, double-click to frame it again. The control points the system uses are
-// handles: drag one to move it across the view, or with Shift held, up and down. Below the view:
-// play/pause, restart, speed, looping, the grid and the bounding boxes.
+// handles: drag one to move it across the view, or with Shift held, up and down; while the grid
+// shows, it snaps to it. Control point 0 is where the effect is, so moving it only changes the
+// view. Moving any other point writes it into the file, through a "Set Control Point Positions"
+// operator (one is added when needed); with Ctrl held, a point the file doesn't place moves in the
+// view only. Below the view: play/pause, restart, speed, looping, the grid and the bounding boxes.
 class CParticlePreview : public QWidget
 {
 	Q_OBJECT
 
 public:
+	using ControlPoints_t = std::array<xv::CVec3, xv::particles::CSimulation::CONTROL_POINTS>;
+
 	explicit CParticlePreview( QWidget *pParent = nullptr );
 	~CParticlePreview() override;
 
@@ -55,9 +62,29 @@ public:
 	void FrameView();
 	// Advances the simulation by seconds (the timer does this while playing).
 	void Advance( float flSeconds );
-	// Puts a control point somewhere else, without starting over.
+	// Puts a control point somewhere else in the view, without starting over.
 	void MoveControlPoint( int nIndex, xv::CVec3 vecPosition );
+	// Puts the control points the file doesn't place back where they start.
 	void ResetControlPoints();
+	[[nodiscard]] const ControlPoints_t &GetControlPoints() const { return m_ControlPoints; }
+	void SetControlPoints( const ControlPoints_t &points );
+	// Dragging a control point, as the mouse does it: begin on its handle, drag to places in the
+	// world (snapped to the grid while it shows), end to keep it there. In the view only for point
+	// 0, or with bViewOnly for a point no operator places; otherwise ControlPointPlaced asks for the
+	// file to be changed when it ends.
+	void BeginDrag( int nIndex, bool bViewOnly = false );
+	void DragTo( xv::CVec3 vecPosition );
+	void EndDrag();
+	[[nodiscard]] int GetDragged() const { return m_Drag.m_nIndex; }
+	// Whether a "Set Control Point Positions" operator of the shown systems places a point.
+	[[nodiscard]] bool IsPlacedByFile( int nIndex ) const;
+	// Puts a dragged point into the file at location, measured the way the operator measures it:
+	// with operator nOperator (its slots for the point, and slot nSlot turned to it when not -1), or
+	// a new operator in the shown system when nOperator is -1 (see particles::PlaceControlPoint).
+	// Returns whether the file changed; until it comes back through SetDocument() the point stays
+	// held where it was put.
+	using Placer_t = std::function<bool( int nIndex, xv::CVec3 vecLocation, std::int32_t nOperator, int nSlot )>;
+	void SetPlacer( Placer_t pfnPlace ) { m_pfnPlace = std::move( pfnPlace ); }
 	// The control points the shown systems use (always 0).
 	[[nodiscard]] std::vector<int> GetUsedControlPoints() const;
 
@@ -79,8 +106,26 @@ public:
 	// How full each shown system is.
 	[[nodiscard]] std::vector<Count_t> GetCounts() const;
 
+signals:
+	// Points moved in the view only (dragged or reset), for undo.
+	void ControlPointsMoved( const ControlPoints_t &before, const ControlPoints_t &after, const QString &szDescription );
+
 private:
 	friend class CParticleCanvas;
+
+	struct Drag_t
+	{
+		int m_nIndex = -1;
+		bool m_bInFile = false;
+		std::int32_t m_nOperator = -1;
+		int m_nSlot = -1;
+		xv::CVec3 m_vecOrigin;   // where the operator measures from
+		xv::CVec3 m_vecLocation; // from the origin
+		bool m_bMoved = false;
+		bool m_bEnded = false; // let go, waiting for the file
+		ControlPoints_t m_Before{};
+	};
+
 	friend class CParticleOverlay;
 
 	void Rebuild( bool bKeepTime );
@@ -104,7 +149,9 @@ private:
 	std::map<std::string, std::shared_ptr<const xv::particles::Sprite_t>> m_SpriteCache; // by material
 	std::vector<const xv::particles::Sprite_t *> m_Sprites;                                // by definition
 	std::string m_szSystem;
-	std::array<xv::CVec3, xv::particles::CSimulation::CONTROL_POINTS> m_ControlPoints{};
+	ControlPoints_t m_ControlPoints{};
+	Drag_t m_Drag;
+	Placer_t m_pfnPlace;
 	xv::particles::CCamera m_Camera;
 	bool m_bCameraSet = false;
 	QImage m_Image;

@@ -95,7 +95,9 @@ public:
 		setMouseTracking( true );
 		setCursor( Qt::OpenHandCursor );
 		setToolTip( tr( "Drag to turn around the effect, right-drag to move, scroll to zoom, double-click to frame it.\n"
-						"Drag a control point (CP) to move it; hold Shift to move it up and down" ) );
+						"Drag a control point (CP) to move it; hold Shift to move it up and down. It snaps to the grid while the grid shows.\n"
+						"CP0 is where the effect is: moving it changes only the view. Moving another CP writes it into the file "
+						"(Set Control Point Positions); hold Ctrl to move one the file doesn't place in the view only" ) );
 	}
 
 	// The control point whose handle is under a canvas position, or -1.
@@ -149,13 +151,20 @@ protected:
 	void mousePressEvent( QMouseEvent *pEvent ) override
 	{
 		m_Last = pEvent->position();
-		m_nDragging = pEvent->button() == Qt::LeftButton ? HandleAt( pEvent->position() ) : -1;
-		setCursor( m_nDragging >= 0 ? Qt::SizeAllCursor : Qt::ClosedHandCursor );
+		const int nHandle = pEvent->button() == Qt::LeftButton ? HandleAt( pEvent->position() ) : -1;
+		if ( nHandle >= 0 )
+		{
+			m_pPreview->BeginDrag( nHandle, pEvent->modifiers() & Qt::ControlModifier );
+		}
+		setCursor( nHandle >= 0 ? Qt::SizeAllCursor : Qt::ClosedHandCursor );
 	}
 
 	void mouseReleaseEvent( QMouseEvent *pEvent ) override
 	{
-		m_nDragging = -1;
+		if ( pEvent->button() == Qt::LeftButton )
+		{
+			m_pPreview->EndDrag();
+		}
 		setCursor( HandleAt( pEvent->position() ) >= 0 ? Qt::PointingHandCursor : Qt::OpenHandCursor );
 	}
 
@@ -169,11 +178,12 @@ protected:
 			return;
 		}
 		particles::CCamera &camera = m_pPreview->m_Camera;
-		if ( m_nDragging >= 0 && m_pPreview->m_pSimulation )
+		const int nDragging = m_pPreview->GetDragged();
+		if ( nDragging >= 0 && m_pPreview->m_pSimulation )
 		{
 			// Along a plane through the point facing the camera; with Shift, only up and down.
 			const particles::CCamera view = m_pPreview->GetCanvasCamera();
-			const CVec3 vecFrom = m_pPreview->m_pSimulation->ControlPoint( m_nDragging );
+			const CVec3 vecFrom = m_pPreview->m_pSimulation->ControlPoint( nDragging );
 			const CVec3 vecEye = view.GetEye();
 			const CVec3 vecRay = view.Ray( static_cast<float>( pEvent->position().x() ), static_cast<float>( pEvent->position().y() ) );
 			const bool bVertical = pEvent->modifiers() & Qt::ShiftModifier;
@@ -193,7 +203,7 @@ protected:
 					{
 						vecTo = { vecFrom.m_flX, vecFrom.m_flY, vecTo.m_flZ };
 					}
-					m_pPreview->MoveControlPoint( m_nDragging, vecTo );
+					m_pPreview->DragTo( vecTo );
 				}
 			}
 		}
@@ -228,7 +238,6 @@ protected:
 private:
 	CParticlePreview *m_pPreview;
 	QPointF m_Last;
-	int m_nDragging = -1;
 };
 
 // Control points, bounds and counts over the GPU view, which can't be painted on directly.
@@ -291,6 +300,7 @@ CParticlePreview::CParticlePreview( QWidget *pParent )
 	m_pLoop->setToolTip( tr( "Start again when the effect is over" ) );
 	m_pGrid = new QCheckBox( tr( "Grid" ) );
 	m_pGrid->setChecked( true );
+	m_pGrid->setToolTip( tr( "The ground grid. Control points snap to it while it shows" ) );
 	connect( m_pGrid, &QCheckBox::toggled, this, &CParticlePreview::Redraw );
 	m_pBounds = new QCheckBox( tr( "Bounds" ) );
 	m_pBounds->setObjectName( QStringLiteral( "particleBounds" ) );
@@ -318,7 +328,8 @@ CParticlePreview::CParticlePreview( QWidget *pParent )
 	} );
 	auto *pResetPoints = new QToolButton;
 	pResetPoints->setText( tr( "Reset CPs" ) );
-	pResetPoints->setToolTip( tr( "Put the control points back where they started" ) );
+	pResetPoints->setToolTip( tr( "Put the control points the file doesn't place (CP0 among them) back where they started. "
+								  "Points the file places move back with Undo" ) );
 	connect( pResetPoints, &QToolButton::clicked, this, &CParticlePreview::ResetControlPoints );
 
 	m_pInfo = new QLabel;
@@ -461,6 +472,10 @@ void CParticlePreview::SetReader( particles::FileReader_t pfnReader )
 void CParticlePreview::SetDocument( const xv::dmx::Document_t &document )
 {
 	m_pLibrary = std::make_shared<const particles::CLibrary>( particles::Compile( document ) );
+	if ( m_Drag.m_bEnded )
+	{
+		m_Drag = {}; // the file places the point now
+	}
 	Rebuild( true );
 }
 
@@ -500,6 +515,11 @@ void CParticlePreview::Rebuild( bool bKeepTime )
 			for ( int i = 0; i < particles::CSimulation::CONTROL_POINTS; i++ )
 			{
 				m_pSimulation->SetControlPoint( i, m_ControlPoints[ static_cast<std::size_t>( i ) ] );
+			}
+			if ( m_Drag.m_nIndex >= 0 && m_Drag.m_bInFile && m_Drag.m_bMoved )
+			{
+				// Still being dragged, or let go and not back from the file yet.
+				m_pSimulation->HoldControlPoint( m_Drag.m_nIndex, m_Drag.m_vecOrigin + m_Drag.m_vecLocation );
 			}
 			m_pSimulation->Restart(); // from the control points' places, not from where they were dragged from
 			Advance( std::min( flTime, CATCH_UP ) );
@@ -587,9 +607,136 @@ void CParticlePreview::MoveControlPoint( int nIndex, CVec3 vecPosition )
 //-----------------------------------------------------------------------------
 void CParticlePreview::ResetControlPoints()
 {
+	const ControlPoints_t before = m_ControlPoints;
+	SetControlPoints( DEFAULT_CONTROL_POINTS );
+	if ( before != m_ControlPoints )
+	{
+		emit ControlPointsMoved( before, m_ControlPoints, tr( "Reset control points" ) );
+	}
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+void CParticlePreview::SetControlPoints( const ControlPoints_t &points )
+{
 	for ( int i = 0; i < particles::CSimulation::CONTROL_POINTS; i++ )
 	{
-		MoveControlPoint( i, DEFAULT_CONTROL_POINTS[ static_cast<std::size_t>( i ) ] );
+		MoveControlPoint( i, points[ static_cast<std::size_t>( i ) ] );
+	}
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Whether a "Set Control Point Positions" operator of the shown systems places a point.
+//-----------------------------------------------------------------------------
+bool CParticlePreview::IsPlacedByFile( int nIndex ) const
+{
+	return m_pSimulation && m_pSimulation->FindControlPointSetter( nIndex ).has_value();
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Starts dragging a control point. Points other than 0 go into the file: into the slots
+//          of the operator that already places them, else a spare slot of the system's own
+//          operators, else a new operator.
+//-----------------------------------------------------------------------------
+void CParticlePreview::BeginDrag( int nIndex, bool bViewOnly )
+{
+	if ( m_Drag.m_bEnded && m_pSimulation )
+	{
+		m_pSimulation->ReleaseControlPoints(); // the last one never came back from the file
+	}
+	m_Drag = {};
+	if ( !m_pSimulation || nIndex < 0 || nIndex >= particles::CSimulation::CONTROL_POINTS )
+	{
+		return;
+	}
+	m_Drag.m_nIndex = nIndex;
+	m_Drag.m_Before = m_ControlPoints;
+	const auto setter = m_pSimulation->FindControlPointSetter( nIndex );
+	m_Drag.m_bInFile = m_pfnPlace && ( setter || ( nIndex > 0 && !bViewOnly ) );
+	if ( !m_Drag.m_bInFile )
+	{
+		return;
+	}
+	const auto slot = setter ? setter : m_pSimulation->FindSpareSetter();
+	if ( slot )
+	{
+		m_Drag.m_nOperator = slot->m_pOperator->m_nElement;
+		m_Drag.m_nSlot = setter ? -1 : slot->m_nSlot;
+		m_Drag.m_vecOrigin = m_pSimulation->SetterOrigin( *slot->m_pOperator );
+	}
+	else
+	{
+		m_Drag.m_vecOrigin = m_pSimulation->ControlPoint( 0 ); // where a new operator measures from
+	}
+	m_Drag.m_vecLocation = m_pSimulation->ControlPoint( nIndex ) - m_Drag.m_vecOrigin;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Moves the dragged point towards a place in the world, snapped to the grid while it
+//          shows. For the file the location is snapped, so its numbers stay round.
+//-----------------------------------------------------------------------------
+void CParticlePreview::DragTo( CVec3 vecPosition )
+{
+	if ( m_Drag.m_nIndex < 0 || m_Drag.m_bEnded || !m_pSimulation )
+	{
+		return;
+	}
+	const CVec3 vecOrigin = m_Drag.m_bInFile ? m_Drag.m_vecOrigin : CVec3{};
+	CVec3 vecOffset = vecPosition - vecOrigin;
+	if ( m_pGrid->isChecked() )
+	{
+		const float flStep = particles::GridSpacing( m_Camera );
+		const auto snap = [ flStep ]( float v ) { return std::round( v / flStep ) * flStep + 0.0f; }; // + 0 turns -0 into 0
+		vecOffset = { snap( vecOffset.m_flX ), snap( vecOffset.m_flY ), snap( vecOffset.m_flZ ) };
+	}
+	if ( !m_Drag.m_bInFile )
+	{
+		MoveControlPoint( m_Drag.m_nIndex, vecOffset );
+		m_Drag.m_bMoved = m_ControlPoints != m_Drag.m_Before;
+		return;
+	}
+	if ( vecOffset == m_Drag.m_vecLocation )
+	{
+		return;
+	}
+	m_Drag.m_vecLocation = vecOffset;
+	m_Drag.m_bMoved = true;
+	m_pSimulation->HoldControlPoint( m_Drag.m_nIndex, vecOrigin + vecOffset );
+	Redraw();
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Lets go of the dragged point: into the file, or as a view step for undo.
+//-----------------------------------------------------------------------------
+void CParticlePreview::EndDrag()
+{
+	if ( m_Drag.m_nIndex < 0 || m_Drag.m_bEnded )
+	{
+		return;
+	}
+	const Drag_t drag = m_Drag;
+	if ( !drag.m_bMoved )
+	{
+		m_Drag = {};
+		return;
+	}
+	if ( !drag.m_bInFile )
+	{
+		m_Drag = {};
+		emit ControlPointsMoved( drag.m_Before, m_ControlPoints, tr( "Move CP%1" ).arg( drag.m_nIndex ) );
+		return;
+	}
+	m_Drag.m_bEnded = true;
+	if ( !m_pfnPlace( drag.m_nIndex, drag.m_vecLocation, drag.m_nOperator, drag.m_nSlot ) && m_Drag.m_bEnded )
+	{
+		// The file didn't change (the point is back where it was): nothing will replace the hold.
+		if ( m_pSimulation )
+		{
+			m_pSimulation->ReleaseControlPoints();
+		}
+		m_Drag = {};
+		Redraw();
 	}
 }
 
@@ -601,9 +748,16 @@ std::vector<int> CParticlePreview::GetUsedControlPoints() const
 	std::set<int> used{ 0 };
 	if ( m_pSimulation )
 	{
-		ForEachInstance( m_pSimulation->GetRoot(), [ &used ]( const particles::CSimulation::Instance_t &instance ) {
-			const auto points = instance.m_pDefinition->GetControlPoints();
-			used.insert( points.begin(), points.end() );
+		ForEachInstance( m_pSimulation->GetRoot(), [ this, &used ]( const particles::CSimulation::Instance_t &instance ) {
+			// Not the points a parent sets from its particles: they aren't the shared ones.
+			const auto shared = m_pSimulation->GetSharedControlPoints( instance );
+			for ( int nPoint : instance.m_pDefinition->GetControlPoints() )
+			{
+				if ( std::ranges::find( shared, nPoint ) != shared.end() )
+				{
+					used.insert( nPoint );
+				}
+			}
 		} );
 	}
 	return { used.begin(), used.end() };
@@ -771,7 +925,14 @@ void CParticlePreview::PaintOverlays( QPainter &painter )
 		const QColor color = ControlPointColor( nIndex );
 		painter.setPen( QPen( color, 1.5 ) );
 		painter.setBrush( QColor( color.red(), color.green(), color.blue(), 60 ) );
-		painter.drawEllipse( p, 5.0, 5.0 );
+		if ( IsPlacedByFile( nIndex ) || ( m_Drag.m_nIndex == nIndex && m_Drag.m_bInFile ) )
+		{
+			painter.drawRect( QRectF{ p - QPointF{ 4.5, 4.5 }, QSizeF{ 9.0, 9.0 } } ); // a square: the file places it
+		}
+		else
+		{
+			painter.drawEllipse( p, 5.0, 5.0 );
+		}
 		painter.drawLine( p - QPointF{ 9, 0 }, p - QPointF{ 5, 0 } );
 		painter.drawLine( p + QPointF{ 5, 0 }, p + QPointF{ 9, 0 } );
 		painter.drawLine( p - QPointF{ 0, 9 }, p - QPointF{ 0, 5 } );

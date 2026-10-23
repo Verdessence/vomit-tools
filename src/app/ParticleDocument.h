@@ -49,6 +49,10 @@ public:
 	// it changes nothing. Consecutive edits with the same non-empty mergeKey (typing into one field)
 	// become a single step.
 	bool Edit( const QString &szDescription, const std::function<void( xv::dmx::Document_t & )> &pfnChange, const QString &szMergeKey = {} );
+	// Records a change to how the file is shown rather than to the file (the preview's control
+	// points) as an undo step. It is already made; undo and redo make it again. Such steps alone
+	// don't make the file modified.
+	void AddViewStep( const QString &szDescription, std::function<void()> pfnUndo, std::function<void()> pfnRedo );
 
 signals:
 	void Changed();
@@ -57,9 +61,12 @@ signals:
 private:
 	friend class CParticleEditCommand;
 
+	void UpdateModified();
+
 	QString m_szGamePath;
 	xv::dmx::Document_t m_Document;
 	std::filesystem::path m_DiskPath;
 	QUndoStack *m_pUndo;
 	bool m_bNeverSaved = false;
+	bool m_bWasModified = false;
 };

@@ -245,8 +245,7 @@ void Fill( const CQuad &quad, std::vector<float> &buffer, int nWidth, int nRowSt
 //-----------------------------------------------------------------------------
 void ForEachGridSegment( const CCamera &camera, const std::function<void( std::array<float, 3>, std::array<float, 3>, std::array<float, 3>, float )> &pfnDraw )
 {
-	// About a dozen lines across the view, at a power of two the game's grid would use.
-	const float flSpacing = std::exp2( std::max( 2.0f, std::round( std::log2( camera.m_flDistance / 8.0f ) ) ) );
+	const float flSpacing = GridSpacing( camera );
 	const int nLines = 8;
 	const int nPieces = 16;
 	const float flCenterX = std::round( camera.m_vecTarget.m_flX / flSpacing ) * flSpacing;
@@ -380,6 +379,14 @@ const texture::CImage &MipFor( const Sprite_t &sprite, float flTexels, float flP
 }
 
 } // namespace
+
+//-----------------------------------------------------------------------------
+// Purpose: About a dozen lines across the view, at a power of two the game's grid would use.
+//-----------------------------------------------------------------------------
+float GridSpacing( const CCamera &camera )
+{
+	return std::exp2( std::max( 2.0f, std::round( std::log2( camera.m_flDistance / 8.0f ) ) ) );
+}
 
 //-----------------------------------------------------------------------------
 // Purpose:

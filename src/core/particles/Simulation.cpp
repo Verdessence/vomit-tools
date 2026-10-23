@@ -243,6 +243,12 @@ const std::set<std::pair<Category_t, std::string_view>> &SimulatedFunctions()
 		{ Category_t::CATEGORY_INITIALIZERS, "Remap Noise to Scalar" },
 		{ Category_t::CATEGORY_INITIALIZERS, "remap initial scalar" },
 		{ Category_t::CATEGORY_INITIALIZERS, "random_number" },
+		{ Category_t::CATEGORY_INITIALIZERS, "Velocity Random" },
+		{ Category_t::CATEGORY_INITIALIZERS, "Position Along Path Sequential" },
+		{ Category_t::CATEGORY_INITIALIZERS, "Position Along Path Random" },
+		{ Category_t::CATEGORY_INITIALIZERS, "Position In CP Hierarchy" },
+		{ Category_t::CATEGORY_INITIALIZERS, "Position From Parent Particles" },
+		{ Category_t::CATEGORY_INITIALIZERS, "Position Modify Warp Random" },
 		{ Category_t::CATEGORY_OPERATORS, "Lifespan Decay" },
 		{ Category_t::CATEGORY_OPERATORS, "Movement Basic" },
 		{ Category_t::CATEGORY_OPERATORS, "Alpha Fade In Random" },
@@ -261,6 +267,8 @@ const std::set<std::pair<Category_t, std::string_view>> &SimulatedFunctions()
 		{ Category_t::CATEGORY_OPERATORS, "Noise Vector" },
 		{ Category_t::CATEGORY_OPERATORS, "Remap Distance to Control Point to Scalar" },
 		{ Category_t::CATEGORY_OPERATORS, "Set Control Point Positions" },
+		{ Category_t::CATEGORY_OPERATORS, "Set child control points from particle positions" },
+		{ Category_t::CATEGORY_OPERATORS, "oscillating_movement" },
 		{ Category_t::CATEGORY_RENDERERS, "render_animated_sprites" },
 		{ Category_t::CATEGORY_RENDERERS, "render_sprite_trail" },
 		{ Category_t::CATEGORY_RENDERERS, "render_rope" },
@@ -269,6 +277,7 @@ const std::set<std::pair<Category_t, std::string_view>> &SimulatedFunctions()
 		{ Category_t::CATEGORY_FORCES, "Pull towards control point" },
 		{ Category_t::CATEGORY_CONSTRAINTS, "Constrain distance to control point" },
 		{ Category_t::CATEGORY_CONSTRAINTS, "Prevent passing through a plane" },
+		{ Category_t::CATEGORY_CONSTRAINTS, "Collision via traces" },
 	};
 	return functions;
 }
@@ -427,6 +436,27 @@ bool IsSimulated( Category_t nCategory, std::string_view szFunction )
 }
 
 //-----------------------------------------------------------------------------
+// Purpose: How the preview's version of a function falls short of the game's, when it is worth
+//          saying.
+//-----------------------------------------------------------------------------
+std::string_view PreviewNote( Category_t nCategory, std::string_view szFunction )
+{
+	if ( nCategory == Category_t::CATEGORY_CONSTRAINTS && szFunction == "Collision via traces" )
+	{
+		return "The preview has no map: particles hit only the floor under the grid";
+	}
+	if ( nCategory == Category_t::CATEGORY_OPERATORS && szFunction == "Set child control points from particle positions" )
+	{
+		return "Sets the points of every child system; the group ID isn't used";
+	}
+	if ( nCategory == Category_t::CATEGORY_INITIALIZERS && szFunction == "Velocity Random" )
+	{
+		return "Not checked against a game's files yet: no stock file here uses it";
+	}
+	return {};
+}
+
+//-----------------------------------------------------------------------------
 // Purpose:
 //-----------------------------------------------------------------------------
 CLibrary Compile( const dmx::Document_t &document )
@@ -581,6 +611,151 @@ CVec3 CSimulation::ControlPoint( int nIndex ) const
 }
 
 //-----------------------------------------------------------------------------
+// Purpose: Keeps a control point where it is put, whatever the operators say, until released.
+//-----------------------------------------------------------------------------
+void CSimulation::HoldControlPoint( int nIndex, CVec3 vecPosition )
+{
+	if ( nIndex >= 0 && nIndex < CONTROL_POINTS )
+	{
+		m_HeldControlPoints[ static_cast<std::size_t>( nIndex ) ] = vecPosition;
+		m_ControlPoints[ static_cast<std::size_t>( nIndex ) ] = vecPosition;
+	}
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+void CSimulation::ReleaseControlPoints()
+{
+	m_HeldControlPoints = {};
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: The "Set Control Point Positions" slot that places a control point in the shown
+//          systems. Parents step before their children and later slots after earlier ones, so the
+//          last one found is the one that shows.
+//-----------------------------------------------------------------------------
+std::optional<CSimulation::ControlPointSetter_t> CSimulation::FindControlPointSetter( int nIndex ) const
+{
+	std::optional<ControlPointSetter_t> found;
+	std::function<void( const Instance_t & )> pfnVisit = [ & ]( const Instance_t &instance ) {
+		for ( const CCompiledOperator &op : instance.m_pDefinition->operators )
+		{
+			if ( op.m_nCategory != Category_t::CATEGORY_OPERATORS || op.m_szFunction != SET_CONTROL_POINTS )
+			{
+				continue;
+			}
+			for ( std::size_t i = 0; i < CONTROL_POINT_SLOTS.size(); i++ )
+			{
+				if ( op.Integer( std::string{ CONTROL_POINT_SLOTS[ i ] } + " Control Point Number", -1 ) == nIndex )
+				{
+					found = ControlPointSetter_t{ instance.m_pDefinition, &op, static_cast<int>( i ) };
+				}
+			}
+		}
+		for ( const Instance_t &child : instance.m_Children )
+		{
+			pfnVisit( child );
+		}
+	};
+	if ( m_Root.m_pDefinition && nIndex > 0 )
+	{
+		pfnVisit( m_Root );
+	}
+	return found;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: A slot of the shown system's own operators that repeats an earlier slot's control
+//          point (the operator places it twice), so it is free to place another.
+//-----------------------------------------------------------------------------
+std::optional<CSimulation::ControlPointSetter_t> CSimulation::FindSpareSetter() const
+{
+	if ( !m_Root.m_pDefinition )
+	{
+		return std::nullopt;
+	}
+	for ( const CCompiledOperator &op : m_Root.m_pDefinition->operators )
+	{
+		if ( op.m_nCategory != Category_t::CATEGORY_OPERATORS || op.m_szFunction != SET_CONTROL_POINTS )
+		{
+			continue;
+		}
+		std::set<int> seen;
+		for ( std::size_t i = 0; i < CONTROL_POINT_SLOTS.size(); i++ )
+		{
+			const int nNumber = op.Integer( std::string{ CONTROL_POINT_SLOTS[ i ] } + " Control Point Number", -1 );
+			if ( !seen.insert( nNumber ).second )
+			{
+				return ControlPointSetter_t{ m_Root.m_pDefinition, &op, static_cast<int>( i ) };
+			}
+		}
+	}
+	return std::nullopt;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Locations are from the world's origin, or from a control point (0 unless set).
+//-----------------------------------------------------------------------------
+CVec3 CSimulation::SetterOrigin( const CCompiledOperator &op ) const
+{
+	return op.Flag( "Set positions in world space" ) ? CVec3{} : ControlPoint( op.Integer( "Control Point to offset positions from" ) );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: The control points an instance takes from the shared ones: all but those its parent
+//          sets for it from particle positions.
+//-----------------------------------------------------------------------------
+std::vector<int> CSimulation::GetSharedControlPoints( const Instance_t &instance ) const
+{
+	std::vector<int> shared;
+	for ( int i = 0; i < CONTROL_POINTS; i++ )
+	{
+		if ( !instance.m_OwnControlPoints[ static_cast<std::size_t>( i ) ] )
+		{
+			shared.push_back( i );
+		}
+	}
+	return shared;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: A control point as the instance being stepped sees it.
+//-----------------------------------------------------------------------------
+CVec3 CSimulation::Point( int nIndex ) const
+{
+	if ( nIndex < 0 || nIndex >= CONTROL_POINTS )
+	{
+		return {};
+	}
+	if ( m_pCurrent )
+	{
+		if ( const auto &own = m_pCurrent->m_OwnControlPoints[ static_cast<std::size_t>( nIndex ) ] )
+		{
+			return *own;
+		}
+	}
+	return m_ControlPoints[ static_cast<std::size_t>( nIndex ) ];
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Where Point() was a step ago.
+//-----------------------------------------------------------------------------
+CVec3 CSimulation::PreviousPoint( int nIndex ) const
+{
+	if ( nIndex < 0 || nIndex >= CONTROL_POINTS )
+	{
+		return {};
+	}
+	if ( m_pCurrent && m_pCurrent->m_OwnControlPoints[ static_cast<std::size_t>( nIndex ) ] )
+	{
+		// Set for the first time this step: it hasn't moved yet.
+		return m_pCurrent->m_PreviousOwnControlPoints[ static_cast<std::size_t>( nIndex ) ].value_or( *m_pCurrent->m_OwnControlPoints[ static_cast<std::size_t>( nIndex ) ] );
+	}
+	return m_PreviousControlPoints[ static_cast<std::size_t>( nIndex ) ];
+}
+
+//-----------------------------------------------------------------------------
 // Purpose:
 //-----------------------------------------------------------------------------
 float CSimulation::Random()
@@ -613,6 +788,13 @@ void CSimulation::Restart()
 	m_nNextId = 0;
 	m_nState = m_nSeed;
 	m_ControlPoints = m_UserControlPoints;
+	for ( int i = 0; i < CONTROL_POINTS; i++ )
+	{
+		if ( const auto &held = m_HeldControlPoints[ static_cast<std::size_t>( i ) ] )
+		{
+			m_ControlPoints[ static_cast<std::size_t>( i ) ] = *held;
+		}
+	}
 	m_PreviousControlPoints = m_ControlPoints;
 	m_Root = {};
 	if ( m_nDefinition >= m_pLibrary->m_Definitions.size() )
@@ -633,6 +815,27 @@ void CSimulation::Restart()
 	};
 	m_Root = MakeInstance( m_nDefinition, 0.0f );
 	pfnAddChildren( m_Root, 1 );
+
+	// The points the systems place are there from the start, before anything is emitted.
+	std::function<void( Instance_t & )> pfnPlace = [ & ]( Instance_t &instance ) {
+		m_pCurrent = &instance;
+		const CDefinition &definition = *instance.m_pDefinition;
+		for ( std::size_t i = 0; i < definition.operators.size(); i++ )
+		{
+			const CCompiledOperator &op = definition.operators[ i ];
+			if ( op.m_nCategory == Category_t::CATEGORY_OPERATORS && op.m_szFunction == SET_CONTROL_POINTS && instance.m_flTime >= 0.0f && op.Weight( 0.0f ) > 0.0f )
+			{
+				Operate( instance, op, i, 0.0f );
+			}
+		}
+		for ( Instance_t &child : instance.m_Children )
+		{
+			pfnPlace( child );
+		}
+	};
+	pfnPlace( m_Root );
+	m_pCurrent = nullptr;
+	m_PreviousControlPoints = m_ControlPoints;
 }
 
 //-----------------------------------------------------------------------------
@@ -645,16 +848,16 @@ void CSimulation::Advance( float flSeconds )
 	{
 		m_flPending -= STEP;
 		m_flTime += STEP;
-		std::function<void( Instance_t & )> pfnStepAll = [ & ]( Instance_t &instance ) {
-			Step( instance, STEP );
+		std::function<void( Instance_t &, const Instance_t * )> pfnStepAll = [ & ]( Instance_t &instance, const Instance_t *pParent ) {
+			Step( instance, pParent, STEP );
 			for ( Instance_t &child : instance.m_Children )
 			{
-				pfnStepAll( child );
+				pfnStepAll( child, &instance );
 			}
 		};
 		if ( m_Root.m_pDefinition )
 		{
-			pfnStepAll( m_Root );
+			pfnStepAll( m_Root, nullptr );
 		}
 		m_PreviousControlPoints = m_ControlPoints;
 	}
@@ -707,7 +910,7 @@ void CSimulation::Spawn( Instance_t &instance, int nCount )
 	{
 		Particle_t p;
 		p.m_nId = static_cast<std::uint32_t>( Mix( m_nSeed ^ ( static_cast<std::uint64_t>( m_nNextId++ ) << 20 ) ) );
-		p.m_vecPosition = ControlPoint( 0 );
+		p.m_vecPosition = Point( 0 );
 		p.m_flRadius = p.m_flInitialRadius = definition.m_flRadius;
 		p.m_vecColor = p.m_vecInitialColor = { definition.m_Color[ 0 ], definition.m_Color[ 1 ], definition.m_Color[ 2 ] };
 		p.m_flAlpha = p.m_flInitialAlpha = definition.m_Color[ 3 ];
@@ -740,7 +943,7 @@ void CSimulation::Initialize( Instance_t &instance, Particle_t &p, const CCompil
 
 	if ( f == "Position Within Sphere Random" )
 	{
-		const CVec3 vecCenter = ControlPoint( op.Integer( "control_point_number" ) );
+		const CVec3 vecCenter = Point( op.Integer( "control_point_number" ) );
 		// A random direction, squashed by the bias (0 on an axis flattens the sphere onto a plane).
 		const float z = 2.0f * r( 1 ) - 1.0f;
 		const float flAngle = 2.0f * std::numbers::pi_v<float> * r( 2 );
@@ -768,7 +971,7 @@ void CSimulation::Initialize( Instance_t &instance, Particle_t &p, const CCompil
 	}
 	else if ( f == "Position Within Box Random" )
 	{
-		p.m_vecPosition = ControlPoint( op.Integer( "control point number" ) ) + randomVector( op.Vector( "min" ), op.Vector( "max" ), 1 );
+		p.m_vecPosition = Point( op.Integer( "control point number" ) ) + randomVector( op.Vector( "min" ), op.Vector( "max" ), 1 );
 	}
 	else if ( f == "Position Modify Offset Random" )
 	{
@@ -778,6 +981,145 @@ void CSimulation::Initialize( Instance_t &instance, Particle_t &p, const CCompil
 			vecOffset *= p.m_flRadius;
 		}
 		p.m_vecPosition += vecOffset;
+	}
+	else if ( f == "Position Modify Warp Random" )
+	{
+		// Stretches the place (and speed) a particle got around the control point: by a random
+		// amount between min and max, or, with a transition time, from min to max over that time.
+		const CVec3 vecCenter = Point( op.Integer( "control point number" ) );
+		const CVec3 vecMin = op.Vector( "warp min", { 1, 1, 1 } );
+		const CVec3 vecMax = op.Vector( "warp max", { 1, 1, 1 } );
+		const float flTransition = op.Number( "warp transition time (treats min/max as start/end sizes)" );
+		float t = r( 1 );
+		if ( flTransition > 0.0f )
+		{
+			t = Clamp01( ( instance.m_flTime - op.Number( "warp transition start time" ) ) / flTransition );
+		}
+		if ( op.Flag( "reverse warp (0/1)" ) )
+		{
+			t = 1.0f - t;
+		}
+		const CVec3 vecWarp = Lerp( vecMin, vecMax, CVec3{ t, t, t } );
+		const auto scale = [ &vecWarp ]( CVec3 v ) { return CVec3{ v.m_flX * vecWarp.m_flX, v.m_flY * vecWarp.m_flY, v.m_flZ * vecWarp.m_flZ }; };
+		p.m_vecPosition = vecCenter + scale( p.m_vecPosition - vecCenter );
+		p.m_vecVelocity = scale( p.m_vecVelocity );
+	}
+	else if ( f == "Position Along Path Sequential" || f == "Position Along Path Random" || f == "Position In CP Hierarchy" )
+	{
+		// A path from the start control point to the end one, through the points in between for the
+		// hierarchy, bowed out by the bulge (most at the mid point), with particles spread up to the
+		// maximum distance off it. Sequential steps along it particle by particle; the hierarchy
+		// grows from start to end over its growth time.
+		const int nStart = std::clamp( op.Integer( "start control point number" ), 0, CONTROL_POINTS - 1 );
+		const int nEnd = std::clamp( op.Integer( "end control point number", 1 ), 0, CONTROL_POINTS - 1 );
+		float t = r( 1 );
+		if ( f == "Position Along Path Sequential" )
+		{
+			const int nSteps = std::max( 1, op.Integer( "particles to map from start to end", 100 ) );
+			const int nPlaced = instance.m_Counters[ nOpIndex ]++;
+			if ( op.Flag( "restart behavior (0 = bounce, 1 = loop )" ) )
+			{
+				t = static_cast<float>( nPlaced % nSteps ) / static_cast<float>( nSteps );
+			}
+			else
+			{
+				const int nPhase = nPlaced % ( 2 * nSteps );
+				t = static_cast<float>( nPhase < nSteps ? nPhase : 2 * nSteps - nPhase ) / static_cast<float>( nSteps );
+			}
+		}
+		std::vector<CVec3> path;
+		for ( int i = nStart;; i += nEnd >= nStart ? 1 : -1 )
+		{
+			path.push_back( Point( i ) );
+			if ( i == nEnd || f != "Position In CP Hierarchy" )
+			{
+				break;
+			}
+		}
+		if ( path.size() == 1 )
+		{
+			path.push_back( Point( nEnd ) );
+		}
+		if ( f == "Position In CP Hierarchy" )
+		{
+			const float flGrowth = op.Number( "growth time" );
+			if ( flGrowth > 0.0f )
+			{
+				t *= Clamp01( instance.m_flTime / flGrowth );
+			}
+		}
+		const float flAlong = t * static_cast<float>( path.size() - 1 );
+		const std::size_t nPiece = std::min( path.size() - 2, static_cast<std::size_t>( flAlong ) );
+		const float flPiece = flAlong - static_cast<float>( nPiece );
+		const CVec3 vecFrom = path[ nPiece ];
+		const CVec3 vecTo = path[ nPiece + 1 ];
+		CVec3 vecAt = vecFrom + ( vecTo - vecFrom ) * flPiece;
+		const float flBulge = op.Number( "bulge" );
+		if ( flBulge != 0.0f )
+		{
+			const float flMid = std::clamp( op.Number( "mid point position", 0.5f ), 0.01f, 0.99f );
+			const float flShape = std::sin( std::numbers::pi_v<float> * ( t < flMid ? 0.5f * t / flMid : 0.5f + 0.5f * ( t - flMid ) / ( 1.0f - flMid ) ) );
+			// Off to a random side of the path (the game can also use the end points' facing,
+			// which the preview's points don't have).
+			const CVec3 vecAlong = Normalized( vecTo - vecFrom );
+			CVec3 vecSide = Cross( vecAlong, std::abs( vecAlong.m_flZ ) < 0.9f ? CVec3{ 0, 0, 1 } : CVec3{ 1, 0, 0 } );
+			vecSide = Normalized( vecSide );
+			const CVec3 vecOther = Cross( vecAlong, vecSide );
+			const float flAngle = 2.0f * std::numbers::pi_v<float> * r( 2 );
+			vecAt += ( vecSide * std::cos( flAngle ) + vecOther * std::sin( flAngle ) ) * ( flBulge * flShape );
+		}
+		const float flSpread = op.Number( "maximum distance" );
+		if ( flSpread > 0.0f )
+		{
+			const float z = 2.0f * r( 3 ) - 1.0f;
+			const float flAngle = 2.0f * std::numbers::pi_v<float> * r( 4 );
+			const float flFlat = std::sqrt( std::max( 0.0f, 1.0f - z * z ) );
+			CVec3 vecOffset = CVec3{ flFlat * std::cos( flAngle ), flFlat * std::sin( flAngle ), z } * ( flSpread * std::cbrt( r( 5 ) ) );
+			const CVec3 vecBias = op.Vector( "distance_bias", { 1, 1, 1 } );
+			vecOffset = { vecOffset.m_flX * vecBias.m_flX, vecOffset.m_flY * vecBias.m_flY, vecOffset.m_flZ * vecBias.m_flZ };
+			const CVec3 vecAbsolute = op.Vector( "distance_bias_absolute_value" );
+			if ( vecAbsolute.m_flX != 0.0f )
+			{
+				vecOffset.m_flX = std::abs( vecOffset.m_flX );
+			}
+			if ( vecAbsolute.m_flY != 0.0f )
+			{
+				vecOffset.m_flY = std::abs( vecOffset.m_flY );
+			}
+			if ( vecAbsolute.m_flZ != 0.0f )
+			{
+				vecOffset.m_flZ = std::abs( vecOffset.m_flZ );
+			}
+			vecAt += vecOffset;
+		}
+		p.m_vecPosition = vecAt;
+	}
+	else if ( f == "Position From Parent Particles" )
+	{
+		// From the system that spawned this one: its particles in turn, or a random one. Nothing is
+		// made while it has none.
+		const std::vector<Particle_t> *pFrom = m_pParent ? &m_pParent->m_Particles : nullptr;
+		if ( !pFrom || pFrom->empty() )
+		{
+			p.m_bAlive = false;
+			return;
+		}
+		const std::size_t nCount = pFrom->size();
+		const std::size_t nPick = op.Flag( "Random Parent Particle Distribution" ) ? std::min( nCount - 1, static_cast<std::size_t>( r( 1 ) * static_cast<float>( nCount ) ) )
+																				   : static_cast<std::size_t>( instance.m_Counters[ nOpIndex ]++ ) % nCount;
+		const Particle_t &parent = ( *pFrom )[ nPick ];
+		p.m_vecPosition = parent.m_vecPosition;
+		p.m_vecVelocity += parent.m_vecVelocity * op.Number( "Inherited Velocity Scale" );
+	}
+	else if ( f == "Velocity Random" )
+	{
+		// A speed in a random direction, plus a random vector.
+		const float z = 2.0f * r( 1 ) - 1.0f;
+		const float flAngle = 2.0f * std::numbers::pi_v<float> * r( 2 );
+		const float flFlat = std::sqrt( std::max( 0.0f, 1.0f - z * z ) );
+		const float flSpeed = RandomRange( op.Number( "random_speed_min" ), op.Number( "random_speed_max" ), r( 3 ) );
+		p.m_vecVelocity += CVec3{ flFlat * std::cos( flAngle ), flFlat * std::sin( flAngle ), z } * flSpeed;
+		p.m_vecVelocity += randomVector( op.Vector( "speed_in_local_coordinate_system_min" ), op.Vector( "speed_in_local_coordinate_system_max" ), 4 );
 	}
 	else if ( f == "Lifetime Random" )
 	{
@@ -1039,7 +1381,7 @@ void CSimulation::Operate( Instance_t &instance, const CCompiledOperator &op, st
 	}
 	else if ( f == "Movement Dampen Relative to Control Point" )
 	{
-		const CVec3 vecCenter = ControlPoint( op.Integer( "control_point_number" ) );
+		const CVec3 vecCenter = Point( op.Integer( "control_point_number" ) );
 		const float flRange = op.Number( "falloff range", 4.0f );
 		const float flScale = op.Number( "dampen scale", 1.0f );
 		for ( Particle_t &p : particles )
@@ -1067,7 +1409,7 @@ void CSimulation::Operate( Instance_t &instance, const CCompiledOperator &op, st
 	else if ( f == "Cull when crossing plane" )
 	{
 		const CVec3 vecNormal = Normalized( op.Vector( "Plane Normal", { 0, 0, 1 } ) );
-		const CVec3 vecPoint = ControlPoint( op.Integer( "Control Point for point on plane" ) ) + vecNormal * op.Number( "Cull plane offset" );
+		const CVec3 vecPoint = Point( op.Integer( "Control Point for point on plane" ) ) + vecNormal * op.Number( "Cull plane offset" );
 		for ( Particle_t &p : particles )
 		{
 			if ( Dot( p.m_vecPosition - vecPoint, vecNormal ) < 0.0f )
@@ -1086,7 +1428,7 @@ void CSimulation::Operate( Instance_t &instance, const CCompiledOperator &op, st
 	}
 	else if ( f == "Remap Distance to Control Point to Scalar" )
 	{
-		const CVec3 vecCenter = ControlPoint( op.Integer( "control point", 1 ) );
+		const CVec3 vecCenter = Point( op.Integer( "control point", 1 ) );
 		const float flDMin = op.Number( "distance minimum" );
 		const float flDMax = op.Number( "distance maximum", 128.0f );
 		const int nField = op.Integer( "output field", FIELD_ALPHA );
@@ -1098,17 +1440,60 @@ void CSimulation::Operate( Instance_t &instance, const CCompiledOperator &op, st
 			SetField( p, nField, bScalar ? GetField( p, nField ) * flValue : flValue, false );
 		}
 	}
-	else if ( f == "Set Control Point Positions" )
+	else if ( f == SET_CONTROL_POINTS )
 	{
-		static constexpr std::array<std::string_view, 4> ORDER{ "First", "Second", "Third", "Fourth" };
-		for ( std::string_view szWhich : ORDER )
+		// The parent only says what the point moves with in the game; the place is measured from
+		// the world or from the offset point.
+		const CVec3 vecOrigin = op.Flag( "Set positions in world space" ) ? CVec3{} : Point( op.Integer( "Control Point to offset positions from" ) );
+		for ( std::string_view szWhich : CONTROL_POINT_SLOTS )
 		{
 			const int nNumber = op.Integer( std::string{ szWhich } + " Control Point Number", -1 );
-			const int nParent = op.Integer( std::string{ szWhich } + " Control Point Parent", 0 );
-			if ( nNumber > 0 && nNumber < CONTROL_POINTS )
+			if ( nNumber > 0 && nNumber < CONTROL_POINTS && !m_HeldControlPoints[ static_cast<std::size_t>( nNumber ) ] )
 			{
-				m_ControlPoints[ static_cast<std::size_t>( nNumber ) ] = ControlPoint( nParent ) + op.Vector( std::string{ szWhich } + " Control Point Location" );
+				m_ControlPoints[ static_cast<std::size_t>( nNumber ) ] = vecOrigin + op.Vector( std::string{ szWhich } + " Control Point Location" );
 			}
+		}
+	}
+	else if ( f == "Set child control points from particle positions" )
+	{
+		// Particles in the order they were made; each child system sees them as its own points.
+		const int nCount = op.Integer( "# of control points to set", 1 );
+		const int nFirstPoint = op.Integer( "First control point to set", 1 );
+		const int nFirstParticle = op.Integer( "first particle to copy" );
+		for ( int i = 0; i < nCount; i++ )
+		{
+			const int nPoint = nFirstPoint + i;
+			const int nParticle = nFirstParticle + i;
+			if ( nPoint < 0 || nPoint >= CONTROL_POINTS || nParticle < 0 || nParticle >= static_cast<int>( particles.size() ) )
+			{
+				continue;
+			}
+			for ( Instance_t &child : instance.m_Children )
+			{
+				child.m_OwnControlPoints[ static_cast<std::size_t>( nPoint ) ] = particles[ static_cast<std::size_t>( nParticle ) ].m_vecPosition;
+			}
+		}
+	}
+	else if ( f == "oscillating_movement" )
+	{
+		// A sway along each axis: a speed that swings back and forth over a period, both picked per
+		// particle, between a start and an end time (shares of its life).
+		const CVec3 vecSpeedMin = op.Vector( "oscillation_velocity_min_XYZ" );
+		const CVec3 vecSpeedMax = op.Vector( "oscillation_velocity_max_XYZ" );
+		const CVec3 vecPeriodMin = op.Vector( "oscillation_period_min_XYZ", { 1, 1, 1 } );
+		const CVec3 vecPeriodMax = op.Vector( "oscillation_period_max_XYZ", { 1, 1, 1 } );
+		for ( Particle_t &p : particles )
+		{
+			const float flStart = RandomRange( op.Number( "start_time_min" ), op.Number( "start_time_max" ), r( p, 1 ), op.Number( "start_time_exponent", 1.0f ) );
+			const float flEnd = RandomRange( op.Number( "end_time_min", 1.0f ), op.Number( "end_time_max", 1.0f ), r( p, 2 ), op.Number( "end_time_exponent", 1.0f ) );
+			if ( life( p ) < flStart || life( p ) > flEnd )
+			{
+				continue;
+			}
+			const CVec3 vecSpeed = Lerp( vecSpeedMin, vecSpeedMax, CVec3{ r( p, 3 ), r( p, 4 ), r( p, 5 ) } );
+			const CVec3 vecPeriod = Lerp( vecPeriodMin, vecPeriodMax, CVec3{ r( p, 6 ), r( p, 7 ), r( p, 8 ) } );
+			const auto wave = [ &p ]( float flPeriod ) { return flPeriod > 0.0f ? std::sin( 2.0f * std::numbers::pi_v<float> * p.m_flAge / flPeriod ) : 0.0f; };
+			p.m_vecPosition += CVec3{ vecSpeed.m_flX * wave( vecPeriod.m_flX ), vecSpeed.m_flY * wave( vecPeriod.m_flY ), vecSpeed.m_flZ * wave( vecPeriod.m_flZ ) } * flDt;
 		}
 	}
 	else if ( f == "random force" )
@@ -1121,7 +1506,7 @@ void CSimulation::Operate( Instance_t &instance, const CCompiledOperator &op, st
 	else if ( f == "twist around axis" )
 	{
 		const CVec3 vecAxis = Normalized( op.Vector( "twist axis", { 0, 0, 1 } ) );
-		const CVec3 vecCenter = ControlPoint( 0 );
+		const CVec3 vecCenter = Point( 0 );
 		const float flAmount = op.Number( "amount of force", 10.0f );
 		for ( Particle_t &p : particles )
 		{
@@ -1130,7 +1515,7 @@ void CSimulation::Operate( Instance_t &instance, const CCompiledOperator &op, st
 	}
 	else if ( f == "Pull towards control point" )
 	{
-		const CVec3 vecCenter = ControlPoint( op.Integer( "control point number" ) );
+		const CVec3 vecCenter = Point( op.Integer( "control point number" ) );
 		const float flAmount = op.Number( "amount of force", 5.0f );
 		const float flFalloff = op.Number( "falloff power" );
 		for ( Particle_t &p : particles )
@@ -1142,7 +1527,7 @@ void CSimulation::Operate( Instance_t &instance, const CCompiledOperator &op, st
 	}
 	else if ( f == "Constrain distance to control point" )
 	{
-		const CVec3 vecCenter = ControlPoint( op.Integer( "control point number" ) ) + op.Vector( "offset of center" );
+		const CVec3 vecCenter = Point( op.Integer( "control point number" ) ) + op.Vector( "offset of center" );
 		const float flMinimum = op.Number( "minimum distance" );
 		const float flMaximum = op.Number( "maximum distance", 100.0f );
 		for ( Particle_t &p : particles )
@@ -1155,10 +1540,29 @@ void CSimulation::Operate( Instance_t &instance, const CCompiledOperator &op, st
 			}
 		}
 	}
+	else if ( f == "Collision via traces" )
+	{
+		// The preview has no map: the floor under the grid (height 0) stands in for the world.
+		// Only particles that came down through it this step hit it; ones made under it stay there,
+		// as they would inside a wall. Bounce keeps that share of the speed into it, slide of the
+		// speed along it.
+		const float flBounce = op.Number( "amount of bounce" );
+		const float flSlide = op.Number( "amount of slide", 1.0f );
+		for ( Particle_t &p : particles )
+		{
+			const float flWasAt = p.m_vecPosition.m_flZ - p.m_vecVelocity.m_flZ * flDt;
+			if ( p.m_vecPosition.m_flZ >= 0.0f || flWasAt < 0.0f )
+			{
+				continue;
+			}
+			p.m_vecPosition.m_flZ = 0.0f;
+			p.m_vecVelocity = { p.m_vecVelocity.m_flX * flSlide, p.m_vecVelocity.m_flY * flSlide, -p.m_vecVelocity.m_flZ * flBounce };
+		}
+	}
 	else if ( f == "Prevent passing through a plane" )
 	{
 		const CVec3 vecNormal = Normalized( op.Vector( "plane normal", { 0, 0, 1 } ) );
-		const CVec3 vecPoint = op.Flag( "global origin" ) ? op.Vector( "plane point" ) : ControlPoint( op.Integer( "control point number" ) ) + op.Vector( "plane point" );
+		const CVec3 vecPoint = op.Flag( "global origin" ) ? op.Vector( "plane point" ) : Point( op.Integer( "control point number" ) ) + op.Vector( "plane point" );
 		for ( Particle_t &p : particles )
 		{
 			const float flSide = Dot( p.m_vecPosition - vecPoint, vecNormal );
@@ -1177,7 +1581,7 @@ void CSimulation::Operate( Instance_t &instance, const CCompiledOperator &op, st
 	{
 		// Carried along by however far the control point moved since the last step.
 		const int nIndex = std::clamp( op.Integer( "control_point_number" ), 0, CONTROL_POINTS - 1 );
-		const CVec3 vecMoved = m_ControlPoints[ static_cast<std::size_t>( nIndex ) ] - m_PreviousControlPoints[ static_cast<std::size_t>( nIndex ) ];
+		const CVec3 vecMoved = Point( nIndex ) - PreviousPoint( nIndex );
 		for ( Particle_t &p : particles )
 		{
 			p.m_vecPosition += vecMoved;
@@ -1188,7 +1592,7 @@ void CSimulation::Operate( Instance_t &instance, const CCompiledOperator &op, st
 //-----------------------------------------------------------------------------
 // Purpose:
 //-----------------------------------------------------------------------------
-void CSimulation::Step( Instance_t &instance, float flDt )
+void CSimulation::Step( Instance_t &instance, const Instance_t *pParent, float flDt )
 {
 	instance.m_flTime += flDt;
 	if ( instance.m_flTime < 0.0f )
@@ -1196,6 +1600,8 @@ void CSimulation::Step( Instance_t &instance, float flDt )
 		return;
 	}
 	const CDefinition &definition = *instance.m_pDefinition;
+	m_pCurrent = &instance;
+	m_pParent = pParent;
 
 	// Emit
 	if ( !instance.m_bInitialEmitted )
@@ -1279,6 +1685,9 @@ void CSimulation::Step( Instance_t &instance, float flDt )
 		}
 	}
 	std::erase_if( instance.m_Particles, []( const Particle_t &p ) { return !p.m_bAlive; } );
+	instance.m_PreviousOwnControlPoints = instance.m_OwnControlPoints;
+	m_pCurrent = nullptr;
+	m_pParent = nullptr;
 }
 
 } // namespace xv::particles

@@ -89,6 +89,9 @@ struct CLibrary
 
 // Whether the preview runs this function. Others are left out (and shown as such).
 [[nodiscard]] bool IsSimulated( Category_t nCategory, std::string_view szFunction );
+// How the preview's version of a function falls short of the game's, when it is worth saying;
+// empty otherwise.
+[[nodiscard]] std::string_view PreviewNote( Category_t nCategory, std::string_view szFunction );
 
 struct Particle_t
 {
@@ -129,6 +132,18 @@ public:
 		std::vector<bool> m_Done;       // per emitter: finished emitting
 		bool m_bInitialEmitted = false;
 		std::vector<Instance_t> m_Children;
+		// Control points its parent set from particle positions, in place of the shared ones.
+		std::array<std::optional<CVec3>, CONTROL_POINTS> m_OwnControlPoints{};
+		std::array<std::optional<CVec3>, CONTROL_POINTS> m_PreviousOwnControlPoints{};
+		std::map<std::size_t, int> m_Counters; // per operator: particles placed so far, for sequences
+	};
+
+	// A slot of a "Set Control Point Positions" operator: which control point it places.
+	struct ControlPointSetter_t
+	{
+		const CDefinition *m_pDefinition = nullptr;
+		const CCompiledOperator *m_pOperator = nullptr;
+		int m_nSlot = 0; // 0-3: "First" to "Fourth"
 	};
 
 	CSimulation( std::shared_ptr<const CLibrary> pLibrary, std::size_t nDefinition, std::uint32_t nSeed = 1 );
@@ -140,6 +155,19 @@ public:
 
 	void SetControlPoint( int nIndex, CVec3 vecPosition );
 	[[nodiscard]] CVec3 ControlPoint( int nIndex ) const;
+	// Keeps a control point where it is put, whatever the operators say, until released (while it
+	// is dragged).
+	void HoldControlPoint( int nIndex, CVec3 vecPosition );
+	void ReleaseControlPoints();
+	// The slot that places a control point in the shown systems (the last to run wins), if any.
+	[[nodiscard]] std::optional<ControlPointSetter_t> FindControlPointSetter( int nIndex ) const;
+	// A slot of the shown system's own operators that repeats an earlier slot's control point, so
+	// it can be given another one.
+	[[nodiscard]] std::optional<ControlPointSetter_t> FindSpareSetter() const;
+	// Where a "Set Control Point Positions" operator measures its locations from.
+	[[nodiscard]] CVec3 SetterOrigin( const CCompiledOperator &op ) const;
+	// The control points an instance takes from the shared ones (those its parent doesn't set).
+	[[nodiscard]] std::vector<int> GetSharedControlPoints( const Instance_t &instance ) const;
 	// Advances by seconds, in steps of STEP (the remainder carries over to the next call).
 	void Advance( float flSeconds );
 	void Restart();
@@ -152,12 +180,15 @@ public:
 	[[nodiscard]] bool GetFinished() const;
 
 private:
-	void Step( Instance_t &instance, float flDt );
+	void Step( Instance_t &instance, const Instance_t *pParent, float flDt );
 	void Spawn( Instance_t &instance, int nCount );
 	void Initialize( Instance_t &instance, Particle_t &particle, const CCompiledOperator &op, std::size_t nOpIndex );
 	void Operate( Instance_t &instance, const CCompiledOperator &op, std::size_t nOpIndex, float flDt );
 	[[nodiscard]] float Random(); // 0-1, from the simulation's sequence
 	[[nodiscard]] Instance_t MakeInstance( std::size_t nDefinition, float flDelay ) const;
+	// A control point as the instance being stepped sees it.
+	[[nodiscard]] CVec3 Point( int nIndex ) const;
+	[[nodiscard]] CVec3 PreviousPoint( int nIndex ) const;
 
 	std::shared_ptr<const CLibrary> m_pLibrary;
 	std::size_t m_nDefinition;
@@ -170,7 +201,10 @@ private:
 	std::array<CVec3, CONTROL_POINTS> m_ControlPoints{};
 	std::array<CVec3, CONTROL_POINTS> m_UserControlPoints{};
 	std::array<CVec3, CONTROL_POINTS> m_PreviousControlPoints{}; // a step ago, for what follows them
+	std::array<std::optional<CVec3>, CONTROL_POINTS> m_HeldControlPoints{};
 	Instance_t m_Root;
+	const Instance_t *m_pCurrent = nullptr; // being stepped
+	const Instance_t *m_pParent = nullptr;  // its parent
 };
 
 // A value from 0 to 1 that is fixed for one particle and one use (the operator and what for).

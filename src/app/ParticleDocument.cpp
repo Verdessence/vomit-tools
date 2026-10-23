@@ -6,6 +6,8 @@
 //===========================================================================//
 #include "ParticleDocument.h"
 
+#include <algorithm>
+
 #include <QFileInfo>
 #include <QHash>
 #include <QUndoStack>
@@ -158,6 +160,36 @@ private:
 	bool m_bFirst = true;
 };
 
+// A change to how the file is shown, not to the file.
+class CParticleViewCommand : public QUndoCommand
+{
+public:
+	CParticleViewCommand( const QString &szText, std::function<void()> pfnUndo, std::function<void()> pfnRedo )
+		: QUndoCommand( szText ),
+		  m_pfnUndo( std::move( pfnUndo ) ),
+		  m_pfnRedo( std::move( pfnRedo ) )
+	{
+	}
+
+	// Already made when pushed.
+	void redo() override
+	{
+		if ( m_bFirst )
+		{
+			m_bFirst = false;
+			return;
+		}
+		m_pfnRedo();
+	}
+
+	void undo() override { m_pfnUndo(); }
+
+private:
+	std::function<void()> m_pfnUndo;
+	std::function<void()> m_pfnRedo;
+	bool m_bFirst = true;
+};
+
 //-----------------------------------------------------------------------------
 // Purpose:
 //-----------------------------------------------------------------------------
@@ -167,7 +199,8 @@ CParticleDocument::CParticleDocument( QString szGamePath, Document_t document, Q
 	  m_Document( std::move( document ) ),
 	  m_pUndo( new QUndoStack( this ) )
 {
-	connect( m_pUndo, &QUndoStack::cleanChanged, this, [ this ] { emit ModifiedChanged( IsModified() ); } );
+	connect( m_pUndo, &QUndoStack::cleanChanged, this, &CParticleDocument::UpdateModified );
+	connect( m_pUndo, &QUndoStack::indexChanged, this, &CParticleDocument::UpdateModified );
 }
 
 //-----------------------------------------------------------------------------
@@ -183,7 +216,34 @@ QString CParticleDocument::GetFileName() const
 //-----------------------------------------------------------------------------
 bool CParticleDocument::IsModified() const
 {
-	return m_bNeverSaved || !m_pUndo->isClean();
+	if ( m_bNeverSaved || m_pUndo->cleanIndex() < 0 )
+	{
+		return m_bNeverSaved || !m_pUndo->isClean();
+	}
+	// Modified when a file edit lies between the saved state and now; view steps don't count.
+	const int nFrom = std::min( m_pUndo->cleanIndex(), m_pUndo->index() );
+	const int nTo = std::max( m_pUndo->cleanIndex(), m_pUndo->index() );
+	for ( int i = nFrom; i < nTo; i++ )
+	{
+		if ( !dynamic_cast<const CParticleViewCommand *>( m_pUndo->command( i ) ) )
+		{
+			return true;
+		}
+	}
+	return false;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Tells the views when the modified state changes.
+//-----------------------------------------------------------------------------
+void CParticleDocument::UpdateModified()
+{
+	const bool bModified = IsModified();
+	if ( bModified != m_bWasModified )
+	{
+		m_bWasModified = bModified;
+		emit ModifiedChanged( bModified );
+	}
 }
 
 //-----------------------------------------------------------------------------
@@ -193,7 +253,8 @@ void CParticleDocument::MarkSaved()
 {
 	m_bNeverSaved = false;
 	m_pUndo->setClean();
-	emit ModifiedChanged( IsModified() );
+	m_bWasModified = IsModified();
+	emit ModifiedChanged( m_bWasModified );
 }
 
 //-----------------------------------------------------------------------------
@@ -202,6 +263,7 @@ void CParticleDocument::MarkSaved()
 void CParticleDocument::MarkUnsaved()
 {
 	m_bNeverSaved = true;
+	m_bWasModified = true;
 	emit ModifiedChanged( true );
 }
 
@@ -235,4 +297,12 @@ bool CParticleDocument::Edit( const QString &szDescription, const std::function<
 	m_pUndo->push( pCommand );
 	emit Changed();
 	return true;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Records a change to how the file is shown as an undo step.
+//-----------------------------------------------------------------------------
+void CParticleDocument::AddViewStep( const QString &szDescription, std::function<void()> pfnUndo, std::function<void()> pfnRedo )
+{
+	m_pUndo->push( new CParticleViewCommand( szDescription, std::move( pfnUndo ), std::move( pfnRedo ) ) );
 }

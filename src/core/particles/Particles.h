@@ -163,6 +163,17 @@ void RenameSystem( dmx::Document_t &document, std::int32_t nSystem, std::string_
 // Adds an operator with the function's attributes at position (the end when nullopt).
 std::int32_t AddOperator( dmx::Document_t &document, std::int32_t nSystem, Category_t nCategory, const CFunctionInfo &function,
 	std::optional<std::size_t> position = std::nullopt );
+// "Set Control Point Positions" places up to four control points, one per slot: "<slot> Control
+// Point Number", "... Parent" and "... Location".
+inline constexpr std::string_view SET_CONTROL_POINTS = "Set Control Point Positions";
+inline constexpr std::array<std::string_view, 4> CONTROL_POINT_SLOTS{ "First", "Second", "Third", "Fourth" };
+// Puts control point nIndex at vecLocation (measured the way the operator measures it) with a "Set
+// Control Point Positions" operator, and returns the operator. With nOperator, every slot of it
+// that places nIndex is moved; nSlot, when not -1, is turned to nIndex first. Without one, a new
+// operator goes first in nSystem's operators with all four slots on nIndex, so no other point
+// changes.
+std::int32_t PlaceControlPoint( dmx::Document_t &document, std::int32_t nSystem, int nIndex, dmx::Vec3_t vecLocation, std::int32_t nOperator, int nSlot,
+	const CSchema &schema );
 // Copies an element with no references (an operator) into a system's list at position.
 std::int32_t InsertCopy( dmx::Document_t &document, std::int32_t nSystem, std::string_view szAttribute, const dmx::CElement &element,
 	std::optional<std::size_t> position = std::nullopt );

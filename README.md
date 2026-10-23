@@ -122,7 +122,13 @@ puts the sun.
   - Drag to turn around it, right-drag to move, scroll to zoom, double-click (or **Frame**) to fit it
     in view.
   - The control points the system uses are handles: drag one to move it, with Shift held to move it
-    up and down. Particles locked to a control point move with it.
+    up and down. They snap to the grid while it shows. Particles locked to a control point move
+    with it.
+    - CP0 is where the effect is, so moving it only changes the view.
+    - Moving any other point writes it into the file with a **Set Control Point Positions** operator,
+      added when the system has none; square handles mark the points the file places. Hold Ctrl to
+      move a point the file doesn't place in the view only.
+    - Moves undo like any other edit. **Reset CPs** puts the view's points back.
   - A panel in the corner shows each system's particles against its `max_particles`, orange when
     it's full. **Bounds** shows each system's bounding box and where its particles really are.
   - Play/pause, restart, speeds from 0.1× to 2×, looping and a ground grid. It draws on the graphics
@@ -130,7 +136,7 @@ puts the sun.
   - Edits show at once, without starting the effect over.
   - It's an approximation worked out from what each operator's name and settings say, not the
     game's code. Operators it doesn't run yet are greyed out in the list and named under the
-    preview; collisions, models and refraction aren't drawn.
+    preview. Collisions hit only the floor under the grid; models and refraction aren't drawn.
 - **Properties:** the right column edits the selected system, operator or child link. Numbers, vectors,
   colours (with a picker), on/off values, materials (completed from the game's materials) and child
   systems each get a fitting field. Names in bold differ from the value the game's files use most,

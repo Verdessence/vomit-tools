@@ -861,6 +861,75 @@ std::int32_t AddOperator( Document_t &document, std::int32_t nSystem, Category_t
 }
 
 //-----------------------------------------------------------------------------
+// Purpose: Puts a control point somewhere with a "Set Control Point Positions" operator: moves
+//          the slots of an existing one, or adds one whose four slots all place the point.
+//-----------------------------------------------------------------------------
+std::int32_t PlaceControlPoint( Document_t &document, std::int32_t nSystem, int nIndex, dmx::Vec3_t vecLocation, std::int32_t nOperator, int nSlot,
+	const CSchema &schema )
+{
+	const auto slotName = []( std::size_t nWhich, std::string_view szWhat ) { return std::string{ CONTROL_POINT_SLOTS[ nWhich ] } + " Control Point " + std::string{ szWhat }; };
+	if ( nOperator < 0 )
+	{
+		if ( !Valid( document, nSystem ) )
+		{
+			return -1;
+		}
+		CFunctionInfo function;
+		if ( const CFunctionInfo *pKnown = schema.Function( Category_t::CATEGORY_OPERATORS, SET_CONTROL_POINTS ) )
+		{
+			function = *pKnown;
+		}
+		else
+		{
+			// Without the game's files: the settings Valve's editor writes for it.
+			function.m_szName = SET_CONTROL_POINTS;
+			for ( std::string_view szCommon : COMMON_OPERATOR_ATTRIBUTES )
+			{
+				function.m_Attributes.push_back( { std::string{ szCommon }, AttrType_t::ATTR_TYPE_FLOAT, 0.0f } );
+			}
+			for ( std::size_t i = 0; i < CONTROL_POINT_SLOTS.size(); i++ )
+			{
+				function.m_Attributes.push_back( { slotName( i, "Number" ), AttrType_t::ATTR_TYPE_INT, std::int32_t{ 0 } } );
+				function.m_Attributes.push_back( { slotName( i, "Parent" ), AttrType_t::ATTR_TYPE_INT, std::int32_t{ 0 } } );
+				function.m_Attributes.push_back( { slotName( i, "Location" ), AttrType_t::ATTR_TYPE_VECTOR3, dmx::Vec3_t{} } );
+			}
+			function.m_Attributes.push_back( { "Set positions in world space", AttrType_t::ATTR_TYPE_BOOL, false } );
+			function.m_Attributes.push_back( { "Control Point to offset positions from", AttrType_t::ATTR_TYPE_INT, std::int32_t{ 0 } } );
+		}
+		nOperator = AddOperator( document, nSystem, Category_t::CATEGORY_OPERATORS, function, 0 );
+		CElement &op = At( document, nOperator );
+		for ( std::size_t i = 0; i < CONTROL_POINT_SLOTS.size(); i++ )
+		{
+			SetAttribute( op, slotName( i, "Number" ), AttrType_t::ATTR_TYPE_INT, std::int32_t{ nIndex } );
+			SetAttribute( op, slotName( i, "Parent" ), AttrType_t::ATTR_TYPE_INT, std::int32_t{ 0 } );
+			SetAttribute( op, slotName( i, "Location" ), AttrType_t::ATTR_TYPE_VECTOR3, vecLocation );
+		}
+		SetAttribute( op, "Set positions in world space", AttrType_t::ATTR_TYPE_BOOL, false );
+		SetAttribute( op, "Control Point to offset positions from", AttrType_t::ATTR_TYPE_INT, std::int32_t{ 0 } );
+		return nOperator;
+	}
+	if ( !Valid( document, nOperator ) )
+	{
+		return -1;
+	}
+	CElement &op = At( document, nOperator );
+	if ( nSlot >= 0 && nSlot < static_cast<int>( CONTROL_POINT_SLOTS.size() ) )
+	{
+		SetAttribute( op, slotName( static_cast<std::size_t>( nSlot ), "Number" ), AttrType_t::ATTR_TYPE_INT, std::int32_t{ nIndex } );
+	}
+	for ( std::size_t i = 0; i < CONTROL_POINT_SLOTS.size(); i++ )
+	{
+		const Attribute_t *pNumber = op.Find( slotName( i, "Number" ) );
+		const auto *pValue = pNumber ? std::get_if<std::int32_t>( &pNumber->m_Value ) : nullptr;
+		if ( pValue && *pValue == nIndex )
+		{
+			SetAttribute( op, slotName( i, "Location" ), AttrType_t::ATTR_TYPE_VECTOR3, vecLocation );
+		}
+	}
+	return nOperator;
+}
+
+//-----------------------------------------------------------------------------
 // Purpose: Copies an element with no references (an operator) into a system's list at position.
 //-----------------------------------------------------------------------------
 std::int32_t InsertCopy( Document_t &document, std::int32_t nSystem, std::string_view szAttribute, const CElement &element, std::optional<std::size_t> position )

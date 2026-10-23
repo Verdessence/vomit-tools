@@ -1,5 +1,26 @@
 # Changelog
 
+## Unreleased
+
+### Particle preview
+- **Control points go into the file.** Dragging any point but CP0 writes it into the system's **Set
+  Control Point Positions** operator, adding one (first in the list) when there is none. Its four
+  slots all start on the dragged point, so no other point changes; dragging another point takes a
+  slot that repeats one. Square handles mark the points the file places.
+- **Snapping:** dragged points snap to the grid while it shows.
+- **Undo:** every control point move undoes, CP0 and **Reset CPs** included. Moves that only change
+  the view don't mark the file as modified. Hold Ctrl to move a point the file doesn't place in the
+  view only.
+- **Set Control Point Positions** now measures from the world or from its offset point, as its
+  settings say, and places its points from the start.
+- **More operators:** Position Along Path Sequential, Position In CP Hierarchy, Position From Parent
+  Particles, Position Modify Warp Random, Set child control points from particle positions,
+  oscillating_movement and Collision via traces (against the floor under the grid; the preview has
+  no map). Also Velocity Random and Position Along Path Random, which no CS:S or HL2 file uses.
+  - 55 of the 57 functions CS:S and HL2 use now run; 279 of their 288 systems run completely.
+  - The two left need a model: Position on Model Random and Movement Lock to Bone.
+  - An operator's tooltip says where the preview's version falls short.
+
 ## 0.4.0 — The Particle (2026-10-23)
 
 The particle editor arrives: open, edit and save the game's `.pcf` files, with a live preview.

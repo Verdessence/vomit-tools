@@ -122,6 +122,8 @@ struct ScreenQuad_t
 };
 // Everything the particles draw, in drawing order (system by system, back to front in each).
 [[nodiscard]] std::vector<ScreenQuad_t> Layout( const CSimulation &simulation, const CCamera &camera, const SpriteLookup_t &pfnSprites );
+// The distance between the ground grid's lines, which depends on how far away the camera is.
+[[nodiscard]] float GridSpacing( const CCamera &camera );
 // The ground grid, as thin quads.
 [[nodiscard]] std::vector<ScreenQuad_t> GridQuads( const CCamera &camera );
 // Draws into out (camera.width x camera.height). Rows are split over the available cores.

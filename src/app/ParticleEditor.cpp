@@ -29,6 +29,7 @@
 #include <QListWidget>
 #include <QMenu>
 #include <QMimeData>
+#include <QPointer>
 #include <QPainter>
 #include <QRegularExpressionValidator>
 #include <QScreen>
@@ -550,6 +551,41 @@ CParticleEditor::CParticleEditor( CParticleDocument *pDocument, QWidget *pParent
 	pPropertyLayout->addWidget( m_pProperties );
 	m_pPreview = new CParticlePreview;
 	m_pPreview->setObjectName( QStringLiteral( "particlePreview" ) );
+	// Dragged control points: the file's, through Set Control Point Positions; the view's, as undo
+	// steps that leave the file unmodified.
+	m_pPreview->SetPlacer( [ this ]( int nIndex, xv::CVec3 vecLocation, std::int32_t nOperator, int nSlot ) {
+		if ( m_nSystem < 0 )
+		{
+			return false;
+		}
+		std::int32_t nPlaced = -1;
+		const bool bChanged = m_pDocument->Edit( tr( "Move CP%1" ).arg( nIndex ), [ & ]( Document_t &doc ) {
+			nPlaced = particles::PlaceControlPoint( doc, m_nSystem, nIndex, { vecLocation.m_flX, vecLocation.m_flY, vecLocation.m_flZ }, nOperator, nSlot, m_Schema );
+		} );
+		if ( bChanged && nOperator < 0 )
+		{
+			SelectElement( nPlaced ); // show the operator that was added
+		}
+		return bChanged;
+	} );
+	connect( m_pPreview, &CParticlePreview::ControlPointsMoved, this,
+		[ this ]( const CParticlePreview::ControlPoints_t &before, const CParticlePreview::ControlPoints_t &after, const QString &szDescription ) {
+			const QPointer<CParticlePreview> pPreview = m_pPreview;
+			m_pDocument->AddViewStep(
+				szDescription,
+				[ pPreview, before ] {
+					if ( pPreview )
+					{
+						pPreview->SetControlPoints( before );
+					}
+				},
+				[ pPreview, after ] {
+					if ( pPreview )
+					{
+						pPreview->SetControlPoints( after );
+					}
+				} );
+		} );
 	auto *pRight = new QSplitter( Qt::Vertical );
 	pRight->setContentsMargins( 0, 6, 6, 6 );
 	pRight->addWidget( m_pPreview );
@@ -949,6 +985,10 @@ void CParticleEditor::RebuildStack()
 				pItem->setFont( 0, italic );
 				pItem->setForeground( 0, palette().color( QPalette::PlaceholderText ) );
 				pItem->setToolTip( 0, tr( "Not in the preview yet: it plays without this one" ) );
+			}
+			else if ( const std::string_view szNote = category ? particles::PreviewNote( *category, labels[ i ].toStdString() ) : std::string_view{}; !szNote.empty() )
+			{
+				pItem->setToolTip( 0, tr( "In the preview: %1" ).arg( Qs( szNote ) ) );
 			}
 			if ( const auto it = worst.find( elements[ i ] ); it != worst.end() )
 			{
@@ -1420,6 +1460,10 @@ void CParticleEditor::FillAddMenu()
 			if ( !particles::IsSimulated( nCategory, pFunction->m_szName ) )
 			{
 				szTip += u'\n' + tr( "Not in the preview yet" );
+			}
+			else if ( const std::string_view szNote = particles::PreviewNote( nCategory, pFunction->m_szName ); !szNote.empty() )
+			{
+				szTip += u'\n' + tr( "In the preview: %1" ).arg( Qs( szNote ) );
 			}
 			items.push_back( { Qs( pFunction->m_szName ), szTip, [ this, nCategory, szName = Qs( pFunction->m_szName ) ] { AddOperator( nCategory, szName ); } } );
 		}
