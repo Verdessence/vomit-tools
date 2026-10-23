@@ -326,7 +326,7 @@ const std::set<std::pair<Category_t, std::string_view>> &SimulatedFunctions()
 		{ Category_t::CATEGORY_INITIALIZERS, "Velocity Inherit from Control Point" },
 		{ Category_t::CATEGORY_INITIALIZERS, "Remap Noise to Scalar" },
 		{ Category_t::CATEGORY_INITIALIZERS, "remap initial scalar" },
-		{ Category_t::CATEGORY_INITIALIZERS, "random_number" },
+		{ Category_t::CATEGORY_INITIALIZERS, "random_number" }, // fills a random value other functions may read: nothing to show
 		{ Category_t::CATEGORY_INITIALIZERS, "Velocity Random" },
 		{ Category_t::CATEGORY_INITIALIZERS, "Position Along Path Sequential" },
 		{ Category_t::CATEGORY_INITIALIZERS, "Position Along Path Random" },
@@ -1505,10 +1505,10 @@ void CSimulation::Initialize( Instance_t &instance, Particle_t &p, const CCompil
 		const CVec3 vecValue = randomVector( op.Vector( "min" ), op.Vector( "max" ), 1 );
 		SetVectorField( p, nField, nField == FIELD_POSITION ? p.m_vecPosition + vecValue : vecValue, true );
 	}
-	else if ( f == "Inherit Velocity" )
+	else if ( f == "Inherit Velocity" || f == "Velocity Inherit from Control Point" )
 	{
 		// Some of how fast the control point is moving (when it is dragged).
-		const int nPoint = op.Integer( "control_point_number" );
+		const int nPoint = op.Integer( "control point number", op.Integer( "control_point_number" ) );
 		p.m_vecVelocity += ( Point( nPoint ) - PreviousPoint( nPoint ) ) * ( op.Number( "velocity scale", 1.0f ) / STEP );
 	}
 	else if ( f == "Remap Particle Count to Scalar" )

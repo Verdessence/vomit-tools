@@ -7,6 +7,8 @@ add_library(vomit_tools_core STATIC
         kv1/Kv1.h
         model/Model.cpp
         model/Model.h
+        particles/Names.cpp
+        particles/Names.h
         particles/Particles.cpp
         particles/Particles.h
         particles/Render.cpp

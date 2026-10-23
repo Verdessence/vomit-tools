@@ -73,7 +73,8 @@ void FillPicker( QMenu *pSub, std::vector<PickerItem_t> items, const QString &sz
 		for ( int i = 0; i < pList->count(); i++ )
 		{
 			QListWidgetItem *pItem = pList->item( i );
-			pItem->setHidden( !pItem->text().contains( szText, Qt::CaseInsensitive ) );
+			// The tooltip counts too: a plain name finds the item by its real name and the other way round.
+			pItem->setHidden( !pItem->text().contains( szText, Qt::CaseInsensitive ) && !pItem->toolTip().contains( szText, Qt::CaseInsensitive ) );
 			pFirst = pFirst || pItem->isHidden() ? pFirst : pItem;
 		}
 		pList->setCurrentItem( pFirst );

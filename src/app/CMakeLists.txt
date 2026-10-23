@@ -10,6 +10,8 @@ add_library(vomit_tools_ui STATIC
         FolderBrowser.h
         ImageFiles.cpp
         ImageFiles.h
+        InterfaceMode.cpp
+        InterfaceMode.h
         KvCard.cpp
         KvCard.h
         MainWindow.cpp

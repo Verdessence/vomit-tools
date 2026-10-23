@@ -46,9 +46,11 @@
 #include <QWidgetAction>
 
 #include "ParticleDocument.h"
+#include "InterfaceMode.h"
 #include "MenuPicker.h"
 #include "ParticlePreview.h"
 #include "QtPaths.h"
+#include "particles/Names.h"
 #include "particles/Simulation.h"
 #include "util/Numbers.h"
 #include "vfs/Vfs.h"
@@ -131,6 +133,35 @@ QString ListTitle( const QString &szList )
 	}
 	const auto category = particles::CategoryOf( szList.toStdString() );
 	return category ? CategoryTitle( *category ) : szList;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+bool IsSimple()
+{
+	return CInterfaceMode::Instance().IsSimple();
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: A function as the interface shows it: its plain name in the simple interface (when it
+//          has one), else its own; the tooltip gives the other name and what it does.
+//-----------------------------------------------------------------------------
+std::pair<QString, QString> FunctionLabel( Category_t nCategory, const QString &szFunction )
+{
+	const particles::PlainName_t plain = particles::PlainFunction( nCategory, szFunction.toStdString() );
+	QString szTip;
+	if ( plain.m_szName.empty() )
+	{
+		return { szFunction, szTip };
+	}
+	if ( IsSimple() )
+	{
+		szTip = szFunction + u'\n' + Qs( plain.m_szMeaning );
+		return { Qs( plain.m_szName ), szTip };
+	}
+	szTip = Qs( plain.m_szName ) + QStringLiteral( ": " ) + Qs( plain.m_szMeaning );
+	return { szFunction, szTip };
 }
 
 // The order the selected system's lists are shown and offered in: what it looks like first, then
@@ -555,6 +586,10 @@ CParticleEditor::CParticleEditor( CParticleDocument *pDocument, QWidget *pParent
 	pLayout->addWidget( pRows, 1 );
 
 	connect( m_pDocument, &CParticleDocument::Changed, this, &CParticleEditor::ScheduleRefresh );
+	connect( &CInterfaceMode::Instance(), &CInterfaceMode::Changed, this, [ this ] {
+		RebuildStack();
+		RebuildProperties();
+	} );
 	SetGridView( QSettings{}.value( GRID_VIEW_KEY, false ).toBool() );
 	RebuildSchema();
 	const auto all = particles::Systems( m_pDocument->GetDocument() );
@@ -887,7 +922,8 @@ void CParticleEditor::RebuildStack()
 	}
 
 	const auto addList = [ & ]( const QString &szList, const std::vector<QString> &labels, const std::vector<std::int32_t> &elements ) {
-		auto *pHeader = new QTreeWidgetItem( { QStringLiteral( "%1 (%2)" ).arg( ListTitle( szList ) ).arg( elements.size() ) } );
+		const QString szTitle = IsSimple() ? Qs( particles::PlainListTitle( szList.toStdString() ) ) : ListTitle( szList );
+		auto *pHeader = new QTreeWidgetItem( { QStringLiteral( "%1 (%2)" ).arg( szTitle ).arg( elements.size() ) } );
 		pHeader->setData( 0, ROLE_ELEMENT_ROLE, -1 );
 		pHeader->setData( 0, ROLE_LIST_ROLE, szList );
 		pHeader->setFont( 0, bold );
@@ -899,9 +935,16 @@ void CParticleEditor::RebuildStack()
 		const auto category = particles::CategoryOf( szList.toStdString() );
 		for ( std::size_t i = 0; i < elements.size(); i++ )
 		{
-			auto *pItem = new QTreeWidgetItem( pHeader, { labels[ i ] } );
+			// Operators by plain or real name; their function name decides the rest.
+			const auto [ szLabel, szAbout ] = category ? FunctionLabel( *category, labels[ i ] ) : std::pair{ labels[ i ], QString{} };
+			auto *pItem = new QTreeWidgetItem( pHeader, { szLabel } );
 			pItem->setData( 0, ROLE_ELEMENT_ROLE, elements[ i ] );
 			pItem->setData( 0, ROLE_LIST_ROLE, szList );
+			QStringList tips;
+			if ( !szAbout.isEmpty() )
+			{
+				tips << szAbout;
+			}
 			if ( category && !particles::IsSimulated( *category, labels[ i ].toStdString() ) )
 			{
 				QFont italic = pItem->font( 0 );
@@ -909,12 +952,13 @@ void CParticleEditor::RebuildStack()
 				pItem->setFont( 0, italic );
 				pItem->setForeground( 0, palette().color( QPalette::PlaceholderText ) );
 				const std::string_view szWhy = particles::PreviewNote( *category, labels[ i ].toStdString() );
-				pItem->setToolTip( 0, szWhy.empty() ? tr( "Not in the preview yet: it plays without this one" ) : tr( "Not in the preview: %1. It plays without this one" ).arg( Qs( szWhy ) ) );
+				tips << ( szWhy.empty() ? tr( "Not in the preview yet: it plays without this one" ) : tr( "Not in the preview: %1. It plays without this one" ).arg( Qs( szWhy ) ) );
 			}
 			else if ( const std::string_view szNote = category ? particles::PreviewNote( *category, labels[ i ].toStdString() ) : std::string_view{}; !szNote.empty() )
 			{
-				pItem->setToolTip( 0, tr( "In the preview: %1" ).arg( Qs( szNote ) ) );
+				tips << tr( "In the preview: %1" ).arg( Qs( szNote ) );
 			}
+			pItem->setToolTip( 0, tips.join( u'\n' ) );
 			if ( const auto it = worst.find( elements[ i ] ); it != worst.end() )
 			{
 				pItem->setIcon( 0, SeverityIcon( style(), it->second ) );
@@ -1047,15 +1091,33 @@ void CParticleEditor::RebuildProperties()
 	QFont bold = m_pProperties->font();
 	bold.setBold( true );
 
-	const auto addRow = [ & ]( QTreeWidgetItem *pParent, const Attribute_t &attribute ) {
-		auto *pItem = new QTreeWidgetItem( pParent, { Qs( attribute.m_szName ) } );
-		pItem->setData( 0, ROLE_ATTRIBUTE_ROLE, Qs( attribute.m_szName ) );
+	// The function the shown settings belong to, for their plain names; empty for a system.
+	const std::string szOwner = element.m_szType == particles::OPERATOR_TYPE ? std::string{ particles::FunctionName( element ) } : std::string{};
+	const bool bSimple = IsSimple();
+	const auto addRow = [ & ]( QTreeWidgetItem *pParent, const Attribute_t &attribute ) -> QTreeWidgetItem * {
 		const particles::AttributeInfo_t *pFallback = DefaultFor( nTarget, attribute.m_szName );
+		const bool bChanged = pFallback && pFallback->m_nType == attribute.m_nType && !xv::dmx::SameValue( pFallback->m_Value, attribute.m_Value );
+		// The simple interface leaves advanced settings out while they have their usual value.
+		if ( bSimple && !bChanged && particles::IsAdvancedSetting( szOwner, attribute.m_szName ) )
+		{
+			return nullptr;
+		}
+		const particles::PlainName_t plain = particles::PlainSetting( szOwner, attribute.m_szName );
+		auto *pItem = new QTreeWidgetItem( pParent, { bSimple ? Qs( plain.m_szName ) : Qs( attribute.m_szName ) } );
+		pItem->setData( 0, ROLE_ATTRIBUTE_ROLE, Qs( attribute.m_szName ) );
 		QString szTip = tr( "%1 (%2)" ).arg( Qs( attribute.m_szName ), Qs( xv::dmx::TypeName( attribute.m_nType ) ) );
+		if ( !bSimple && !plain.m_szName.empty() && plain.m_szName != attribute.m_szName )
+		{
+			szTip += u'\n' + Qs( plain.m_szName ) + ( plain.m_szMeaning.empty() ? QString{} : QStringLiteral( ": " ) + Qs( plain.m_szMeaning ) );
+		}
+		else if ( !plain.m_szMeaning.empty() )
+		{
+			szTip += u'\n' + Qs( plain.m_szMeaning );
+		}
 		if ( pFallback && pFallback->m_nType == attribute.m_nType )
 		{
 			szTip += u'\n' + tr( "Most used in the game's files: %1" ).arg( Qs( xv::dmx::ValueText( pFallback->m_Value ) ) );
-			if ( !xv::dmx::SameValue( pFallback->m_Value, attribute.m_Value ) )
+			if ( bChanged )
 			{
 				pItem->setFont( 0, bold ); // changed from the usual value
 			}
@@ -1076,7 +1138,7 @@ void CParticleEditor::RebuildProperties()
 	if ( element.m_szType == particles::SYSTEM_TYPE )
 	{
 		m_pPropertiesTitle->setText( tr( "<b>%1</b> · particle system" ).arg( Qs( element.m_szName ).toHtmlEscaped() ) );
-		auto *pName = new QTreeWidgetItem( m_pProperties, { tr( "name" ) } );
+		auto *pName = new QTreeWidgetItem( m_pProperties, { bSimple ? tr( "Name" ) : tr( "name" ) } );
 		pName->setData( 0, ROLE_ATTRIBUTE_ROLE, QStringLiteral( "name" ) );
 		pName->setToolTip( 0, tr( "Maps and code use the system by this name" ) );
 		auto *pNameField = new QLineEdit( Qs( element.m_szName ) );
@@ -1101,6 +1163,10 @@ void CParticleEditor::RebuildProperties()
 					shown.insert( pAttribute->m_szName );
 				}
 			}
+			if ( pParent && pParent->childCount() == 0 )
+			{
+				delete pParent; // everything in it tucked away
+			}
 		}
 		QTreeWidgetItem *pOther = nullptr;
 		for ( const Attribute_t &attribute : element.m_Attributes )
@@ -1124,8 +1190,11 @@ void CParticleEditor::RebuildProperties()
 			return pKnown ? pKnown->m_nUses : 0;
 		}()
 													: 0;
+		const QString szShown = category && bSimple && !particles::PlainFunction( *category, szFunction.toStdString() ).m_szName.empty()
+			? QStringLiteral( "%1</b> (%2)<b>" ).arg( Qs( particles::PlainFunction( *category, szFunction.toStdString() ).m_szName ).toHtmlEscaped(), szFunction.toHtmlEscaped() )
+			: szFunction.toHtmlEscaped();
 		m_pPropertiesTitle->setText( tr( "<b>%1</b> · %2 of %3%4" )
-				.arg( szFunction.toHtmlEscaped(), category ? CategorySingular( *category ).toLower() : tr( "operator" ),
+				.arg( szShown, category ? CategorySingular( *category ).toLower() : tr( "operator" ),
 					Qs( doc.m_Elements[ static_cast<std::size_t>( m_nSystem ) ].m_szName ).toHtmlEscaped(),
 					nUses > 0 ? tr( " · used %n time(s) in the game's files", nullptr, nUses ) : QString{} ) );
 		auto *pSettings = addGroup( tr( "Settings" ), true );
@@ -1140,7 +1209,11 @@ void CParticleEditor::RebuildProperties()
 		}
 		if ( pSettings->childCount() == 0 )
 		{
-			pSettings->setText( 0, tr( "Settings (none: this one has nothing to set)" ) );
+			pSettings->setText( 0, bSimple ? tr( "Settings (none to show: switch the simple interface off to see them all)" ) : tr( "Settings (none: this one has nothing to set)" ) );
+		}
+		if ( pFade->childCount() == 0 )
+		{
+			delete pFade;
 		}
 	}
 	else if ( element.m_szType == particles::CHILD_TYPE )
@@ -1193,6 +1266,24 @@ QWidget *CParticleEditor::ValueEditor( std::int32_t nElement, const Attribute_t 
 	{
 		case AttrType_t::ATTR_TYPE_INT:
 		{
+			if ( particles::IsFieldSetting( attribute.m_szName ) )
+			{
+				// A particle field by number: listed by name.
+				auto *pCombo = new QComboBox;
+				const int nCurrent = std::get<std::int32_t>( current );
+				for ( int nField = 0; nField < particles::FIELD_COUNT; nField++ )
+				{
+					const QString szField = Qs( particles::FieldName( nField ) );
+					pCombo->addItem( IsSimple() ? szField : QStringLiteral( "%1 · %2" ).arg( nField ).arg( szField ), nField );
+				}
+				if ( pCombo->findData( nCurrent ) < 0 )
+				{
+					pCombo->addItem( QString::number( nCurrent ), nCurrent );
+				}
+				pCombo->setCurrentIndex( pCombo->findData( nCurrent ) );
+				connect( pCombo, &QComboBox::activated, this, [ commit, pCombo ] { commit( std::int32_t{ pCombo->currentData().toInt() } ); } );
+				return pCombo;
+			}
 			auto *pSpin = new QSpinBox;
 			pSpin->setRange( INT_MIN, INT_MAX );
 			pSpin->setValue( std::get<std::int32_t>( current ) );
@@ -1391,7 +1482,12 @@ void CParticleEditor::FillAddMenu()
 			{
 				szTip += u'\n' + tr( "In the preview: %1" ).arg( Qs( szNote ) );
 			}
-			items.push_back( { Qs( pFunction->m_szName ), szTip, [ this, nCategory, szName = Qs( pFunction->m_szName ) ] { AddOperator( nCategory, szName ); } } );
+			const auto [ szLabel, szAbout ] = FunctionLabel( nCategory, Qs( pFunction->m_szName ) );
+			if ( !szAbout.isEmpty() )
+			{
+				szTip = szAbout + u'\n' + szTip;
+			}
+			items.push_back( { szLabel, szTip, [ this, nCategory, szName = Qs( pFunction->m_szName ) ] { AddOperator( nCategory, szName ); } } );
 		}
 		QMenu *pSub = AddPicker( pMenu, CategorySingular( nCategory ), std::move( items ), tr( "No examples to copy from: open a game" ) );
 		if ( selected == nCategory )

@@ -143,6 +143,9 @@ puts the sun.
   - It's an approximation worked out from what each operator's name and settings say, not the
     game's code. Operators it doesn't run yet are greyed out in the list and named under the
     preview. Collisions hit only the floor under the grid, and refraction isn't drawn.
+- **Simple interface** (View → Simple Interface): plain names for operators and settings with a
+  line saying what each does, and advanced settings tucked away until changed. Off, the files' own
+  keys and every setting show. The file is edited the same either way.
 - **Properties:** the right column edits the selected system, operator or child link. Numbers, vectors,
   colours (with a picker), on/off values, materials (completed from the game's materials) and child
   systems each get a fitting field. Names in bold differ from the value the game's files use most,

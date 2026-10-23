@@ -51,6 +51,7 @@
 #include "FileViews.h"
 #include "FolderBrowser.h"
 #include "ImageFiles.h"
+#include "InterfaceMode.h"
 #include "KvCard.h"
 #include "MenuPicker.h"
 #include "ParticleDocument.h"
@@ -473,6 +474,17 @@ void CMainWindow::BuildMenus( QAction *pSearchPathsToggle )
 	} );
 	pGame->addSeparator();
 	pGame->addAction( pSearchPathsToggle );
+
+	// Simple or regular names, everywhere and remembered.
+	auto *pView = menuBar()->addMenu( tr( "&View" ) );
+	QAction *pSimple = pView->addAction( tr( "&Simple Interface" ) );
+	pSimple->setObjectName( QStringLiteral( "simpleInterface" ) );
+	pSimple->setCheckable( true );
+	pSimple->setChecked( CInterfaceMode::Instance().IsSimple() );
+	pSimple->setToolTip( tr( "Plain names with what each setting does, and advanced settings tucked away. "
+							 "Off: the files' own names and every setting. Either way the files are edited the same" ) );
+	connect( pSimple, &QAction::toggled, this, []( bool bOn ) { CInterfaceMode::Instance().SetSimple( bOn ); } );
+	connect( &CInterfaceMode::Instance(), &CInterfaceMode::Changed, pSimple, &QAction::setChecked );
 
 	auto *pHelp = menuBar()->addMenu( tr( "&Help" ) );
 	pHelp->addAction( tr( "&About vomit-tools" ), this, [ this ] { CAboutDialog{ this }.exec(); } );
