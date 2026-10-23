@@ -119,6 +119,8 @@ private:
 	[[nodiscard]] std::vector<std::int32_t> GetSelectedSystems() const;
 	[[nodiscard]] const xv::particles::AttributeInfo_t *DefaultFor( std::int32_t nElement, const std::string &szAttribute ) const;
 	[[nodiscard]] QWidget *ValueEditor( std::int32_t nElement, const xv::dmx::Attribute_t &attribute );
+	// The simple interface's easier editor for a value, or nullptr to use the regular one.
+	[[nodiscard]] QWidget *SimpleValueEditor( std::int32_t nElement, const xv::dmx::Attribute_t &attribute );
 
 	CParticleDocument *m_pDocument;
 	ParticleGame_t m_Game;

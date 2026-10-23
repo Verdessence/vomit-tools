@@ -35,6 +35,8 @@
 #include <QScreen>
 #include <QSettings>
 #include <QSpinBox>
+#include <QWheelEvent>
+#include <QDoubleSpinBox>
 #include <QSplitter>
 #include <QStringListModel>
 #include <QStyle>
@@ -47,6 +49,7 @@
 
 #include "ParticleDocument.h"
 #include "InterfaceMode.h"
+#include "Language.h"
 #include "MenuPicker.h"
 #include "ParticlePreview.h"
 #include "QtPaths.h"
@@ -149,19 +152,112 @@ bool IsSimple()
 //-----------------------------------------------------------------------------
 std::pair<QString, QString> FunctionLabel( Category_t nCategory, const QString &szFunction )
 {
-	const particles::PlainName_t plain = particles::PlainFunction( nCategory, szFunction.toStdString() );
-	QString szTip;
-	if ( plain.m_szName.empty() )
+	const particles::PlainName_t plain = ParticleNames().Function( nCategory, szFunction.toStdString() );
+	QStringList tips;
+	const bool bSimple = IsSimple() && !plain.m_szName.empty();
+	if ( bSimple && Qs( plain.m_szName ) != szFunction )
 	{
-		return { szFunction, szTip };
+		tips << szFunction;
 	}
-	if ( IsSimple() )
+	if ( !plain.m_szMeaning.empty() )
 	{
-		szTip = szFunction + u'\n' + Qs( plain.m_szMeaning );
-		return { Qs( plain.m_szName ), szTip };
+		tips << Qs( plain.m_szMeaning );
 	}
-	szTip = Qs( plain.m_szName ) + QStringLiteral( ": " ) + Qs( plain.m_szMeaning );
-	return { szFunction, szTip };
+	return { bSimple ? Qs( plain.m_szName ) : szFunction, tips.join( u'\n' ) };
+}
+
+// A spin box that leaves the mouse wheel to the panel until it is clicked into, so scrolling the
+// properties doesn't change values.
+template <typename Base>
+class CFocusSpin : public Base
+{
+public:
+	CFocusSpin()
+	{
+		this->setFocusPolicy( Qt::StrongFocus );
+		this->setKeyboardTracking( false );
+	}
+
+protected:
+	void wheelEvent( QWheelEvent *pEvent ) override
+	{
+		if ( this->hasFocus() )
+		{
+			Base::wheelEvent( pEvent );
+		}
+		else
+		{
+			pEvent->ignore();
+		}
+	}
+};
+
+// A number box for floats that shows them without trailing zeros.
+class CFloatSpin : public CFocusSpin<QDoubleSpinBox>
+{
+public:
+	CFloatSpin() { setDecimals( 6 ); }
+
+	[[nodiscard]] QString textFromValue( double flValue ) const override
+	{
+		QString szText = QString::number( flValue, 'f', decimals() );
+		if ( szText.contains( u'.' ) )
+		{
+			while ( szText.endsWith( u'0' ) )
+			{
+				szText.chop( 1 );
+			}
+			if ( szText.endsWith( u'.' ) )
+			{
+				szText.chop( 1 );
+			}
+		}
+		return szText == QStringLiteral( "-0" ) ? QStringLiteral( "0" ) : szText;
+	}
+};
+
+//-----------------------------------------------------------------------------
+// Purpose: A float box set up for a kind of number: its range (widened to take the value it
+//          has), step and unit.
+//-----------------------------------------------------------------------------
+CFloatSpin *KindSpin( particles::InputKind_t nKind, float flValue )
+{
+	using enum particles::InputKind_t;
+	auto *pSpin = new CFloatSpin;
+	double flMin = -1e9, flMax = 1e9, flStep = std::abs( flValue ) >= 10.0f ? 1.0 : 0.1;
+	switch ( nKind )
+	{
+		case INPUT_KIND_SHARE:
+			flMin = 0.0;
+			flMax = 1.0;
+			flStep = 0.05;
+			break;
+		case INPUT_KIND_SECONDS:
+			flMin = 0.0;
+			flStep = 0.1;
+			break;
+		case INPUT_KIND_DEGREES:
+			flMin = -360.0;
+			flMax = 360.0;
+			flStep = 5.0;
+			break;
+		case INPUT_KIND_DEGREES_PER_SECOND: flStep = 10.0; break;
+		case INPUT_KIND_PER_SECOND:
+			flMin = 0.0;
+			flStep = 1.0;
+			break;
+		case INPUT_KIND_ALPHA:
+			flMin = 0.0;
+			flMax = 255.0;
+			flStep = 5.0;
+			break;
+		default: break;
+	}
+	pSpin->setRange( std::min( flMin, static_cast<double>( flValue ) ), std::max( flMax, static_cast<double>( flValue ) ) );
+	pSpin->setSingleStep( flStep );
+	pSpin->setSuffix( Qs( ParticleNames().Unit( nKind ) ) );
+	pSpin->setValue( static_cast<double>( flValue ) );
+	return pSpin;
 }
 
 // The order the selected system's lists are shown and offered in: what it looks like first, then
@@ -942,7 +1038,7 @@ void CParticleEditor::RebuildStack()
 	}
 
 	const auto addList = [ & ]( const QString &szList, const std::vector<QString> &labels, const std::vector<std::int32_t> &elements ) {
-		const QString szTitle = IsSimple() ? Qs( particles::PlainListTitle( szList.toStdString() ) ) : ListTitle( szList );
+		const QString szTitle = ListTitle( szList );
 		auto *pHeader = new QTreeWidgetItem( { QStringLiteral( "%1 (%2)" ).arg( szTitle ).arg( elements.size() ) } );
 		pHeader->setData( 0, ROLE_ELEMENT_ROLE, -1 );
 		pHeader->setData( 0, ROLE_LIST_ROLE, szList );
@@ -1122,15 +1218,11 @@ void CParticleEditor::RebuildProperties()
 		{
 			return nullptr;
 		}
-		const particles::PlainName_t plain = particles::PlainSetting( szOwner, attribute.m_szName );
+		const particles::PlainName_t plain = ParticleNames().Setting( szOwner, attribute.m_szName );
 		auto *pItem = new QTreeWidgetItem( pParent, { bSimple ? Qs( plain.m_szName ) : Qs( attribute.m_szName ) } );
 		pItem->setData( 0, ROLE_ATTRIBUTE_ROLE, Qs( attribute.m_szName ) );
 		QString szTip = tr( "%1 (%2)" ).arg( Qs( attribute.m_szName ), Qs( xv::dmx::TypeName( attribute.m_nType ) ) );
-		if ( !bSimple && !plain.m_szName.empty() && plain.m_szName != attribute.m_szName )
-		{
-			szTip += u'\n' + Qs( plain.m_szName ) + ( plain.m_szMeaning.empty() ? QString{} : QStringLiteral( ": " ) + Qs( plain.m_szMeaning ) );
-		}
-		else if ( !plain.m_szMeaning.empty() )
+		if ( !plain.m_szMeaning.empty() )
 		{
 			szTip += u'\n' + Qs( plain.m_szMeaning );
 		}
@@ -1210,8 +1302,9 @@ void CParticleEditor::RebuildProperties()
 			return pKnown ? pKnown->m_nUses : 0;
 		}()
 													: 0;
-		const QString szShown = category && bSimple && !particles::PlainFunction( *category, szFunction.toStdString() ).m_szName.empty()
-			? QStringLiteral( "%1</b> (%2)<b>" ).arg( Qs( particles::PlainFunction( *category, szFunction.toStdString() ).m_szName ).toHtmlEscaped(), szFunction.toHtmlEscaped() )
+		const QString szSimpleName = category ? Qs( ParticleNames().Function( *category, szFunction.toStdString() ).m_szName ) : QString{};
+		const QString szShown = bSimple && !szSimpleName.isEmpty() && szSimpleName != szFunction
+			? QStringLiteral( "%1</b> (%2)<b>" ).arg( szSimpleName.toHtmlEscaped(), szFunction.toHtmlEscaped() )
 			: szFunction.toHtmlEscaped();
 		m_pPropertiesTitle->setText( tr( "<b>%1</b> · %2 of %3%4" )
 				.arg( szShown, category ? CategorySingular( *category ).toLower() : tr( "operator" ),
@@ -1273,6 +1366,122 @@ void CParticleEditor::RebuildProperties()
 }
 
 //-----------------------------------------------------------------------------
+// Purpose: The simple interface's easier ways in: a list of names for settings that pick from a
+//          few, number boxes with units and sensible steps for the rest (control points as CP n),
+//          and X/Y/Z boxes for vectors. Nothing for kinds it has no better way for.
+//-----------------------------------------------------------------------------
+QWidget *CParticleEditor::SimpleValueEditor( std::int32_t nElement, const Attribute_t &attribute )
+{
+	using enum particles::InputKind_t;
+	const particles::CNames &names = ParticleNames();
+	const QString szName = Qs( attribute.m_szName );
+	const auto commit = [ this, nElement, szName ]( xv::dmx::Value_t value ) { SetValue( nElement, szName, value ); };
+	const xv::dmx::Value_t &current = attribute.m_Value;
+	const AttrType_t nType = attribute.m_nType;
+
+	// Named values.
+	const auto &choices = names.Choices( attribute.m_szName );
+	if ( !choices.empty() && ( nType == AttrType_t::ATTR_TYPE_INT || nType == AttrType_t::ATTR_TYPE_BOOL || nType == AttrType_t::ATTR_TYPE_STRING ) )
+	{
+		auto *pCombo = new QComboBox;
+		const bool bText = nType == AttrType_t::ATTR_TYPE_STRING;
+		pCombo->setEditable( bText ); // a group the list doesn't name can still be typed
+		for ( const particles::NamedValue_t &choice : choices )
+		{
+			pCombo->addItem( Qs( choice.m_szName ), Qs( choice.m_szValue ) );
+		}
+		const QString szNow = nType == AttrType_t::ATTR_TYPE_INT ? QString::number( std::get<std::int32_t>( current ) )
+			: nType == AttrType_t::ATTR_TYPE_BOOL                ? ( std::get<bool>( current ) ? QStringLiteral( "1" ) : QStringLiteral( "0" ) )
+																 : Qs( std::get<std::string>( current ) );
+		int nIndex = pCombo->findData( szNow, Qt::UserRole, Qt::MatchFixedString );
+		if ( nIndex < 0 )
+		{
+			pCombo->addItem( szNow, szNow );
+			nIndex = pCombo->count() - 1;
+		}
+		pCombo->setCurrentIndex( nIndex );
+		const auto pick = [ commit, nType ]( const QString &szValue ) {
+			if ( nType == AttrType_t::ATTR_TYPE_INT )
+			{
+				commit( std::int32_t{ szValue.toInt() } );
+			}
+			else if ( nType == AttrType_t::ATTR_TYPE_BOOL )
+			{
+				commit( szValue == u"1" );
+			}
+			else
+			{
+				commit( szValue.toStdString() );
+			}
+		};
+		connect( pCombo, &QComboBox::activated, this, [ pCombo, pick ]( int nPicked ) { pick( pCombo->itemData( nPicked ).toString() ); } );
+		if ( bText )
+		{
+			connect( pCombo->lineEdit(), &QLineEdit::editingFinished, this, [ pCombo, pick ] {
+				const int nAt = pCombo->findText( pCombo->currentText() );
+				pick( nAt >= 0 ? pCombo->itemData( nAt ).toString() : pCombo->currentText() );
+			} );
+		}
+		return pCombo;
+	}
+
+	const particles::InputKind_t nKind = names.Input( attribute.m_szName );
+	if ( nType == AttrType_t::ATTR_TYPE_INT )
+	{
+		auto *pSpin = new CFocusSpin<QSpinBox>;
+		const int nNow = std::get<std::int32_t>( current );
+		switch ( nKind )
+		{
+			case INPUT_KIND_CONTROL_POINT:
+				pSpin->setRange( std::min( -1, nNow ), std::max( 63, nNow ) );
+				pSpin->setPrefix( tr( "CP " ) );
+				pSpin->setSpecialValueText( tr( "None" ) );
+				break;
+			case INPUT_KIND_COUNT:
+				pSpin->setRange( nNow < 0 ? -1 : 0, INT_MAX );
+				pSpin->setSpecialValueText( nNow < 0 ? tr( "None" ) : QString{} );
+				break;
+			case INPUT_KIND_ALPHA: pSpin->setRange( std::min( 0, nNow ), std::max( 255, nNow ) ); break;
+			default: pSpin->setRange( INT_MIN, INT_MAX ); break;
+		}
+		pSpin->setValue( nNow );
+		connect( pSpin, &QSpinBox::valueChanged, this, [ commit ]( int nValue ) { commit( std::int32_t{ nValue } ); } );
+		return pSpin;
+	}
+	if ( nType == AttrType_t::ATTR_TYPE_FLOAT )
+	{
+		CFloatSpin *pSpin = KindSpin( nKind, std::get<float>( current ) );
+		connect( pSpin, &QDoubleSpinBox::valueChanged, this, [ commit ]( double flValue ) { commit( static_cast<float>( flValue ) ); } );
+		return pSpin;
+	}
+	if ( nType == AttrType_t::ATTR_TYPE_VECTOR3 || nType == AttrType_t::ATTR_TYPE_QANGLE )
+	{
+		auto *pBox = new QWidget;
+		auto *pLayout = new QHBoxLayout( pBox );
+		pLayout->setContentsMargins( 0, 0, 0, 0 );
+		pLayout->setSpacing( 2 );
+		const auto vector = std::get<xv::dmx::Vec3_t>( current );
+		std::vector<CFloatSpin *> boxes;
+		for ( std::size_t i = 0; i < 3; i++ )
+		{
+			CFloatSpin *pSpin = KindSpin( nKind, vector[ i ] );
+			pSpin->setPrefix( QStringLiteral( "XYZ" ).mid( static_cast<int>( i ), 1 ) + u' ' );
+			pSpin->setMinimumWidth( 64 );
+			pLayout->addWidget( pSpin );
+			boxes.push_back( pSpin );
+		}
+		for ( CFloatSpin *pSpin : boxes )
+		{
+			connect( pSpin, &QDoubleSpinBox::valueChanged, this, [ commit, boxes ] {
+				commit( xv::dmx::Vec3_t{ static_cast<float>( boxes[ 0 ]->value() ), static_cast<float>( boxes[ 1 ]->value() ), static_cast<float>( boxes[ 2 ]->value() ) } );
+			} );
+		}
+		return pBox;
+	}
+	return nullptr;
+}
+
+//-----------------------------------------------------------------------------
 // Purpose:
 //-----------------------------------------------------------------------------
 QWidget *CParticleEditor::ValueEditor( std::int32_t nElement, const Attribute_t &attribute )
@@ -1281,6 +1490,13 @@ QWidget *CParticleEditor::ValueEditor( std::int32_t nElement, const Attribute_t 
 	const AttrType_t nType = attribute.m_nType;
 	const xv::dmx::Value_t current = attribute.m_Value;
 	const auto commit = [ this, nElement, szName ]( xv::dmx::Value_t value ) { SetValue( nElement, szName, value ); };
+	if ( IsSimple() && !particles::IsFieldSetting( attribute.m_szName ) )
+	{
+		if ( QWidget *pEasier = SimpleValueEditor( nElement, attribute ) )
+		{
+			return pEasier;
+		}
+	}
 
 	switch ( nType )
 	{
@@ -1293,7 +1509,7 @@ QWidget *CParticleEditor::ValueEditor( std::int32_t nElement, const Attribute_t 
 				const int nCurrent = std::get<std::int32_t>( current );
 				for ( int nField = 0; nField < particles::FIELD_COUNT; nField++ )
 				{
-					const QString szField = Qs( particles::FieldName( nField ) );
+					const QString szField = Qs( ParticleNames().FieldName( nField ) );
 					pCombo->addItem( IsSimple() ? szField : QStringLiteral( "%1 · %2" ).arg( nField ).arg( szField ), nField );
 				}
 				if ( pCombo->findData( nCurrent ) < 0 )

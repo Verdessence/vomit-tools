@@ -574,6 +574,14 @@ bool IsSimulated( Category_t nCategory, std::string_view szFunction )
 }
 
 //-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+std::vector<std::pair<Category_t, std::string_view>> PreviewedFunctions()
+{
+	return { SimulatedFunctions().begin(), SimulatedFunctions().end() };
+}
+
+//-----------------------------------------------------------------------------
 // Purpose: A function's current name, whatever case or older name the file uses.
 //-----------------------------------------------------------------------------
 std::string_view CurrentFunctionName( Category_t nCategory, std::string_view szFunction )

@@ -13,6 +13,8 @@ add_library(vomit_tools_ui STATIC
         InterfaceMode.cpp
         InterfaceMode.h
         KvCard.cpp
+        Language.cpp
+        Language.h
         KvCard.h
         MainWindow.cpp
         MainWindow.h
@@ -75,6 +77,11 @@ if(Qt6_VERSION VERSION_GREATER_EQUAL 6.7 AND TARGET Qt6::ShaderTools AND TARGET 
 else()
     message(STATUS "vomit-tools: particle preview in software only (needs Qt 6.7+ with ShaderTools for the GPU)")
 endif()
+# Text and input kinds the editors read at run time (data/), built in.
+qt_add_resources(vomit_tools_ui "vomit_tools_data"
+        PREFIX "/data"
+        BASE data
+        FILES data/lang_en.txt data/particle_inputs.txt)
 target_link_libraries(vomit_tools_ui PUBLIC vomit_tools::core Qt6::Widgets)
 vomit_tools_set_warnings(vomit_tools_ui)
 

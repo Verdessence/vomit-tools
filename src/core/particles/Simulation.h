@@ -96,6 +96,8 @@ struct CLibrary
 };
 [[nodiscard]] CLibrary Compile( const dmx::Document_t &document );
 
+// Every function the preview runs, by category and current name.
+[[nodiscard]] std::vector<std::pair<Category_t, std::string_view>> PreviewedFunctions();
 // A function's current name: files may spell it in another case, or by the older name an early
 // editor gave it ("basic_movement" for Movement Basic). Unknown names come back as they are.
 [[nodiscard]] std::string_view CurrentFunctionName( Category_t nCategory, std::string_view szFunction );

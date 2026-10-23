@@ -69,19 +69,23 @@
   box or offset range shows around its control point; with **Bounds**, every one does.
 
 ### Particle editor
-- **View → Simple Interface** (remembered): plain names for every operator and setting, with a line
-  saying what each does — "Burst" for emit_instantaneously, "Particles per second" for
-  emission_rate — and lists titled by what they do ("How they start", "Over their life"). Advanced
-  settings (when an operator runs, visibility tests, the system's simulation tuning) are tucked
-  away while they have their usual value. The file is edited exactly the same; turn it off for the
-  files' own keys and every setting.
+- **View → Simple Interface** (remembered): names without the underscores and lower case —
+  "Max Particles" for max_particles, "Animated Sprites" for render_animated_sprites — and easier
+  ways to type values: number boxes with units (s, °, °/s) and sensible steps, control points as
+  "CP n", named choices for settings that pick from a few (orientation type, restart behaviour,
+  light type, bulge control, collision group…), X/Y/Z boxes for vectors. Advanced settings (when
+  an operator runs, visibility tests, the system's simulation tuning) are tucked away while they
+  have their usual value. The file is edited exactly the same; turn it off for the files' own keys
+  and fields.
+- The names, a line on what each function and setting does, and the named values are in
+  `src/app/data/lang_en.txt` (Valve's language file layout); how each number is typed is in
+  `src/app/data/particle_inputs.txt`. Both are built into the app.
 - **Add to a Map's Manifest…** lists the file in `maps/<map>_particles.txt` (made in the write
   folder when the map has none), so only that map loads it.
 - In either interface, tooltips give the other name and the explanation, the Add menu finds
   operators by either name, and settings that pick a particle field ("output field") are a list of
   named fields instead of a number.
-- The names and explanations are our own, written from the VDC articles and the preview's
-  behaviour.
+- The explanations are our own, written from the VDC articles and the preview's behaviour.
 
 ### Skybox editor
 - **File → Open Sky from Game** lists the skies in a searchable list that fits on the screen,
