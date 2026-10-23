@@ -1,4 +1,11 @@
+//===========================================================================//
 // SPDX-License-Identifier: GPL-3.0-or-later
+//
+// Purpose: The skybox creator: six face images, laid out as they join, a view from inside, and
+//          checks for what would go wrong in game (missing or mismatched faces, faces turned the
+//          wrong way, sizes the game can't use).
+//
+//===========================================================================//
 #pragma once
 
 #include <array>
@@ -14,68 +21,72 @@ class QComboBox;
 class QLabel;
 class QLineEdit;
 class QListWidget;
-class SkyDocument;
-class SkyView;
+class CSkyDocument;
+class CSkyView;
 
-// The skybox creator: six face images, laid out as they join, a view from inside, and checks for
-// what would go wrong in game (missing or mismatched faces, faces turned the wrong way, sizes the
-// game can't use).
-class SkyEditor : public QWidget {
+class CSkyEditor : public QWidget
+{
 	Q_OBJECT
 
 public:
-	struct Issue {
-		enum class Severity { Info, Warning, Error };
-		Severity severity = Severity::Info;
-		QString message;
-		std::optional<xv::sky::OrientationFix> fix; // applied by double-clicking the issue
+	struct Issue_t
+	{
+		enum class Severity_t
+		{
+			SEVERITY_INFO,
+			SEVERITY_WARNING,
+			SEVERITY_ERROR
+		};
+		Severity_t m_nSeverity = Severity_t::SEVERITY_INFO;
+		QString m_szMessage;
+		std::optional<xv::sky::OrientationFix_t> m_Fix; // applied by double-clicking the issue
 	};
 
 	// Takes ownership of document.
-	explicit SkyEditor(SkyDocument* document, QWidget* parent = nullptr);
+	explicit CSkyEditor( CSkyDocument *pDocument, QWidget *pParent = nullptr );
 
-	[[nodiscard]] SkyDocument* document() const { return document_; }
-	[[nodiscard]] SkyView* view() const { return view_; }
+	[[nodiscard]] CSkyDocument *GetDocument() const { return m_pDocument; }
+	[[nodiscard]] CSkyView *GetView() const { return m_pView; }
 
 	// Puts each file on the face its name ends with (…rt.png, …UP.tga), as one undo step. A single
 	// file dropped into an empty sky brings the other faces beside it along. Returns the files that
 	// couldn't be placed or read, with the reason.
-	QStringList loadFiles(const QStringList& paths);
-	bool loadFace(xv::sky::Face face, const QString& path);
+	QStringList LoadFiles( const QStringList &paths );
+	bool LoadFace( xv::sky::Face_t nFace, const QString &szPath );
 	// Fills every face with a labelled pattern for checking orientation in game.
-	void useTestPattern(int size = 512);
-	void applyFix(const xv::sky::OrientationFix& fix);
+	void UseTestPattern( int nSize = 512 );
+	void ApplyFix( const xv::sky::OrientationFix_t &fix );
 
-	[[nodiscard]] const std::vector<Issue>& issues() const { return issues_; }
+	[[nodiscard]] const std::vector<Issue_t> &GetIssues() const { return m_Issues; }
 	// No errors: every face present, a valid name, sizes the game can use.
-	[[nodiscard]] bool canExport() const;
+	[[nodiscard]] bool CanExport() const;
 	// After an export: where the files went and how to see the sky in game.
-	void showExported(const QString& folder);
+	void ShowExported( const QString &szFolder );
 
 signals:
-	void exportRequested();   // to the game's write folder
-	void exportToRequested(); // to a folder the user picks
+	void ExportRequested();   // to the game's write folder
+	void ExportToRequested(); // to a folder the user picks
 
 protected:
-	void dragEnterEvent(QDragEnterEvent* event) override;
-	void dropEvent(QDropEvent* event) override;
+	void dragEnterEvent( QDragEnterEvent *pEvent ) override;
+	void dropEvent( QDropEvent *pEvent ) override;
 
 private:
-	void browseFace(xv::sky::Face face);
-	void browseFiles();
-	void facesChanged();
-	void relint();
-	void updateSizeEstimate();
+	void BrowseFace( xv::sky::Face_t nFace );
+	void BrowseFiles();
+	void FacesChanged();
+	void Relint();
+	void UpdateSizeEstimate();
 
-	SkyDocument* document_ = nullptr;
-	SkyView* view_ = nullptr;
-	std::array<QWidget*, 6> slots_{};
-	QLineEdit* name_ = nullptr;
-	QComboBox* format_ = nullptr;
-	QComboBox* size_ = nullptr;
-	QCheckBox* mipmaps_ = nullptr;
-	QLabel* estimate_ = nullptr;
-	QLabel* exported_ = nullptr;
-	QListWidget* issueList_ = nullptr;
-	std::vector<Issue> issues_;
+	CSkyDocument *m_pDocument = nullptr;
+	CSkyView *m_pView = nullptr;
+	std::array<QWidget *, 6> m_Slots{};
+	QLineEdit *m_pName = nullptr;
+	QComboBox *m_pFormat = nullptr;
+	QComboBox *m_pSize = nullptr;
+	QCheckBox *m_pMipmaps = nullptr;
+	QLabel *m_pEstimate = nullptr;
+	QLabel *m_pExported = nullptr;
+	QListWidget *m_pIssueList = nullptr;
+	std::vector<Issue_t> m_Issues;
 };

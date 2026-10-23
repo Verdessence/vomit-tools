@@ -1,4 +1,10 @@
+//===========================================================================//
 // SPDX-License-Identifier: GPL-3.0-or-later
+//
+// Purpose: The sky as a player sees it from inside: drag to look around, wheel to zoom. Angles and
+//          field of view follow Source's, so "setang <pitch> <yaw> 0" in game shows the same view.
+//
+//===========================================================================//
 #pragma once
 
 #include <QPoint>
@@ -7,47 +13,46 @@
 #include "sky/Sky.h"
 #include "texture/Image.h"
 
-// The sky as a player sees it from inside: drag to look around, wheel to zoom. Angles and field
-// of view follow Source's, so "setang <pitch> <yaw> 0" in game shows the same view.
-class SkyView : public QWidget {
+class CSkyView : public QWidget
+{
 	Q_OBJECT
 
 public:
-	explicit SkyView(QWidget* parent = nullptr);
+	explicit CSkyView( QWidget *pParent = nullptr );
 
-	// The cube is not owned; call refresh() after it changes. nullptr shows nothing.
-	void setCube(const xv::sky::Cube* cube);
-	void refresh();
+	// The cube is not owned; call Refresh() after it changes. nullptr shows nothing.
+	void SetCube( const xv::sky::CCube *pCube );
+	void Refresh();
 
-	[[nodiscard]] xv::sky::Angles angles() const { return angles_; }
-	void setAngles(xv::sky::Angles angles);
-	[[nodiscard]] float fov() const { return fov_; }
-	void setFov(float fov);
-	void setShowLabels(bool show);
-	void setShowEdges(bool show);
+	[[nodiscard]] xv::sky::Angles_t GetAngles() const { return m_Angles; }
+	void SetAngles( xv::sky::Angles_t angles );
+	[[nodiscard]] float GetFov() const { return m_flFov; }
+	void SetFov( float flFov );
+	void SetShowLabels( bool bShow );
+	void SetShowEdges( bool bShow );
 	// "setang 0 90 0": the console command (sv_cheats 1) for the same view in game.
-	[[nodiscard]] QString setangCommand() const;
+	[[nodiscard]] QString GetSetangCommand() const;
 
 signals:
-	void viewChanged();
+	void ViewChanged();
 
 protected:
-	void paintEvent(QPaintEvent* event) override;
-	void mousePressEvent(QMouseEvent* event) override;
-	void mouseMoveEvent(QMouseEvent* event) override;
-	void mouseDoubleClickEvent(QMouseEvent* event) override;
-	void wheelEvent(QWheelEvent* event) override;
-	void keyPressEvent(QKeyEvent* event) override;
-	void contextMenuEvent(QContextMenuEvent* event) override;
+	void paintEvent( QPaintEvent *pEvent ) override;
+	void mousePressEvent( QMouseEvent *pEvent ) override;
+	void mouseMoveEvent( QMouseEvent *pEvent ) override;
+	void mouseDoubleClickEvent( QMouseEvent *pEvent ) override;
+	void wheelEvent( QWheelEvent *pEvent ) override;
+	void keyPressEvent( QKeyEvent *pEvent ) override;
+	void contextMenuEvent( QContextMenuEvent *pEvent ) override;
 
 private:
-	void look(float yawDelta, float pitchDelta);
+	void Look( float flYawDelta, float flPitchDelta );
 
-	const xv::sky::Cube* cube_ = nullptr;
-	xv::sky::Angles angles_;
-	float fov_ = 90.0f;
-	bool labels_ = true;
-	bool edges_ = false;
-	QPoint lastMouse_;
-	xv::texture::Image frame_;
+	const xv::sky::CCube *m_pCube = nullptr;
+	xv::sky::Angles_t m_Angles;
+	float m_flFov = 90.0f;
+	bool m_bLabels = true;
+	bool m_bEdges = false;
+	QPoint m_LastMouse;
+	xv::texture::CImage m_Frame;
 };

@@ -1,246 +1,352 @@
+//===========================================================================//
 // SPDX-License-Identifier: GPL-3.0-or-later
+//
+// Purpose: See SoundDocument.h.
+//
+//===========================================================================//
 #include "SoundDocument.h"
 
 #include <QFileInfo>
 #include <QUndoStack>
 
-using xv::kv1::Node;
-using xv::sound::NodePath;
+using xv::kv1::CNode;
+using xv::sound::NodePath_t;
 
-namespace {
+namespace
+{
 
-// The node at path inside a copy of its top-level entry (path[0] names the entry itself).
-Node* descend(Node& entry, const NodePath& path) {
-	Node* node = &entry;
-	for (std::size_t i = 1; i < path.size(); i++) {
-		if (!node->isBlock() || path[i] >= node->children().size()) {
+//-----------------------------------------------------------------------------
+// Purpose: The node at path inside a copy of its top-level entry (path[0] names the entry itself).
+//-----------------------------------------------------------------------------
+CNode *Descend( CNode &entry, const NodePath_t &path )
+{
+	CNode *pNode = &entry;
+	for ( std::size_t i = 1; i < path.size(); i++ )
+	{
+		if ( !pNode->IsBlock() || path[ i ] >= pNode->GetChildren().size() )
+		{
 			return nullptr;
 		}
-		node = &node->child(path[i]);
+		pNode = &pNode->Child( path[ i ] );
 	}
-	return node;
+	return pNode;
 }
 
-NodePath parentOf(NodePath path) {
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+NodePath_t ParentOf( NodePath_t path )
+{
 	path.pop_back();
 	return path;
 }
 
 } // namespace
 
-class ReplaceEntryCommand : public QUndoCommand {
+class CReplaceEntryCommand : public QUndoCommand
+{
 public:
-	ReplaceEntryCommand(SoundDocument* document, std::size_t index, Node before, Node after, const QString& text)
-			: QUndoCommand(text)
-			, document_(document)
-			, index_(index)
-			, before_(std::move(before))
-			, after_(std::move(after)) {}
+	CReplaceEntryCommand( CSoundDocument *pDocument, std::size_t nIndex, CNode before, CNode after, const QString &szText )
+		: QUndoCommand( szText ),
+		  m_pDocument( pDocument ),
+		  m_nIndex( nIndex ),
+		  m_Before( std::move( before ) ),
+		  m_After( std::move( after ) )
+	{}
 
-	void redo() override {
-		document_->document_.roots[index_] = after_;
-		emit document_->changed();
+	void redo() override
+	{
+		m_pDocument->m_Document.m_Roots[ m_nIndex ] = m_After;
+		emit m_pDocument->Changed();
 	}
 
-	void undo() override {
-		document_->document_.roots[index_] = before_;
-		emit document_->changed();
+	void undo() override
+	{
+		m_pDocument->m_Document.m_Roots[ m_nIndex ] = m_Before;
+		emit m_pDocument->Changed();
 	}
 
 private:
-	SoundDocument* document_;
-	std::size_t index_;
-	Node before_;
-	Node after_;
+	CSoundDocument *m_pDocument;
+	std::size_t m_nIndex;
+	CNode m_Before;
+	CNode m_After;
 };
 
-class InsertEntryCommand : public QUndoCommand {
+class CInsertEntryCommand : public QUndoCommand
+{
 public:
-	InsertEntryCommand(SoundDocument* document, std::size_t index, Node entry, const QString& text)
-			: QUndoCommand(text)
-			, document_(document)
-			, index_(index)
-			, entry_(std::move(entry)) {}
+	CInsertEntryCommand( CSoundDocument *pDocument, std::size_t nIndex, CNode entry, const QString &szText )
+		: QUndoCommand( szText ),
+		  m_pDocument( pDocument ),
+		  m_nIndex( nIndex ),
+		  m_Entry( std::move( entry ) )
+	{}
 
-	void redo() override {
-		auto& doc = document_->document_;
+	void redo() override
+	{
+		auto &doc = m_pDocument->m_Document;
 		// The first time, lay it out like its neighbours; afterwards reuse exactly that layout.
-		if (!laidOut_) {
-			entry_ = doc.insertRoot(index_, entry_);
-			laidOut_ = true;
-		} else {
-			doc.insertRoot(index_, entry_, xv::kv1::Layout::Keep);
+		if ( !m_bLaidOut )
+		{
+			m_Entry = doc.InsertRoot( m_nIndex, m_Entry );
+			m_bLaidOut = true;
 		}
-		emit document_->changed();
+		else
+		{
+			doc.InsertRoot( m_nIndex, m_Entry, xv::kv1::Layout_t::LAYOUT_KEEP );
+		}
+		emit m_pDocument->Changed();
 	}
 
-	void undo() override {
-		document_->document_.takeRoot(index_);
-		emit document_->changed();
+	void undo() override
+	{
+		m_pDocument->m_Document.TakeRoot( m_nIndex );
+		emit m_pDocument->Changed();
 	}
 
 private:
-	SoundDocument* document_;
-	std::size_t index_;
-	Node entry_;
-	bool laidOut_ = false;
+	CSoundDocument *m_pDocument;
+	std::size_t m_nIndex;
+	CNode m_Entry;
+	bool m_bLaidOut = false;
 };
 
-class RemoveEntryCommand : public QUndoCommand {
+class CRemoveEntryCommand : public QUndoCommand
+{
 public:
-	RemoveEntryCommand(SoundDocument* document, std::size_t index, const QString& text)
-			: QUndoCommand(text)
-			, document_(document)
-			, index_(index) {}
+	CRemoveEntryCommand( CSoundDocument *pDocument, std::size_t nIndex, const QString &szText )
+		: QUndoCommand( szText ),
+		  m_pDocument( pDocument ),
+		  m_nIndex( nIndex )
+	{}
 
-	void redo() override {
-		removed_ = document_->document_.takeRoot(index_);
-		emit document_->changed();
+	void redo() override
+	{
+		m_Removed = m_pDocument->m_Document.TakeRoot( m_nIndex );
+		emit m_pDocument->Changed();
 	}
 
-	void undo() override {
-		document_->document_.insertRoot(index_, removed_, xv::kv1::Layout::Keep);
-		emit document_->changed();
+	void undo() override
+	{
+		m_pDocument->m_Document.InsertRoot( m_nIndex, m_Removed, xv::kv1::Layout_t::LAYOUT_KEEP );
+		emit m_pDocument->Changed();
 	}
 
 private:
-	SoundDocument* document_;
-	std::size_t index_;
-	Node removed_;
+	CSoundDocument *m_pDocument;
+	std::size_t m_nIndex;
+	CNode m_Removed;
 };
 
-SoundDocument::SoundDocument(QString gamePath, xv::sound::FileKind kind, xv::kv1::ParseResult parsed, QObject* parent)
-		: QObject(parent)
-		, gamePath_(std::move(gamePath))
-		, kind_(kind)
-		, schema_(xv::sound::schemaFor(kind))
-		, document_(std::move(parsed.document))
-		, diagnostics_(std::move(parsed.diagnostics))
-		, undo_(new QUndoStack(this)) {
-	Q_ASSERT(schema_);
-	connect(undo_, &QUndoStack::cleanChanged, this, [this](bool clean) {
-		emit modifiedChanged(!clean || neverSaved_);
-	});
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+CSoundDocument::CSoundDocument( QString szGamePath, xv::sound::FileKind_t nKind, xv::kv1::CParseResult parsed, QObject *pParent )
+	: QObject( pParent ),
+	  m_szGamePath( std::move( szGamePath ) ),
+	  m_nKind( nKind ),
+	  m_pSchema( xv::sound::SchemaFor( nKind ) ),
+	  m_Document( std::move( parsed.m_Document ) ),
+	  m_Diagnostics( std::move( parsed.m_Diagnostics ) ),
+	  m_pUndo( new QUndoStack( this ) )
+{
+	Q_ASSERT( m_pSchema );
+	connect( m_pUndo, &QUndoStack::cleanChanged, this, [ this ]( bool bClean ) {
+		emit ModifiedChanged( !bClean || m_bNeverSaved );
+	} );
 }
 
-QString SoundDocument::fileName() const {
-	return QFileInfo{gamePath_}.fileName();
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+QString CSoundDocument::GetFileName() const
+{
+	return QFileInfo{ m_szGamePath }.fileName();
 }
 
-std::filesystem::path SoundDocument::localRoot() const {
-	if (diskPath_.empty()) {
+//-----------------------------------------------------------------------------
+// Purpose: The game or mod folder holding this file's scripts/ (or maps/) folder, for finding its
+//          sounds on
+//          disk when no game is mounted; empty if it isn't in one.
+//-----------------------------------------------------------------------------
+std::filesystem::path CSoundDocument::GetLocalRoot() const
+{
+	if ( m_DiskPath.empty() )
+	{
 		return {};
 	}
-	const auto folder = diskPath_.parent_path();
-	const QString name = QString::fromStdU16String(folder.filename().u16string());
-	if (name.compare(u"scripts", Qt::CaseInsensitive) == 0 || name.compare(u"maps", Qt::CaseInsensitive) == 0) {
+	const auto folder = m_DiskPath.parent_path();
+	const QString szName = QString::fromStdU16String( folder.filename().u16string() );
+	if ( szName.compare( u"scripts", Qt::CaseInsensitive ) == 0 || szName.compare( u"maps", Qt::CaseInsensitive ) == 0 )
+	{
 		return folder.parent_path();
 	}
 	return {};
 }
 
-bool SoundDocument::isModified() const {
-	return neverSaved_ || !undo_->isClean();
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+bool CSoundDocument::IsModified() const
+{
+	return m_bNeverSaved || !m_pUndo->isClean();
 }
 
-std::string SoundDocument::serialize() const {
-	return xv::kv1::write(document_);
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+std::string CSoundDocument::GetSerialize() const
+{
+	return xv::kv1::Write( m_Document );
 }
 
-void SoundDocument::markSaved() {
-	neverSaved_ = false;
-	undo_->setClean();
-	emit modifiedChanged(false);
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+void CSoundDocument::MarkSaved()
+{
+	m_bNeverSaved = false;
+	m_pUndo->setClean();
+	emit ModifiedChanged( false );
 }
 
-void SoundDocument::markUnsaved() {
-	neverSaved_ = true;
-	emit modifiedChanged(true);
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+void CSoundDocument::MarkUnsaved()
+{
+	m_bNeverSaved = true;
+	emit ModifiedChanged( true );
 }
 
-const Node* SoundDocument::node(const NodePath& path) const {
-	if (path.empty() || path[0] >= document_.roots.size()) {
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+const CNode *CSoundDocument::Node( const NodePath_t &path ) const
+{
+	if ( path.empty() || path[ 0 ] >= m_Document.m_Roots.size() )
+	{
 		return nullptr;
 	}
-	return descend(const_cast<Node&>(document_.roots[path[0]]), path);
+	return Descend( const_cast<CNode &>( m_Document.m_Roots[ path[ 0 ] ] ), path );
 }
 
-const xv::sound::BlockDef* SoundDocument::blockDef(const NodePath& path) const {
-	if (path.size() == 1) {
-		return schema_->entry;
+//-----------------------------------------------------------------------------
+// Purpose: The schema block for the block at path; nullptr for blocks the schema doesn't know.
+//-----------------------------------------------------------------------------
+const xv::sound::BlockDef_t *CSoundDocument::BlockDef( const NodePath_t &path ) const
+{
+	if ( path.size() == 1 )
+	{
+		return m_pSchema->m_pEntry;
 	}
-	const Node* block = node(path);
-	return block && block->isBlock() ? schema_->block(block->key()) : nullptr;
+	const CNode *pBlock = Node( path );
+	return pBlock && pBlock->IsBlock() ? m_pSchema->Block( pBlock->GetKey() ) : nullptr;
 }
 
-void SoundDocument::editEntry(std::size_t rootIndex, const QString& description, const std::function<bool(Node& entry)>& edit) {
-	if (rootIndex >= document_.roots.size()) {
+//-----------------------------------------------------------------------------
+// Purpose: Applies edit to a copy of top-level entry rootIndex and pushes the swap as one undo
+//          step.
+//-----------------------------------------------------------------------------
+void CSoundDocument::EditEntry( std::size_t nRootIndex, const QString &szDescription, const std::function<bool( CNode &entry )> &pfnEdit )
+{
+	if ( nRootIndex >= m_Document.m_Roots.size() )
+	{
 		return;
 	}
-	Node after = document_.roots[rootIndex];
-	if (!edit(after)) {
+	CNode after = m_Document.m_Roots[ nRootIndex ];
+	if ( !pfnEdit( after ) )
+	{
 		return;
 	}
-	undo_->push(new ReplaceEntryCommand(this, rootIndex, document_.roots[rootIndex], std::move(after), description));
+	m_pUndo->push( new CReplaceEntryCommand( this, nRootIndex, m_Document.m_Roots[ nRootIndex ], std::move( after ), szDescription ) );
 }
 
-void SoundDocument::setKey(const NodePath& path, const QString& key) {
-	const Node* current = node(path);
-	if (!current || current->key() == key.toStdString()) {
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+void CSoundDocument::SetKey( const NodePath_t &path, const QString &szKey )
+{
+	const CNode *pCurrent = Node( path );
+	if ( !pCurrent || pCurrent->GetKey() == szKey.toStdString() )
+	{
 		return;
 	}
-	const QString description = path.size() == 1 ? tr("Rename %1").arg(key) : tr("Change key to %1").arg(key);
-	editEntry(path[0], description, [&](Node& entry) {
-		Node* target = descend(entry, path);
-		return target && target->setKey(key.toStdString());
-	});
+	const QString szDescription = path.size() == 1 ? tr( "Rename %1" ).arg( szKey ) : tr( "Change key to %1" ).arg( szKey );
+	EditEntry( path[ 0 ], szDescription, [ & ]( CNode &entry ) {
+		CNode *pTarget = Descend( entry, path );
+		return pTarget && pTarget->SetKey( szKey.toStdString() );
+	} );
 }
 
-void SoundDocument::setValue(const NodePath& path, const QString& value) {
-	const Node* current = node(path);
-	if (!current || !current->isPair() || current->value() == value.toStdString()) {
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+void CSoundDocument::SetValue( const NodePath_t &path, const QString &szValue )
+{
+	const CNode *pCurrent = Node( path );
+	if ( !pCurrent || !pCurrent->IsPair() || pCurrent->GetValue() == szValue.toStdString() )
+	{
 		return;
 	}
-	editEntry(path[0], tr("Set %1").arg(QString::fromStdString(current->key())), [&](Node& entry) {
-		Node* target = descend(entry, path);
-		return target && target->setValue(value.toStdString());
-	});
+	EditEntry( path[ 0 ], tr( "Set %1" ).arg( QString::fromStdString( pCurrent->GetKey() ) ), [ & ]( CNode &entry ) {
+		CNode *pTarget = Descend( entry, path );
+		return pTarget && pTarget->SetValue( szValue.toStdString() );
+	} );
 }
 
-void SoundDocument::insertChild(const NodePath& parent, std::size_t index, Node child, const QString& description) {
-	if (parent.empty()) {
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+void CSoundDocument::InsertChild( const NodePath_t &parent, std::size_t nIndex, CNode child, const QString &szDescription )
+{
+	if ( parent.empty() )
+	{
 		return;
 	}
-	editEntry(parent[0], description, [&](Node& entry) {
-		Node* block = descend(entry, parent);
-		if (!block || !block->isBlock()) {
+	EditEntry( parent[ 0 ], szDescription, [ & ]( CNode &entry ) {
+		CNode *pBlock = Descend( entry, parent );
+		if ( !pBlock || !pBlock->IsBlock() )
+		{
 			return false;
 		}
-		block->insertChild(index, std::move(child));
+		pBlock->InsertChild( nIndex, std::move( child ) );
 		return true;
-	});
+	} );
 }
 
-void SoundDocument::removeNode(const NodePath& path) {
-	const Node* target = node(path);
-	if (!target) {
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+void CSoundDocument::RemoveNode( const NodePath_t &path )
+{
+	const CNode *pTarget = Node( path );
+	if ( !pTarget )
+	{
 		return;
 	}
-	const QString description = tr("Delete %1").arg(QString::fromStdString(target->key()));
-	if (path.size() == 1) {
-		undo_->push(new RemoveEntryCommand(this, path[0], description));
+	const QString szDescription = tr( "Delete %1" ).arg( QString::fromStdString( pTarget->GetKey() ) );
+	if ( path.size() == 1 )
+	{
+		m_pUndo->push( new CRemoveEntryCommand( this, path[ 0 ], szDescription ) );
 		return;
 	}
-	editEntry(path[0], description, [&](Node& entry) {
-		Node* parent = descend(entry, parentOf(path));
-		if (!parent || !parent->isBlock() || path.back() >= parent->children().size()) {
+	EditEntry( path[ 0 ], szDescription, [ & ]( CNode &entry ) {
+		CNode *pParent = Descend( entry, ParentOf( path ) );
+		if ( !pParent || !pParent->IsBlock() || path.back() >= pParent->GetChildren().size() )
+		{
 			return false;
 		}
-		parent->removeChild(path.back());
+		pParent->RemoveChild( path.back() );
 		return true;
-	});
+	} );
 }
 
-void SoundDocument::insertEntry(std::size_t index, Node entry, const QString& description) {
-	undo_->push(new InsertEntryCommand(this, std::min(index, document_.roots.size()), std::move(entry), description));
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+void CSoundDocument::InsertEntry( std::size_t nIndex, CNode entry, const QString &szDescription )
+{
+	m_pUndo->push( new CInsertEntryCommand( this, std::min( nIndex, m_Document.m_Roots.size() ), std::move( entry ), szDescription ) );
 }

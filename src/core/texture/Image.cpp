@@ -1,4 +1,9 @@
+//===========================================================================//
 // SPDX-License-Identifier: GPL-3.0-or-later
+//
+// Purpose: See Image.h.
+//
+//===========================================================================//
 #include "Image.h"
 
 #include <algorithm>
@@ -10,16 +15,23 @@
 #include "stb_image.h"
 #include "stb_image_resize2.h"
 
-namespace xv::texture {
+namespace xv::texture
+{
 
-namespace {
+namespace
+{
 
-const std::array<float, 256>& linearTable() {
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+const std::array<float, 256> &LinearTable()
+{
 	static const std::array<float, 256> table = [] {
 		std::array<float, 256> values{};
-		for (std::size_t i = 0; i < values.size(); i++) {
-			const float c = static_cast<float>(i) / 255.0f;
-			values[i] = c <= 0.04045f ? c / 12.92f : std::pow((c + 0.055f) / 1.055f, 2.4f);
+		for ( std::size_t i = 0; i < values.size(); i++ )
+		{
+			const float c = static_cast<float>( i ) / 255.0f;
+			values[ i ] = c <= 0.04045f ? c / 12.92f : std::pow( ( c + 0.055f ) / 1.055f, 2.4f );
 		}
 		return values;
 	}();
@@ -28,139 +40,202 @@ const std::array<float, 256>& linearTable() {
 
 } // namespace
 
-Image::Image(int width_, int height_)
-		: width(std::max(width_, 0))
-		, height(std::max(height_, 0))
-		, pixels(static_cast<std::size_t>(width) * static_cast<std::size_t>(height) * 4) {}
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+CImage::CImage( int nWidth, int nHeight )
+	: m_nWidth( std::max( nWidth, 0 ) ),
+	  m_nHeight( std::max( nHeight, 0 ) ),
+	  m_Pixels( static_cast<std::size_t>( m_nWidth ) * static_cast<std::size_t>( m_nHeight ) * 4 )
+{}
 
-bool isImageExtension(std::string_view extension) {
-	static constexpr std::string_view EXTENSIONS[] = {"png", "jpg", "jpeg", "tga", "bmp", "psd", "gif", "hdr", "pnm", "ppm", "pgm"};
-	return std::ranges::find(EXTENSIONS, extension) != std::end(EXTENSIONS);
+//-----------------------------------------------------------------------------
+// Purpose: The extensions loadImage reads ("png", "tga", ...), lowercase and without the dot.
+//-----------------------------------------------------------------------------
+bool IsImageExtension( std::string_view szExtension )
+{
+	static constexpr std::string_view EXTENSIONS[] = { "png", "jpg", "jpeg", "tga", "bmp", "psd", "gif", "hdr", "pnm", "ppm", "pgm" };
+	return std::ranges::find( EXTENSIONS, szExtension ) != std::end( EXTENSIONS );
 }
 
-std::optional<Image> loadImage(std::span<const std::byte> data, std::string* error) {
-	if (data.empty() || data.size() > static_cast<std::size_t>(INT_MAX)) {
-		if (error) {
-			*error = data.empty() ? "empty file" : "file too large";
+//-----------------------------------------------------------------------------
+// Purpose: PNG, JPEG, TGA, BMP, PSD (composited), GIF (first frame), PNM, and Radiance HDR (gamma-
+//          mapped to
+//          8 bits), recognised by content. Input is untrusted.
+//-----------------------------------------------------------------------------
+std::optional<CImage> LoadImage( std::span<const std::byte> data, std::string *pError )
+{
+	if ( data.empty() || data.size() > static_cast<std::size_t>( INT_MAX ) )
+	{
+		if ( pError )
+		{
+			*pError = data.empty() ? "empty file" : "file too large";
 		}
 		return std::nullopt;
 	}
-	int width = 0;
-	int height = 0;
-	int channels = 0;
-	stbi_uc* decoded = stbi_load_from_memory(reinterpret_cast<const stbi_uc*>(data.data()), static_cast<int>(data.size()), &width, &height, &channels, 4);
-	if (!decoded) {
-		if (error) {
-			const char* reason = stbi_failure_reason();
-			*error = reason ? reason : "not an image";
+	int nWidth = 0;
+	int nHeight = 0;
+	int nChannels = 0;
+	stbi_uc *pDecoded = stbi_load_from_memory( reinterpret_cast<const stbi_uc *>( data.data() ), static_cast<int>( data.size() ), &nWidth, &nHeight, &nChannels, 4 );
+	if ( !pDecoded )
+	{
+		if ( pError )
+		{
+			const char *pszReason = stbi_failure_reason();
+			*pError = pszReason ? pszReason : "not an image";
 		}
 		return std::nullopt;
 	}
-	Image image{width, height};
-	std::memcpy(image.pixels.data(), decoded, image.pixels.size());
-	stbi_image_free(decoded);
+	CImage image{ nWidth, nHeight };
+	std::memcpy( image.m_Pixels.data(), pDecoded, image.m_Pixels.size() );
+	stbi_image_free( pDecoded );
 	return image;
 }
 
-Image resize(const Image& image, int width, int height) {
-	if (image.width == width && image.height == height) {
+//-----------------------------------------------------------------------------
+// Purpose: Resampled in linear light (the pixels are taken as sRGB), with a Mitchell filter when
+//          shrinking
+//          and Catmull-Rom when enlarging.
+//-----------------------------------------------------------------------------
+CImage Resize( const CImage &image, int nWidth, int nHeight )
+{
+	if ( image.m_nWidth == nWidth && image.m_nHeight == nHeight )
+	{
 		return image;
 	}
-	Image out{width, height};
-	if (!image.empty() && !out.empty()) {
-		stbir_resize_uint8_srgb(image.pixels.data(), image.width, image.height, 0, out.pixels.data(), width, height, 0, STBIR_RGBA);
+	CImage out{ nWidth, nHeight };
+	if ( !image.Empty() && !out.Empty() )
+	{
+		stbir_resize_uint8_srgb( image.m_Pixels.data(), image.m_nWidth, image.m_nHeight, 0, out.m_Pixels.data(), nWidth, nHeight, 0, STBIR_RGBA );
 	}
 	return out;
 }
 
-Image halfSize(const Image& image) {
-	Image out{std::max(1, image.width / 2), std::max(1, image.height / 2)};
-	const auto& linear = linearTable();
-	for (int y = 0; y < out.height; y++) {
-		for (int x = 0; x < out.width; x++) {
+//-----------------------------------------------------------------------------
+// Purpose: The next mipmap level: half the size (at least 1x1), each pixel the average of up to
+//          four, in
+//          linear light.
+//-----------------------------------------------------------------------------
+CImage HalfSize( const CImage &image )
+{
+	CImage out{ std::max( 1, image.m_nWidth / 2 ), std::max( 1, image.m_nHeight / 2 ) };
+	const auto &linear = LinearTable();
+	for ( int y = 0; y < out.m_nHeight; y++ )
+	{
+		for ( int x = 0; x < out.m_nWidth; x++ )
+		{
 			std::array<float, 4> sum{};
-			int count = 0;
-			for (int dy = 0; dy < 2; dy++) {
-				for (int dx = 0; dx < 2; dx++) {
-					const int sx = std::min(x * 2 + dx, image.width - 1);
-					const int sy = std::min(y * 2 + dy, image.height - 1);
-					const std::uint8_t* p = image.pixel(sx, sy);
-					for (int c = 0; c < 3; c++) {
-						sum[c] += linear[p[c]];
+			int nCount = 0;
+			for ( int nDy = 0; nDy < 2; nDy++ )
+			{
+				for ( int nDx = 0; nDx < 2; nDx++ )
+				{
+					const int nSx = std::min( x * 2 + nDx, image.m_nWidth - 1 );
+					const int nSy = std::min( y * 2 + nDy, image.m_nHeight - 1 );
+					const std::uint8_t *p = image.Pixel( nSx, nSy );
+					for ( int c = 0; c < 3; c++ )
+					{
+						sum[ c ] += linear[ p[ c ] ];
 					}
-					sum[3] += p[3];
-					count++;
+					sum[ 3 ] += p[ 3 ];
+					nCount++;
 				}
 			}
-			std::uint8_t* q = out.pixel(x, y);
-			for (int c = 0; c < 3; c++) {
-				q[c] = fromLinear(sum[c] / static_cast<float>(count));
+			std::uint8_t *q = out.Pixel( x, y );
+			for ( int c = 0; c < 3; c++ )
+			{
+				q[ c ] = FromLinear( sum[ c ] / static_cast<float>( nCount ) );
 			}
-			q[3] = static_cast<std::uint8_t>(std::lround(sum[3] / static_cast<float>(count)));
+			q[ 3 ] = static_cast<std::uint8_t>( std::lround( sum[ 3 ] / static_cast<float>( nCount ) ) );
 		}
 	}
 	return out;
 }
 
-Image oriented(const Image& image, int quarterTurns, bool mirror) {
-	quarterTurns = ((quarterTurns % 4) + 4) % 4;
-	if (quarterTurns == 0 && !mirror) {
+//-----------------------------------------------------------------------------
+// Purpose: Turned clockwise by quarterTurns (0-3), then mirrored left to right if mirror is set.
+//-----------------------------------------------------------------------------
+CImage Oriented( const CImage &image, int nQuarterTurns, bool bMirror )
+{
+	nQuarterTurns = ( ( nQuarterTurns % 4 ) + 4 ) % 4;
+	if ( nQuarterTurns == 0 && !bMirror )
+	{
 		return image;
 	}
-	const int w = image.width;
-	const int h = image.height;
-	const bool swapped = quarterTurns % 2 == 1;
-	Image out{swapped ? h : w, swapped ? w : h};
-	for (int y = 0; y < out.height; y++) {
-		for (int x = 0; x < out.width; x++) {
-			const int mx = mirror ? out.width - 1 - x : x; // the pixel of the turned (unmirrored) image
-			int sx = mx;
-			int sy = y;
-			switch (quarterTurns) {
+	const int w = image.m_nWidth;
+	const int h = image.m_nHeight;
+	const bool bSwapped = nQuarterTurns % 2 == 1;
+	CImage out{ bSwapped ? h : w, bSwapped ? w : h };
+	for ( int y = 0; y < out.m_nHeight; y++ )
+	{
+		for ( int x = 0; x < out.m_nWidth; x++ )
+		{
+			const int nMx = bMirror ? out.m_nWidth - 1 - x : x; // the pixel of the turned (unmirrored) image
+			int nSx = nMx;
+			int nSy = y;
+			switch ( nQuarterTurns )
+			{
 				case 1: // clockwise: the left column becomes the top row
-					sx = y;
-					sy = h - 1 - mx;
+					nSx = y;
+					nSy = h - 1 - nMx;
 					break;
 				case 2:
-					sx = w - 1 - mx;
-					sy = h - 1 - y;
+					nSx = w - 1 - nMx;
+					nSy = h - 1 - y;
 					break;
 				case 3:
-					sx = w - 1 - y;
-					sy = mx;
+					nSx = w - 1 - y;
+					nSy = nMx;
 					break;
 				default:
 					break;
 			}
-			std::memcpy(out.pixel(x, y), image.pixel(sx, sy), 4);
+			std::memcpy( out.Pixel( x, y ), image.Pixel( nSx, nSy ), 4 );
 		}
 	}
 	return out;
 }
 
-Orientation combined(Orientation first, Orientation second) {
+//-----------------------------------------------------------------------------
+// Purpose: The one orientation that equals applying first, then second.
+//-----------------------------------------------------------------------------
+COrientation Combined( COrientation first, COrientation second )
+{
 	// A turn after a mirror is the mirror after the opposite turn.
-	const int turns = first.quarterTurns + (first.mirror ? -second.quarterTurns : second.quarterTurns);
-	return {((turns % 4) + 4) % 4, first.mirror != second.mirror};
+	const int nTurns = first.m_nQuarterTurns + ( first.m_bMirror ? -second.m_nQuarterTurns : second.m_nQuarterTurns );
+	return { ( ( nTurns % 4 ) + 4 ) % 4, first.m_bMirror != second.m_bMirror };
 }
 
-int nearestPowerOfTwo(int n) {
-	int power = 1;
-	while (power < n && power < (1 << 29)) {
-		power <<= 1;
+//-----------------------------------------------------------------------------
+// Purpose: The power of two nearest to n, at least 1.
+//-----------------------------------------------------------------------------
+int NearestPowerOfTwo( int n )
+{
+	int nPower = 1;
+	while ( nPower < n && nPower < ( 1 << 29 ) )
+	{
+		nPower <<= 1;
 	}
 	// power >= n: step back when the smaller power is nearer.
-	return power > 1 && n - power / 2 < power - n ? power / 2 : power;
+	return nPower > 1 && n - nPower / 2 < nPower - n ? nPower / 2 : nPower;
 }
 
-float toLinear(std::uint8_t value) {
-	return linearTable()[value];
+//-----------------------------------------------------------------------------
+// Purpose: sRGB 8-bit value to linear light 0-1 and back.
+//-----------------------------------------------------------------------------
+float ToLinear( std::uint8_t nValue )
+{
+	return LinearTable()[ nValue ];
 }
 
-std::uint8_t fromLinear(float value) {
-	value = std::clamp(value, 0.0f, 1.0f);
-	const float c = value <= 0.0031308f ? value * 12.92f : 1.055f * std::pow(value, 1.0f / 2.4f) - 0.055f;
-	return static_cast<std::uint8_t>(std::lround(c * 255.0f));
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+std::uint8_t FromLinear( float flValue )
+{
+	flValue = std::clamp( flValue, 0.0f, 1.0f );
+	const float c = flValue <= 0.0031308f ? flValue * 12.92f : 1.055f * std::pow( flValue, 1.0f / 2.4f ) - 0.055f;
+	return static_cast<std::uint8_t>( std::lround( c * 255.0f ) );
 }
 
 } // namespace xv::texture

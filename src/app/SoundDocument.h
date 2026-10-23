@@ -1,4 +1,11 @@
+//===========================================================================//
 // SPDX-License-Identifier: GPL-3.0-or-later
+//
+// Purpose: An open soundscape or soundscript file.  Every change goes through the undo stack and
+//          swaps in a whole new copy of the top-level entry it touches, so undoing restores the
+//          file byte for byte, comments and spacing included.
+//
+//===========================================================================//
 #pragma once
 
 #include <filesystem>
@@ -14,64 +21,61 @@
 
 class QUndoStack;
 
-// An open soundscape or soundscript file.
-//
-// Every change goes through the undo stack and swaps in a whole new copy of the top-level entry
-// it touches, so undoing restores the file byte for byte, comments and spacing included.
-class SoundDocument : public QObject {
+class CSoundDocument : public QObject
+{
 	Q_OBJECT
 
 public:
-	SoundDocument(QString gamePath, xv::sound::FileKind kind, xv::kv1::ParseResult parsed, QObject* parent = nullptr);
+	CSoundDocument( QString szGamePath, xv::sound::FileKind_t nKind, xv::kv1::CParseResult parsed, QObject *pParent = nullptr );
 
-	[[nodiscard]] const QString& gamePath() const { return gamePath_; }
-	[[nodiscard]] QString fileName() const;
-	[[nodiscard]] xv::sound::FileKind kind() const { return kind_; }
-	[[nodiscard]] const xv::sound::Schema& schema() const { return *schema_; }
-	[[nodiscard]] const xv::kv1::Document& document() const { return document_; }
-	[[nodiscard]] const std::vector<xv::kv1::Diagnostic>& parseDiagnostics() const { return diagnostics_; }
-	[[nodiscard]] QUndoStack* undoStack() const { return undo_; }
-	[[nodiscard]] bool isModified() const;
+	[[nodiscard]] const QString &GetGamePath() const { return m_szGamePath; }
+	[[nodiscard]] QString GetFileName() const;
+	[[nodiscard]] xv::sound::FileKind_t GetKind() const { return m_nKind; }
+	[[nodiscard]] const xv::sound::CSchema &GetSchema() const { return *m_pSchema; }
+	[[nodiscard]] const xv::kv1::CDocument &GetDocument() const { return m_Document; }
+	[[nodiscard]] const std::vector<xv::kv1::Diagnostic_t> &GetParseDiagnostics() const { return m_Diagnostics; }
+	[[nodiscard]] QUndoStack *GetUndoStack() const { return m_pUndo; }
+	[[nodiscard]] bool IsModified() const;
 
 	// The loose file Save writes to; empty when the file came from a VPK or is new.
-	[[nodiscard]] const std::filesystem::path& diskPath() const { return diskPath_; }
-	void setDiskPath(std::filesystem::path path) { diskPath_ = std::move(path); }
+	[[nodiscard]] const std::filesystem::path &GetDiskPath() const { return m_DiskPath; }
+	void SetDiskPath( std::filesystem::path path ) { m_DiskPath = std::move( path ); }
 	// The game or mod folder holding this file's scripts/ (or maps/) folder, for finding its sounds on
 	// disk when no game is mounted; empty if it isn't in one.
-	[[nodiscard]] std::filesystem::path localRoot() const;
-	[[nodiscard]] std::string serialize() const;
-	void markSaved();
-	void markUnsaved(); // a new document that has never been written
-	[[nodiscard]] bool isNew() const { return neverSaved_; }
+	[[nodiscard]] std::filesystem::path GetLocalRoot() const;
+	[[nodiscard]] std::string GetSerialize() const;
+	void MarkSaved();
+	void MarkUnsaved(); // a new document that has never been written
+	[[nodiscard]] bool IsNew() const { return m_bNeverSaved; }
 
-	[[nodiscard]] const xv::kv1::Node* node(const xv::sound::NodePath& path) const;
+	[[nodiscard]] const xv::kv1::CNode *Node( const xv::sound::NodePath_t &path ) const;
 	// The schema block for the block at path; nullptr for blocks the schema doesn't know.
-	[[nodiscard]] const xv::sound::BlockDef* blockDef(const xv::sound::NodePath& path) const;
+	[[nodiscard]] const xv::sound::BlockDef_t *BlockDef( const xv::sound::NodePath_t &path ) const;
 
-	void setKey(const xv::sound::NodePath& path, const QString& key);
-	void setValue(const xv::sound::NodePath& path, const QString& value);
-	void insertChild(const xv::sound::NodePath& parent, std::size_t index, xv::kv1::Node child, const QString& description);
-	void removeNode(const xv::sound::NodePath& path);
-	void insertEntry(std::size_t index, xv::kv1::Node entry, const QString& description);
+	void SetKey( const xv::sound::NodePath_t &path, const QString &szKey );
+	void SetValue( const xv::sound::NodePath_t &path, const QString &szValue );
+	void InsertChild( const xv::sound::NodePath_t &parent, std::size_t nIndex, xv::kv1::CNode child, const QString &szDescription );
+	void RemoveNode( const xv::sound::NodePath_t &path );
+	void InsertEntry( std::size_t nIndex, xv::kv1::CNode entry, const QString &szDescription );
 
 signals:
-	void changed();
-	void modifiedChanged(bool modified);
+	void Changed();
+	void ModifiedChanged( bool bModified );
 
 private:
-	friend class ReplaceEntryCommand;
-	friend class InsertEntryCommand;
-	friend class RemoveEntryCommand;
+	friend class CReplaceEntryCommand;
+	friend class CInsertEntryCommand;
+	friend class CRemoveEntryCommand;
 
 	// Applies edit to a copy of top-level entry rootIndex and pushes the swap as one undo step.
-	void editEntry(std::size_t rootIndex, const QString& description, const std::function<bool(xv::kv1::Node& entry)>& edit);
+	void EditEntry( std::size_t nRootIndex, const QString &szDescription, const std::function<bool( xv::kv1::CNode &entry )> &pfnEdit );
 
-	QString gamePath_;
-	xv::sound::FileKind kind_;
-	const xv::sound::Schema* schema_;
-	xv::kv1::Document document_;
-	std::vector<xv::kv1::Diagnostic> diagnostics_;
-	std::filesystem::path diskPath_;
-	QUndoStack* undo_;
-	bool neverSaved_ = false;
+	QString m_szGamePath;
+	xv::sound::FileKind_t m_nKind;
+	const xv::sound::CSchema *m_pSchema;
+	xv::kv1::CDocument m_Document;
+	std::vector<xv::kv1::Diagnostic_t> m_Diagnostics;
+	std::filesystem::path m_DiskPath;
+	QUndoStack *m_pUndo;
+	bool m_bNeverSaved = false;
 };

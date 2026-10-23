@@ -1,4 +1,9 @@
+//===========================================================================//
 // SPDX-License-Identifier: GPL-3.0-or-later
+//
+// Purpose: See SoundIndex.h.
+//
+//===========================================================================//
 #include "SoundIndex.h"
 
 #include <algorithm>
@@ -10,151 +15,217 @@
 #include "sound/Wav.h"
 #include "vfs/Vfs.h"
 
-using xv::sound::FileKind;
+using xv::sound::FileKind_t;
 
-void SoundIndex::rebuild(const xv::vfs::FileSystem& fileSystem) {
-	fileSystem_ = &fileSystem;
-	soundFiles_.clear();
-	soundscapes_.clear();
-	sounds_.clear();
-	soundscapeDocuments_.clear();
-	loops_.clear();
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+void CSoundIndex::Rebuild( const xv::vfs::CFileSystem &fileSystem )
+{
+	m_pFileSystem = &fileSystem;
+	m_SoundFiles.clear();
+	m_Soundscapes.clear();
+	m_Sounds.clear();
+	m_SoundscapeDocuments.clear();
+	m_Loops.clear();
 
-	for (const std::string& path : fileSystem.find("sound", "", true)) {
-		if (path.ends_with(".wav") || path.ends_with(".mp3")) {
-			soundFiles_ << QString::fromStdString(path.substr(6));
+	for ( const std::string &szPath : fileSystem.Find( "sound", "", true ) )
+	{
+		if ( szPath.ends_with( ".wav" ) || szPath.ends_with( ".mp3" ) )
+		{
+			m_SoundFiles << QString::fromStdString( szPath.substr( 6 ) );
 		}
 	}
 
-	for (const std::string& file : fileSystem.find("scripts", ".txt")) {
-		const FileKind kind = xv::sound::fileKindForPath(file);
-		if (kind == FileKind::Unknown) {
+	for ( const std::string &szFile : fileSystem.Find( "scripts", ".txt" ) )
+	{
+		const FileKind_t nKind = xv::sound::FileKindForPath( szFile );
+		if ( nKind == FileKind_t::FILE_KIND_UNKNOWN )
+		{
 			continue;
 		}
-		const auto text = fileSystem.readText(file);
-		if (!text) {
+		const auto text = fileSystem.ReadText( szFile );
+		if ( !text )
+		{
 			continue;
 		}
-		auto parsed = xv::kv1::parse(*text);
-		auto& entries = (kind == FileKind::Soundscape ? soundscapes_ : sounds_)[file];
-		for (const xv::kv1::Node& root : parsed.document.roots) {
-			if (root.isBlock()) {
-				entries.push_back({root.key(), kind == FileKind::Soundscape ? xv::sound::nestedSoundscapes(root) : std::vector<std::string>{}});
+		auto parsed = xv::kv1::Parse( *text );
+		auto &entries = ( nKind == FileKind_t::FILE_KIND_SOUNDSCAPE ? m_Soundscapes : m_Sounds )[ szFile ];
+		for ( const xv::kv1::CNode &root : parsed.m_Document.m_Roots )
+		{
+			if ( root.IsBlock() )
+			{
+				entries.push_back( { root.GetKey(), nKind == FileKind_t::FILE_KIND_SOUNDSCAPE ? xv::sound::NestedSoundscapes( root ) : std::vector<std::string>{} } );
 			}
 		}
-		if (kind == FileKind::Soundscape) {
-			soundscapeDocuments_.emplace(file, std::move(parsed.document));
+		if ( nKind == FileKind_t::FILE_KIND_SOUNDSCAPE )
+		{
+			m_SoundscapeDocuments.emplace( szFile, std::move( parsed.m_Document ) );
 		}
 	}
 }
 
-QStringList SoundIndex::soundscapeNames(const SoundDocument* including) const {
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+QStringList CSoundIndex::SoundscapeNames( const CSoundDocument *pIncluding ) const
+{
 	std::set<QString> names;
-	const std::string skip = including ? including->gamePath().toStdString() : std::string{};
-	for (const auto& [file, entries] : soundscapes_) {
-		if (file != skip) {
-			for (const Entry& entry : entries) {
-				names.insert(QString::fromStdString(entry.name));
+	const std::string szSkip = pIncluding ? pIncluding->GetGamePath().toStdString() : std::string{};
+	for ( const auto &[ file, entries ] : m_Soundscapes )
+	{
+		if ( file != szSkip )
+		{
+			for ( const Entry_t &entry : entries )
+			{
+				names.insert( QString::fromStdString( entry.m_szName ) );
 			}
 		}
 	}
-	if (including && including->kind() == FileKind::Soundscape) {
-		for (const xv::kv1::Node& root : including->document().roots) {
-			if (root.isBlock()) {
-				names.insert(QString::fromStdString(root.key()));
+	if ( pIncluding && pIncluding->GetKind() == FileKind_t::FILE_KIND_SOUNDSCAPE )
+	{
+		for ( const xv::kv1::CNode &root : pIncluding->GetDocument().m_Roots )
+		{
+			if ( root.IsBlock() )
+			{
+				names.insert( QString::fromStdString( root.GetKey() ) );
 			}
 		}
 	}
-	return {names.begin(), names.end()};
+	return { names.begin(), names.end() };
 }
 
-bool SoundIndex::hasGame() const {
-	return fileSystem_ && !fileSystem_->records().empty();
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+bool CSoundIndex::HasGame() const
+{
+	return m_pFileSystem && !m_pFileSystem->GetRecords().empty();
 }
 
-bool SoundIndex::exists(std::string_view gamePath) const {
-	return fileSystem_ && fileSystem_->resolve(gamePath) != nullptr;
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+bool CSoundIndex::Exists( std::string_view szGamePath ) const
+{
+	return m_pFileSystem && m_pFileSystem->Resolve( szGamePath ) != nullptr;
 }
 
-const xv::kv1::Node* SoundIndex::findSoundscape(std::string_view name, const SoundDocument* first) const {
-	std::string skip;
-	if (first && first->kind() == FileKind::Soundscape) {
-		if (const xv::kv1::Node* found = first->document().find(name); found && found->isBlock()) {
-			return found;
+//-----------------------------------------------------------------------------
+// Purpose: A soundscape by name, looked up in `first` before the game's other soundscape files.
+//-----------------------------------------------------------------------------
+const xv::kv1::CNode *CSoundIndex::FindSoundscape( std::string_view szName, const CSoundDocument *pFirst ) const
+{
+	std::string szSkip;
+	if ( pFirst && pFirst->GetKind() == FileKind_t::FILE_KIND_SOUNDSCAPE )
+	{
+		if ( const xv::kv1::CNode *pFound = pFirst->GetDocument().Find( szName ); pFound && pFound->IsBlock() )
+		{
+			return pFound;
 		}
-		skip = xv::vfs::normalizePath(first->gamePath().toStdString());
+		szSkip = xv::vfs::NormalizePath( pFirst->GetGamePath().toStdString() );
 	}
-	for (const auto& [file, document] : soundscapeDocuments_) {
-		if (file != skip) {
-			if (const xv::kv1::Node* found = document.find(name); found && found->isBlock()) {
-				return found;
+	for ( const auto &[ file, document ] : m_SoundscapeDocuments )
+	{
+		if ( file != szSkip )
+		{
+			if ( const xv::kv1::CNode *pFound = document.Find( szName ); pFound && pFound->IsBlock() )
+			{
+				return pFound;
 			}
 		}
 	}
 	return nullptr;
 }
 
-std::optional<bool> SoundIndex::hasLoopPoints(std::string_view gamePath) const {
-	auto [it, inserted] = loops_.try_emplace(std::string{gamePath});
-	if (inserted && fileSystem_) {
-		if (const auto bytes = fileSystem_->read(gamePath)) {
-			if (const auto info = xv::sound::readWavInfo(*bytes)) {
-				it->second = info->loopStart.has_value();
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+std::optional<bool> CSoundIndex::HasLoopPoints( std::string_view szGamePath ) const
+{
+	auto [ it, inserted ] = m_Loops.try_emplace( std::string{ szGamePath } );
+	if ( inserted && m_pFileSystem )
+	{
+		if ( const auto bytes = m_pFileSystem->Read( szGamePath ) )
+		{
+			if ( const auto info = xv::sound::ReadWavInfo( *bytes ) )
+			{
+				it->second = info->m_LoopStart.has_value();
 			}
 		}
 	}
 	return it->second;
 }
 
-std::vector<std::string> SoundIndex::manifestFiles(FileKind kind) const {
-	if (!fileSystem_) {
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+std::vector<std::string> CSoundIndex::ManifestFiles( FileKind_t nKind ) const
+{
+	if ( !m_pFileSystem )
+	{
 		return {};
 	}
-	const auto text = fileSystem_->readText(xv::sound::manifestPathFor(kind));
-	return text ? xv::sound::manifestFiles(xv::kv1::parse(*text).document) : std::vector<std::string>{};
+	const auto text = m_pFileSystem->ReadText( xv::sound::ManifestPathFor( nKind ) );
+	return text ? xv::sound::ManifestFiles( xv::kv1::Parse( *text ).m_Document ) : std::vector<std::string>{};
 }
 
-xv::sound::LintContext SoundIndex::lintContext(const SoundDocument& document) const {
-	xv::sound::LintContext context;
+//-----------------------------------------------------------------------------
+// Purpose: Everything the linter needs, with the document's own file left out of the cross-file
+//          maps.
+//-----------------------------------------------------------------------------
+xv::sound::LintContext_t CSoundIndex::LintContext( const CSoundDocument &document ) const
+{
+	xv::sound::LintContext_t context;
 	// Sounds are looked for in the mounted game and, for files opened from a mod folder, beside them.
-	const std::filesystem::path root = document.localRoot();
-	if (hasGame() || !root.empty()) {
-		context.fileExists = [this, root](std::string_view path) {
+	const std::filesystem::path root = document.GetLocalRoot();
+	if ( HasGame() || !root.empty() )
+	{
+		context.m_pfnFileExists = [ this, root ]( std::string_view szPath ) {
 			std::error_code ec;
-			return exists(path) || (!root.empty() && std::filesystem::exists(xv::vfs::findCaseInsensitive(root / xv::vfs::fromUtf8(path)), ec));
+			return Exists( szPath ) || ( !root.empty() && std::filesystem::exists( xv::vfs::FindCaseInsensitive( root / xv::vfs::FromUtf8( szPath ) ), ec ) );
 		};
-		context.hasLoopPoints = [this, root](std::string_view path) -> std::optional<bool> {
-			if (exists(path)) {
-				return hasLoopPoints(path);
+		context.m_pfnHasLoopPoints = [ this, root ]( std::string_view szPath ) -> std::optional<bool> {
+			if ( Exists( szPath ) )
+			{
+				return HasLoopPoints( szPath );
 			}
-			if (root.empty() || !fileSystem_) {
+			if ( root.empty() || !m_pFileSystem )
+			{
 				return std::nullopt;
 			}
-			const auto bytes = SoundPlayer::readGameFile(*fileSystem_, std::string{path}, root);
-			const auto info = bytes ? xv::sound::readWavInfo(*bytes) : std::nullopt;
-			return info ? std::optional{info->loopStart.has_value()} : std::nullopt;
+			const auto bytes = CSoundPlayer::ReadGameFile( *m_pFileSystem, std::string{ szPath }, root );
+			const auto info = bytes ? xv::sound::ReadWavInfo( *bytes ) : std::nullopt;
+			return info ? std::optional{ info->m_LoopStart.has_value() } : std::nullopt;
 		};
 	}
 
-	const std::string self = xv::vfs::normalizePath(document.gamePath().toStdString());
-	const bool soundscape = document.kind() == FileKind::Soundscape;
-	for (const auto& [file, entries] : soundscape ? soundscapes_ : sounds_) {
-		if (file == self) {
+	const std::string szSelf = xv::vfs::NormalizePath( document.GetGamePath().toStdString() );
+	const bool bSoundscape = document.GetKind() == FileKind_t::FILE_KIND_SOUNDSCAPE;
+	for ( const auto &[ file, entries ] : bSoundscape ? m_Soundscapes : m_Sounds )
+	{
+		if ( file == szSelf )
+		{
 			continue;
 		}
-		for (const Entry& entry : entries) {
-			const std::string name = xv::sound::toLower(entry.name);
-			if (soundscape) {
-				context.otherSoundscapes.emplace(name, file);
-				context.otherNesting.emplace(name, entry.nested);
-			} else {
-				context.otherSounds.emplace(name, file);
+		for ( const Entry_t &entry : entries )
+		{
+			const std::string szName = xv::sound::ToLower( entry.m_szName );
+			if ( bSoundscape )
+			{
+				context.m_OtherSoundscapes.emplace( szName, file );
+				context.m_OtherNesting.emplace( szName, entry.m_Nested );
+			}
+			else
+			{
+				context.m_OtherSounds.emplace( szName, file );
 			}
 		}
 	}
-	if (hasGame()) {
-		const auto listed = manifestFiles(document.kind());
-		context.listedInManifest = std::ranges::find(listed, self) != listed.end();
+	if ( HasGame() )
+	{
+		const auto listed = ManifestFiles( document.GetKind() );
+		context.m_ListedInManifest = std::ranges::find( listed, szSelf ) != listed.end();
 	}
 	return context;
 }

@@ -2,8 +2,8 @@
 
 Soundscape, skybox and particle editors for Source engine games, as one Qt 6 app for Linux and Windows.
 
-**Status:** the soundscape and soundscript editor works, with sound previews, and the skybox
-creator makes skies from six images. The particle editor comes next.
+**Status:** the soundscape and soundscript editor works, with sound previews; the skybox creator
+makes skies from six images; and the particle editor edits PCF files, with a live preview.
 
 ## Opening things
 
@@ -15,9 +15,9 @@ command line (`vomit-tools <file|folder|gameinfo.txt>...`):
   folders merged, the winning copy of each file).
 - **A folder:** **File → Open Folder** opens a mod folder, a `custom/` folder or anything else in
   the **Folder** tab.
-- **A file:** **File → Open File** opens a file. Soundscapes and soundscripts open in the editor,
-  under any name (the file name or the entries decide); other files show in the preview, VTFs and
-  images included.
+- **A file:** **File → Open File** opens a file. Soundscapes and soundscripts open in the sound
+  editor, under any name (the file name or the entries decide), and `.pcf` files in the particle
+  editor; other files show in the preview, VTFs and images included.
 - **Recent:** **File → Open Recent** lists recent games, folders and files.
 
 A game isn't required. When a file or folder belongs to one (a `gameinfo.txt` sits in it or above
@@ -105,9 +105,63 @@ The faces' orientation comes from the game's own skies. In all of them, the pixe
 each cube edge match under it, and the sun drawn in a map's sky sits where its `light_environment`
 puts the sun.
 
+## Particle editor
+
+- **Opening:** double-click a `.pcf` in the **Game** or **Folder** tab, open one from **File → Open
+  File**, or start one with **File → New Particle File**.
+- **Systems:** the file's systems are listed on the left, with child systems under the systems that
+  spawn them, or (**Grid**) as pictures of each effect. **New System** starts one with a basic set of operators (it emits, moves, fades and
+  draws). **Duplicate**, **Delete** and renaming (double-click or F2) are there too. Renaming also
+  updates the child links and `cull_replacement_definition` values that name the system.
+- **Operators:** the middle column shows the selected system's renderers, operators, initializers,
+  emitters, child systems, forces and constraints, each list in the order it runs. **Add** offers
+  every function the game's own particle files use, most used first, in a searchable list. ▲ and ▼
+  reorder, and **Remove** takes one out.
+- **Preview:** the selected system plays above its properties, with the systems it spawns, using the
+  game's materials and sprite sheets.
+  - Drag to turn around it, right-drag to move, scroll to zoom, double-click (or **Frame**) to fit it
+    in view.
+  - The control points the system uses are handles: drag one to move it, with Shift held to move it
+    up and down. Particles locked to a control point move with it.
+  - A panel in the corner shows each system's particles against its `max_particles`, orange when
+    it's full. **Bounds** shows each system's bounding box and where its particles really are.
+  - Play/pause, restart, speeds from 0.1× to 2×, looping and a ground grid. It draws on the graphics
+    card where Qt can (**GPU**), in software otherwise.
+  - Edits show at once, without starting the effect over.
+  - It's an approximation worked out from what each operator's name and settings say, not the
+    game's code. Operators it doesn't run yet are greyed out in the list and named under the
+    preview; collisions, models and refraction aren't drawn.
+- **Properties:** the right column edits the selected system, operator or child link. Numbers, vectors,
+  colours (with a picker), on/off values, materials (completed from the game's materials) and child
+  systems each get a fitting field. Names in bold differ from the value the game's files use most,
+  and right-clicking one resets it.
+- **Search:** **Edit → Find Particle System** (Ctrl+Shift+F, or **Search All Files**) looks through
+  every particle file the game has, by system name, material, operator or child system, and opens
+  the one picked.
+- **Copy and paste:** copied systems bring the systems they spawn along, and paste into any particle
+  file, in the same window or another one. The clipboard also gets the systems as keyvalues2 text.
+- **Checks:**
+  - systems that spawn themselves
+  - child links to nothing
+  - names used twice in the file
+  - names another of the game's files also defines
+  - materials the game doesn't have
+  - cull replacements that don't exist
+  - operators none of the game's files use, or used as the wrong kind
+  - files the manifest doesn't list
+- **Saving** keeps everything the editor doesn't show: an unedited file is written back byte for
+  byte. Files from a VPK are saved to the write folder, like soundscapes. **Save As** can also convert
+  between binary encodings 1 and 2, or write keyvalues2 text for reading and comparing.
+- **Manifest:** **Add to Manifest** lists the file in `particles/particles_manifest.txt`.
+- **Undo** works for every change.
+
+The editor learns operators and their usual values from the mounted game's own particle files,
+so open a game (or a file inside one) to get the full **Add** menu.
+
 ## Building
 
-You need CMake 3.25+, a C++20 compiler and Qt 6.5+ (Core, Widgets, Test).
+You need CMake 3.25+, a C++20 compiler and Qt 6.5+ (Core, Widgets, Test). With Qt 6.7+ and its
+Shader Tools module, the particle preview can also draw on the GPU.
 [sourcepp](https://github.com/craftablescience/sourcepp), [miniaudio](https://miniaud.io) and
 [stb](https://github.com/nothings/stb) are fetched at configure time; to build offline, point
 `FETCHCONTENT_SOURCE_DIR_SOURCEPP`, `FETCHCONTENT_SOURCE_DIR_MINIAUDIO` and `FETCHCONTENT_SOURCE_DIR_STB`
@@ -139,6 +193,18 @@ Use [llvm-mingw](https://github.com/mstorsjo/llvm-mingw) with Qt's `llvm_mingw` 
 Linux Qt of the same version for the host tools. Instructions are in
 [cmake/toolchains/llvm-mingw-x86_64.cmake](cmake/toolchains/llvm-mingw-x86_64.cmake).
 
+## Code style
+
+The code follows the naming and layout conventions of Valve's Source SDK (the style, not its code):
+
+- Classes are `CName`, plain structs and enums `Name_t`, enum values `ENUM_NAME_VALUE`.
+- Members are `m_` plus a type prefix: `m_nCount` (integers and enums), `m_flTime` (floats),
+  `m_bVisible`, `m_pEditor` (pointers), `m_szName` (strings), `m_vecOrigin`, `m_pfnRead` (callables),
+  and `m_Name` for other types. Locals and parameters use the same prefixes without `m_`.
+- Functions are `PascalCase`; accessors are `GetName()`, `IsModified()`, `SetName()`.
+- Every function definition has a `Purpose:` banner, and every file a header block.
+- Layout is set by `.clang-format`: Allman braces, tabs, `if ( x )`, `Call( a, b )`, `p[ i ]`.
+
 ## Layout
 
 | Path | What |
@@ -150,7 +216,8 @@ Linux Qt of the same version for the host tools. Instructions are in
 | `src/core/audio` | Decoding (WAV PCM/ADPCM, MP3) and playback on [miniaudio](https://miniaud.io) |
 | `src/core/texture` | VTF 7.0–7.5 reading and 7.1/7.2 writing, DXT and other formats; image loading on [stb](https://github.com/nothings/stb) |
 | `src/core/sky` | Sky faces and their orientation, preview rendering, seam checks, export, loading the game's skies |
-| `src/app` | Qt app: game and folder browsers, sound editor (cards, value pickers, playback), skybox creator, document tabs |
+| `src/core/particles` | Particle systems in PCF files: reading, editing, copy and paste, operator defaults from the game's files, checks, manifest; the preview's simulation and drawing |
+| `src/app` | Qt app: game and folder browsers, sound editor (cards, value pickers, playback), skybox creator, particle editor, document tabs |
 
 ## License
 

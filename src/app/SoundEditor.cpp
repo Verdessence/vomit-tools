@@ -1,4 +1,9 @@
+//===========================================================================//
 // SPDX-License-Identifier: GPL-3.0-or-later
+//
+// Purpose: See SoundEditor.h.
+//
+//===========================================================================//
 #include "SoundEditor.h"
 
 #include <algorithm>
@@ -23,352 +28,463 @@
 #include "SoundIndex.h"
 #include "SoundPlayer.h"
 
-using xv::sound::Issue;
-using xv::sound::NodePath;
+using xv::sound::Issue_t;
+using xv::sound::NodePath_t;
 
-namespace {
+namespace
+{
 
-QString qs(std::string_view text) {
-	return QString::fromUtf8(text.data(), static_cast<qsizetype>(text.size()));
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+QString Qs( std::string_view szText )
+{
+	return QString::fromUtf8( szText.data(), static_cast<qsizetype>( szText.size() ) );
 }
 
-QIcon severityIcon(Issue::Severity severity) {
-	switch (severity) {
-		case Issue::Severity::Error:   return QApplication::style()->standardIcon(QStyle::SP_MessageBoxCritical);
-		case Issue::Severity::Warning: return QApplication::style()->standardIcon(QStyle::SP_MessageBoxWarning);
-		default:                       return QApplication::style()->standardIcon(QStyle::SP_MessageBoxInformation);
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+QIcon SeverityIcon( Issue_t::Severity_t nSeverity )
+{
+	switch ( nSeverity )
+	{
+		case Issue_t::Severity_t::SEVERITY_ERROR: return QApplication::style()->standardIcon( QStyle::SP_MessageBoxCritical );
+		case Issue_t::Severity_t::SEVERITY_WARNING: return QApplication::style()->standardIcon( QStyle::SP_MessageBoxWarning );
+		default: return QApplication::style()->standardIcon( QStyle::SP_MessageBoxInformation );
 	}
 }
 
-QVariant pathToVariant(const NodePath& path) {
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+QVariant PathToVariant( const NodePath_t &path )
+{
 	QVariantList list;
-	for (const std::size_t index : path) {
-		list << QVariant::fromValue(static_cast<qulonglong>(index));
+	for ( const std::size_t nIndex : path )
+	{
+		list << QVariant::fromValue( static_cast<qulonglong>( nIndex ) );
 	}
 	return list;
 }
 
-NodePath variantToPath(const QVariant& value) {
-	NodePath path;
-	for (const QVariant& index : value.toList()) {
-		path.push_back(static_cast<std::size_t>(index.toULongLong()));
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+NodePath_t VariantToPath( const QVariant &value )
+{
+	NodePath_t path;
+	for ( const QVariant &index : value.toList() )
+	{
+		path.push_back( static_cast<std::size_t>( index.toULongLong() ) );
 	}
 	return path;
 }
 
 } // namespace
 
-SoundEditor::SoundEditor(SoundDocument* document, const SoundIndex& index, SoundPlayer* player, QWidget* parent)
-		: QWidget(parent)
-		, document_(document)
-		, index_(index)
-		, player_(player) {
-	const QString noun = qs(document_->schema().entryNoun);
+//-----------------------------------------------------------------------------
+// Purpose: player may be null: no playback then.
+//-----------------------------------------------------------------------------
+CSoundEditor::CSoundEditor( CSoundDocument *pDocument, const CSoundIndex &index, CSoundPlayer *pPlayer, QWidget *pParent )
+	: QWidget( pParent ),
+	  m_pDocument( pDocument ),
+	  m_Index( index ),
+	  m_pPlayer( pPlayer )
+{
+	const QString szNoun = Qs( m_pDocument->GetSchema().m_szEntryNoun );
 
-	auto* toolbar = new QToolBar;
-	toolbar->setToolButtonStyle(Qt::ToolButtonTextOnly);
-	if (player_) {
-		QAction* play = toolbar->addAction(tr("▶ Play"), this, [this] {
-			if (card_) {
-				card_->play();
+	auto *pToolbar = new QToolBar;
+	pToolbar->setToolButtonStyle( Qt::ToolButtonTextOnly );
+	if ( m_pPlayer )
+	{
+		QAction *pPlay = pToolbar->addAction( tr( "▶ Play" ), this, [ this ] {
+			if ( m_pCard )
+			{
+				m_pCard->Play();
 			}
-		});
-		play->setShortcut(QKeySequence{Qt::CTRL | Qt::Key_Return});
-		play->setShortcutContext(Qt::WidgetWithChildrenShortcut);
-		play->setToolTip(document_->kind() == xv::sound::FileKind::Soundscape
-			? tr("Play the selected soundscape (%1). Positions, distance falloff and DSP aren't simulated.").arg(play->shortcut().toString(QKeySequence::NativeText))
-			: tr("Play the selected sound with its volume, pitch and random picks (%1)").arg(play->shortcut().toString(QKeySequence::NativeText)));
-		QAction* stop = toolbar->addAction(tr("■ Stop"), player_, &SoundPlayer::stop);
-		stop->setShortcut(QKeySequence{Qt::CTRL | Qt::Key_Period});
-		stop->setShortcutContext(Qt::WidgetWithChildrenShortcut);
-		stop->setToolTip(tr("Stop all sounds (%1)").arg(stop->shortcut().toString(QKeySequence::NativeText)));
-		addAction(play);
-		addAction(stop);
-		toolbar->addSeparator();
+		} );
+		pPlay->setShortcut( QKeySequence{ Qt::CTRL | Qt::Key_Return } );
+		pPlay->setShortcutContext( Qt::WidgetWithChildrenShortcut );
+		pPlay->setToolTip( m_pDocument->GetKind() == xv::sound::FileKind_t::FILE_KIND_SOUNDSCAPE
+				? tr( "Play the selected soundscape (%1). Positions, distance falloff and DSP aren't simulated." ).arg( pPlay->shortcut().toString( QKeySequence::NativeText ) )
+				: tr( "Play the selected sound with its volume, pitch and random picks (%1)" ).arg( pPlay->shortcut().toString( QKeySequence::NativeText ) ) );
+		QAction *pStop = pToolbar->addAction( tr( "■ Stop" ), m_pPlayer, &CSoundPlayer::Stop );
+		pStop->setShortcut( QKeySequence{ Qt::CTRL | Qt::Key_Period } );
+		pStop->setShortcutContext( Qt::WidgetWithChildrenShortcut );
+		pStop->setToolTip( tr( "Stop all sounds (%1)" ).arg( pStop->shortcut().toString( QKeySequence::NativeText ) ) );
+		addAction( pPlay );
+		addAction( pStop );
+		pToolbar->addSeparator();
 	}
-	toolbar->addAction(tr("New %1…").arg(noun), this, &SoundEditor::addEntry);
-	duplicate_ = toolbar->addAction(tr("Duplicate"), this, &SoundEditor::duplicateEntry);
-	delete_ = toolbar->addAction(tr("Delete"), this, &SoundEditor::deleteEntry);
-	toolbar->addSeparator();
-	addToManifest_ = toolbar->addAction(tr("Add to Manifest"), this, [this] { emit addToManifestRequested(document_); });
-	addToManifest_->setToolTip(tr("List this file in %1 so the game loads it").arg(qs(xv::sound::manifestPathFor(document_->kind()))));
-	auto* spacer = new QWidget;
-	spacer->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
-	toolbar->addWidget(spacer);
-	summary_ = new QLabel;
-	toolbar->addWidget(summary_);
+	pToolbar->addAction( tr( "New %1…" ).arg( szNoun ), this, &CSoundEditor::AddEntry );
+	m_pDuplicate = pToolbar->addAction( tr( "Duplicate" ), this, &CSoundEditor::DuplicateEntry );
+	m_pDelete = pToolbar->addAction( tr( "Delete" ), this, &CSoundEditor::DeleteEntry );
+	pToolbar->addSeparator();
+	m_pAddToManifest = pToolbar->addAction( tr( "Add to Manifest" ), this, [ this ] { emit AddToManifestRequested( m_pDocument ); } );
+	m_pAddToManifest->setToolTip( tr( "List this file in %1 so the game loads it" ).arg( Qs( xv::sound::ManifestPathFor( m_pDocument->GetKind() ) ) ) );
+	auto *pSpacer = new QWidget;
+	pSpacer->setSizePolicy( QSizePolicy::Expanding, QSizePolicy::Preferred );
+	pToolbar->addWidget( pSpacer );
+	m_pSummary = new QLabel;
+	pToolbar->addWidget( m_pSummary );
 
-	filter_ = new QLineEdit;
-	filter_->setPlaceholderText(tr("Filter %1s…").arg(noun));
-	filter_->setClearButtonEnabled(true);
-	entries_ = new QListWidget;
-	entries_->setObjectName(QStringLiteral("entryList"));
-	entries_->setUniformItemSizes(true);
-	auto* left = new QWidget;
-	auto* leftLayout = new QVBoxLayout(left);
-	leftLayout->setContentsMargins(0, 0, 0, 0);
-	leftLayout->addWidget(filter_);
-	leftLayout->addWidget(entries_);
+	m_pFilter = new QLineEdit;
+	m_pFilter->setPlaceholderText( tr( "Filter %1s…" ).arg( szNoun ) );
+	m_pFilter->setClearButtonEnabled( true );
+	m_pEntries = new QListWidget;
+	m_pEntries->setObjectName( QStringLiteral( "entryList" ) );
+	m_pEntries->setUniformItemSizes( true );
+	auto *pLeft = new QWidget;
+	auto *pLeftLayout = new QVBoxLayout( pLeft );
+	pLeftLayout->setContentsMargins( 0, 0, 0, 0 );
+	pLeftLayout->addWidget( m_pFilter );
+	pLeftLayout->addWidget( m_pEntries );
 
-	scroll_ = new QScrollArea;
-	scroll_->setWidgetResizable(true);
-	scroll_->setFrameShape(QFrame::NoFrame);
+	m_pScroll = new QScrollArea;
+	m_pScroll->setWidgetResizable( true );
+	m_pScroll->setFrameShape( QFrame::NoFrame );
 
-	auto* top = new QSplitter;
-	top->addWidget(left);
-	top->addWidget(scroll_);
-	top->setStretchFactor(1, 3);
-	top->setSizes({240, 760});
+	auto *pTop = new QSplitter;
+	pTop->addWidget( pLeft );
+	pTop->addWidget( m_pScroll );
+	pTop->setStretchFactor( 1, 3 );
+	pTop->setSizes( { 240, 760 } );
 
-	issueList_ = new QListWidget;
-	issueList_->setObjectName(QStringLiteral("issueList"));
-	auto* vertical = new QSplitter(Qt::Vertical);
-	vertical->addWidget(top);
-	vertical->addWidget(issueList_);
-	vertical->setStretchFactor(0, 4);
-	vertical->setStretchFactor(1, 1);
+	m_pIssueList = new QListWidget;
+	m_pIssueList->setObjectName( QStringLiteral( "issueList" ) );
+	auto *pVertical = new QSplitter( Qt::Vertical );
+	pVertical->addWidget( pTop );
+	pVertical->addWidget( m_pIssueList );
+	pVertical->setStretchFactor( 0, 4 );
+	pVertical->setStretchFactor( 1, 1 );
 
-	auto* layout = new QVBoxLayout(this);
-	layout->setContentsMargins(0, 0, 0, 0);
-	layout->setSpacing(0);
-	layout->addWidget(toolbar);
-	layout->addWidget(vertical);
+	auto *pLayout = new QVBoxLayout( this );
+	pLayout->setContentsMargins( 0, 0, 0, 0 );
+	pLayout->setSpacing( 0 );
+	pLayout->addWidget( pToolbar );
+	pLayout->addWidget( pVertical );
 
-	connect(filter_, &QLineEdit::textChanged, this, [this](const QString& text) {
-		for (int row = 0; row < entries_->count(); row++) {
-			QListWidgetItem* item = entries_->item(row);
-			item->setHidden(!item->text().contains(text, Qt::CaseInsensitive));
+	connect( m_pFilter, &QLineEdit::textChanged, this, [ this ]( const QString &szText ) {
+		for ( int nRow = 0; nRow < m_pEntries->count(); nRow++ )
+		{
+			QListWidgetItem *pItem = m_pEntries->item( nRow );
+			pItem->setHidden( !pItem->text().contains( szText, Qt::CaseInsensitive ) );
 		}
-	});
-	connect(entries_, &QListWidget::currentItemChanged, this, [this](QListWidgetItem* item) {
-		if (!item) {
+	} );
+	connect( m_pEntries, &QListWidget::currentItemChanged, this, [ this ]( QListWidgetItem *pItem ) {
+		if ( !pItem )
+		{
 			return;
 		}
-		const auto root = static_cast<std::size_t>(item->data(Qt::UserRole).toULongLong());
-		if (current_ != root) {
-			current_ = root;
-			showEntry();
+		const auto nRoot = static_cast<std::size_t>( pItem->data( Qt::UserRole ).toULongLong() );
+		if ( m_Current != nRoot )
+		{
+			m_Current = nRoot;
+			ShowEntry();
 		}
-	});
-	connect(entries_, &QListWidget::itemDoubleClicked, this, [this] {
-		if (card_) {
-			if (const xv::kv1::Node* node = document_->node({*current_})) {
-				bool ok = false;
-				const QString name = QInputDialog::getText(this, tr("Rename"), tr("Name:"), QLineEdit::Normal, qs(node->key()), &ok);
-				if (ok && !name.isEmpty()) {
-					document_->setKey({*current_}, name);
+	} );
+	connect( m_pEntries, &QListWidget::itemDoubleClicked, this, [ this ] {
+		if ( m_pCard )
+		{
+			if ( const xv::kv1::CNode *pNode = m_pDocument->Node( { *m_Current } ) )
+			{
+				bool bOk = false;
+				const QString szName = QInputDialog::getText( this, tr( "Rename" ), tr( "Name:" ), QLineEdit::Normal, Qs( pNode->GetKey() ), &bOk );
+				if ( bOk && !szName.isEmpty() )
+				{
+					m_pDocument->SetKey( { *m_Current }, szName );
 				}
 			}
 		}
-	});
-	connect(issueList_, &QListWidget::itemActivated, this, [this](QListWidgetItem* item) {
-		jumpTo(variantToPath(item->data(Qt::UserRole)));
-	});
-	connect(document_, &SoundDocument::changed, this, &SoundEditor::scheduleRefresh);
+	} );
+	connect( m_pIssueList, &QListWidget::itemActivated, this, [ this ]( QListWidgetItem *pItem ) {
+		JumpTo( VariantToPath( pItem->data( Qt::UserRole ) ) );
+	} );
+	connect( m_pDocument, &CSoundDocument::Changed, this, &CSoundEditor::ScheduleRefresh );
 
 	// Open on the first entry.
-	for (std::size_t i = 0; i < document_->document().roots.size(); i++) {
-		if (document_->document().roots[i].isBlock()) {
-			current_ = i;
+	for ( std::size_t i = 0; i < m_pDocument->GetDocument().m_Roots.size(); i++ )
+	{
+		if ( m_pDocument->GetDocument().m_Roots[ i ].IsBlock() )
+		{
+			m_Current = i;
 			break;
 		}
 	}
-	refresh();
+	Refresh();
 }
 
-void SoundEditor::relint() {
-	lint();
-	rebuildEntryList();
-	if (card_) {
-		card_->showIssues(issues_);
+//-----------------------------------------------------------------------------
+// Purpose: Re-run the linter, e.g. after the game was remounted.
+//-----------------------------------------------------------------------------
+void CSoundEditor::Relint()
+{
+	Lint();
+	RebuildEntryList();
+	if ( m_pCard )
+	{
+		m_pCard->ShowIssues( m_Issues );
 	}
 }
 
-void SoundEditor::selectEntry(std::size_t root) {
-	current_ = root;
-	rebuildEntryList();
-	showEntry();
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+void CSoundEditor::SelectEntry( std::size_t nRoot )
+{
+	m_Current = nRoot;
+	RebuildEntryList();
+	ShowEntry();
 }
 
-// Edits arrive while a table is still inside its itemChanged handler; rebuilding the card
-// right then would delete the table under it, so the rebuild waits for the event loop.
-void SoundEditor::scheduleRefresh() {
-	if (!refreshQueued_) {
-		refreshQueued_ = true;
-		QTimer::singleShot(0, this, &SoundEditor::refresh);
+//-----------------------------------------------------------------------------
+// Purpose: Edits arrive while a table is still inside its itemChanged handler; rebuilding the card
+//          right then would delete the table under it, so the rebuild waits for the event loop.
+//-----------------------------------------------------------------------------
+void CSoundEditor::ScheduleRefresh()
+{
+	if ( !m_bRefreshQueued )
+	{
+		m_bRefreshQueued = true;
+		QTimer::singleShot( 0, this, &CSoundEditor::Refresh );
 	}
 }
 
-void SoundEditor::refresh() {
-	refreshQueued_ = false;
-	const auto& roots = document_->document().roots;
-	if (current_ && *current_ >= roots.size()) {
-		current_ = roots.empty() ? std::nullopt : std::optional{roots.size() - 1};
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+void CSoundEditor::Refresh()
+{
+	m_bRefreshQueued = false;
+	const auto &roots = m_pDocument->GetDocument().m_Roots;
+	if ( m_Current && *m_Current >= roots.size() )
+	{
+		m_Current = roots.empty() ? std::nullopt : std::optional{ roots.size() - 1 };
 	}
-	lint();
-	rebuildEntryList();
-	showEntry();
+	Lint();
+	RebuildEntryList();
+	ShowEntry();
 }
 
-void SoundEditor::lint() {
-	const auto context = index_.lintContext(*document_);
-	listedInManifest_ = context.listedInManifest.value_or(true);
-	issues_ = xv::sound::lint(document_->document(), document_->kind(), context);
-	addToManifest_->setEnabled(!listedInManifest_);
-	showIssueList();
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+void CSoundEditor::Lint()
+{
+	const auto context = m_Index.LintContext( *m_pDocument );
+	m_bListedInManifest = context.m_ListedInManifest.value_or( true );
+	m_Issues = xv::sound::Lint( m_pDocument->GetDocument(), m_pDocument->GetKind(), context );
+	m_pAddToManifest->setEnabled( !m_bListedInManifest );
+	ShowIssueList();
 }
 
-void SoundEditor::showIssueList() {
-	issueList_->clear();
-	int counts[3] = {};
-	for (const auto& diagnostic : document_->parseDiagnostics()) {
-		const auto severity = diagnostic.severity == xv::kv1::Diagnostic::Severity::Error ? Issue::Severity::Error : Issue::Severity::Warning;
-		auto* item = new QListWidgetItem(severityIcon(severity), tr("Line %1: %2 (as loaded)").arg(diagnostic.line).arg(qs(diagnostic.message)), issueList_);
-		item->setData(Qt::UserRole, pathToVariant({}));
-		counts[static_cast<int>(severity)]++;
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+void CSoundEditor::ShowIssueList()
+{
+	m_pIssueList->clear();
+	int counts[ 3 ] = {};
+	for ( const auto &diagnostic : m_pDocument->GetParseDiagnostics() )
+	{
+		const auto nSeverity = diagnostic.m_nSeverity == xv::kv1::Diagnostic_t::Severity_t::SEVERITY_ERROR ? Issue_t::Severity_t::SEVERITY_ERROR : Issue_t::Severity_t::SEVERITY_WARNING;
+		auto *pItem = new QListWidgetItem( SeverityIcon( nSeverity ), tr( "Line %1: %2 (as loaded)" ).arg( diagnostic.m_nLine ).arg( Qs( diagnostic.m_szMessage ) ), m_pIssueList );
+		pItem->setData( Qt::UserRole, PathToVariant( {} ) );
+		counts[ static_cast<int>( nSeverity ) ]++;
 	}
-	for (const Issue& issue : issues_) {
-		QString where;
-		if (!issue.path.empty()) {
-			NodePath prefix;
-			for (const std::size_t index : issue.path) {
-				prefix.push_back(index);
-				if (const xv::kv1::Node* node = document_->node(prefix)) {
-					where += (where.isEmpty() ? QString{} : QStringLiteral(" › ")) + qs(node->key());
+	for ( const Issue_t &issue : m_Issues )
+	{
+		QString szWhere;
+		if ( !issue.m_Path.empty() )
+		{
+			NodePath_t prefix;
+			for ( const std::size_t nIndex : issue.m_Path )
+			{
+				prefix.push_back( nIndex );
+				if ( const xv::kv1::CNode *pNode = m_pDocument->Node( prefix ) )
+				{
+					szWhere += ( szWhere.isEmpty() ? QString{} : QStringLiteral( " › " ) ) + Qs( pNode->GetKey() );
 				}
 			}
-			where += QStringLiteral(": ");
+			szWhere += QStringLiteral( ": " );
 		}
-		auto* item = new QListWidgetItem(severityIcon(issue.severity), where + qs(issue.message), issueList_);
-		item->setData(Qt::UserRole, pathToVariant(issue.path));
-		counts[static_cast<int>(issue.severity)]++;
+		auto *pItem = new QListWidgetItem( SeverityIcon( issue.m_nSeverity ), szWhere + Qs( issue.m_szMessage ), m_pIssueList );
+		pItem->setData( Qt::UserRole, PathToVariant( issue.m_Path ) );
+		counts[ static_cast<int>( issue.m_nSeverity ) ]++;
 	}
-	const int errors = counts[static_cast<int>(Issue::Severity::Error)];
-	const int warnings = counts[static_cast<int>(Issue::Severity::Warning)];
-	const auto count = [](int n, const QString& one, const QString& many) { return (n == 1 ? one : many).arg(n); };
-	summary_->setText(errors + warnings == 0
-		? tr("No problems found")
-		: count(errors, tr("%1 error"), tr("%1 errors")) + QStringLiteral(" · ") + count(warnings, tr("%1 warning"), tr("%1 warnings")));
+	const int nErrors = counts[ static_cast<int>( Issue_t::Severity_t::SEVERITY_ERROR ) ];
+	const int nWarnings = counts[ static_cast<int>( Issue_t::Severity_t::SEVERITY_WARNING ) ];
+	const auto count = []( int n, const QString &szOne, const QString &szMany ) { return ( n == 1 ? szOne : szMany ).arg( n ); };
+	m_pSummary->setText( nErrors + nWarnings == 0
+			? tr( "No problems found" )
+			: count( nErrors, tr( "%1 error" ), tr( "%1 errors" ) ) + QStringLiteral( " · " ) + count( nWarnings, tr( "%1 warning" ), tr( "%1 warnings" ) ) );
 }
 
-void SoundEditor::rebuildEntryList() {
-	const QSignalBlocker blocker{entries_};
-	entries_->clear();
-	const auto& roots = document_->document().roots;
-	for (std::size_t i = 0; i < roots.size(); i++) {
-		if (!roots[i].isBlock()) {
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+void CSoundEditor::RebuildEntryList()
+{
+	const QSignalBlocker blocker{ m_pEntries };
+	m_pEntries->clear();
+	const auto &roots = m_pDocument->GetDocument().m_Roots;
+	for ( std::size_t i = 0; i < roots.size(); i++ )
+	{
+		if ( !roots[ i ].IsBlock() )
+		{
 			continue;
 		}
-		auto* item = new QListWidgetItem(qs(roots[i].key()), entries_);
-		item->setData(Qt::UserRole, QVariant::fromValue(static_cast<qulonglong>(i)));
-		std::optional<Issue::Severity> worst;
-		for (const Issue& issue : issues_) {
-			if (!issue.path.empty() && issue.path[0] == i && issue.severity != Issue::Severity::Info) {
-				worst = std::max(worst.value_or(issue.severity), issue.severity);
+		auto *pItem = new QListWidgetItem( Qs( roots[ i ].GetKey() ), m_pEntries );
+		pItem->setData( Qt::UserRole, QVariant::fromValue( static_cast<qulonglong>( i ) ) );
+		std::optional<Issue_t::Severity_t> worst;
+		for ( const Issue_t &issue : m_Issues )
+		{
+			if ( !issue.m_Path.empty() && issue.m_Path[ 0 ] == i && issue.m_nSeverity != Issue_t::Severity_t::SEVERITY_INFO )
+			{
+				worst = std::max( worst.value_or( issue.m_nSeverity ), issue.m_nSeverity );
 			}
 		}
-		if (worst) {
-			item->setIcon(severityIcon(*worst));
+		if ( worst )
+		{
+			pItem->setIcon( SeverityIcon( *worst ) );
 		}
-		item->setHidden(!item->text().contains(filter_->text(), Qt::CaseInsensitive));
-		if (current_ == i) {
-			entries_->setCurrentItem(item);
+		pItem->setHidden( !pItem->text().contains( m_pFilter->text(), Qt::CaseInsensitive ) );
+		if ( m_Current == i )
+		{
+			m_pEntries->setCurrentItem( pItem );
 		}
 	}
-	const bool selected = current_ && *current_ < roots.size() && roots[*current_].isBlock();
-	duplicate_->setEnabled(selected);
-	delete_->setEnabled(selected);
+	const bool bSelected = m_Current && *m_Current < roots.size() && roots[ *m_Current ].IsBlock();
+	m_pDuplicate->setEnabled( bSelected );
+	m_pDelete->setEnabled( bSelected );
 }
 
-void SoundEditor::showEntry() {
-	const int scroll = scroll_->verticalScrollBar()->value();
-	const bool sameEntry = card_ && current_ && card_->path() == NodePath{*current_};
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+void CSoundEditor::ShowEntry()
+{
+	const int nScroll = m_pScroll->verticalScrollBar()->value();
+	const bool bSameEntry = m_pCard && m_Current && m_pCard->GetPath() == NodePath_t{ *m_Current };
 
-	auto* host = new QWidget;
-	auto* layout = new QVBoxLayout(host);
-	layout->setContentsMargins(12, 12, 12, 12);
-	card_ = nullptr;
-	const auto& roots = document_->document().roots;
-	if (current_ && *current_ < roots.size() && roots[*current_].isBlock()) {
-		card_ = new KvCard(*document_, index_, player_, {*current_});
-		connect(card_, &KvCard::added, this, [this](const NodePath& path) { pendingEdit_ = path; });
-		card_->showIssues(issues_);
-		layout->addWidget(card_);
-	} else {
-		auto* empty = new QLabel(tr("Nothing selected. Use “New %1…” to add one.").arg(qs(document_->schema().entryNoun)));
-		empty->setEnabled(false);
-		layout->addWidget(empty);
+	auto *pHost = new QWidget;
+	auto *pLayout = new QVBoxLayout( pHost );
+	pLayout->setContentsMargins( 12, 12, 12, 12 );
+	m_pCard = nullptr;
+	const auto &roots = m_pDocument->GetDocument().m_Roots;
+	if ( m_Current && *m_Current < roots.size() && roots[ *m_Current ].IsBlock() )
+	{
+		m_pCard = new CKvCard( *m_pDocument, m_Index, m_pPlayer, { *m_Current } );
+		connect( m_pCard, &CKvCard::Added, this, [ this ]( const NodePath_t &path ) { m_PendingEdit = path; } );
+		m_pCard->ShowIssues( m_Issues );
+		pLayout->addWidget( m_pCard );
 	}
-	layout->addStretch();
-	scroll_->setWidget(host); // deletes the previous card
+	else
+	{
+		auto *pEmpty = new QLabel( tr( "Nothing selected. Use “New %1…” to add one." ).arg( Qs( m_pDocument->GetSchema().m_szEntryNoun ) ) );
+		pEmpty->setEnabled( false );
+		pLayout->addWidget( pEmpty );
+	}
+	pLayout->addStretch();
+	m_pScroll->setWidget( pHost ); // deletes the previous card
 
-	if (sameEntry) {
-		QTimer::singleShot(0, this, [this, scroll] { scroll_->verticalScrollBar()->setValue(scroll); });
+	if ( bSameEntry )
+	{
+		QTimer::singleShot( 0, this, [ this, nScroll ] { m_pScroll->verticalScrollBar()->setValue( nScroll ); } );
 	}
-	if (pendingEdit_ && card_) {
-		const NodePath path = *pendingEdit_;
-		pendingEdit_.reset();
-		QTimer::singleShot(0, this, [this, path] {
-			if (!card_) {
+	if ( m_PendingEdit && m_pCard )
+	{
+		const NodePath_t path = *m_PendingEdit;
+		m_PendingEdit.reset();
+		QTimer::singleShot( 0, this, [ this, path ] {
+			if ( !m_pCard )
+			{
 				return;
 			}
-			if (!card_->beginEdit(path)) {
-				if (KvCard* added = card_->cardFor(path)) {
-					scroll_->ensureWidgetVisible(added);
+			if ( !m_pCard->BeginEdit( path ) )
+			{
+				if ( CKvCard *pAdded = m_pCard->CardFor( path ) )
+				{
+					m_pScroll->ensureWidgetVisible( pAdded );
 				}
 			}
-		});
+		} );
 	}
 }
 
-void SoundEditor::jumpTo(const NodePath& path) {
-	if (path.empty()) {
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+void CSoundEditor::JumpTo( const NodePath_t &path )
+{
+	if ( path.empty() )
+	{
 		return;
 	}
-	if (current_ != path[0]) {
-		current_ = path[0];
-		rebuildEntryList();
-		showEntry();
+	if ( m_Current != path[ 0 ] )
+	{
+		m_Current = path[ 0 ];
+		RebuildEntryList();
+		ShowEntry();
 	}
-	QTimer::singleShot(0, this, [this, path] {
-		if (!card_ || card_->beginEdit(path)) {
+	QTimer::singleShot( 0, this, [ this, path ] {
+		if ( !m_pCard || m_pCard->BeginEdit( path ) )
+		{
 			return;
 		}
-		if (KvCard* card = card_->cardFor(path)) {
-			scroll_->ensureWidgetVisible(card);
+		if ( CKvCard *pCard = m_pCard->CardFor( path ) )
+		{
+			m_pScroll->ensureWidgetVisible( pCard );
 		}
-	});
+	} );
 }
 
-void SoundEditor::addEntry() {
-	const QString noun = qs(document_->schema().entryNoun);
-	bool ok = false;
-	const QString name = QInputDialog::getText(this, tr("New %1").arg(noun), tr("Name:"), QLineEdit::Normal, {}, &ok);
-	if (!ok || name.isEmpty()) {
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+void CSoundEditor::AddEntry()
+{
+	const QString szNoun = Qs( m_pDocument->GetSchema().m_szEntryNoun );
+	bool bOk = false;
+	const QString szName = QInputDialog::getText( this, tr( "New %1" ).arg( szNoun ), tr( "Name:" ), QLineEdit::Normal, {}, &bOk );
+	if ( !bOk || szName.isEmpty() )
+	{
 		return;
 	}
-	const std::size_t index = current_ ? *current_ + 1 : document_->document().roots.size();
-	document_->insertEntry(index, entryTemplate(*document_, name.toStdString()), tr("New %1").arg(name));
-	current_ = index;
+	const std::size_t nIndex = m_Current ? *m_Current + 1 : m_pDocument->GetDocument().m_Roots.size();
+	m_pDocument->InsertEntry( nIndex, EntryTemplate( *m_pDocument, szName.toStdString() ), tr( "New %1" ).arg( szName ) );
+	m_Current = nIndex;
 }
 
-void SoundEditor::duplicateEntry() {
-	if (!current_) {
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+void CSoundEditor::DuplicateEntry()
+{
+	if ( !m_Current )
+	{
 		return;
 	}
-	xv::kv1::Node copy = document_->document().roots[*current_];
-	const QString name = qs(copy.key()) + QStringLiteral("_copy");
-	copy.setKey(name.toStdString());
-	document_->insertEntry(*current_ + 1, std::move(copy), tr("Duplicate as %1").arg(name));
-	current_ = *current_ + 1;
+	xv::kv1::CNode copy = m_pDocument->GetDocument().m_Roots[ *m_Current ];
+	const QString szName = Qs( copy.GetKey() ) + QStringLiteral( "_copy" );
+	copy.SetKey( szName.toStdString() );
+	m_pDocument->InsertEntry( *m_Current + 1, std::move( copy ), tr( "Duplicate as %1" ).arg( szName ) );
+	m_Current = *m_Current + 1;
 }
 
-void SoundEditor::deleteEntry() {
-	if (!current_) {
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+void CSoundEditor::DeleteEntry()
+{
+	if ( !m_Current )
+	{
 		return;
 	}
-	const QString name = qs(document_->document().roots[*current_].key());
-	if (QMessageBox::question(this, tr("Delete"), tr("Delete “%1”?").arg(name)) == QMessageBox::Yes) {
-		document_->removeNode({*current_});
+	const QString szName = Qs( m_pDocument->GetDocument().m_Roots[ *m_Current ].GetKey() );
+	if ( QMessageBox::question( this, tr( "Delete" ), tr( "Delete “%1”?" ).arg( szName ) ) == QMessageBox::Yes )
+	{
+		m_pDocument->RemoveNode( { *m_Current } );
 	}
 }

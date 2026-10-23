@@ -5,6 +5,12 @@ add_library(vomit_tools_core STATIC
         dmx/Dmx.h
         kv1/Kv1.cpp
         kv1/Kv1.h
+        particles/Particles.cpp
+        particles/Particles.h
+        particles/Render.cpp
+        particles/Render.h
+        particles/Simulation.cpp
+        particles/Simulation.h
         sky/Sky.cpp
         sky/Sky.h
         sound/SoundConstants.cpp
@@ -22,6 +28,7 @@ add_library(vomit_tools_core STATIC
         texture/Vtf.cpp
         texture/Vtf.h
         util/Numbers.h
+        util/Vec3.h
         vfs/Steam.cpp
         vfs/Steam.h
         vfs/Vfs.cpp

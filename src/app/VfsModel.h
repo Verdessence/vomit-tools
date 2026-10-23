@@ -1,4 +1,10 @@
+//===========================================================================//
 // SPDX-License-Identifier: GPL-3.0-or-later
+//
+// Purpose: Folder tree of every file visible under the "game" path ID, with the mount each one is
+//          read from.
+//
+//===========================================================================//
 #pragma once
 
 #include <memory>
@@ -7,45 +13,56 @@
 
 #include <QAbstractItemModel>
 
-namespace xv::vfs {
-class FileSystem;
-class Mount;
-}
+namespace xv::vfs
+{
+class CFileSystem;
+class CMount;
+} // namespace xv::vfs
 
-// Folder tree of every file visible under the "game" path ID, with the mount each one is read from.
-class VfsModel : public QAbstractItemModel {
+class CVfsModel : public QAbstractItemModel
+{
 	Q_OBJECT
 
 public:
-	enum Column { NameColumn, SourceColumn, ColumnCount };
-	enum Role { PathRole = Qt::UserRole + 1, IsDirectoryRole };
-
-	explicit VfsModel(QObject* parent = nullptr);
-	~VfsModel() override;
-
-	void rebuild(const xv::vfs::FileSystem& fileSystem);
-	[[nodiscard]] int fileCount() const { return fileCount_; }
-	[[nodiscard]] QModelIndex indexForPath(const std::string& path) const;
-
-	[[nodiscard]] QModelIndex index(int row, int column, const QModelIndex& parent = {}) const override;
-	[[nodiscard]] QModelIndex parent(const QModelIndex& child) const override;
-	[[nodiscard]] int rowCount(const QModelIndex& parent = {}) const override;
-	[[nodiscard]] int columnCount(const QModelIndex& parent = {}) const override;
-	[[nodiscard]] QVariant data(const QModelIndex& index, int role = Qt::DisplayRole) const override;
-	[[nodiscard]] QVariant headerData(int section, Qt::Orientation orientation, int role = Qt::DisplayRole) const override;
-
-private:
-	struct Node {
-		QString name;
-		std::string path; // full normalized path; empty for folders
-		const xv::vfs::Mount* mount = nullptr;
-		Node* parent = nullptr;
-		int row = 0;
-		std::vector<std::unique_ptr<Node>> children;
+	enum Column_t
+	{
+		COLUMN_NAME_COLUMN,
+		COLUMN_SOURCE_COLUMN,
+		COLUMN_COLUMN_COUNT
+	};
+	enum Role_t
+	{
+		ROLE_PATH_ROLE = Qt::UserRole + 1,
+		ROLE_IS_DIRECTORY_ROLE
 	};
 
-	[[nodiscard]] Node* nodeAt(const QModelIndex& index) const;
+	explicit CVfsModel( QObject *pParent = nullptr );
+	~CVfsModel() override;
 
-	std::unique_ptr<Node> root_;
-	int fileCount_ = 0;
+	void Rebuild( const xv::vfs::CFileSystem &fileSystem );
+	[[nodiscard]] int GetFileCount() const { return m_nFileCount; }
+	[[nodiscard]] QModelIndex IndexForPath( const std::string &szPath ) const;
+
+	[[nodiscard]] QModelIndex index( int nRow, int nColumn, const QModelIndex &parent = {} ) const override;
+	[[nodiscard]] QModelIndex parent( const QModelIndex &child ) const override;
+	[[nodiscard]] int rowCount( const QModelIndex &parent = {} ) const override;
+	[[nodiscard]] int columnCount( const QModelIndex &parent = {} ) const override;
+	[[nodiscard]] QVariant data( const QModelIndex &index, int nRole = Qt::DisplayRole ) const override;
+	[[nodiscard]] QVariant headerData( int nSection, Qt::Orientation nOrientation, int nRole = Qt::DisplayRole ) const override;
+
+private:
+	struct Node_t
+	{
+		QString m_szName;
+		std::string m_szPath; // full normalized path; empty for folders
+		const xv::vfs::CMount *m_pMount = nullptr;
+		Node_t *m_pParent = nullptr;
+		int m_nRow = 0;
+		std::vector<std::unique_ptr<Node_t>> m_Children;
+	};
+
+	[[nodiscard]] Node_t *NodeAt( const QModelIndex &index ) const;
+
+	std::unique_ptr<Node_t> m_pRoot;
+	int m_nFileCount = 0;
 };

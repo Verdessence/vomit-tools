@@ -18,6 +18,7 @@ jobs:
         uses: jurplel/install-qt-action@v4
         with:
           version: '6.8.*'
+          modules: 'qtshadertools'
           cache: true
 
       # The xcb packages are needed so linuxdeploy can bundle Qt's X11 platform plugin.
@@ -79,6 +80,7 @@ jobs:
         uses: jurplel/install-qt-action@v4
         with:
           version: '6.8.*'
+          modules: 'qtshadertools'
           cache: true
 
       - name: Build
@@ -111,13 +113,28 @@ jobs:
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@v4
+
       - uses: actions/download-artifact@v4
         with:
           merge-multiple: true
 
+      # The release is titled by the annotated tag's message ("v0.4 - The Particle") and described
+      # by this version's section of CHANGELOG.md.
+      - name: Release notes
+        run: |
+          tag="${GITHUB_REF_NAME}"
+          version="${tag#v}"
+          git fetch --force origin "refs/tags/${tag}:refs/tags/${tag}"
+          title="$(git tag -l --format='%(contents:subject)' "${tag}")"
+          echo "title=${title:-$tag}" >> "$GITHUB_OUTPUT"
+          awk -v v="${version}" '/^## / { if (found) exit; if (index($0, "## " v " ") == 1) { found = 1; next } } found' CHANGELOG.md > release-notes.md
+        id: notes
+
       - uses: softprops/action-gh-release@v2
         with:
+          name: ${{ steps.notes.outputs.title }}
+          body_path: release-notes.md
           files: |
             vomit-tools-x86_64.AppImage
             vomit-tools-windows-x64.zip
-          generate_release_notes: true

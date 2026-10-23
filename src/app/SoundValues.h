@@ -1,4 +1,10 @@
+//===========================================================================//
 // SPDX-License-Identifier: GPL-3.0-or-later
+//
+// Purpose: What a value means, for the grey column next to it: "140 dB · attenuation 0.22",
+//          "Tunnel Medium", ...
+//
+//===========================================================================//
 #pragma once
 
 #include <QString>
@@ -6,30 +12,35 @@
 
 #include "sound/SoundSchema.h"
 
-class SoundDocument;
-class SoundIndex;
+class CSoundDocument;
+class CSoundIndex;
 
-// What a value means, for the grey column next to it: "140 dB · attenuation 0.22", "Tunnel Medium", ...
-[[nodiscard]] QString describeValue(xv::sound::ValueKind kind, const QString& value);
+[[nodiscard]] QString DescribeValue( xv::sound::ValueKind_t nKind, const QString &szValue );
 
 // Editors for the key/value grid of one block: keys come from the block's schema, values get a
 // dropdown of every constant that fits (CHAN_*, SNDLVL_*, DSP presets...) or a sound-file picker.
-class SoundValueDelegate : public QStyledItemDelegate {
+class CSoundValueDelegate : public QStyledItemDelegate
+{
 	Q_OBJECT
 
 public:
-	enum Column { KeyColumn, ValueColumn, MeaningColumn };
+	enum Column_t
+	{
+		COLUMN_KEY_COLUMN,
+		COLUMN_VALUE_COLUMN,
+		COLUMN_MEANING_COLUMN
+	};
 
-	SoundValueDelegate(const xv::sound::BlockDef* block, const SoundIndex& index, const SoundDocument& document, QObject* parent = nullptr);
+	CSoundValueDelegate( const xv::sound::BlockDef_t *pBlock, const CSoundIndex &index, const CSoundDocument &document, QObject *pParent = nullptr );
 
-	QWidget* createEditor(QWidget* parent, const QStyleOptionViewItem& option, const QModelIndex& index) const override;
-	void setEditorData(QWidget* editor, const QModelIndex& index) const override;
-	void setModelData(QWidget* editor, QAbstractItemModel* model, const QModelIndex& index) const override;
+	QWidget *createEditor( QWidget *pParent, const QStyleOptionViewItem &option, const QModelIndex &index ) const override;
+	void setEditorData( QWidget *pEditor, const QModelIndex &index ) const override;
+	void setModelData( QWidget *pEditor, QAbstractItemModel *pModel, const QModelIndex &index ) const override;
 
-	[[nodiscard]] static xv::sound::ValueKind kindOf(const xv::sound::BlockDef* block, const QString& key);
+	[[nodiscard]] static xv::sound::ValueKind_t KindOf( const xv::sound::BlockDef_t *pBlock, const QString &szKey );
 
 private:
-	const xv::sound::BlockDef* block_;
-	const SoundIndex& index_;
-	const SoundDocument& document_;
+	const xv::sound::BlockDef_t *m_pBlock;
+	const CSoundIndex &m_Index;
+	const CSoundDocument &m_Document;
 };

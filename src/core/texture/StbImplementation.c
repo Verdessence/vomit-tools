@@ -1,4 +1,7 @@
+//===========================================================================//
 // SPDX-License-Identifier: GPL-3.0-or-later
+//
+//===========================================================================//
 // The stb implementations, compiled once in their own target (vomit_tools_stb) so our warning
 // flags don't apply to them.
 

@@ -1,4 +1,9 @@
+//===========================================================================//
 // SPDX-License-Identifier: GPL-3.0-or-later
+//
+// Purpose: See SkyDocument.h.
+//
+//===========================================================================//
 #include "SkyDocument.h"
 
 #include <utility>
@@ -6,145 +11,230 @@
 #include <QUndoCommand>
 #include <QUndoStack>
 
-using xv::sky::Face;
+using xv::sky::Face_t;
 
 // Swaps all six slots between two states: undo restores every face exactly.
-class SkySlotsCommand : public QUndoCommand {
+class CSkySlotsCommand : public QUndoCommand
+{
 public:
-	SkySlotsCommand(SkyDocument* document, std::array<SkyDocument::Slot, 6> before, std::array<SkyDocument::Slot, 6> after, const QString& text)
-			: QUndoCommand(text)
-			, document_(document)
-			, before_(std::move(before))
-			, after_(std::move(after)) {}
+	CSkySlotsCommand( CSkyDocument *pDocument, std::array<CSkyDocument::Slot_t, 6> before, std::array<CSkyDocument::Slot_t, 6> after, const QString &szText )
+		: QUndoCommand( szText ),
+		  m_pDocument( pDocument ),
+		  m_Before( std::move( before ) ),
+		  m_After( std::move( after ) )
+	{}
 
-	void redo() override { document_->applySlots(after_); }
-	void undo() override { document_->applySlots(before_); }
+	void redo() override { m_pDocument->ApplySlots( m_After ); }
+	void undo() override { m_pDocument->ApplySlots( m_Before ); }
 
 private:
-	SkyDocument* document_;
-	std::array<SkyDocument::Slot, 6> before_;
-	std::array<SkyDocument::Slot, 6> after_;
+	CSkyDocument *m_pDocument;
+	std::array<CSkyDocument::Slot_t, 6> m_Before;
+	std::array<CSkyDocument::Slot_t, 6> m_After;
 };
 
-SkyDocument::SkyDocument(QObject* parent)
-		: QObject(parent)
-		, undoStack_(new QUndoStack(this)) {
-	connect(undoStack_, &QUndoStack::cleanChanged, this, &SkyDocument::updateModified);
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+CSkyDocument::CSkyDocument( QObject *pParent )
+	: QObject( pParent ),
+	  m_pUndoStack( new QUndoStack( this ) )
+{
+	connect( m_pUndoStack, &QUndoStack::cleanChanged, this, &CSkyDocument::UpdateModified );
 }
 
-SkyDocument::~SkyDocument() = default;
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+CSkyDocument::~CSkyDocument() = default;
 
-void SkyDocument::setName(const QString& name) {
-	if (name == name_) {
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+void CSkyDocument::SetName( const QString &szName )
+{
+	if ( szName == m_szName )
+	{
 		return;
 	}
-	name_ = name;
-	settingChanged();
-	emit nameChanged();
+	m_szName = szName;
+	SettingChanged();
+	emit NameChanged();
 }
 
-void SkyDocument::setFormat(xv::texture::VtfFormat format) {
-	if (format != format_) {
-		format_ = format;
-		settingChanged();
-		emit optionsChanged();
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+void CSkyDocument::SetFormat( xv::texture::VtfFormat_t nFormat )
+{
+	if ( nFormat != m_nFormat )
+	{
+		m_nFormat = nFormat;
+		SettingChanged();
+		emit OptionsChanged();
 	}
 }
 
-void SkyDocument::setSize(int size) {
-	if (size != size_) {
-		size_ = size;
-		settingChanged();
-		emit optionsChanged();
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+void CSkyDocument::SetSize( int nSize )
+{
+	if ( nSize != m_nSize )
+	{
+		m_nSize = nSize;
+		SettingChanged();
+		emit OptionsChanged();
 	}
 }
 
-void SkyDocument::setMipmaps(bool mipmaps) {
-	if (mipmaps != mipmaps_) {
-		mipmaps_ = mipmaps;
-		settingChanged();
-		emit optionsChanged();
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+void CSkyDocument::SetMipmaps( bool bMipmaps )
+{
+	if ( bMipmaps != m_bMipmaps )
+	{
+		m_bMipmaps = bMipmaps;
+		SettingChanged();
+		emit OptionsChanged();
 	}
 }
 
-void SkyDocument::setSlots(const std::array<std::optional<Slot>, 6>& changes, const QString& text) {
-	std::array<Slot, 6> after = slots_;
-	for (std::size_t i = 0; i < after.size(); i++) {
-		if (changes[i]) {
-			after[i] = *changes[i];
+//-----------------------------------------------------------------------------
+// Purpose: Undoable. Faces left as nullopt are unchanged; all the changes are one undo step.
+//-----------------------------------------------------------------------------
+void CSkyDocument::SetSlots( const std::array<std::optional<Slot_t>, 6> &changes, const QString &szText )
+{
+	std::array<Slot_t, 6> after = m_Slots;
+	for ( std::size_t i = 0; i < after.size(); i++ )
+	{
+		if ( changes[ i ] )
+		{
+			after[ i ] = *changes[ i ];
 		}
 	}
-	undoStack_->push(new SkySlotsCommand(this, slots_, std::move(after), text));
+	m_pUndoStack->push( new CSkySlotsCommand( this, m_Slots, std::move( after ), szText ) );
 }
 
-void SkyDocument::setSlot(Face face, Slot slot, const QString& text) {
-	std::array<std::optional<Slot>, 6> changes;
-	changes[xv::sky::indexOf(face)] = std::move(slot);
-	setSlots(changes, text);
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+void CSkyDocument::SetSlot( Face_t nFace, Slot_t slot, const QString &szText )
+{
+	std::array<std::optional<Slot_t>, 6> changes;
+	changes[ xv::sky::IndexOf( nFace ) ] = std::move( slot );
+	SetSlots( changes, szText );
 }
 
-void SkyDocument::clearFace(Face face) {
-	if (slot(face).image) {
-		setSlot(face, {}, tr("Clear %1").arg(QString::fromUtf8(xv::sky::suffix(face))));
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+void CSkyDocument::ClearFace( Face_t nFace )
+{
+	if ( Slot( nFace ).m_pImage )
+	{
+		SetSlot( nFace, {}, tr( "Clear %1" ).arg( QString::fromUtf8( xv::sky::Suffix( nFace ) ) ) );
 	}
 }
 
-void SkyDocument::orient(Face face, xv::texture::Orientation change, const QString& text) {
-	Slot changed = slot(face);
-	if (!changed.image) {
+//-----------------------------------------------------------------------------
+// Purpose: Turns and/or mirrors a face further (undoable).
+//-----------------------------------------------------------------------------
+void CSkyDocument::Orient( Face_t nFace, xv::texture::COrientation change, const QString &szText )
+{
+	Slot_t changed = Slot( nFace );
+	if ( !changed.m_pImage )
+	{
 		return;
 	}
-	changed.orientation = xv::texture::combined(changed.orientation, change);
-	setSlot(face, std::move(changed), text);
+	changed.m_Orientation = xv::texture::Combined( changed.m_Orientation, change );
+	SetSlot( nFace, std::move( changed ), szText );
 }
 
-void SkyDocument::applySlots(const std::array<Slot, 6>& all) {
-	slots_ = all;
-	cube_.reset();
-	emit facesChanged();
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+void CSkyDocument::ApplySlots( const std::array<Slot_t, 6> &all )
+{
+	m_Slots = all;
+	m_Cube.reset();
+	emit FacesChanged();
 }
 
-const xv::sky::Cube& SkyDocument::cube() const {
-	if (!cube_) {
-		xv::sky::Cube cube;
-		for (Face face : xv::sky::FACES) {
-			const Slot& s = slot(face);
-			if (s.image) {
-				cube.face(face) = xv::texture::oriented(*s.image, s.orientation.quarterTurns, s.orientation.mirror);
-				cube.transforms[xv::sky::indexOf(face)] = s.transform;
+//-----------------------------------------------------------------------------
+// Purpose: The faces as they will be written, for previews, checks and export.
+//-----------------------------------------------------------------------------
+const xv::sky::CCube &CSkyDocument::GetCube() const
+{
+	if ( !m_Cube )
+	{
+		xv::sky::CCube cube;
+		for ( Face_t nFace : xv::sky::FACES )
+		{
+			const Slot_t &s = Slot( nFace );
+			if ( s.m_pImage )
+			{
+				cube.Face( nFace ) = xv::texture::Oriented( *s.m_pImage, s.m_Orientation.m_nQuarterTurns, s.m_Orientation.m_bMirror );
+				cube.m_Transforms[ xv::sky::IndexOf( nFace ) ] = s.m_Transform;
 			}
 		}
-		cube_ = std::move(cube);
+		m_Cube = std::move( cube );
 	}
-	return *cube_;
+	return *m_Cube;
 }
 
-bool SkyDocument::complete() const {
-	return std::ranges::all_of(slots_, [](const Slot& s) { return s.image != nullptr; });
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+bool CSkyDocument::GetComplete() const
+{
+	return std::ranges::all_of( m_Slots, []( const Slot_t &s ) { return s.m_pImage != nullptr; } );
 }
 
-xv::sky::ExportOptions SkyDocument::exportOptions() const {
-	return {.name = name_.toStdString(), .format = format_, .size = size_, .mipmaps = mipmaps_};
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+xv::sky::ExportOptions_t CSkyDocument::GetExportOptions() const
+{
+	return { .m_szName = m_szName.toStdString(), .m_nFormat = m_nFormat, .m_nSize = m_nSize, .m_bMipmaps = m_bMipmaps };
 }
 
-bool SkyDocument::isModified() const {
-	return settingsChanged_ || !undoStack_->isClean();
+//-----------------------------------------------------------------------------
+// Purpose: Changed since the last export (or since it was opened).
+//-----------------------------------------------------------------------------
+bool CSkyDocument::IsModified() const
+{
+	return m_bSettingsChanged || !m_pUndoStack->isClean();
 }
 
-void SkyDocument::markExported() {
-	settingsChanged_ = false;
-	undoStack_->setClean();
-	updateModified();
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+void CSkyDocument::MarkExported()
+{
+	m_bSettingsChanged = false;
+	m_pUndoStack->setClean();
+	UpdateModified();
 }
 
-void SkyDocument::settingChanged() {
-	settingsChanged_ = true;
-	updateModified();
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+void CSkyDocument::SettingChanged()
+{
+	m_bSettingsChanged = true;
+	UpdateModified();
 }
 
-void SkyDocument::updateModified() {
-	if (isModified() != modified_) {
-		modified_ = isModified();
-		emit modifiedChanged(modified_);
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+void CSkyDocument::UpdateModified()
+{
+	if ( IsModified() != m_bModified )
+	{
+		m_bModified = IsModified();
+		emit ModifiedChanged( m_bModified );
 	}
 }

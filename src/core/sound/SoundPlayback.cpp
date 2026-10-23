@@ -1,4 +1,9 @@
+//===========================================================================//
 // SPDX-License-Identifier: GPL-3.0-or-later
+//
+// Purpose: See SoundPlayback.h.
+//
+//===========================================================================//
 #include "SoundPlayback.h"
 
 #include <algorithm>
@@ -9,322 +14,452 @@
 #include "SoundConstants.h"
 #include "SoundLint.h"
 
-namespace xv::sound {
+namespace xv::sound
+{
 
-namespace {
+namespace
+{
 
-std::string_view trim(std::string_view text) {
-	const auto first = text.find_first_not_of(" \t\r\n");
-	if (first == std::string_view::npos) {
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+std::string_view Trim( std::string_view szText )
+{
+	const auto nFirst = szText.find_first_not_of( " \t\r\n" );
+	if ( nFirst == std::string_view::npos )
+	{
 		return {};
 	}
-	return text.substr(first, text.find_last_not_of(" \t\r\n") - first + 1);
+	return szText.substr( nFirst, szText.find_last_not_of( " \t\r\n" ) - nFirst + 1 );
 }
 
-std::optional<double> resolvePart(ValueKind kind, std::string_view part) {
-	const auto constant = [part](std::span<const Constant> table) -> std::optional<double> {
-		if (const Constant* c = findConstant(table, part)) {
-			return c->value;
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+std::optional<double> ResolvePart( ValueKind_t nKind, std::string_view szPart )
+{
+	const auto constant = [ szPart ]( std::span<const Constant_t> table ) -> std::optional<double> {
+		if ( const Constant_t *c = FindConstant( table, szPart ) )
+		{
+			return c->m_flValue;
 		}
-		return parseNumber<double>(part);
+		return ParseNumber<double>( szPart );
 	};
-	switch (kind) {
-		case ValueKind::Volume:      return constant(volumes());
-		case ValueKind::Pitch:       return constant(pitches());
-		case ValueKind::Attenuation: return constant(attenuations());
-		case ValueKind::SoundLevel:  return parseSoundLevel(part);
-		default:                     return parseNumber<double>(part);
+	switch ( nKind )
+	{
+		case ValueKind_t::VALUE_KIND_VOLUME: return constant( Volumes() );
+		case ValueKind_t::VALUE_KIND_PITCH: return constant( Pitches() );
+		case ValueKind_t::VALUE_KIND_ATTENUATION: return constant( Attenuations() );
+		case ValueKind_t::VALUE_KIND_SOUND_LEVEL: return ParseSoundLevel( szPart );
+		default: return ParseNumber<double>( szPart );
 	}
 }
 
 // The settings a block plays with, read the way its file type reads them.
-struct Settings {
-	Range volume{1, 1};
-	Range pitch{100, 100};
-	std::optional<int> position;
-	bool randomPosition = false;
-	std::optional<double> soundLevel;
-	double delaySeconds = 0;
+struct Settings_t
+{
+	CRange m_Volume{ 1, 1 };
+	CRange m_Pitch{ 100, 100 };
+	std::optional<int> m_Position;
+	bool m_bRandomPosition = false;
+	std::optional<double> m_SoundLevel;
+	double m_flDelaySeconds = 0;
 };
 
-Settings readSettings(FileKind kind, const kv1::Node& block) {
-	const bool script = kind == FileKind::Soundscript;
-	Settings settings;
-	if (const kv1::Node* volume = block.find("volume")) {
-		settings.volume = parseRange(script ? ValueKind::Volume : ValueKind::NumberRange, volume->value()).value_or(Range{1, 1});
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+Settings_t ReadSettings( FileKind_t nKind, const kv1::CNode &block )
+{
+	const bool bScript = nKind == FileKind_t::FILE_KIND_SOUNDSCRIPT;
+	Settings_t settings;
+	if ( const kv1::CNode *pVolume = block.Find( "volume" ) )
+	{
+		settings.m_Volume = ParseRange( bScript ? ValueKind_t::VALUE_KIND_VOLUME : ValueKind_t::VALUE_KIND_NUMBER_RANGE, pVolume->GetValue() ).value_or( CRange{ 1, 1 } );
 	}
-	if (const kv1::Node* pitch = block.find("pitch")) {
-		settings.pitch = parseRange(script ? ValueKind::Pitch : ValueKind::NumberRange, pitch->value()).value_or(Range{100, 100});
+	if ( const kv1::CNode *pPitch = block.Find( "pitch" ) )
+	{
+		settings.m_Pitch = ParseRange( bScript ? ValueKind_t::VALUE_KIND_PITCH : ValueKind_t::VALUE_KIND_NUMBER_RANGE, pPitch->GetValue() ).value_or( CRange{ 100, 100 } );
 	}
-	if (const kv1::Node* level = block.find("soundlevel")) {
-		if (const auto range = parseRange(ValueKind::SoundLevel, level->value())) {
-			settings.soundLevel = range->low;
-		}
-	} else if (const kv1::Node* attenuation = block.find("attenuation") ? block.find("attenuation") : block.find("compatibilityattenuation")) {
-		if (const auto range = parseRange(ValueKind::Attenuation, attenuation->value())) {
-			settings.soundLevel = attenuationToSoundLevel(range->low);
-		}
-	}
-	if (const kv1::Node* position = block.find("position")) {
-		if (kv1::equalsIgnoreCase(trim(position->value()), "random")) {
-			settings.randomPosition = true;
-		} else {
-			settings.position = parseNumber<int>(trim(position->value()));
+	if ( const kv1::CNode *pLevel = block.Find( "soundlevel" ) )
+	{
+		if ( const auto range = ParseRange( ValueKind_t::VALUE_KIND_SOUND_LEVEL, pLevel->GetValue() ) )
+		{
+			settings.m_SoundLevel = range->m_flLow;
 		}
 	}
-	if (const kv1::Node* delay = block.find("delay_msec")) {
-		settings.delaySeconds = parseNumber<double>(trim(delay->value())).value_or(0) / 1000.0;
+	else if ( const kv1::CNode *pAttenuation = block.Find( "attenuation" ) ? block.Find( "attenuation" ) : block.Find( "compatibilityattenuation" ) )
+	{
+		if ( const auto range = ParseRange( ValueKind_t::VALUE_KIND_ATTENUATION, pAttenuation->GetValue() ) )
+		{
+			settings.m_SoundLevel = AttenuationToSoundLevel( range->m_flLow );
+		}
+	}
+	if ( const kv1::CNode *pPosition = block.Find( "position" ) )
+	{
+		if ( kv1::EqualsIgnoreCase( Trim( pPosition->GetValue() ), "random" ) )
+		{
+			settings.m_bRandomPosition = true;
+		}
+		else
+		{
+			settings.m_Position = ParseNumber<int>( Trim( pPosition->GetValue() ) );
+		}
+	}
+	if ( const kv1::CNode *pDelay = block.Find( "delay_msec" ) )
+	{
+		settings.m_flDelaySeconds = ParseNumber<double>( Trim( pDelay->GetValue() ) ).value_or( 0 ) / 1000.0;
 	}
 	return settings;
 }
 
-std::vector<std::string> wavesIn(const kv1::Node& block) {
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+std::vector<std::string> WavesIn( const kv1::CNode &block )
+{
 	std::vector<std::string> waves;
-	for (const kv1::Node* wave : block.findAll("wave")) {
-		waves.push_back(wave->value());
+	for ( const kv1::CNode *pWave : block.FindAll( "wave" ) )
+	{
+		waves.push_back( pWave->GetValue() );
 	}
-	if (const kv1::Node* rndwave = block.find("rndwave"); rndwave && rndwave->isBlock()) {
-		for (const kv1::Node* wave : rndwave->findAll("wave")) {
-			waves.push_back(wave->value());
+	if ( const kv1::CNode *pRndwave = block.Find( "rndwave" ); pRndwave && pRndwave->IsBlock() )
+	{
+		for ( const kv1::CNode *pWave : pRndwave->FindAll( "wave" ) )
+		{
+			waves.push_back( pWave->GetValue() );
 		}
 	}
-	std::erase_if(waves, [](const std::string& wave) { return trim(wave).empty(); });
+	std::erase_if( waves, []( const std::string &szWave ) { return Trim( szWave ).empty(); } );
 	return waves;
 }
 
-PlayRequest makeRequest(const std::vector<std::string>& waves, const Settings& settings, bool loop, std::string origin, std::mt19937& random) {
-	PlayRequest request;
-	request.wave = waves[std::uniform_int_distribution<std::size_t>{0, waves.size() - 1}(random)];
-	request.gamePath = waveGamePath(request.wave);
-	request.volume = settings.volume.pick(random);
-	request.pitch = settings.pitch.pick(random);
-	request.loop = loop;
-	request.delaySeconds = settings.delaySeconds;
-	request.position = settings.position;
-	request.randomPosition = settings.randomPosition;
-	request.soundLevel = settings.soundLevel;
-	request.origin = std::move(origin);
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+PlayRequest_t MakeRequest( const std::vector<std::string> &waves, const Settings_t &settings, bool bLoop, std::string szOrigin, std::mt19937 &random )
+{
+	PlayRequest_t request;
+	request.m_szWave = waves[ std::uniform_int_distribution<std::size_t>{ 0, waves.size() - 1 }( random ) ];
+	request.m_szGamePath = WaveGamePath( request.m_szWave );
+	request.m_flVolume = settings.m_Volume.Pick( random );
+	request.m_flPitch = settings.m_Pitch.Pick( random );
+	request.m_bLoop = bLoop;
+	request.m_flDelaySeconds = settings.m_flDelaySeconds;
+	request.m_Position = settings.m_Position;
+	request.m_bRandomPosition = settings.m_bRandomPosition;
+	request.m_SoundLevel = settings.m_SoundLevel;
+	request.m_szOrigin = std::move( szOrigin );
 	return request;
 }
 
 } // namespace
 
-double Range::pick(std::mt19937& random) const {
-	return low >= high ? low : std::uniform_real_distribution<double>{low, high}(random);
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+double CRange::Pick( std::mt19937 &random ) const
+{
+	return m_flLow >= m_flHigh ? m_flLow : std::uniform_real_distribution<double>{ m_flLow, m_flHigh }( random );
 }
 
-std::optional<Range> parseRange(ValueKind kind, std::string_view text) {
+//-----------------------------------------------------------------------------
+// Purpose: "0.5", "VOL_NORM", "95, 105", "SNDLVL_80dB"... as a range; nullopt if the value doesn't
+//          parse.
+//-----------------------------------------------------------------------------
+std::optional<CRange> ParseRange( ValueKind_t nKind, std::string_view szText )
+{
 	std::vector<std::string_view> parts;
-	std::size_t start = 0;
-	while (true) {
-		const auto comma = text.find(',', start);
-		parts.push_back(trim(text.substr(start, comma == std::string_view::npos ? std::string_view::npos : comma - start)));
-		if (comma == std::string_view::npos) {
+	std::size_t nStart = 0;
+	while ( true )
+	{
+		const auto nComma = szText.find( ',', nStart );
+		parts.push_back( Trim( szText.substr( nStart, nComma == std::string_view::npos ? std::string_view::npos : nComma - nStart ) ) );
+		if ( nComma == std::string_view::npos )
+		{
 			break;
 		}
-		start = comma + 1;
+		nStart = nComma + 1;
 	}
-	if (parts.size() > 2) {
+	if ( parts.size() > 2 )
+	{
 		return std::nullopt;
 	}
-	const auto low = resolvePart(kind, parts[0]);
-	const auto high = parts.size() == 2 ? resolvePart(kind, parts[1]) : low;
-	if (!low || !high) {
+	const auto low = ResolvePart( nKind, parts[ 0 ] );
+	const auto high = parts.size() == 2 ? ResolvePart( nKind, parts[ 1 ] ) : low;
+	if ( !low || !high )
+	{
 		return std::nullopt;
 	}
-	return Range{std::min(*low, *high), std::max(*low, *high)};
+	return CRange{ std::min( *low, *high ), std::max( *low, *high ) };
 }
 
-std::string waveGamePath(std::string_view wave) {
-	for (std::size_t i = 0; i < 2 && i < wave.size(); i++) {
-		if (wave[i] == '!' || wave[i] == '?') {
+//-----------------------------------------------------------------------------
+// Purpose: "sound/<path>" for a wave value, flags stripped and normalized; empty for sentences and
+//          voice streams.
+//-----------------------------------------------------------------------------
+std::string WaveGamePath( std::string_view szWave )
+{
+	for ( std::size_t i = 0; i < 2 && i < szWave.size(); i++ )
+	{
+		if ( szWave[ i ] == '!' || szWave[ i ] == '?' )
+		{
 			return {};
 		}
 	}
-	const std::string_view file = trim(stripPathFlags(wave));
-	return file.empty() ? std::string{} : "sound/" + vfs::normalizePath(file);
+	const std::string_view szFile = Trim( StripPathFlags( szWave ) );
+	return szFile.empty() ? std::string{} : "sound/" + vfs::NormalizePath( szFile );
 }
 
-std::optional<PlayRequest> playBlock(FileKind kind, const kv1::Node& block, const kv1::Node* parent, std::mt19937& random) {
-	if (!block.isBlock()) {
+//-----------------------------------------------------------------------------
+// Purpose: One play of a block with its own settings: a soundscript entry, playlooping,
+//          playrandom, or an
+//          rndwave (which takes its settings from the enclosing block). nullopt if there is
+//          nothing to play.
+//-----------------------------------------------------------------------------
+std::optional<PlayRequest_t> PlayBlock( FileKind_t nKind, const kv1::CNode &block, const kv1::CNode *pParent, std::mt19937 &random )
+{
+	if ( !block.IsBlock() )
+	{
 		return std::nullopt;
 	}
-	const std::string key = toLower(block.key());
-	if (key == "rndwave") {
+	const std::string szKey = ToLower( block.GetKey() );
+	if ( szKey == "rndwave" )
+	{
 		// An rndwave plays with the settings of the entry or playrandom around it.
 		std::vector<std::string> waves;
-		for (const kv1::Node* wave : block.findAll("wave")) {
-			if (!trim(wave->value()).empty()) {
-				waves.push_back(wave->value());
+		for ( const kv1::CNode *pWave : block.FindAll( "wave" ) )
+		{
+			if ( !Trim( pWave->GetValue() ).empty() )
+			{
+				waves.push_back( pWave->GetValue() );
 			}
 		}
-		if (waves.empty()) {
+		if ( waves.empty() )
+		{
 			return std::nullopt;
 		}
-		const Settings settings = parent ? readSettings(kind, *parent) : Settings{};
-		return makeRequest(waves, settings, false, parent ? parent->key() + " › rndwave" : "rndwave", random);
+		const Settings_t settings = pParent ? ReadSettings( nKind, *pParent ) : Settings_t{};
+		return MakeRequest( waves, settings, false, pParent ? pParent->GetKey() + " › rndwave" : "rndwave", random );
 	}
 
-	const bool looping = kind == FileKind::Soundscape && key == "playlooping";
-	const bool entry = kind == FileKind::Soundscript && parent == nullptr;
-	if (!looping && !entry && !(kind == FileKind::Soundscape && key == "playrandom")) {
+	const bool bLooping = nKind == FileKind_t::FILE_KIND_SOUNDSCAPE && szKey == "playlooping";
+	const bool bEntry = nKind == FileKind_t::FILE_KIND_SOUNDSCRIPT && pParent == nullptr;
+	if ( !bLooping && !bEntry && !( nKind == FileKind_t::FILE_KIND_SOUNDSCAPE && szKey == "playrandom" ) )
+	{
 		return std::nullopt;
 	}
-	const auto waves = wavesIn(block);
-	if (waves.empty()) {
+	const auto waves = WavesIn( block );
+	if ( waves.empty() )
+	{
 		return std::nullopt;
 	}
-	return makeRequest(waves, readSettings(kind, block), looping, block.key(), random);
+	return MakeRequest( waves, ReadSettings( nKind, block ), bLooping, block.GetKey(), random );
 }
 
-namespace {
+namespace
+{
 
-class Planner {
+class CPlanner
+{
 public:
-	explicit Planner(const SoundscapeLookup& lookup)
-			: lookup_(lookup) {}
+	explicit CPlanner( const SoundscapeLookup_t &pfnLookup )
+		: m_pfnLookup( pfnLookup )
+	{}
 
-	struct Context {
-		double volumeScale = 1;
-		std::optional<int> positionOverride;
-		std::optional<int> ambientPositionOverride;
+	struct Context_t
+	{
+		double m_flVolumeScale = 1;
+		std::optional<int> m_PositionOverride;
+		std::optional<int> m_AmbientPositionOverride;
 	};
 
-	void add(const kv1::Node& soundscape, const Context& context) {
-		const std::string name = toLower(soundscape.key());
-		if (std::ranges::find(stack_, name) != stack_.end()) {
-			plan_.problems.push_back(std::format("playsoundscape loop at \"{}\"; not followed", soundscape.key()));
+	void Add( const kv1::CNode &soundscape, const Context_t &context )
+	{
+		const std::string szName = ToLower( soundscape.GetKey() );
+		if ( std::ranges::find( m_Stack, szName ) != m_Stack.end() )
+		{
+			m_Plan.m_Problems.push_back( std::format( "playsoundscape loop at \"{}\"; not followed", soundscape.GetKey() ) );
 			return;
 		}
-		if (stack_.size() >= 8) {
-			plan_.problems.push_back(std::format("playsoundscape nesting is too deep at \"{}\"", soundscape.key()));
+		if ( m_Stack.size() >= 8 )
+		{
+			m_Plan.m_Problems.push_back( std::format( "playsoundscape nesting is too deep at \"{}\"", soundscape.GetKey() ) );
 			return;
 		}
-		stack_.push_back(name);
-		for (const kv1::Node& child : soundscape.children()) {
-			if (!child.isBlock()) {
+		m_Stack.push_back( szName );
+		for ( const kv1::CNode &child : soundscape.GetChildren() )
+		{
+			if ( !child.IsBlock() )
+			{
 				continue;
 			}
-			const std::string key = toLower(child.key());
-			const std::string origin = soundscape.key() + " › " + child.key();
-			if (key == "playlooping" || key == "playrandom") {
-				addRule(child, key == "playlooping", origin, context);
-			} else if (key == "playsoundscape") {
-				addNested(child, origin, context);
+			const std::string szKey = ToLower( child.GetKey() );
+			const std::string szOrigin = soundscape.GetKey() + " › " + child.GetKey();
+			if ( szKey == "playlooping" || szKey == "playrandom" )
+			{
+				AddRule( child, szKey == "playlooping", szOrigin, context );
+			}
+			else if ( szKey == "playsoundscape" )
+			{
+				AddNested( child, szOrigin, context );
 			}
 		}
-		stack_.pop_back();
+		m_Stack.pop_back();
 	}
 
-	SoundscapePlan take() {
-		return std::move(plan_);
+	SoundscapePlan_t Take()
+	{
+		return std::move( m_Plan );
 	}
 
 private:
-	void addRule(const kv1::Node& block, bool looping, const std::string& origin, const Context& context) {
-		SoundscapeRule rule;
-		rule.kind = looping ? SoundscapeRule::Kind::Looping : SoundscapeRule::Kind::Random;
-		rule.waves = wavesIn(block);
-		if (rule.waves.empty()) {
-			plan_.problems.push_back(origin + " has no sounds");
+	void AddRule( const kv1::CNode &block, bool bLooping, const std::string &szOrigin, const Context_t &context )
+	{
+		SoundscapeRule_t rule;
+		rule.m_nKind = bLooping ? SoundscapeRule_t::Kind_t::KIND_LOOPING : SoundscapeRule_t::Kind_t::KIND_RANDOM;
+		rule.m_Waves = WavesIn( block );
+		if ( rule.m_Waves.empty() )
+		{
+			m_Plan.m_Problems.push_back( szOrigin + " has no sounds" );
 			return;
 		}
-		const Settings settings = readSettings(FileKind::Soundscape, block);
-		rule.volume = {settings.volume.low * context.volumeScale, settings.volume.high * context.volumeScale};
-		rule.pitch = settings.pitch;
-		rule.position = settings.position;
-		rule.randomPosition = settings.randomPosition;
-		rule.soundLevel = settings.soundLevel;
-		if (rule.position && context.positionOverride) {
-			rule.position = context.positionOverride;
-		} else if (!rule.position && !rule.randomPosition && context.ambientPositionOverride) {
-			rule.position = context.ambientPositionOverride;
+		const Settings_t settings = ReadSettings( FileKind_t::FILE_KIND_SOUNDSCAPE, block );
+		rule.m_Volume = { settings.m_Volume.m_flLow * context.m_flVolumeScale, settings.m_Volume.m_flHigh * context.m_flVolumeScale };
+		rule.m_Pitch = settings.m_Pitch;
+		rule.m_Position = settings.m_Position;
+		rule.m_bRandomPosition = settings.m_bRandomPosition;
+		rule.m_SoundLevel = settings.m_SoundLevel;
+		if ( rule.m_Position && context.m_PositionOverride )
+		{
+			rule.m_Position = context.m_PositionOverride;
 		}
-		if (!looping) {
-			if (const kv1::Node* time = block.find("time")) {
-				rule.interval = parseRange(ValueKind::NumberRange, time->value()).value_or(Range{10, 10});
+		else if ( !rule.m_Position && !rule.m_bRandomPosition && context.m_AmbientPositionOverride )
+		{
+			rule.m_Position = context.m_AmbientPositionOverride;
+		}
+		if ( !bLooping )
+		{
+			if ( const kv1::CNode *pTime = block.Find( "time" ) )
+			{
+				rule.m_Interval = ParseRange( ValueKind_t::VALUE_KIND_NUMBER_RANGE, pTime->GetValue() ).value_or( CRange{ 10, 10 } );
 			}
 		}
-		rule.origin = origin;
-		plan_.rules.push_back(std::move(rule));
+		rule.m_szOrigin = szOrigin;
+		m_Plan.m_Rules.push_back( std::move( rule ) );
 	}
 
-	void addNested(const kv1::Node& block, const std::string& origin, const Context& context) {
-		const kv1::Node* name = block.find("name");
-		const kv1::Node* target = name ? lookup_(name->value()) : nullptr;
-		if (!target) {
-			plan_.problems.push_back(std::format("{}: no soundscape named \"{}\"", origin, name ? name->value() : std::string{}));
+	void AddNested( const kv1::CNode &block, const std::string &szOrigin, const Context_t &context )
+	{
+		const kv1::CNode *pName = block.Find( "name" );
+		const kv1::CNode *pTarget = pName ? m_pfnLookup( pName->GetValue() ) : nullptr;
+		if ( !pTarget )
+		{
+			m_Plan.m_Problems.push_back( std::format( "{}: no soundscape named \"{}\"", szOrigin, pName ? pName->GetValue() : std::string{} ) );
 			return;
 		}
-		Context nested = context;
-		if (const kv1::Node* volume = block.find("volume")) {
-			nested.volumeScale *= parseNumber<double>(trim(volume->value())).value_or(1);
+		Context_t nested = context;
+		if ( const kv1::CNode *pVolume = block.Find( "volume" ) )
+		{
+			nested.m_flVolumeScale *= ParseNumber<double>( Trim( pVolume->GetValue() ) ).value_or( 1 );
 		}
-		if (const kv1::Node* position = block.find("positionoverride")) {
-			nested.positionOverride = parseNumber<int>(trim(position->value()));
+		if ( const kv1::CNode *pPosition = block.Find( "positionoverride" ) )
+		{
+			nested.m_PositionOverride = ParseNumber<int>( Trim( pPosition->GetValue() ) );
 		}
-		if (const kv1::Node* position = block.find("ambientpositionoverride")) {
-			nested.ambientPositionOverride = parseNumber<int>(trim(position->value()));
+		if ( const kv1::CNode *pPosition = block.Find( "ambientpositionoverride" ) )
+		{
+			nested.m_AmbientPositionOverride = ParseNumber<int>( Trim( pPosition->GetValue() ) );
 		}
-		add(*target, nested);
+		Add( *pTarget, nested );
 	}
 
-	const SoundscapeLookup& lookup_;
-	std::vector<std::string> stack_;
-	SoundscapePlan plan_;
+	const SoundscapeLookup_t &m_pfnLookup;
+	std::vector<std::string> m_Stack;
+	SoundscapePlan_t m_Plan;
 };
 
 } // namespace
 
-SoundscapePlan planSoundscape(const kv1::Node& soundscape, const SoundscapeLookup& lookup) {
-	Planner planner{lookup};
-	planner.add(soundscape, {});
-	SoundscapePlan plan = planner.take();
-	if (const kv1::Node* dsp = soundscape.find("dsp")) {
-		plan.dsp = parseNumber<int>(trim(dsp->value())).value_or(0);
+//-----------------------------------------------------------------------------
+// Purpose: Every looping and random sound a soundscape plays, nested playsoundscapes included,
+//          with their
+//          volume scaling and position overrides applied.
+//-----------------------------------------------------------------------------
+SoundscapePlan_t PlanSoundscape( const kv1::CNode &soundscape, const SoundscapeLookup_t &pfnLookup )
+{
+	CPlanner planner{ pfnLookup };
+	planner.Add( soundscape, {} );
+	SoundscapePlan_t plan = planner.Take();
+	if ( const kv1::CNode *pDsp = soundscape.Find( "dsp" ) )
+	{
+		plan.m_nDsp = ParseNumber<int>( Trim( pDsp->GetValue() ) ).value_or( 0 );
 	}
 	return plan;
 }
 
-SoundscapeSimulation::SoundscapeSimulation(std::vector<SoundscapeRule> rules, std::uint32_t seed)
-		: rules_(std::move(rules))
-		, due_(rules_.size(), 0)
-		, random_(seed) {}
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+CSoundscapeSimulation::CSoundscapeSimulation( std::vector<SoundscapeRule_t> rules, std::uint32_t nSeed )
+	: m_Rules( std::move( rules ) ),
+	  m_Due( m_Rules.size(), 0 ),
+	  m_Random( nSeed )
+{}
 
-PlayRequest SoundscapeSimulation::request(const SoundscapeRule& rule) {
-	Settings settings;
-	settings.volume = rule.volume;
-	settings.pitch = rule.pitch;
-	settings.position = rule.position;
-	settings.randomPosition = rule.randomPosition;
-	settings.soundLevel = rule.soundLevel;
-	return makeRequest(rule.waves, settings, rule.kind == SoundscapeRule::Kind::Looping, rule.origin, random_);
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+PlayRequest_t CSoundscapeSimulation::Request( const SoundscapeRule_t &rule )
+{
+	Settings_t settings;
+	settings.m_Volume = rule.m_Volume;
+	settings.m_Pitch = rule.m_Pitch;
+	settings.m_Position = rule.m_Position;
+	settings.m_bRandomPosition = rule.m_bRandomPosition;
+	settings.m_SoundLevel = rule.m_SoundLevel;
+	return MakeRequest( rule.m_Waves, settings, rule.m_nKind == SoundscapeRule_t::Kind_t::KIND_LOOPING, rule.m_szOrigin, m_Random );
 }
 
-std::vector<PlayRequest> SoundscapeSimulation::start() {
-	now_ = 0;
-	std::vector<PlayRequest> loops;
-	for (std::size_t i = 0; i < rules_.size(); i++) {
-		if (rules_[i].kind == SoundscapeRule::Kind::Looping) {
-			loops.push_back(request(rules_[i]));
-		} else {
-			due_[i] = rules_[i].interval.pick(random_);
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+std::vector<PlayRequest_t> CSoundscapeSimulation::Start()
+{
+	m_flNow = 0;
+	std::vector<PlayRequest_t> loops;
+	for ( std::size_t i = 0; i < m_Rules.size(); i++ )
+	{
+		if ( m_Rules[ i ].m_nKind == SoundscapeRule_t::Kind_t::KIND_LOOPING )
+		{
+			loops.push_back( Request( m_Rules[ i ] ) );
+		}
+		else
+		{
+			m_Due[ i ] = m_Rules[ i ].m_Interval.Pick( m_Random );
 		}
 	}
 	return loops;
 }
 
-std::vector<PlayRequest> SoundscapeSimulation::advance(double seconds) {
-	now_ += std::max(0.0, seconds);
-	std::vector<PlayRequest> due;
-	for (std::size_t i = 0; i < rules_.size(); i++) {
-		if (rules_[i].kind != SoundscapeRule::Kind::Random) {
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+std::vector<PlayRequest_t> CSoundscapeSimulation::Advance( double flSeconds )
+{
+	m_flNow += std::max( 0.0, flSeconds );
+	std::vector<PlayRequest_t> due;
+	for ( std::size_t i = 0; i < m_Rules.size(); i++ )
+	{
+		if ( m_Rules[ i ].m_nKind != SoundscapeRule_t::Kind_t::KIND_RANDOM )
+		{
 			continue;
 		}
-		while (due_[i] <= now_) {
-			due.push_back(request(rules_[i]));
+		while ( m_Due[ i ] <= m_flNow )
+		{
+			due.push_back( Request( m_Rules[ i ] ) );
 			// A zero interval would fire forever; the engine can't play faster than its frame rate anyway.
-			due_[i] += std::max(0.05, rules_[i].interval.pick(random_));
+			m_Due[ i ] += std::max( 0.05, m_Rules[ i ].m_Interval.Pick( m_Random ) );
 		}
 	}
 	return due;

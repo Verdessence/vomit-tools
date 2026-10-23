@@ -1,4 +1,10 @@
+//===========================================================================//
 // SPDX-License-Identifier: GPL-3.0-or-later
+//
+// Purpose: Image files the skybox editor and the preview read: VTF, plus what stb reads (PNG,
+//          JPEG, TGA, BMP, PSD, GIF, HDR, PNM).
+//
+//===========================================================================//
 #pragma once
 
 #include <cstddef>
@@ -10,14 +16,12 @@
 
 #include "texture/Image.h"
 
-// Image files the skybox editor and the preview read: VTF, plus what stb reads (PNG, JPEG, TGA,
-// BMP, PSD, GIF, HDR, PNM).
-[[nodiscard]] bool isImageFile(const QString& name);
+[[nodiscard]] bool IsImageFile( const QString &szName );
 // name decides VTF or not; the content decides the rest.
-[[nodiscard]] std::optional<xv::texture::Image> decodeImageFile(const QString& name, std::span<const std::byte> data, QString* error = nullptr);
-[[nodiscard]] std::optional<xv::texture::Image> readImageFile(const QString& path, QString* error = nullptr);
+[[nodiscard]] std::optional<xv::texture::CImage> DecodeImageFile( const QString &szName, std::span<const std::byte> data, QString *pError = nullptr );
+[[nodiscard]] std::optional<xv::texture::CImage> ReadImageFile( const QString &szPath, QString *pError = nullptr );
 // A tooltip-sized description of an image file: size, and for VTFs version, format, mipmaps, flags.
-[[nodiscard]] QString describeImageFile(const QString& name, std::span<const std::byte> data);
+[[nodiscard]] QString DescribeImageFile( const QString &szName, std::span<const std::byte> data );
 
-[[nodiscard]] QImage toQImage(const xv::texture::Image& image);
-[[nodiscard]] xv::texture::Image fromQImage(const QImage& image);
+[[nodiscard]] QImage ToQImage( const xv::texture::CImage &image );
+[[nodiscard]] xv::texture::CImage FromQImage( const QImage &image );

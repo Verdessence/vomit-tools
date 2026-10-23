@@ -1,4 +1,9 @@
+//===========================================================================//
 // SPDX-License-Identifier: GPL-3.0-or-later
+//
+// Purpose: See SoundLint.h.
+//
+//===========================================================================//
 #include "SoundLint.h"
 
 #include <algorithm>
@@ -9,196 +14,272 @@
 #include "../vfs/Vfs.h"
 #include "SoundConstants.h"
 
-namespace xv::sound {
+namespace xv::sound
+{
 
-namespace {
+namespace
+{
 
-std::string_view trim(std::string_view text) {
-	const auto first = text.find_first_not_of(" \t\r\n");
-	if (first == std::string_view::npos) {
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+std::string_view Trim( std::string_view szText )
+{
+	const auto nFirst = szText.find_first_not_of( " \t\r\n" );
+	if ( nFirst == std::string_view::npos )
+	{
 		return {};
 	}
-	const auto last = text.find_last_not_of(" \t\r\n");
-	return text.substr(first, last - first + 1);
+	const auto nLast = szText.find_last_not_of( " \t\r\n" );
+	return szText.substr( nFirst, nLast - nFirst + 1 );
 }
 
-template<typename T>
-std::optional<T> parse(std::string_view text) {
-	return parseNumber<T>(trim(text));
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+template <typename T>
+std::optional<T> Parse( std::string_view szText )
+{
+	return ParseNumber<T>( Trim( szText ) );
 }
 
-std::vector<std::string_view> split(std::string_view text, char separator) {
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+std::vector<std::string_view> Split( std::string_view szText, char chSeparator )
+{
 	std::vector<std::string_view> parts;
-	std::size_t start = 0;
-	while (true) {
-		const auto end = text.find(separator, start);
-		parts.push_back(trim(text.substr(start, end == std::string_view::npos ? std::string_view::npos : end - start)));
-		if (end == std::string_view::npos) {
+	std::size_t nStart = 0;
+	while ( true )
+	{
+		const auto nEnd = szText.find( chSeparator, nStart );
+		parts.push_back( Trim( szText.substr( nStart, nEnd == std::string_view::npos ? std::string_view::npos : nEnd - nStart ) ) );
+		if ( nEnd == std::string_view::npos )
+		{
 			return parts;
 		}
-		start = end + 1;
+		nStart = nEnd + 1;
 	}
 }
 
-// A value that may be a "min,max" range, each part checked by checkPart.
-template<typename F>
-std::optional<std::string> checkRange(std::string_view value, F&& checkPart) {
-	const auto parts = split(value, ',');
-	if (parts.size() > 2) {
+//-----------------------------------------------------------------------------
+// Purpose: A value that may be a "min,max" range, each part checked by checkPart.
+//-----------------------------------------------------------------------------
+template <typename F>
+std::optional<std::string> CheckRange( std::string_view szValue, F &&checkPart )
+{
+	const auto parts = Split( szValue, ',' );
+	if ( parts.size() > 2 )
+	{
 		return "expected one value or a min,max range";
 	}
-	for (const std::string_view part : parts) {
-		if (part.empty()) {
+	for ( const std::string_view szPart : parts )
+	{
+		if ( szPart.empty() )
+		{
 			return "empty value";
 		}
-		if (auto problem = checkPart(part)) {
+		if ( auto problem = checkPart( szPart ) )
+		{
 			return problem;
 		}
 	}
 	return std::nullopt;
 }
 
-auto numberOr(std::span<const Constant> table, std::string_view prefix) {
-	return [table, prefix](std::string_view part) -> std::optional<std::string> {
-		if (findConstant(table, part) || parse<double>(part)) {
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+auto NumberOr( std::span<const Constant_t> table, std::string_view szPrefix )
+{
+	return [ table, szPrefix ]( std::string_view szPart ) -> std::optional<std::string> {
+		if ( FindConstant( table, szPart ) || Parse<double>( szPart ) )
+		{
 			return std::nullopt;
 		}
-		return std::format("\"{}\" is not a number or a {} constant", part, prefix);
+		return std::format( "\"{}\" is not a number or a {} constant", szPart, szPrefix );
 	};
 }
 
-std::optional<std::string> notNumber(std::string_view part) {
-	return parse<double>(part) ? std::nullopt : std::optional<std::string>{std::format("\"{}\" is not a number", part)};
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+std::optional<std::string> NotNumber( std::string_view szPart )
+{
+	return Parse<double>( szPart ) ? std::nullopt : std::optional<std::string>{ std::format( "\"{}\" is not a number", szPart ) };
 }
 
-bool endsWithIgnoreCase(std::string_view text, std::string_view suffix) {
-	return text.size() >= suffix.size() && kv1::equalsIgnoreCase(text.substr(text.size() - suffix.size()), suffix);
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+bool EndsWithIgnoreCase( std::string_view szText, std::string_view szSuffix )
+{
+	return szText.size() >= szSuffix.size() && kv1::EqualsIgnoreCase( szText.substr( szText.size() - szSuffix.size() ), szSuffix );
 }
 
-class Linter {
+class CLinter
+{
 public:
-	Linter(const kv1::Document& document, FileKind kind, const Schema& schema, const LintContext& context)
-			: doc_(document)
-			, kind_(kind)
-			, schema_(schema)
-			, context_(context) {}
+	CLinter( const kv1::CDocument &document, FileKind_t nKind, const CSchema &schema, const LintContext_t &context )
+		: m_Doc( document ),
+		  m_nKind( nKind ),
+		  m_Schema( schema ),
+		  m_Context( context )
+	{}
 
-	std::vector<Issue> run() {
-		if (context_.listedInManifest == false) {
-			add(Issue::Severity::Warning, {}, std::format("Not listed in {}, so the game won't load this file", manifestPathFor(kind_)));
+	std::vector<Issue_t> Run()
+	{
+		if ( m_Context.m_ListedInManifest == false )
+		{
+			Add( Issue_t::Severity_t::SEVERITY_WARNING, {}, std::format( "Not listed in {}, so the game won't load this file", ManifestPathFor( m_nKind ) ) );
 		}
 
 		std::unordered_set<std::string> seen;
-		for (std::size_t i = 0; i < doc_.roots.size(); i++) {
-			const kv1::Node& root = doc_.roots[i];
-			if (root.isPair()) {
-				add(Issue::Severity::Warning, {i}, std::format("\"{}\" is a key/value pair at the top level; the engine only reads named blocks", root.key()));
+		for ( std::size_t i = 0; i < m_Doc.m_Roots.size(); i++ )
+		{
+			const kv1::CNode &root = m_Doc.m_Roots[ i ];
+			if ( root.IsPair() )
+			{
+				Add( Issue_t::Severity_t::SEVERITY_WARNING, { i }, std::format( "\"{}\" is a key/value pair at the top level; the engine only reads named blocks", root.GetKey() ) );
 				continue;
 			}
-			if (!root.isBlock()) {
+			if ( !root.IsBlock() )
+			{
 				continue;
 			}
-			const std::string name = toLower(root.key());
-			if (name.empty()) {
-				add(Issue::Severity::Error, {i}, std::format("This {} has no name", schema_.entryNoun));
-			} else if (!seen.insert(name).second) {
-				add(Issue::Severity::Warning, {i}, std::format("\"{}\" is defined more than once in this file", root.key()));
-			} else {
-				const auto& others = kind_ == FileKind::Soundscape ? context_.otherSoundscapes : context_.otherSounds;
-				if (const auto it = others.find(name); it != others.end()) {
-					add(Issue::Severity::Info, {i}, std::format("\"{}\" is also defined in {}; only one definition is used", root.key(), it->second));
+			const std::string szName = ToLower( root.GetKey() );
+			if ( szName.empty() )
+			{
+				Add( Issue_t::Severity_t::SEVERITY_ERROR, { i }, std::format( "This {} has no name", m_Schema.m_szEntryNoun ) );
+			}
+			else if ( !seen.insert( szName ).second )
+			{
+				Add( Issue_t::Severity_t::SEVERITY_WARNING, { i }, std::format( "\"{}\" is defined more than once in this file", root.GetKey() ) );
+			}
+			else
+			{
+				const auto &others = m_nKind == FileKind_t::FILE_KIND_SOUNDSCAPE ? m_Context.m_OtherSoundscapes : m_Context.m_OtherSounds;
+				if ( const auto it = others.find( szName ); it != others.end() )
+				{
+					Add( Issue_t::Severity_t::SEVERITY_INFO, { i }, std::format( "\"{}\" is also defined in {}; only one definition is used", root.GetKey(), it->second ) );
 				}
 			}
-			if (kind_ == FileKind::Soundscape) {
-				nesting_[name] = nestedSoundscapes(root);
+			if ( m_nKind == FileKind_t::FILE_KIND_SOUNDSCAPE )
+			{
+				m_Nesting[ szName ] = NestedSoundscapes( root );
 			}
 		}
 
-		for (std::size_t i = 0; i < doc_.roots.size(); i++) {
-			if (doc_.roots[i].isBlock()) {
-				checkBlock(*schema_.entry, doc_.roots[i], {i});
+		for ( std::size_t i = 0; i < m_Doc.m_Roots.size(); i++ )
+		{
+			if ( m_Doc.m_Roots[ i ].IsBlock() )
+			{
+				CheckBlock( *m_Schema.m_pEntry, m_Doc.m_Roots[ i ], { i } );
 			}
 		}
-		if (kind_ == FileKind::Soundscape) {
-			checkLoops();
+		if ( m_nKind == FileKind_t::FILE_KIND_SOUNDSCAPE )
+		{
+			CheckLoops();
 		}
-		return std::move(issues_);
+		return std::move( m_Issues );
 	}
 
 private:
-	void add(Issue::Severity severity, NodePath path, std::string message) {
-		issues_.push_back({severity, std::move(path), std::move(message)});
+	void Add( Issue_t::Severity_t nSeverity, NodePath_t path, std::string szMessage )
+	{
+		m_Issues.push_back( { nSeverity, std::move( path ), std::move( szMessage ) } );
 	}
 
-	void checkBlock(const BlockDef& def, const kv1::Node& node, const NodePath& path) {
-		bool hasWave = false;
-		bool hasRndwave = false;
-		bool hasName = false;
-		for (std::size_t j = 0; j < node.children().size(); j++) {
-			const kv1::Node& child = node.child(j);
-			NodePath childPath = path;
-			childPath.push_back(j);
-			const std::string key = child.key();
+	void CheckBlock( const BlockDef_t &def, const kv1::CNode &node, const NodePath_t &path )
+	{
+		bool bHasWave = false;
+		bool bHasRndwave = false;
+		bool bHasName = false;
+		for ( std::size_t j = 0; j < node.GetChildren().size(); j++ )
+		{
+			const kv1::CNode &child = node.Child( j );
+			NodePath_t childPath = path;
+			childPath.push_back( j );
+			const std::string szKey = child.GetKey();
 
-			if (child.isPair()) {
-				const KeyDef* keyDef = findKey(def, key);
-				if (!keyDef) {
-					add(Issue::Severity::Warning, std::move(childPath), allowsBlock(def, key)
-						? std::format("\"{}\" should be a block {{ ... }}, not a value", key)
-						: std::format("Unknown key \"{}\"; the engine ignores it", key));
+			if ( child.IsPair() )
+			{
+				const KeyDef_t *pKeyDef = FindKey( def, szKey );
+				if ( !pKeyDef )
+				{
+					Add( Issue_t::Severity_t::SEVERITY_WARNING, std::move( childPath ), AllowsBlock( def, szKey ) ? std::format( "\"{}\" should be a block {{ ... }}, not a value", szKey ) : std::format( "Unknown key \"{}\"; the engine ignores it", szKey ) );
 					continue;
 				}
-				hasWave |= keyDef->kind == ValueKind::Wave;
-				hasName |= keyDef->kind == ValueKind::SoundscapeName;
-				const std::string value = child.value();
-				if (auto problem = checkValue(keyDef->kind, value)) {
-					add(Issue::Severity::Warning, std::move(childPath), std::move(*problem));
+				bHasWave |= pKeyDef->m_nKind == ValueKind_t::VALUE_KIND_WAVE;
+				bHasName |= pKeyDef->m_nKind == ValueKind_t::VALUE_KIND_SOUNDSCAPE_NAME;
+				const std::string szValue = child.GetValue();
+				if ( auto problem = CheckValue( pKeyDef->m_nKind, szValue ) )
+				{
+					Add( Issue_t::Severity_t::SEVERITY_WARNING, std::move( childPath ), std::move( *problem ) );
 					continue;
 				}
-				checkMeaning(def, *keyDef, value, childPath);
-			} else if (child.isBlock()) {
-				if (!allowsBlock(def, key)) {
-					add(Issue::Severity::Warning, std::move(childPath), std::format("Unknown block \"{}\"; the engine ignores it", key));
+				CheckMeaning( def, *pKeyDef, szValue, childPath );
+			}
+			else if ( child.IsBlock() )
+			{
+				if ( !AllowsBlock( def, szKey ) )
+				{
+					Add( Issue_t::Severity_t::SEVERITY_WARNING, std::move( childPath ), std::format( "Unknown block \"{}\"; the engine ignores it", szKey ) );
 					continue;
 				}
-				if (kv1::equalsIgnoreCase(key, "rndwave")) {
-					hasRndwave = true;
-					if (child.findAll("wave").empty()) {
-						add(Issue::Severity::Warning, childPath, "rndwave has no wave entries");
+				if ( kv1::EqualsIgnoreCase( szKey, "rndwave" ) )
+				{
+					bHasRndwave = true;
+					if ( child.FindAll( "wave" ).empty() )
+					{
+						Add( Issue_t::Severity_t::SEVERITY_WARNING, childPath, "rndwave has no wave entries" );
 					}
 				}
-				if (const BlockDef* sub = schema_.block(key)) {
-					checkBlock(*sub, child, childPath);
+				if ( const BlockDef_t *pSub = m_Schema.Block( szKey ) )
+				{
+					CheckBlock( *pSub, child, childPath );
 				}
 			}
 		}
 
-		if (kv1::equalsIgnoreCase(def.key, "playlooping") && !hasWave) {
-			add(Issue::Severity::Warning, path, "playlooping has no wave, so it plays nothing");
-		} else if (kv1::equalsIgnoreCase(def.key, "playrandom") && !hasRndwave) {
-			add(Issue::Severity::Warning, path, "playrandom needs an rndwave block with the sounds to pick from");
-		} else if (kv1::equalsIgnoreCase(def.key, "playsoundscape") && !hasName) {
-			add(Issue::Severity::Warning, path, "playsoundscape has no name");
-		} else if (&def == schema_.entry && kind_ == FileKind::Soundscript && !hasWave && !hasRndwave) {
-			add(Issue::Severity::Error, path, "This sound has no wave or rndwave");
+		if ( kv1::EqualsIgnoreCase( def.m_szKey, "playlooping" ) && !bHasWave )
+		{
+			Add( Issue_t::Severity_t::SEVERITY_WARNING, path, "playlooping has no wave, so it plays nothing" );
+		}
+		else if ( kv1::EqualsIgnoreCase( def.m_szKey, "playrandom" ) && !bHasRndwave )
+		{
+			Add( Issue_t::Severity_t::SEVERITY_WARNING, path, "playrandom needs an rndwave block with the sounds to pick from" );
+		}
+		else if ( kv1::EqualsIgnoreCase( def.m_szKey, "playsoundscape" ) && !bHasName )
+		{
+			Add( Issue_t::Severity_t::SEVERITY_WARNING, path, "playsoundscape has no name" );
+		}
+		else if ( &def == m_Schema.m_pEntry && m_nKind == FileKind_t::FILE_KIND_SOUNDSCRIPT && !bHasWave && !bHasRndwave )
+		{
+			Add( Issue_t::Severity_t::SEVERITY_ERROR, path, "This sound has no wave or rndwave" );
 		}
 	}
 
-	void checkMeaning(const BlockDef& def, const KeyDef& keyDef, const std::string& value, const NodePath& path) {
-		switch (keyDef.kind) {
-			case ValueKind::Wave:
-				checkWave(value, path, kv1::equalsIgnoreCase(def.key, "playlooping"));
+	void CheckMeaning( const BlockDef_t &def, const KeyDef_t &keyDef, const std::string &szValue, const NodePath_t &path )
+	{
+		switch ( keyDef.m_nKind )
+		{
+			case ValueKind_t::VALUE_KIND_WAVE:
+				CheckWave( szValue, path, kv1::EqualsIgnoreCase( def.m_szKey, "playlooping" ) );
 				break;
-			case ValueKind::SoundscapeName: {
-				const std::string name = toLower(value);
-				if (!nesting_.contains(name) && !context_.otherSoundscapes.contains(name)) {
-					add(Issue::Severity::Error, path, std::format("No soundscape named \"{}\"", value));
+			case ValueKind_t::VALUE_KIND_SOUNDSCAPE_NAME:
+			{
+				const std::string szName = ToLower( szValue );
+				if ( !m_Nesting.contains( szName ) && !m_Context.m_OtherSoundscapes.contains( szName ) )
+				{
+					Add( Issue_t::Severity_t::SEVERITY_ERROR, path, std::format( "No soundscape named \"{}\"", szValue ) );
 				}
 				break;
 			}
-			case ValueKind::DspPreset:
-				if (const auto preset = parse<int>(value); preset && *preset >= static_cast<int>(dspPresets().size())) {
-					add(Issue::Severity::Info, path, std::format("dsp {} is not one of the stock presets", *preset));
+			case ValueKind_t::VALUE_KIND_DSP_PRESET:
+				if ( const auto preset = Parse<int>( szValue ); preset && *preset >= static_cast<int>( DspPresets().size() ) )
+				{
+					Add( Issue_t::Severity_t::SEVERITY_INFO, path, std::format( "dsp {} is not one of the stock presets", *preset ) );
 				}
 				break;
 			default:
@@ -206,51 +287,67 @@ private:
 		}
 	}
 
-	void checkWave(std::string_view value, const NodePath& path, bool looping) {
-		for (std::size_t i = 0; i < 2 && i < value.size(); i++) {
-			if (value[i] == '!' || value[i] == '?') {
+	void CheckWave( std::string_view szValue, const NodePath_t &path, bool bLooping )
+	{
+		for ( std::size_t i = 0; i < 2 && i < szValue.size(); i++ )
+		{
+			if ( szValue[ i ] == '!' || szValue[ i ] == '?' )
+			{
 				return; // a sentence or voice stream, not a file
 			}
 		}
-		const std::string_view file = stripPathFlags(value);
-		if (!endsWithIgnoreCase(file, ".wav") && !endsWithIgnoreCase(file, ".mp3")) {
-			add(Issue::Severity::Warning, path, std::format("\"{}\" is not a .wav or .mp3 file", file));
+		const std::string_view szFile = StripPathFlags( szValue );
+		if ( !EndsWithIgnoreCase( szFile, ".wav" ) && !EndsWithIgnoreCase( szFile, ".mp3" ) )
+		{
+			Add( Issue_t::Severity_t::SEVERITY_WARNING, path, std::format( "\"{}\" is not a .wav or .mp3 file", szFile ) );
 			return;
 		}
-		const std::string gamePath = "sound/" + vfs::normalizePath(file);
-		if (context_.fileExists && !context_.fileExists(gamePath)) {
-			add(Issue::Severity::Warning, path, std::format("{} is not in the mounted game", gamePath));
+		const std::string szGamePath = "sound/" + vfs::NormalizePath( szFile );
+		if ( m_Context.m_pfnFileExists && !m_Context.m_pfnFileExists( szGamePath ) )
+		{
+			Add( Issue_t::Severity_t::SEVERITY_WARNING, path, std::format( "{} is not in the mounted game", szGamePath ) );
 			return;
 		}
-		if (looping && endsWithIgnoreCase(file, ".wav") && context_.hasLoopPoints) {
-			if (const auto loops = context_.hasLoopPoints(gamePath); loops && !*loops) {
-				add(Issue::Severity::Warning, path, std::format("{} has no loop points, so playlooping plays it only once", gamePath));
+		if ( bLooping && EndsWithIgnoreCase( szFile, ".wav" ) && m_Context.m_pfnHasLoopPoints )
+		{
+			if ( const auto loops = m_Context.m_pfnHasLoopPoints( szGamePath ); loops && !*loops )
+			{
+				Add( Issue_t::Severity_t::SEVERITY_WARNING, path, std::format( "{} has no loop points, so playlooping plays it only once", szGamePath ) );
 			}
 		}
 	}
 
-	const std::vector<std::string>* nestedIn(const std::string& name) const {
-		if (const auto it = nesting_.find(name); it != nesting_.end()) {
+	const std::vector<std::string> *NestedIn( const std::string &szName ) const
+	{
+		if ( const auto it = m_Nesting.find( szName ); it != m_Nesting.end() )
+		{
 			return &it->second;
 		}
-		if (const auto it = context_.otherNesting.find(name); it != context_.otherNesting.end()) {
+		if ( const auto it = m_Context.m_OtherNesting.find( szName ); it != m_Context.m_OtherNesting.end() )
+		{
 			return &it->second;
 		}
 		return nullptr;
 	}
 
 	// Depth-first search for a chain of playsoundscapes from `from` back to `target`.
-	bool reaches(const std::string& from, const std::string& target, std::unordered_set<std::string>& visited, std::vector<std::string>& chain) const {
-		if (from == target) {
+	bool Reaches( const std::string &szFrom, const std::string &szTarget, std::unordered_set<std::string> &visited, std::vector<std::string> &chain ) const
+	{
+		if ( szFrom == szTarget )
+		{
 			return true;
 		}
-		if (!visited.insert(from).second) {
+		if ( !visited.insert( szFrom ).second )
+		{
 			return false;
 		}
-		if (const auto* nested = nestedIn(from)) {
-			for (const std::string& next : *nested) {
-				chain.push_back(next);
-				if (reaches(next, target, visited, chain)) {
+		if ( const auto *pNested = NestedIn( szFrom ) )
+		{
+			for ( const std::string &szNext : *pNested )
+			{
+				chain.push_back( szNext );
+				if ( Reaches( szNext, szTarget, visited, chain ) )
+				{
 					return true;
 				}
 				chain.pop_back();
@@ -259,157 +356,214 @@ private:
 		return false;
 	}
 
-	void checkLoops() {
-		for (std::size_t i = 0; i < doc_.roots.size(); i++) {
-			const kv1::Node& root = doc_.roots[i];
-			if (!root.isBlock()) {
+	void CheckLoops()
+	{
+		for ( std::size_t i = 0; i < m_Doc.m_Roots.size(); i++ )
+		{
+			const kv1::CNode &root = m_Doc.m_Roots[ i ];
+			if ( !root.IsBlock() )
+			{
 				continue;
 			}
-			const std::string name = toLower(root.key());
-			for (std::size_t j = 0; j < root.children().size(); j++) {
-				const kv1::Node& child = root.child(j);
-				const kv1::Node* target = child.isBlock() && kv1::equalsIgnoreCase(child.key(), "playsoundscape") ? child.find("name") : nullptr;
-				if (!target) {
+			const std::string szName = ToLower( root.GetKey() );
+			for ( std::size_t j = 0; j < root.GetChildren().size(); j++ )
+			{
+				const kv1::CNode &child = root.Child( j );
+				const kv1::CNode *pTarget = child.IsBlock() && kv1::EqualsIgnoreCase( child.GetKey(), "playsoundscape" ) ? child.Find( "name" ) : nullptr;
+				if ( !pTarget )
+				{
 					continue;
 				}
 				std::unordered_set<std::string> visited;
-				std::vector<std::string> chain{name, toLower(target->value())};
-				if (reaches(chain.back(), name, visited, chain)) {
-					std::string text;
-					for (const std::string& step : chain) {
-						text += (text.empty() ? "" : " → ") + step;
+				std::vector<std::string> chain{ szName, ToLower( pTarget->GetValue() ) };
+				if ( Reaches( chain.back(), szName, visited, chain ) )
+				{
+					std::string szText;
+					for ( const std::string &szStep : chain )
+					{
+						szText += ( szText.empty() ? "" : " → " ) + szStep;
 					}
-					add(Issue::Severity::Error, {i, j}, std::format("playsoundscape loop: {}", text));
+					Add( Issue_t::Severity_t::SEVERITY_ERROR, { i, j }, std::format( "playsoundscape loop: {}", szText ) );
 				}
 			}
 		}
 	}
 
-	const kv1::Document& doc_;
-	FileKind kind_;
-	const Schema& schema_;
-	const LintContext& context_;
-	std::unordered_map<std::string, std::vector<std::string>> nesting_;
-	std::vector<Issue> issues_;
+	const kv1::CDocument &m_Doc;
+	FileKind_t m_nKind;
+	const CSchema &m_Schema;
+	const LintContext_t &m_Context;
+	std::unordered_map<std::string, std::vector<std::string>> m_Nesting;
+	std::vector<Issue_t> m_Issues;
 };
 
 } // namespace
 
-std::string toLower(std::string_view text) {
-	std::string out{text};
-	std::ranges::transform(out, out.begin(), [](char c) {
-		return (c >= 'A' && c <= 'Z') ? static_cast<char>(c - 'A' + 'a') : c;
-	});
-	return out;
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+std::string ToLower( std::string_view szText )
+{
+	std::string szOut{ szText };
+	std::ranges::transform( szOut, szOut.begin(), []( char c ) {
+		return ( c >= 'A' && c <= 'Z' ) ? static_cast<char>( c - 'A' + 'a' ) : c;
+	} );
+	return szOut;
 }
 
-std::optional<std::string> checkValue(ValueKind kind, std::string_view value) {
-	const std::string_view text = trim(value);
-	switch (kind) {
-		case ValueKind::Text:
+//-----------------------------------------------------------------------------
+// Purpose: Checks one value's syntax against its kind; returns what is wrong, or nullopt if it is
+//          fine.
+//-----------------------------------------------------------------------------
+std::optional<std::string> CheckValue( ValueKind_t nKind, std::string_view szValue )
+{
+	const std::string_view szText = Trim( szValue );
+	switch ( nKind )
+	{
+		case ValueKind_t::VALUE_KIND_TEXT:
 			return std::nullopt;
-		case ValueKind::Number:
-			return notNumber(text);
-		case ValueKind::NumberRange:
-			return checkRange(text, notNumber);
-		case ValueKind::Volume:
-			return checkRange(text, numberOr(volumes(), "VOL_"));
-		case ValueKind::Pitch:
-			return checkRange(text, numberOr(pitches(), "PITCH_"));
-		case ValueKind::SoundLevel:
-			return checkRange(text, [](std::string_view part) -> std::optional<std::string> {
-				if (parseSoundLevel(part)) {
+		case ValueKind_t::VALUE_KIND_NUMBER:
+			return NotNumber( szText );
+		case ValueKind_t::VALUE_KIND_NUMBER_RANGE:
+			return CheckRange( szText, NotNumber );
+		case ValueKind_t::VALUE_KIND_VOLUME:
+			return CheckRange( szText, NumberOr( Volumes(), "VOL_" ) );
+		case ValueKind_t::VALUE_KIND_PITCH:
+			return CheckRange( szText, NumberOr( Pitches(), "PITCH_" ) );
+		case ValueKind_t::VALUE_KIND_SOUND_LEVEL:
+			return CheckRange( szText, []( std::string_view szPart ) -> std::optional<std::string> {
+				if ( ParseSoundLevel( szPart ) )
+				{
 					return std::nullopt;
 				}
-				return std::format("\"{}\" is not a sound level (SNDLVL_* or a number of decibels)", part);
-			});
-		case ValueKind::Attenuation:
-			return numberOr(attenuations(), "ATTN_")(text);
-		case ValueKind::Channel:
-			if (findConstant(channels(), text) || parse<int>(text)) {
+				return std::format( "\"{}\" is not a sound level (SNDLVL_* or a number of decibels)", szPart );
+			} );
+		case ValueKind_t::VALUE_KIND_ATTENUATION:
+			return NumberOr( Attenuations(), "ATTN_" )( szText );
+		case ValueKind_t::VALUE_KIND_CHANNEL:
+			if ( FindConstant( Channels(), szText ) || Parse<int>( szText ) )
+			{
 				return std::nullopt;
 			}
-			return std::format("\"{}\" is not a CHAN_ constant", text);
-		case ValueKind::DspPreset:
-			if (const auto preset = parse<int>(text); preset && *preset >= 0) {
+			return std::format( "\"{}\" is not a CHAN_ constant", szText );
+		case ValueKind_t::VALUE_KIND_DSP_PRESET:
+			if ( const auto preset = Parse<int>( szText ); preset && *preset >= 0 )
+			{
 				return std::nullopt;
 			}
-			return std::format("\"{}\" is not a preset number", text);
-		case ValueKind::Position:
-		case ValueKind::RandomPosition:
-			if (const auto position = parse<int>(text); position && *position >= 0 && *position <= 7) {
+			return std::format( "\"{}\" is not a preset number", szText );
+		case ValueKind_t::VALUE_KIND_POSITION:
+		case ValueKind_t::VALUE_KIND_RANDOM_POSITION:
+			if ( const auto position = Parse<int>( szText ); position && *position >= 0 && *position <= 7 )
+			{
 				return std::nullopt;
 			}
-			if (kind == ValueKind::RandomPosition && kv1::equalsIgnoreCase(text, "random")) {
+			if ( nKind == ValueKind_t::VALUE_KIND_RANDOM_POSITION && kv1::EqualsIgnoreCase( szText, "random" ) )
+			{
 				return std::nullopt;
 			}
-			if (kind == ValueKind::RandomPosition) {
-				return std::format("\"{}\" is not a position from 0 to 7 or \"random\"", text);
+			if ( nKind == ValueKind_t::VALUE_KIND_RANDOM_POSITION )
+			{
+				return std::format( "\"{}\" is not a position from 0 to 7 or \"random\"", szText );
 			}
-			return std::format("\"{}\" is not a position from 0 to 7", text);
-		case ValueKind::Origin: {
+			return std::format( "\"{}\" is not a position from 0 to 7", szText );
+		case ValueKind_t::VALUE_KIND_ORIGIN:
+		{
 			std::vector<std::string_view> parts;
-			for (const std::string_view part : split(text, ' ')) {
-				if (!part.empty()) {
-					parts.push_back(part);
+			for ( const std::string_view szPart : Split( szText, ' ' ) )
+			{
+				if ( !szPart.empty() )
+				{
+					parts.push_back( szPart );
 				}
 			}
-			if (parts.size() == 3 && std::ranges::all_of(parts, [](std::string_view p) { return parse<double>(p).has_value(); })) {
+			if ( parts.size() == 3 && std::ranges::all_of( parts, []( std::string_view p ) { return Parse<double>( p ).has_value(); } ) )
+			{
 				return std::nullopt;
 			}
-			return std::format("\"{}\" is not an \"x y z\" position", text);
+			return std::format( "\"{}\" is not an \"x y z\" position", szText );
 		}
-		case ValueKind::Wave:
-		case ValueKind::SoundscapeName:
-			return text.empty() ? std::optional<std::string>{"empty"} : std::nullopt;
-		case ValueKind::Bool:
-			return text == "0" || text == "1" ? std::nullopt : std::optional<std::string>{std::format("\"{}\" is not 0 or 1", text)};
+		case ValueKind_t::VALUE_KIND_WAVE:
+		case ValueKind_t::VALUE_KIND_SOUNDSCAPE_NAME:
+			return szText.empty() ? std::optional<std::string>{ "empty" } : std::nullopt;
+		case ValueKind_t::VALUE_KIND_BOOL:
+			return szText == "0" || szText == "1" ? std::nullopt : std::optional<std::string>{ std::format( "\"{}\" is not 0 or 1", szText ) };
 	}
 	return std::nullopt;
 }
 
-std::vector<Issue> lint(const kv1::Document& document, FileKind kind, const LintContext& context) {
-	const Schema* schema = schemaFor(kind);
-	if (!schema) {
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+std::vector<Issue_t> Lint( const kv1::CDocument &document, FileKind_t nKind, const LintContext_t &context )
+{
+	const CSchema *pSchema = SchemaFor( nKind );
+	if ( !pSchema )
+	{
 		return {};
 	}
-	return Linter{document, kind, *schema, context}.run();
+	return CLinter{ document, nKind, *pSchema, context }.Run();
 }
 
-std::vector<std::string> nestedSoundscapes(const kv1::Node& soundscape) {
+//-----------------------------------------------------------------------------
+// Purpose: Lowercase names of the soundscapes a soundscape plays through playsoundscape.
+//-----------------------------------------------------------------------------
+std::vector<std::string> NestedSoundscapes( const kv1::CNode &soundscape )
+{
 	std::vector<std::string> names;
-	for (const kv1::Node& child : soundscape.children()) {
-		if (child.isBlock() && kv1::equalsIgnoreCase(child.key(), "playsoundscape")) {
-			if (const kv1::Node* name = child.find("name")) {
-				names.push_back(toLower(name->value()));
+	for ( const kv1::CNode &child : soundscape.GetChildren() )
+	{
+		if ( child.IsBlock() && kv1::EqualsIgnoreCase( child.GetKey(), "playsoundscape" ) )
+		{
+			if ( const kv1::CNode *pName = child.Find( "name" ) )
+			{
+				names.push_back( ToLower( pName->GetValue() ) );
 			}
 		}
 	}
 	return names;
 }
 
-namespace {
+namespace
+{
 
-kv1::Node* manifestBlock(kv1::Document& manifest) {
-	const auto it = std::ranges::find_if(manifest.roots, &kv1::Node::isBlock);
-	return it == manifest.roots.end() ? nullptr : &*it;
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+kv1::CNode *ManifestBlock( kv1::CDocument &manifest )
+{
+	const auto it = std::ranges::find_if( manifest.m_Roots, &kv1::CNode::IsBlock );
+	return it == manifest.m_Roots.end() ? nullptr : &*it;
 }
 
-bool isManifestKey(std::string_view key) {
-	return kv1::equalsIgnoreCase(key, "file") || kv1::equalsIgnoreCase(key, "precache_file") || kv1::equalsIgnoreCase(key, "preload_file");
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+bool IsManifestKey( std::string_view szKey )
+{
+	return kv1::EqualsIgnoreCase( szKey, "file" ) || kv1::EqualsIgnoreCase( szKey, "precache_file" ) || kv1::EqualsIgnoreCase( szKey, "preload_file" );
 }
 
 } // namespace
 
-std::vector<std::string> manifestFiles(const kv1::Document& manifest) {
+//-----------------------------------------------------------------------------
+// Purpose: Files a manifest lists (values of "file", "precache_file" and "preload_file"),
+//          normalized.
+//-----------------------------------------------------------------------------
+std::vector<std::string> ManifestFiles( const kv1::CDocument &manifest )
+{
 	std::vector<std::string> files;
-	for (const kv1::Node& root : manifest.roots) {
-		if (!root.isBlock()) {
+	for ( const kv1::CNode &root : manifest.m_Roots )
+	{
+		if ( !root.IsBlock() )
+		{
 			continue;
 		}
-		for (const kv1::Node& child : root.children()) {
-			if (child.isPair() && isManifestKey(child.key())) {
-				files.push_back(vfs::normalizePath(child.value()));
+		for ( const kv1::CNode &child : root.GetChildren() )
+		{
+			if ( child.IsPair() && IsManifestKey( child.GetKey() ) )
+			{
+				files.push_back( vfs::NormalizePath( child.GetValue() ) );
 			}
 		}
 		break;
@@ -417,13 +571,19 @@ std::vector<std::string> manifestFiles(const kv1::Document& manifest) {
 	return files;
 }
 
-bool addToManifest(kv1::Document& manifest, FileKind kind, std::string_view path) {
-	kv1::Node* block = manifestBlock(manifest);
-	const auto listed = manifestFiles(manifest);
-	if (!block || std::ranges::find(listed, vfs::normalizePath(path)) != listed.end()) {
+//-----------------------------------------------------------------------------
+// Purpose: Adds path to the manifest's block. Returns false if it was already listed or there is
+//          no block.
+//-----------------------------------------------------------------------------
+bool AddToManifest( kv1::CDocument &manifest, FileKind_t nKind, std::string_view szPath )
+{
+	kv1::CNode *pBlock = ManifestBlock( manifest );
+	const auto listed = ManifestFiles( manifest );
+	if ( !pBlock || std::ranges::find( listed, vfs::NormalizePath( szPath ) ) != listed.end() )
+	{
 		return false;
 	}
-	block->appendChild(kv1::Node::makePair(kind == FileKind::Soundscape ? "file" : "precache_file", path));
+	pBlock->AppendChild( kv1::CNode::MakePair( nKind == FileKind_t::FILE_KIND_SOUNDSCAPE ? "file" : "precache_file", szPath ) );
 	return true;
 }
 

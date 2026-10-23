@@ -14,6 +14,14 @@ add_library(vomit_tools_ui STATIC
         KvCard.h
         MainWindow.cpp
         MainWindow.h
+        ParticleDocument.cpp
+        ParticleDocument.h
+        ParticleEditor.cpp
+        ParticleEditor.h
+        ParticlePreview.cpp
+        ParticlePreview.h
+        ParticleSearch.cpp
+        ParticleSearch.h
         QtPaths.h
         SkyDocument.cpp
         SkyDocument.h
@@ -48,6 +56,21 @@ add_custom_target(vomit_tools_build_info
         BYPRODUCTS "${CMAKE_CURRENT_BINARY_DIR}/BuildInfo.cpp"
         VERBATIM)
 add_dependencies(vomit_tools_ui vomit_tools_build_info)
+
+# The particle preview draws on the GPU where Qt has QRhiWidget (6.7+) and the shader tools to build
+# its shaders; otherwise it draws in software only.
+if(Qt6_VERSION VERSION_GREATER_EQUAL 6.7 AND TARGET Qt6::ShaderTools AND TARGET Qt6::GuiPrivate)
+    target_sources(vomit_tools_ui PRIVATE ParticleGpuView.cpp ParticleGpuView.h)
+    qt_add_shaders(vomit_tools_ui "vomit_tools_particle_shaders"
+            PREFIX "/shaders"
+            BASE shaders
+            FILES shaders/particle.vert shaders/particle.frag)
+    target_link_libraries(vomit_tools_ui PRIVATE Qt6::GuiPrivate)
+    target_compile_definitions(vomit_tools_ui PRIVATE VOMIT_TOOLS_GPU_PREVIEW)
+    message(STATUS "vomit-tools: particle preview on the GPU")
+else()
+    message(STATUS "vomit-tools: particle preview in software only (needs Qt 6.7+ with ShaderTools for the GPU)")
+endif()
 target_link_libraries(vomit_tools_ui PUBLIC vomit_tools::core Qt6::Widgets)
 vomit_tools_set_warnings(vomit_tools_ui)
 

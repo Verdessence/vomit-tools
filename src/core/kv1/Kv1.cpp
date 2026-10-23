@@ -1,575 +1,820 @@
+//===========================================================================//
 // SPDX-License-Identifier: GPL-3.0-or-later
+//
+// Purpose: See Kv1.h.
+//
+//===========================================================================//
 #include "Kv1.h"
 
 #include <algorithm>
 #include <utility>
 
-namespace xv::kv1 {
+namespace xv::kv1
+{
 
-namespace {
+namespace
+{
 
 constexpr std::string_view UTF8_BOM = "\xEF\xBB\xBF";
 
-bool isSpace(char c) {
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+bool IsSpace( char c )
+{
 	return c == ' ' || c == '\t' || c == '\r' || c == '\n' || c == '\v' || c == '\f';
 }
 
-char lower(char c) {
-	return (c >= 'A' && c <= 'Z') ? static_cast<char>(c - 'A' + 'a') : c;
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+char Lower( char c )
+{
+	return ( c >= 'A' && c <= 'Z' ) ? static_cast<char>( c - 'A' + 'a' ) : c;
 }
 
-std::string decode(std::string_view text, bool escapeSequences) {
-	if (!escapeSequences) {
-		return std::string{text};
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+std::string Decode( std::string_view szText, bool bEscapeSequences )
+{
+	if ( !bEscapeSequences )
+	{
+		return std::string{ szText };
 	}
-	std::string out;
-	out.reserve(text.size());
-	for (std::size_t i = 0; i < text.size(); i++) {
-		if (text[i] != '\\' || i + 1 == text.size()) {
-			out += text[i];
+	std::string szOut;
+	szOut.reserve( szText.size() );
+	for ( std::size_t i = 0; i < szText.size(); i++ )
+	{
+		if ( szText[ i ] != '\\' || i + 1 == szText.size() )
+		{
+			szOut += szText[ i ];
 			continue;
 		}
-		switch (const char next = text[++i]) {
-			case 'n': out += '\n'; break;
-			case 't': out += '\t'; break;
-			default:  out += next; break;
+		switch ( const char chNext = szText[ ++i ] )
+		{
+			case 'n': szOut += '\n'; break;
+			case 't': szOut += '\t'; break;
+			default: szOut += chNext; break;
 		}
 	}
-	return out;
+	return szOut;
 }
 
-std::optional<std::string> quote(std::string_view text, bool escapeSequences) {
-	std::string out = "\"";
-	for (const char c : text) {
-		if (!escapeSequences) {
-			if (c == '"') {
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+std::optional<std::string> Quote( std::string_view szText, bool bEscapeSequences )
+{
+	std::string szOut = "\"";
+	for ( const char c : szText )
+	{
+		if ( !bEscapeSequences )
+		{
+			if ( c == '"' )
+			{
 				return std::nullopt;
 			}
-			out += c;
+			szOut += c;
 			continue;
 		}
-		switch (c) {
-			case '"':  out += "\\\""; break;
-			case '\\': out += "\\\\"; break;
-			case '\n': out += "\\n"; break;
-			case '\t': out += "\\t"; break;
-			default:   out += c; break;
+		switch ( c )
+		{
+			case '"': szOut += "\\\""; break;
+			case '\\': szOut += "\\\\"; break;
+			case '\n': szOut += "\\n"; break;
+			case '\t': szOut += "\\t"; break;
+			default: szOut += c; break;
 		}
 	}
-	out += '"';
-	return out;
+	szOut += '"';
+	return szOut;
 }
 
-bool canBeUnquoted(std::string_view text) {
-	if (text.empty() || text.front() == '[' || text.starts_with("//")) {
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+bool CanBeUnquoted( std::string_view szText )
+{
+	if ( szText.empty() || szText.front() == '[' || szText.starts_with( "//" ) )
+	{
 		return false;
 	}
-	return std::ranges::none_of(text, [](char c) {
-		return isSpace(c) || c == '"' || c == '{' || c == '}';
-	});
+	return std::ranges::none_of( szText, []( char c ) {
+		return IsSpace( c ) || c == '"' || c == '{' || c == '}';
+	} );
 }
 
-// Re-spell a token with new text, keeping it unquoted only if it was and still can be.
-bool respell(Token& token, std::string_view text, bool escapeSequences) {
-	if (token.kind == TokenKind::Unquoted && canBeUnquoted(text) && !(escapeSequences && text.find('\\') != std::string_view::npos)) {
-		token.raw = text;
+//-----------------------------------------------------------------------------
+// Purpose: Re-spell a token with new text, keeping it unquoted only if it was and still can be.
+//-----------------------------------------------------------------------------
+bool Respell( CToken &token, std::string_view szText, bool bEscapeSequences )
+{
+	if ( token.m_nKind == TokenKind_t::TOKEN_KIND_UNQUOTED && CanBeUnquoted( szText ) && !( bEscapeSequences && szText.find( '\\' ) != std::string_view::npos ) )
+	{
+		token.m_szRaw = szText;
 		return true;
 	}
-	auto quoted = quote(text, escapeSequences);
-	if (!quoted) {
+	auto quoted = Quote( szText, bEscapeSequences );
+	if ( !quoted )
+	{
 		return false;
 	}
-	token.raw = std::move(*quoted);
-	token.kind = TokenKind::Quoted;
-	token.unterminated = false;
+	token.m_szRaw = std::move( *quoted );
+	token.m_nKind = TokenKind_t::TOKEN_KIND_QUOTED;
+	token.m_bUnterminated = false;
 	return true;
 }
 
-class LineIndex {
+class CLineIndex
+{
 public:
-	explicit LineIndex(std::string_view text) {
-		starts_.push_back(0);
-		for (std::size_t i = 0; i < text.size(); i++) {
-			if (text[i] == '\n') {
-				starts_.push_back(i + 1);
+	explicit CLineIndex( std::string_view szText )
+	{
+		m_Starts.push_back( 0 );
+		for ( std::size_t i = 0; i < szText.size(); i++ )
+		{
+			if ( szText[ i ] == '\n' )
+			{
+				m_Starts.push_back( i + 1 );
 			}
 		}
 	}
 
-	Diagnostic make(std::size_t offset, Diagnostic::Severity severity, std::string message) const {
-		const auto it = std::ranges::upper_bound(starts_, offset);
-		const auto line = static_cast<std::size_t>(it - starts_.begin());
-		return {severity, line, offset - starts_[line - 1] + 1, std::move(message)};
+	Diagnostic_t Make( std::size_t nOffset, Diagnostic_t::Severity_t nSeverity, std::string szMessage ) const
+	{
+		const auto it = std::ranges::upper_bound( m_Starts, nOffset );
+		const auto nLine = static_cast<std::size_t>( it - m_Starts.begin() );
+		return { nSeverity, nLine, nOffset - m_Starts[ nLine - 1 ] + 1, std::move( szMessage ) };
 	}
 
 private:
-	std::vector<std::size_t> starts_;
+	std::vector<std::size_t> m_Starts;
 };
 
-struct LexResult {
-	std::vector<Token> tokens;
-	std::string trailing;
+struct LexResult_t
+{
+	std::vector<CToken> m_Tokens;
+	std::string m_szTrailing;
 };
 
-LexResult lex(std::string_view src, bool escapeSequences, const LineIndex& lines, std::vector<Diagnostic>& diagnostics) {
-	LexResult result;
-	std::string trivia;
-	std::size_t pos = 0;
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+LexResult_t Lex( std::string_view szSrc, bool bEscapeSequences, const CLineIndex &lines, std::vector<Diagnostic_t> &diagnostics )
+{
+	LexResult_t result;
+	std::string szTrivia;
+	std::size_t nPos = 0;
 
-	if (src.starts_with(UTF8_BOM)) {
-		trivia += UTF8_BOM;
-		pos = UTF8_BOM.size();
+	if ( szSrc.starts_with( UTF8_BOM ) )
+	{
+		szTrivia += UTF8_BOM;
+		nPos = UTF8_BOM.size();
 	}
 
-	while (true) {
-		while (pos < src.size()) {
-			if (isSpace(src[pos])) {
-				trivia += src[pos++];
-			} else if (src.substr(pos).starts_with("//")) {
-				const auto end = std::min(src.find('\n', pos), src.size());
-				trivia += src.substr(pos, end - pos);
-				pos = end;
-			} else {
+	while ( true )
+	{
+		while ( nPos < szSrc.size() )
+		{
+			if ( IsSpace( szSrc[ nPos ] ) )
+			{
+				szTrivia += szSrc[ nPos++ ];
+			}
+			else if ( szSrc.substr( nPos ).starts_with( "//" ) )
+			{
+				const auto nEnd = std::min( szSrc.find( '\n', nPos ), szSrc.size() );
+				szTrivia += szSrc.substr( nPos, nEnd - nPos );
+				nPos = nEnd;
+			}
+			else
+			{
 				break;
 			}
 		}
-		if (pos >= src.size()) {
-			result.trailing = std::move(trivia);
+		if ( nPos >= szSrc.size() )
+		{
+			result.m_szTrailing = std::move( szTrivia );
 			return result;
 		}
 
-		Token token;
-		token.leading = std::move(trivia);
-		trivia.clear();
-		token.offset = pos;
-		const std::size_t start = pos;
+		CToken token;
+		token.m_szLeading = std::move( szTrivia );
+		szTrivia.clear();
+		token.m_nOffset = nPos;
+		const std::size_t nStart = nPos;
 
-		switch (src[pos]) {
+		switch ( szSrc[ nPos ] )
+		{
 			case '{':
-				token.kind = TokenKind::OpenBrace;
-				pos++;
+				token.m_nKind = TokenKind_t::TOKEN_KIND_OPEN_BRACE;
+				nPos++;
 				break;
 			case '}':
-				token.kind = TokenKind::CloseBrace;
-				pos++;
+				token.m_nKind = TokenKind_t::TOKEN_KIND_CLOSE_BRACE;
+				nPos++;
 				break;
-			case '"': {
-				token.kind = TokenKind::Quoted;
-				token.unterminated = true;
-				pos++;
-				while (pos < src.size()) {
-					if (escapeSequences && src[pos] == '\\' && pos + 1 < src.size()) {
-						pos += 2;
+			case '"':
+			{
+				token.m_nKind = TokenKind_t::TOKEN_KIND_QUOTED;
+				token.m_bUnterminated = true;
+				nPos++;
+				while ( nPos < szSrc.size() )
+				{
+					if ( bEscapeSequences && szSrc[ nPos ] == '\\' && nPos + 1 < szSrc.size() )
+					{
+						nPos += 2;
 						continue;
 					}
-					if (src[pos++] == '"') {
-						token.unterminated = false;
+					if ( szSrc[ nPos++ ] == '"' )
+					{
+						token.m_bUnterminated = false;
 						break;
 					}
 				}
-				if (token.unterminated) {
-					diagnostics.push_back(lines.make(start, Diagnostic::Severity::Error, "string is never closed"));
-				} else if (src.substr(start, pos - start).find('\n') != std::string_view::npos) {
-					diagnostics.push_back(lines.make(start, Diagnostic::Severity::Warning, "string spans several lines (missing closing quote?)"));
+				if ( token.m_bUnterminated )
+				{
+					diagnostics.push_back( lines.Make( nStart, Diagnostic_t::Severity_t::SEVERITY_ERROR, "string is never closed" ) );
+				}
+				else if ( szSrc.substr( nStart, nPos - nStart ).find( '\n' ) != std::string_view::npos )
+				{
+					diagnostics.push_back( lines.Make( nStart, Diagnostic_t::Severity_t::SEVERITY_WARNING, "string spans several lines (missing closing quote?)" ) );
 				}
 				break;
 			}
 			case '[':
-				token.kind = TokenKind::Conditional;
-				while (pos < src.size() && src[pos] != '\n' && src[pos++] != ']') {}
+				token.m_nKind = TokenKind_t::TOKEN_KIND_CONDITIONAL;
+				while ( nPos < szSrc.size() && szSrc[ nPos ] != '\n' && szSrc[ nPos++ ] != ']' )
+				{
+				}
 				break;
 			default:
-				token.kind = TokenKind::Unquoted;
-				while (pos < src.size() && !isSpace(src[pos]) && src[pos] != '"' && src[pos] != '{' && src[pos] != '}') {
-					pos++;
+				token.m_nKind = TokenKind_t::TOKEN_KIND_UNQUOTED;
+				while ( nPos < szSrc.size() && !IsSpace( szSrc[ nPos ] ) && szSrc[ nPos ] != '"' && szSrc[ nPos ] != '{' && szSrc[ nPos ] != '}' )
+				{
+					nPos++;
 				}
 				break;
 		}
-		token.raw = src.substr(start, pos - start);
-		result.tokens.push_back(std::move(token));
+		token.m_szRaw = szSrc.substr( nStart, nPos - nStart );
+		result.m_Tokens.push_back( std::move( token ) );
 	}
 }
 
 } // namespace
 
-std::string_view Token::text() const {
-	std::string_view text = raw;
-	if (kind == TokenKind::Quoted) {
-		text.remove_prefix(1);
-		if (!unterminated && !text.empty()) {
-			text.remove_suffix(1);
+//-----------------------------------------------------------------------------
+// Purpose: The token without its surrounding quotes. Escape sequences are not decoded.
+//-----------------------------------------------------------------------------
+std::string_view CToken::GetText() const
+{
+	std::string_view szText = m_szRaw;
+	if ( m_nKind == TokenKind_t::TOKEN_KIND_QUOTED )
+	{
+		szText.remove_prefix( 1 );
+		if ( !m_bUnterminated && !szText.empty() )
+		{
+			szText.remove_suffix( 1 );
 		}
 	}
-	return text;
+	return szText;
 }
 
-bool equalsIgnoreCase(std::string_view a, std::string_view b) {
-	return std::ranges::equal(a, b, [](char x, char y) { return lower(x) == lower(y); });
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+bool EqualsIgnoreCase( std::string_view a, std::string_view b )
+{
+	return std::ranges::equal( a, b, []( char x, char y ) { return Lower( x ) == Lower( y ); } );
 }
 
-class Parser {
+class CParser
+{
 public:
-	Parser(std::vector<Token> tokens, bool escapeSequences, const LineIndex& lines, std::vector<Diagnostic>& diagnostics)
-			: tokens_(std::move(tokens))
-			, escapeSequences_(escapeSequences)
-			, lines_(lines)
-			, diagnostics_(diagnostics) {}
+	CParser( std::vector<CToken> tokens, bool bEscapeSequences, const CLineIndex &lines, std::vector<Diagnostic_t> &diagnostics )
+		: m_Tokens( std::move( tokens ) ),
+		  m_bEscapeSequences( bEscapeSequences ),
+		  m_Lines( lines ),
+		  m_Diagnostics( diagnostics )
+	{}
 
-	std::vector<Node> parseList(int depth) {
-		std::vector<Node> out;
-		while (const Token* token = peek()) {
-			if (token->kind == TokenKind::CloseBrace) {
-				if (depth > 0) {
+	std::vector<CNode> ParseList( int nDepth )
+	{
+		std::vector<CNode> out;
+		while ( const CToken *pToken = GetPeek() )
+		{
+			if ( pToken->m_nKind == TokenKind_t::TOKEN_KIND_CLOSE_BRACE )
+			{
+				if ( nDepth > 0 )
+				{
 					return out;
 				}
-				error(*token, "unexpected '}'");
-				out.push_back(stray());
+				Error( *pToken, "unexpected '}'" );
+				out.push_back( Stray() );
 				continue;
 			}
-			if (token->kind == TokenKind::Conditional) {
-				error(*token, "condition without a key");
-				out.push_back(stray());
+			if ( pToken->m_nKind == TokenKind_t::TOKEN_KIND_CONDITIONAL )
+			{
+				Error( *pToken, "condition without a key" );
+				out.push_back( Stray() );
 				continue;
 			}
 
-			Node node;
-			node.escapeSequences_ = escapeSequences_;
-			if (token->kind == TokenKind::OpenBrace) {
-				error(*token, "block without a key");
-			} else {
-				node.key_ = take();
-				if (peekIs(TokenKind::Conditional)) {
-					node.condition_ = take();
+			CNode node;
+			node.m_bEscapeSequences = m_bEscapeSequences;
+			if ( pToken->m_nKind == TokenKind_t::TOKEN_KIND_OPEN_BRACE )
+			{
+				Error( *pToken, "block without a key" );
+			}
+			else
+			{
+				node.m_Key = Take();
+				if ( PeekIs( TokenKind_t::TOKEN_KIND_CONDITIONAL ) )
+				{
+					node.m_Condition = Take();
 				}
-				if (peekIs(TokenKind::Quoted) || peekIs(TokenKind::Unquoted)) {
-					node.kind_ = Node::Kind::Pair;
-					node.value_ = take();
-					if (!node.condition_ && peekIs(TokenKind::Conditional)) {
-						node.condition_ = take();
-						node.conditionAfterKey_ = false;
+				if ( PeekIs( TokenKind_t::TOKEN_KIND_QUOTED ) || PeekIs( TokenKind_t::TOKEN_KIND_UNQUOTED ) )
+				{
+					node.m_nKind = CNode::Kind_t::KIND_PAIR;
+					node.m_Value = Take();
+					if ( !node.m_Condition && PeekIs( TokenKind_t::TOKEN_KIND_CONDITIONAL ) )
+					{
+						node.m_Condition = Take();
+						node.m_bConditionAfterKey = false;
 					}
-					out.push_back(std::move(node));
+					out.push_back( std::move( node ) );
 					continue;
 				}
-				if (!peekIs(TokenKind::OpenBrace)) {
-					error(node.key_, "key has no value");
-					node.kind_ = Node::Kind::Stray;
-					out.push_back(std::move(node));
+				if ( !PeekIs( TokenKind_t::TOKEN_KIND_OPEN_BRACE ) )
+				{
+					Error( node.m_Key, "key has no value" );
+					node.m_nKind = CNode::Kind_t::KIND_STRAY;
+					out.push_back( std::move( node ) );
 					continue;
 				}
 			}
 
-			node.kind_ = Node::Kind::Block;
-			node.open_ = take();
-			node.children_ = parseList(depth + 1);
-			if (peekIs(TokenKind::CloseBrace)) {
-				node.close_ = take();
-			} else {
-				error(node.open_, "block is never closed");
+			node.m_nKind = CNode::Kind_t::KIND_BLOCK;
+			node.m_Open = Take();
+			node.m_Children = ParseList( nDepth + 1 );
+			if ( PeekIs( TokenKind_t::TOKEN_KIND_CLOSE_BRACE ) )
+			{
+				node.m_Close = Take();
 			}
-			out.push_back(std::move(node));
+			else
+			{
+				Error( node.m_Open, "block is never closed" );
+			}
+			out.push_back( std::move( node ) );
 		}
 		return out;
 	}
 
 private:
-	const Token* peek() const {
-		return index_ < tokens_.size() ? &tokens_[index_] : nullptr;
+	const CToken *GetPeek() const
+	{
+		return m_nIndex < m_Tokens.size() ? &m_Tokens[ m_nIndex ] : nullptr;
 	}
 
-	bool peekIs(TokenKind kind) const {
-		const Token* token = peek();
-		return token && token->kind == kind;
+	bool PeekIs( TokenKind_t nKind ) const
+	{
+		const CToken *pToken = GetPeek();
+		return pToken && pToken->m_nKind == nKind;
 	}
 
-	Token take() {
-		return std::move(tokens_[index_++]);
+	CToken Take()
+	{
+		return std::move( m_Tokens[ m_nIndex++ ] );
 	}
 
-	Node stray() {
-		Node node;
-		node.kind_ = Node::Kind::Stray;
-		node.key_ = take();
-		node.escapeSequences_ = escapeSequences_;
+	CNode Stray()
+	{
+		CNode node;
+		node.m_nKind = CNode::Kind_t::KIND_STRAY;
+		node.m_Key = Take();
+		node.m_bEscapeSequences = m_bEscapeSequences;
 		return node;
 	}
 
-	void error(const Token& token, std::string message) {
-		diagnostics_.push_back(lines_.make(token.offset, Diagnostic::Severity::Error, std::move(message)));
+	void Error( const CToken &token, std::string szMessage )
+	{
+		m_Diagnostics.push_back( m_Lines.Make( token.m_nOffset, Diagnostic_t::Severity_t::SEVERITY_ERROR, std::move( szMessage ) ) );
 	}
 
-	std::vector<Token> tokens_;
-	std::size_t index_ = 0;
-	bool escapeSequences_;
-	const LineIndex& lines_;
-	std::vector<Diagnostic>& diagnostics_;
+	std::vector<CToken> m_Tokens;
+	std::size_t m_nIndex = 0;
+	bool m_bEscapeSequences;
+	const CLineIndex &m_Lines;
+	std::vector<Diagnostic_t> &m_Diagnostics;
 };
 
-Node Node::makePair(std::string_view key, std::string_view value, bool escapeSequences) {
-	Node node;
-	node.kind_ = Kind::Pair;
-	node.escapeSequences_ = escapeSequences;
-	node.key_.kind = TokenKind::Quoted;
-	node.value_.kind = TokenKind::Quoted;
-	node.value_.leading = "\t";
-	node.setKey(key);
-	node.setValue(value);
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+CNode CNode::MakePair( std::string_view szKey, std::string_view szValue, bool bEscapeSequences )
+{
+	CNode node;
+	node.m_nKind = Kind_t::KIND_PAIR;
+	node.m_bEscapeSequences = bEscapeSequences;
+	node.m_Key.m_nKind = TokenKind_t::TOKEN_KIND_QUOTED;
+	node.m_Value.m_nKind = TokenKind_t::TOKEN_KIND_QUOTED;
+	node.m_Value.m_szLeading = "\t";
+	node.SetKey( szKey );
+	node.SetValue( szValue );
 	return node;
 }
 
-Node Node::makeBlock(std::string_view key, bool escapeSequences) {
-	Node node;
-	node.kind_ = Kind::Block;
-	node.escapeSequences_ = escapeSequences;
-	node.key_.kind = TokenKind::Quoted;
-	node.setKey(key);
-	node.open_.kind = TokenKind::OpenBrace;
-	node.open_.raw = "{";
-	node.close_.emplace();
-	node.close_->raw = "}";
-	node.close_->kind = TokenKind::CloseBrace;
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+CNode CNode::MakeBlock( std::string_view szKey, bool bEscapeSequences )
+{
+	CNode node;
+	node.m_nKind = Kind_t::KIND_BLOCK;
+	node.m_bEscapeSequences = bEscapeSequences;
+	node.m_Key.m_nKind = TokenKind_t::TOKEN_KIND_QUOTED;
+	node.SetKey( szKey );
+	node.m_Open.m_nKind = TokenKind_t::TOKEN_KIND_OPEN_BRACE;
+	node.m_Open.m_szRaw = "{";
+	node.m_Close.emplace();
+	node.m_Close->m_szRaw = "}";
+	node.m_Close->m_nKind = TokenKind_t::TOKEN_KIND_CLOSE_BRACE;
 	return node;
 }
 
-std::string Node::key() const {
-	return decode(key_.text(), escapeSequences_);
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+std::string CNode::GetKey() const
+{
+	return Decode( m_Key.GetText(), m_bEscapeSequences );
 }
 
-std::string Node::value() const {
-	return kind_ == Kind::Pair ? decode(value_.text(), escapeSequences_) : std::string{};
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+std::string CNode::GetValue() const
+{
+	return m_nKind == Kind_t::KIND_PAIR ? Decode( m_Value.GetText(), m_bEscapeSequences ) : std::string{};
 }
 
-std::optional<std::string_view> Node::condition() const {
-	if (!condition_) {
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+std::optional<std::string_view> CNode::GetCondition() const
+{
+	if ( !m_Condition )
+	{
 		return std::nullopt;
 	}
-	return condition_->raw;
+	return m_Condition->m_szRaw;
 }
 
-bool Node::setKey(std::string_view key) {
-	return respell(key_, key, escapeSequences_);
+//-----------------------------------------------------------------------------
+// Purpose: Keep the original quoting style where the new text allows it. Return false if the text
+//          cannot be represented (a double quote while escape sequences are off).
+//-----------------------------------------------------------------------------
+bool CNode::SetKey( std::string_view szKey )
+{
+	return Respell( m_Key, szKey, m_bEscapeSequences );
 }
 
-bool Node::setValue(std::string_view value) {
-	return kind_ == Kind::Pair && respell(value_, value, escapeSequences_);
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+bool CNode::SetValue( std::string_view szValue )
+{
+	return m_nKind == Kind_t::KIND_PAIR && Respell( m_Value, szValue, m_bEscapeSequences );
 }
 
-const Node* Node::find(std::string_view key) const {
-	const auto it = std::ranges::find_if(children_, [key](const Node& child) {
-		return child.kind_ != Kind::Stray && equalsIgnoreCase(child.key_.text(), key);
-	});
-	return it == children_.end() ? nullptr : &*it;
+//-----------------------------------------------------------------------------
+// Purpose: Lookups are case-insensitive, like the engine's.
+//-----------------------------------------------------------------------------
+const CNode *CNode::Find( std::string_view szKey ) const
+{
+	const auto it = std::ranges::find_if( m_Children, [ szKey ]( const CNode &child ) {
+		return child.m_nKind != Kind_t::KIND_STRAY && EqualsIgnoreCase( child.m_Key.GetText(), szKey );
+	} );
+	return it == m_Children.end() ? nullptr : &*it;
 }
 
-Node* Node::find(std::string_view key) {
-	return const_cast<Node*>(std::as_const(*this).find(key));
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+CNode *CNode::Find( std::string_view szKey )
+{
+	return const_cast<CNode *>( std::as_const( *this ).Find( szKey ) );
 }
 
-std::vector<const Node*> Node::findAll(std::string_view key) const {
-	std::vector<const Node*> out;
-	for (const Node& child : children_) {
-		if (child.kind_ != Kind::Stray && equalsIgnoreCase(child.key_.text(), key)) {
-			out.push_back(&child);
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+std::vector<const CNode *> CNode::FindAll( std::string_view szKey ) const
+{
+	std::vector<const CNode *> out;
+	for ( const CNode &child : m_Children )
+	{
+		if ( child.m_nKind != Kind_t::KIND_STRAY && EqualsIgnoreCase( child.m_Key.GetText(), szKey ) )
+		{
+			out.push_back( &child );
 		}
 	}
 	return out;
 }
 
-std::string_view Node::indentation() const {
-	const std::string& leading = key_.raw.empty() ? open_.leading : key_.leading;
-	const auto newline = leading.rfind('\n');
-	const std::string_view tail = newline == std::string::npos ? std::string_view{leading} : std::string_view{leading}.substr(newline + 1);
-	return std::ranges::all_of(tail, isSpace) ? tail : std::string_view{};
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+std::string_view CNode::GetIndentation() const
+{
+	const std::string &szLeading = m_Key.m_szRaw.empty() ? m_Open.m_szLeading : m_Key.m_szLeading;
+	const auto nNewline = szLeading.rfind( '\n' );
+	const std::string_view szTail = nNewline == std::string::npos ? std::string_view{ szLeading } : std::string_view{ szLeading }.substr( nNewline + 1 );
+	return std::ranges::all_of( szTail, IsSpace ) ? szTail : std::string_view{};
 }
 
-void Node::layout(std::string_view indent) {
-	const std::string lineStart = "\n" + std::string{indent};
-	key_.leading = lineStart;
-	if (kind_ != Kind::Block) {
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+void CNode::Layout( std::string_view szIndent )
+{
+	const std::string szLineStart = "\n" + std::string{ szIndent };
+	m_Key.m_szLeading = szLineStart;
+	if ( m_nKind != Kind_t::KIND_BLOCK )
+	{
 		return;
 	}
-	open_.leading = lineStart;
-	if (close_) {
-		close_->leading = lineStart;
+	m_Open.m_szLeading = szLineStart;
+	if ( m_Close )
+	{
+		m_Close->m_szLeading = szLineStart;
 	}
-	const std::string childIndent = std::string{indent} + "\t";
-	for (Node& child : children_) {
-		child.layout(childIndent);
-	}
-}
-
-void Node::setEscapeSequences(bool escapeSequences) {
-	escapeSequences_ = escapeSequences;
-	for (Node& child : children_) {
-		child.setEscapeSequences(escapeSequences);
+	const std::string szChildIndent = std::string{ szIndent } + "\t";
+	for ( CNode &child : m_Children )
+	{
+		child.Layout( szChildIndent );
 	}
 }
 
-Node& Node::insertChild(std::size_t index, Node child, Layout layout) {
-	index = std::min(index, children_.size());
-	child.setEscapeSequences(escapeSequences_);
-	if (layout == Layout::Infer) {
-		const std::string indent = children_.empty()
-			? std::string{indentation()} + "\t"
-			: std::string{children_[index > 0 ? index - 1 : 0].indentation()};
-		child.layout(indent);
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+void CNode::SetEscapeSequences( bool bEscapeSequences )
+{
+	m_bEscapeSequences = bEscapeSequences;
+	for ( CNode &child : m_Children )
+	{
+		child.SetEscapeSequences( bEscapeSequences );
+	}
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Only valid on Blocks. With Layout::Infer the child is indented like its siblings, and a
+//          pair's key-to-value spacing is copied from a neighbouring pair.
+//-----------------------------------------------------------------------------
+CNode &CNode::InsertChild( std::size_t nIndex, CNode child, Layout_t nLayout )
+{
+	nIndex = std::min( nIndex, m_Children.size() );
+	child.SetEscapeSequences( m_bEscapeSequences );
+	if ( nLayout == Layout_t::LAYOUT_INFER )
+	{
+		const std::string szIndent = m_Children.empty()
+			? std::string{ GetIndentation() } + "\t"
+			: std::string{ m_Children[ nIndex > 0 ? nIndex - 1 : 0 ].GetIndentation() };
+		child.Layout( szIndent );
 
 		// Line values up the way the neighbouring pairs do ("key"\t\t"value").
-		if (child.kind_ == Kind::Pair) {
-			const auto spacing = [](const Node& n) {
-				return n.kind_ == Kind::Pair && !n.value_.leading.empty() && n.value_.leading.find('\n') == std::string::npos;
+		if ( child.m_nKind == Kind_t::KIND_PAIR )
+		{
+			const auto spacing = []( const CNode &n ) {
+				return n.m_nKind == Kind_t::KIND_PAIR && !n.m_Value.m_szLeading.empty() && n.m_Value.m_szLeading.find( '\n' ) == std::string::npos;
 			};
-			for (std::size_t distance = 1; distance <= children_.size(); distance++) {
-				const Node* before = index >= distance ? &children_[index - distance] : nullptr;
-				const Node* after = index + distance - 1 < children_.size() ? &children_[index + distance - 1] : nullptr;
-				const Node* sibling = before && spacing(*before) ? before : after && spacing(*after) ? after : nullptr;
-				if (sibling) {
-					child.value_.leading = sibling->value_.leading;
+			for ( std::size_t nDistance = 1; nDistance <= m_Children.size(); nDistance++ )
+			{
+				const CNode *pBefore = nIndex >= nDistance ? &m_Children[ nIndex - nDistance ] : nullptr;
+				const CNode *pAfter = nIndex + nDistance - 1 < m_Children.size() ? &m_Children[ nIndex + nDistance - 1 ] : nullptr;
+				const CNode *pSibling = pBefore && spacing( *pBefore ) ? pBefore : pAfter && spacing( *pAfter ) ? pAfter
+																												: nullptr;
+				if ( pSibling )
+				{
+					child.m_Value.m_szLeading = pSibling->m_Value.m_szLeading;
 					break;
 				}
 			}
 		}
 
-		if (index == children_.size() && close_) {
-			std::string& beforeClose = close_->leading;
+		if ( nIndex == m_Children.size() && m_Close )
+		{
+			std::string &szBeforeClose = m_Close->m_szLeading;
 			// Comments just before the closing brace ("// List additional files here") stay above appended entries.
-			if (const auto comment = beforeClose.rfind("//"); comment != std::string::npos) {
-				const auto lineEnd = beforeClose.find('\n', comment);
-				child.key_.leading.insert(0, beforeClose.substr(0, lineEnd));
-				beforeClose.erase(0, lineEnd);
+			if ( const auto nComment = szBeforeClose.rfind( "//" ); nComment != std::string::npos )
+			{
+				const auto nLineEnd = szBeforeClose.find( '\n', nComment );
+				child.m_Key.m_szLeading.insert( 0, szBeforeClose.substr( 0, nLineEnd ) );
+				szBeforeClose.erase( 0, nLineEnd );
 			}
 			// Keep the closing brace on its own line when appending to a block written as `{}`.
-			if (beforeClose.find('\n') == std::string::npos) {
-				beforeClose = "\n" + std::string{indentation()};
+			if ( szBeforeClose.find( '\n' ) == std::string::npos )
+			{
+				szBeforeClose = "\n" + std::string{ GetIndentation() };
 			}
 		}
 	}
-	return *children_.insert(children_.begin() + static_cast<std::ptrdiff_t>(index), std::move(child));
+	return *m_Children.insert( m_Children.begin() + static_cast<std::ptrdiff_t>( nIndex ), std::move( child ) );
 }
 
-Node& Node::appendChild(Node child, Layout layout) {
-	return insertChild(children_.size(), std::move(child), layout);
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+CNode &CNode::AppendChild( CNode child, Layout_t nLayout )
+{
+	return InsertChild( m_Children.size(), std::move( child ), nLayout );
 }
 
-void Node::removeChild(std::size_t index) {
-	if (index < children_.size()) {
-		children_.erase(children_.begin() + static_cast<std::ptrdiff_t>(index));
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+void CNode::RemoveChild( std::size_t nIndex )
+{
+	if ( nIndex < m_Children.size() )
+	{
+		m_Children.erase( m_Children.begin() + static_cast<std::ptrdiff_t>( nIndex ) );
 	}
 }
 
-Node Node::takeChild(std::size_t index) {
-	Node taken = std::move(children_.at(index));
-	children_.erase(children_.begin() + static_cast<std::ptrdiff_t>(index));
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+CNode CNode::TakeChild( std::size_t nIndex )
+{
+	CNode taken = std::move( m_Children.at( nIndex ) );
+	m_Children.erase( m_Children.begin() + static_cast<std::ptrdiff_t>( nIndex ) );
 	return taken;
 }
 
-const Node* Document::find(std::string_view key) const {
-	const auto it = std::ranges::find_if(roots, [key](const Node& root) {
-		return root.kind() != Node::Kind::Stray && equalsIgnoreCase(root.keyToken().text(), key);
-	});
-	return it == roots.end() ? nullptr : &*it;
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+const CNode *CDocument::Find( std::string_view szKey ) const
+{
+	const auto it = std::ranges::find_if( m_Roots, [ szKey ]( const CNode &root ) {
+		return root.GetKind() != CNode::Kind_t::KIND_STRAY && EqualsIgnoreCase( root.GetKeyToken().GetText(), szKey );
+	} );
+	return it == m_Roots.end() ? nullptr : &*it;
 }
 
-Node* Document::find(std::string_view key) {
-	return const_cast<Node*>(std::as_const(*this).find(key));
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+CNode *CDocument::Find( std::string_view szKey )
+{
+	return const_cast<CNode *>( std::as_const( *this ).Find( szKey ) );
 }
 
-std::vector<const Node*> Document::findAll(std::string_view key) const {
-	std::vector<const Node*> out;
-	for (const Node& root : roots) {
-		if (root.kind() != Node::Kind::Stray && equalsIgnoreCase(root.keyToken().text(), key)) {
-			out.push_back(&root);
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+std::vector<const CNode *> CDocument::FindAll( std::string_view szKey ) const
+{
+	std::vector<const CNode *> out;
+	for ( const CNode &root : m_Roots )
+	{
+		if ( root.GetKind() != CNode::Kind_t::KIND_STRAY && EqualsIgnoreCase( root.GetKeyToken().GetText(), szKey ) )
+		{
+			out.push_back( &root );
 		}
 	}
 	return out;
 }
 
-Node& Document::appendRoot(Node node) {
-	return insertRoot(roots.size(), std::move(node));
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+CNode &CDocument::AppendRoot( CNode node )
+{
+	return InsertRoot( m_Roots.size(), std::move( node ) );
 }
 
-Node& Document::insertRoot(std::size_t index, Node node, Layout layout) {
-	index = std::min(index, roots.size());
-	node.setEscapeSequences(options.escapeSequences);
-	if (layout == Layout::Infer) {
-		node.layout("");
-		if (index == 0) {
-			node.key_.leading = roots.empty() ? "" : "\n\n";
-		} else if (!roots[index - 1].isBlock()) {
-			node.key_.leading = "\n";
-		} else {
-			node.key_.leading = "\n\n";
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+CNode &CDocument::InsertRoot( std::size_t nIndex, CNode node, Layout_t nLayout )
+{
+	nIndex = std::min( nIndex, m_Roots.size() );
+	node.SetEscapeSequences( m_Options.m_bEscapeSequences );
+	if ( nLayout == Layout_t::LAYOUT_INFER )
+	{
+		node.Layout( "" );
+		if ( nIndex == 0 )
+		{
+			node.m_Key.m_szLeading = m_Roots.empty() ? "" : "\n\n";
+		}
+		else if ( !m_Roots[ nIndex - 1 ].IsBlock() )
+		{
+			node.m_Key.m_szLeading = "\n";
+		}
+		else
+		{
+			node.m_Key.m_szLeading = "\n\n";
 		}
 	}
-	return *roots.insert(roots.begin() + static_cast<std::ptrdiff_t>(index), std::move(node));
+	return *m_Roots.insert( m_Roots.begin() + static_cast<std::ptrdiff_t>( nIndex ), std::move( node ) );
 }
 
-Node Document::takeRoot(std::size_t index) {
-	Node taken = std::move(roots.at(index));
-	roots.erase(roots.begin() + static_cast<std::ptrdiff_t>(index));
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+CNode CDocument::TakeRoot( std::size_t nIndex )
+{
+	CNode taken = std::move( m_Roots.at( nIndex ) );
+	m_Roots.erase( m_Roots.begin() + static_cast<std::ptrdiff_t>( nIndex ) );
 	return taken;
 }
 
-bool ParseResult::hasErrors() const {
-	return std::ranges::any_of(diagnostics, [](const Diagnostic& d) { return d.severity == Diagnostic::Severity::Error; });
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+bool CParseResult::HasErrors() const
+{
+	return std::ranges::any_of( m_Diagnostics, []( const Diagnostic_t &d ) { return d.m_nSeverity == Diagnostic_t::Severity_t::SEVERITY_ERROR; } );
 }
 
-ParseResult parse(std::string_view text, ParseOptions options) {
-	ParseResult result;
-	result.document.options = options;
-	const LineIndex lines{text};
-	auto [tokens, trailing] = lex(text, options.escapeSequences, lines, result.diagnostics);
-	Parser parser{std::move(tokens), options.escapeSequences, lines, result.diagnostics};
-	result.document.roots = parser.parseList(0);
-	result.document.trailing = std::move(trailing);
-	std::ranges::stable_sort(result.diagnostics, {}, [](const Diagnostic& d) { return std::pair{d.line, d.column}; });
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+CParseResult Parse( std::string_view szText, ParseOptions_t options )
+{
+	CParseResult result;
+	result.m_Document.m_Options = options;
+	const CLineIndex lines{ szText };
+	auto [ tokens, trailing ] = Lex( szText, options.m_bEscapeSequences, lines, result.m_Diagnostics );
+	CParser parser{ std::move( tokens ), options.m_bEscapeSequences, lines, result.m_Diagnostics };
+	result.m_Document.m_Roots = parser.ParseList( 0 );
+	result.m_Document.m_szTrailing = std::move( trailing );
+	std::ranges::stable_sort( result.m_Diagnostics, {}, []( const Diagnostic_t &d ) { return std::pair{ d.m_nLine, d.m_nColumn }; } );
 	return result;
 }
 
-void writeNode(std::string& out, const Node& node) {
-	const auto token = [&out](const Token& t) {
-		out += t.leading;
-		out += t.raw;
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+void WriteNode( std::string &szOut, const CNode &node )
+{
+	const auto token = [ &szOut ]( const CToken &t ) {
+		szOut += t.m_szLeading;
+		szOut += t.m_szRaw;
 	};
 
-	token(node.key_);
-	switch (node.kind_) {
-		case Node::Kind::Stray:
-			if (node.condition_) {
-				token(*node.condition_);
+	token( node.m_Key );
+	switch ( node.m_nKind )
+	{
+		case CNode::Kind_t::KIND_STRAY:
+			if ( node.m_Condition )
+			{
+				token( *node.m_Condition );
 			}
 			break;
-		case Node::Kind::Pair:
-			if (node.condition_ && node.conditionAfterKey_) {
-				token(*node.condition_);
+		case CNode::Kind_t::KIND_PAIR:
+			if ( node.m_Condition && node.m_bConditionAfterKey )
+			{
+				token( *node.m_Condition );
 			}
-			token(node.value_);
-			if (node.condition_ && !node.conditionAfterKey_) {
-				token(*node.condition_);
+			token( node.m_Value );
+			if ( node.m_Condition && !node.m_bConditionAfterKey )
+			{
+				token( *node.m_Condition );
 			}
 			break;
-		case Node::Kind::Block:
-			if (node.condition_) {
-				token(*node.condition_);
+		case CNode::Kind_t::KIND_BLOCK:
+			if ( node.m_Condition )
+			{
+				token( *node.m_Condition );
 			}
-			token(node.open_);
-			for (const Node& child : node.children_) {
-				writeNode(out, child);
+			token( node.m_Open );
+			for ( const CNode &child : node.m_Children )
+			{
+				WriteNode( szOut, child );
 			}
-			if (node.close_) {
-				token(*node.close_);
+			if ( node.m_Close )
+			{
+				token( *node.m_Close );
 			}
 			break;
 	}
 }
 
-std::string write(const Document& document) {
-	std::string out;
-	for (const Node& root : document.roots) {
-		writeNode(out, root);
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+std::string Write( const CDocument &document )
+{
+	std::string szOut;
+	for ( const CNode &root : document.m_Roots )
+	{
+		WriteNode( szOut, root );
 	}
-	out += document.trailing;
-	return out;
+	szOut += document.m_szTrailing;
+	return szOut;
 }
 
 } // namespace xv::kv1

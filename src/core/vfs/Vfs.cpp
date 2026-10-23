@@ -1,4 +1,9 @@
+//===========================================================================//
 // SPDX-License-Identifier: GPL-3.0-or-later
+//
+// Purpose: See Vfs.h.
+//
+//===========================================================================//
 #include "Vfs.h"
 
 #include <algorithm>
@@ -11,449 +16,627 @@
 
 #include "../kv1/Kv1.h"
 
-namespace xv::vfs {
+namespace xv::vfs
+{
 
 namespace fs = std::filesystem;
 
-namespace {
+namespace
+{
 
-std::string lowerAscii(std::string_view text) {
-	std::string out{text};
-	std::ranges::transform(out, out.begin(), [](char c) {
-		return (c >= 'A' && c <= 'Z') ? static_cast<char>(c - 'A' + 'a') : c;
-	});
-	return out;
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+std::string LowerAscii( std::string_view szText )
+{
+	std::string szOut{ szText };
+	std::ranges::transform( szOut, szOut.begin(), []( char c ) {
+		return ( c >= 'A' && c <= 'Z' ) ? static_cast<char>( c - 'A' + 'a' ) : c;
+	} );
+	return szOut;
 }
 
-std::vector<std::string> splitIds(std::string_view keys) {
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+std::vector<std::string> SplitIds( std::string_view szKeys )
+{
 	std::vector<std::string> ids;
-	std::size_t start = 0;
-	while (start <= keys.size()) {
-		const auto end = std::min(keys.find('+', start), keys.size());
-		if (end > start) {
-			ids.push_back(lowerAscii(keys.substr(start, end - start)));
+	std::size_t nStart = 0;
+	while ( nStart <= szKeys.size() )
+	{
+		const auto nEnd = std::min( szKeys.find( '+', nStart ), szKeys.size() );
+		if ( nEnd > nStart )
+		{
+			ids.push_back( LowerAscii( szKeys.substr( nStart, nEnd - nStart ) ) );
 		}
-		start = end + 1;
+		nStart = nEnd + 1;
 	}
 	return ids;
 }
 
-// Handles [$X] and [!$X]; anything more elaborate is assumed to apply.
-bool conditionHolds(std::optional<std::string_view> condition) {
-	if (!condition) {
+//-----------------------------------------------------------------------------
+// Purpose: Handles [$X] and [!$X]; anything more elaborate is assumed to apply.
+//-----------------------------------------------------------------------------
+bool ConditionHolds( std::optional<std::string_view> condition )
+{
+	if ( !condition )
+	{
 		return true;
 	}
 	std::string_view c = *condition;
-	if (c.starts_with('[')) {
-		c.remove_prefix(1);
+	if ( c.starts_with( '[' ) )
+	{
+		c.remove_prefix( 1 );
 	}
-	if (c.ends_with(']')) {
-		c.remove_suffix(1);
+	if ( c.ends_with( ']' ) )
+	{
+		c.remove_suffix( 1 );
 	}
-	const bool negate = c.starts_with('!');
-	if (negate) {
-		c.remove_prefix(1);
+	const bool bNegate = c.starts_with( '!' );
+	if ( bNegate )
+	{
+		c.remove_prefix( 1 );
 	}
-	if (!c.starts_with('$') || c.find_first_of(" |&") != std::string_view::npos) {
+	if ( !c.starts_with( '$' ) || c.find_first_of( " |&" ) != std::string_view::npos )
+	{
 		return true;
 	}
-	c.remove_prefix(1);
-#if defined(_WIN32)
+	c.remove_prefix( 1 );
+#if defined( _WIN32 )
 	const bool holds = c == "WIN32" || c == "WIN64" || c == "WINDOWS";
-#elif defined(__APPLE__)
+#elif defined( __APPLE__ )
 	const bool holds = c == "OSX" || c == "POSIX";
 #else
-	const bool holds = c == "LINUX" || c == "POSIX";
+	const bool bHolds = c == "LINUX" || c == "POSIX";
 #endif
-	return negate != holds;
+	return bNegate != bHolds;
 }
 
-// Directory entries, or none if the folder can't be read; never throws.
-std::vector<fs::directory_entry> entriesOf(const fs::path& directory) {
+//-----------------------------------------------------------------------------
+// Purpose: Directory entries, or none if the folder can't be read; never throws.
+//-----------------------------------------------------------------------------
+std::vector<fs::directory_entry> EntriesOf( const fs::path &directory )
+{
 	std::vector<fs::directory_entry> entries;
 	std::error_code ec;
-	for (fs::directory_iterator it{directory, ec}; !ec && it != fs::directory_iterator{}; it.increment(ec)) {
-		entries.push_back(*it);
+	for ( fs::directory_iterator it{ directory, ec }; !ec && it != fs::directory_iterator{}; it.increment( ec ) )
+	{
+		entries.push_back( *it );
 	}
 	return entries;
 }
 
-bool isVpkArchivePart(const fs::path& file) {
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+bool IsVpkArchivePart( const fs::path &file )
+{
 	// name_000.vpk, name_001.vpk, ... hold data for name_dir.vpk and are not mounted on their own.
-	const std::string stem = toUtf8(file.stem());
-	return stem.size() > 4 && stem[stem.size() - 4] == '_'
-		&& std::all_of(stem.end() - 3, stem.end(), [](char c) { return c >= '0' && c <= '9'; });
+	const std::string szStem = ToUtf8( file.stem() );
+	return szStem.size() > 4 && szStem[ szStem.size() - 4 ] == '_' && std::all_of( szStem.end() - 3, szStem.end(), []( char c ) { return c >= '0' && c <= '9'; } );
 }
 
-class DirectoryMount final : public Mount {
+class CDirectoryMount final : public CMount
+{
 public:
-	DirectoryMount(const fs::path& location, std::vector<std::string> ids)
-			: Mount(Kind::Directory, location, std::move(ids)) {
+	CDirectoryMount( const fs::path &location, std::vector<std::string> ids )
+		: CMount( Kind_t::KIND_DIRECTORY, location, std::move( ids ) )
+	{
 		std::error_code ec;
-		auto it = fs::recursive_directory_iterator(location, fs::directory_options::skip_permission_denied, ec);
-		for (; !ec && it != fs::recursive_directory_iterator(); it.increment(ec)) {
+		auto it = fs::recursive_directory_iterator( location, fs::directory_options::skip_permission_denied, ec );
+		for ( ; !ec && it != fs::recursive_directory_iterator(); it.increment( ec ) )
+		{
 			std::error_code typeError;
-			if (it->is_regular_file(typeError)) {
-				files_.emplace(normalizePath(toUtf8(it->path().lexically_relative(location))), it->path());
+			if ( it->is_regular_file( typeError ) )
+			{
+				m_Files.emplace( NormalizePath( ToUtf8( it->path().lexically_relative( location ) ) ), it->path() );
 			}
 		}
 	}
 
-	[[nodiscard]] bool contains(const std::string& path) const override {
-		return files_.contains(path);
+	[[nodiscard]] bool Contains( const std::string &szPath ) const override
+	{
+		return m_Files.contains( szPath );
 	}
 
-	[[nodiscard]] std::optional<std::vector<std::byte>> read(const std::string& path) const override {
-		const auto it = files_.find(path);
-		if (it == files_.end()) {
+	[[nodiscard]] std::optional<std::vector<std::byte>> Read( const std::string &szPath ) const override
+	{
+		const auto it = m_Files.find( szPath );
+		if ( it == m_Files.end() )
+		{
 			return std::nullopt;
 		}
-		std::ifstream stream{it->second, std::ios::binary};
-		if (!stream) {
+		std::ifstream stream{ it->second, std::ios::binary };
+		if ( !stream )
+		{
 			return std::nullopt;
 		}
-		std::vector<char> chars{std::istreambuf_iterator<char>{stream}, std::istreambuf_iterator<char>{}};
-		std::vector<std::byte> bytes(chars.size());
-		std::ranges::transform(chars, bytes.begin(), [](char c) { return static_cast<std::byte>(c); });
+		std::vector<char> chars{ std::istreambuf_iterator<char>{ stream }, std::istreambuf_iterator<char>{} };
+		std::vector<std::byte> bytes( chars.size() );
+		std::ranges::transform( chars, bytes.begin(), []( char c ) { return static_cast<std::byte>( c ); } );
 		return bytes;
 	}
 
-	void forEachFile(const std::function<void(const std::string&)>& callback) const override {
-		for (const auto& [path, _] : files_) {
-			callback(path);
+	void ForEachFile( const std::function<void( const std::string & )> &pfnCallback ) const override
+	{
+		for ( const auto &[ path, _ ] : m_Files )
+		{
+			pfnCallback( path );
 		}
 	}
 
-	[[nodiscard]] std::size_t fileCount() const override {
-		return files_.size();
+	[[nodiscard]] std::size_t GetFileCount() const override
+	{
+		return m_Files.size();
 	}
 
-	[[nodiscard]] std::optional<fs::path> diskPath(const std::string& path) const override {
-		const auto it = files_.find(path);
-		return it == files_.end() ? std::nullopt : std::optional{it->second};
+	[[nodiscard]] std::optional<fs::path> DiskPath( const std::string &szPath ) const override
+	{
+		const auto it = m_Files.find( szPath );
+		return it == m_Files.end() ? std::nullopt : std::optional{ it->second };
 	}
 
 private:
-	std::unordered_map<std::string, fs::path> files_; // normalized path -> real file
+	std::unordered_map<std::string, fs::path> m_Files; // normalized path -> real file
 };
 
-class VpkMount final : public Mount {
+class CVpkMount final : public CMount
+{
 public:
-	VpkMount(const fs::path& location, std::vector<std::string> ids, std::unique_ptr<vpkpp::PackFile> pack)
-			: Mount(Kind::Vpk, location, std::move(ids))
-			, pack_(std::move(pack)) {
-		pack_->runForAllEntries([this](const std::string& path, const vpkpp::Entry&) {
-			entries_.emplace(normalizePath(path), path);
-		});
+	CVpkMount( const fs::path &location, std::vector<std::string> ids, std::unique_ptr<vpkpp::PackFile> pPack )
+		: CMount( Kind_t::KIND_VPK, location, std::move( ids ) ),
+		  m_pPack( std::move( pPack ) )
+	{
+		m_pPack->runForAllEntries( [ this ]( const std::string &szPath, const vpkpp::Entry & ) {
+			m_Entries.emplace( NormalizePath( szPath ), szPath );
+		} );
 	}
 
-	[[nodiscard]] bool contains(const std::string& path) const override {
-		return entries_.contains(path);
+	[[nodiscard]] bool Contains( const std::string &szPath ) const override
+	{
+		return m_Entries.contains( szPath );
 	}
 
-	[[nodiscard]] std::optional<std::vector<std::byte>> read(const std::string& path) const override {
-		const auto it = entries_.find(path);
-		if (it == entries_.end()) {
+	[[nodiscard]] std::optional<std::vector<std::byte>> Read( const std::string &szPath ) const override
+	{
+		const auto it = m_Entries.find( szPath );
+		if ( it == m_Entries.end() )
+		{
 			return std::nullopt;
 		}
-		return pack_->readEntry(it->second);
+		return m_pPack->readEntry( it->second );
 	}
 
-	void forEachFile(const std::function<void(const std::string&)>& callback) const override {
-		for (const auto& [path, _] : entries_) {
-			callback(path);
+	void ForEachFile( const std::function<void( const std::string & )> &pfnCallback ) const override
+	{
+		for ( const auto &[ path, _ ] : m_Entries )
+		{
+			pfnCallback( path );
 		}
 	}
 
-	[[nodiscard]] std::size_t fileCount() const override {
-		return entries_.size();
+	[[nodiscard]] std::size_t GetFileCount() const override
+	{
+		return m_Entries.size();
 	}
 
 private:
-	std::unique_ptr<vpkpp::PackFile> pack_;
-	std::unordered_map<std::string, std::string> entries_; // normalized path -> path inside the VPK
+	std::unique_ptr<vpkpp::PackFile> m_pPack;
+	std::unordered_map<std::string, std::string> m_Entries; // normalized path -> path inside the VPK
 };
 
 } // namespace
 
-std::string toUtf8(const fs::path& path) {
-	const std::u8string utf8 = path.u8string();
-	return {utf8.begin(), utf8.end()};
+//-----------------------------------------------------------------------------
+// Purpose: Filesystem paths as UTF-8, the encoding used for every std::string path in vomit-tools.
+//          (On Windows,
+//          std::filesystem::path::string() would use the ANSI code page instead.)
+//-----------------------------------------------------------------------------
+std::string ToUtf8( const fs::path &path )
+{
+	const std::u8string szUtf8 = path.u8string();
+	return { szUtf8.begin(), szUtf8.end() };
 }
 
-fs::path fromUtf8(std::string_view utf8) {
-	return fs::path{std::u8string{utf8.begin(), utf8.end()}};
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+fs::path FromUtf8( std::string_view szUtf8 )
+{
+	return fs::path{ std::u8string{ szUtf8.begin(), szUtf8.end() } };
 }
 
-std::optional<fs::path> Mount::diskPath(const std::string&) const {
+//-----------------------------------------------------------------------------
+// Purpose: The real file behind a path, for folder mounts; nullopt for files inside a VPK.
+//-----------------------------------------------------------------------------
+std::optional<fs::path> CMount::DiskPath( const std::string & ) const
+{
 	return std::nullopt;
 }
 
-std::string normalizePath(std::string_view path) {
-	std::string out;
-	out.reserve(path.size());
-	for (const char c : path) {
-		const char slash = c == '\\' ? '/' : c;
-		if (slash == '/' && (out.empty() || out.back() == '/')) {
+//-----------------------------------------------------------------------------
+// Purpose: "Materials\\Skybox/Foo.VMT" -> "materials/skybox/foo.vmt"
+//-----------------------------------------------------------------------------
+std::string NormalizePath( std::string_view szPath )
+{
+	std::string szOut;
+	szOut.reserve( szPath.size() );
+	for ( const char c : szPath )
+	{
+		const char chSlash = c == '\\' ? '/' : c;
+		if ( chSlash == '/' && ( szOut.empty() || szOut.back() == '/' ) )
+		{
 			continue;
 		}
-		out += slash;
+		szOut += chSlash;
 	}
-	return lowerAscii(out);
+	return LowerAscii( szOut );
 }
 
-fs::path findCaseInsensitive(const fs::path& path) {
+//-----------------------------------------------------------------------------
+// Purpose: Resolve a path whose components may differ in case from what is on disk (gameinfo.txt
+//          is written for case-insensitive Windows). Returns the input unchanged if nothing
+//          matches.
+//-----------------------------------------------------------------------------
+fs::path FindCaseInsensitive( const fs::path &path )
+{
 	std::error_code ec;
-	if (fs::exists(path, ec)) {
+	if ( fs::exists( path, ec ) )
+	{
 		return path;
 	}
 	fs::path current = path.root_path();
-	for (const fs::path& component : path.relative_path()) {
-		if (fs::exists(current / component, ec)) {
+	for ( const fs::path &component : path.relative_path() )
+	{
+		if ( fs::exists( current / component, ec ) )
+		{
 			current /= component;
 			continue;
 		}
-		const std::string wanted = lowerAscii(toUtf8(component));
-		bool found = false;
-		for (const auto& entry : entriesOf(current)) {
-			if (lowerAscii(toUtf8(entry.path().filename())) == wanted) {
+		const std::string szWanted = LowerAscii( ToUtf8( component ) );
+		bool bFound = false;
+		for ( const auto &entry : EntriesOf( current ) )
+		{
+			if ( LowerAscii( ToUtf8( entry.path().filename() ) ) == szWanted )
+			{
 				current = entry.path();
-				found = true;
+				bFound = true;
 				break;
 			}
 		}
-		if (!found) {
+		if ( !bFound )
+		{
 			return path;
 		}
 	}
 	return current;
 }
 
-std::optional<GameInfo> GameInfo::load(const fs::path& file, std::string* error, fs::path baseDir) {
-	std::ifstream stream{file, std::ios::binary};
-	if (!stream) {
-		if (error) {
-			*error = "cannot open " + toUtf8(file);
+//-----------------------------------------------------------------------------
+// Purpose: baseDir defaults to the parent of the gameinfo folder, which holds for Valve's own
+//          games.
+//          Source mods running on an SDK base need it passed in.
+//-----------------------------------------------------------------------------
+std::optional<CGameInfo> CGameInfo::Load( const fs::path &file, std::string *pError, fs::path baseDir )
+{
+	std::ifstream stream{ file, std::ios::binary };
+	if ( !stream )
+	{
+		if ( pError )
+		{
+			*pError = "cannot open " + ToUtf8( file );
 		}
 		return std::nullopt;
 	}
-	const std::string text{std::istreambuf_iterator<char>{stream}, std::istreambuf_iterator<char>{}};
-	return parse(text, file, error, std::move(baseDir));
+	const std::string szText{ std::istreambuf_iterator<char>{ stream }, std::istreambuf_iterator<char>{} };
+	return Parse( szText, file, pError, std::move( baseDir ) );
 }
 
-std::optional<GameInfo> GameInfo::parse(std::string_view text, const fs::path& file, std::string* error, fs::path baseDir) {
-	const auto fail = [error](std::string message) -> std::optional<GameInfo> {
-		if (error) {
-			*error = std::move(message);
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+std::optional<CGameInfo> CGameInfo::Parse( std::string_view szText, const fs::path &file, std::string *pError, fs::path baseDir )
+{
+	const auto fail = [ pError ]( std::string szMessage ) -> std::optional<CGameInfo> {
+		if ( pError )
+		{
+			*pError = std::move( szMessage );
 		}
 		return std::nullopt;
 	};
 
-	const auto parsed = kv1::parse(text);
-	const kv1::Node* root = parsed.document.find("GameInfo");
-	if (!root || !root->isBlock()) {
-		return fail("no GameInfo block");
+	const auto parsed = kv1::Parse( szText );
+	const kv1::CNode *pRoot = parsed.m_Document.Find( "GameInfo" );
+	if ( !pRoot || !pRoot->IsBlock() )
+	{
+		return fail( "no GameInfo block" );
 	}
-	const kv1::Node* fileSystem = root->find("FileSystem");
-	const kv1::Node* searchPaths = fileSystem ? fileSystem->find("SearchPaths") : nullptr;
-	if (!searchPaths || !searchPaths->isBlock()) {
-		return fail("no FileSystem/SearchPaths block");
+	const kv1::CNode *pFileSystem = pRoot->Find( "FileSystem" );
+	const kv1::CNode *pSearchPaths = pFileSystem ? pFileSystem->Find( "SearchPaths" ) : nullptr;
+	if ( !pSearchPaths || !pSearchPaths->IsBlock() )
+	{
+		return fail( "no FileSystem/SearchPaths block" );
 	}
 
-	GameInfo info;
-	info.file = fs::absolute(file);
-	info.gameDir = info.file.parent_path();
-	info.baseDir = baseDir.empty() ? info.gameDir.parent_path() : fs::absolute(baseDir);
-	if (const kv1::Node* game = root->find("game")) {
-		info.game = game->value();
+	CGameInfo info;
+	info.m_File = fs::absolute( file );
+	info.m_GameDir = info.m_File.parent_path();
+	info.m_BaseDir = baseDir.empty() ? info.m_GameDir.parent_path() : fs::absolute( baseDir );
+	if ( const kv1::CNode *pGame = pRoot->Find( "game" ) )
+	{
+		info.m_szGame = pGame->GetValue();
 	}
-	if (const kv1::Node* title = root->find("title")) {
-		info.title = title->value();
+	if ( const kv1::CNode *pTitle = pRoot->Find( "title" ) )
+	{
+		info.m_szTitle = pTitle->GetValue();
 	}
-	for (const kv1::Node& entry : searchPaths->children()) {
-		if (entry.isPair() && conditionHolds(entry.condition())) {
-			info.searchPaths.push_back({splitIds(entry.key()), entry.value()});
+	for ( const kv1::CNode &entry : pSearchPaths->GetChildren() )
+	{
+		if ( entry.IsPair() && ConditionHolds( entry.GetCondition() ) )
+		{
+			info.m_SearchPaths.push_back( { SplitIds( entry.GetKey() ), entry.GetValue() } );
 		}
 	}
 	return info;
 }
 
-Mount::Mount(Kind kind, fs::path location, std::vector<std::string> ids)
-		: kind_(kind)
-		, location_(std::move(location))
-		, ids_(std::move(ids)) {}
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+CMount::CMount( Kind_t nKind, fs::path location, std::vector<std::string> ids )
+	: m_nKind( nKind ),
+	  m_Location( std::move( location ) ),
+	  m_Ids( std::move( ids ) )
+{}
 
-bool Mount::hasId(std::string_view id) const {
-	return std::ranges::find(ids_, lowerAscii(id)) != ids_.end();
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+bool CMount::HasId( std::string_view szId ) const
+{
+	return std::ranges::find( m_Ids, LowerAscii( szId ) ) != m_Ids.end();
 }
 
-void FileSystem::clear() {
-	records_.clear();
-	mounts_.clear();
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+void CFileSystem::Clear()
+{
+	m_Records.clear();
+	m_Mounts.clear();
 }
 
-void FileSystem::mount(const GameInfo& info) {
-	clear();
-	for (const SearchPath& searchPath : info.searchPaths) {
-		mountSearchPath(info, searchPath);
+//-----------------------------------------------------------------------------
+// Purpose: Replaces whatever was mounted before.
+//-----------------------------------------------------------------------------
+void CFileSystem::Mount( const CGameInfo &info )
+{
+	Clear();
+	for ( const SearchPath_t &searchPath : info.m_SearchPaths )
+	{
+		MountSearchPath( info, searchPath );
 	}
 }
 
-const Mount* FileSystem::addDirectory(const fs::path& directory, std::vector<std::string> ids, std::string* error) {
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+const CMount *CFileSystem::AddDirectory( const fs::path &directory, std::vector<std::string> ids, std::string *pError )
+{
 	std::error_code ec;
-	if (!fs::is_directory(directory, ec)) {
-		if (error) {
-			*error = "not a directory: " + toUtf8(directory);
+	if ( !fs::is_directory( directory, ec ) )
+	{
+		if ( pError )
+		{
+			*pError = "not a directory: " + ToUtf8( directory );
 		}
 		return nullptr;
 	}
-	auto& mount = mounts_.emplace_back(std::make_unique<DirectoryMount>(directory, ids));
-	records_.push_back({toUtf8(directory), directory, std::move(ids), MountRecord::Status::Mounted, {}, mount.get()});
-	return mount.get();
+	auto &pMount = m_Mounts.emplace_back( std::make_unique<CDirectoryMount>( directory, ids ) );
+	m_Records.push_back( { ToUtf8( directory ), directory, std::move( ids ), MountRecord_t::Status_t::STATUS_MOUNTED, {}, pMount.get() } );
+	return pMount.get();
 }
 
-const Mount* FileSystem::addVpk(const fs::path& file, std::vector<std::string> ids, std::string* error) {
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+const CMount *CFileSystem::AddVpk( const fs::path &file, std::vector<std::string> ids, std::string *pError )
+{
 	// sourcepp takes paths as std::string, which std::filesystem reads in the process code page.
 	// The Windows build declares that code page to be UTF-8 in its manifest, so this is lossless there too.
-	auto pack = vpkpp::VPK::open(toUtf8(file));
-	if (!pack) {
-		if (error) {
-			*error = "could not open VPK: " + toUtf8(file);
+	auto pPack = vpkpp::VPK::open( ToUtf8( file ) );
+	if ( !pPack )
+	{
+		if ( pError )
+		{
+			*pError = "could not open VPK: " + ToUtf8( file );
 		}
 		return nullptr;
 	}
-	auto& mount = mounts_.emplace_back(std::make_unique<VpkMount>(file, ids, std::move(pack)));
-	records_.push_back({toUtf8(file), file, std::move(ids), MountRecord::Status::Mounted, {}, mount.get()});
-	return mount.get();
+	auto &pMount = m_Mounts.emplace_back( std::make_unique<CVpkMount>( file, ids, std::move( pPack ) ) );
+	m_Records.push_back( { ToUtf8( file ), file, std::move( ids ), MountRecord_t::Status_t::STATUS_MOUNTED, {}, pMount.get() } );
+	return pMount.get();
 }
 
-void FileSystem::record(const SearchPath& searchPath, const fs::path& location, MountRecord::Status status, std::string message, const Mount* mount) {
-	if (mount) {
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+void CFileSystem::Record( const SearchPath_t &searchPath, const fs::path &location, MountRecord_t::Status_t nStatus, std::string szMessage, const CMount *pMount )
+{
+	if ( pMount )
+	{
 		// addDirectory/addVpk already recorded it; attribute it to the gameinfo entry.
-		records_.back().searchPath = searchPath.path;
+		m_Records.back().m_szSearchPath = searchPath.m_szPath;
 		return;
 	}
-	records_.push_back({searchPath.path, location, searchPath.ids, status, std::move(message), nullptr});
+	m_Records.push_back( { searchPath.m_szPath, location, searchPath.m_Ids, nStatus, std::move( szMessage ), nullptr } );
 }
 
-void FileSystem::mountSearchPath(const GameInfo& info, const SearchPath& searchPath) {
-	std::string expanded = searchPath.path;
-	const auto substitute = [&expanded](std::string_view token, const fs::path& value) {
-		for (auto pos = expanded.find(token); pos != std::string::npos; pos = expanded.find(token)) {
-			expanded.replace(pos, token.size(), toUtf8(value) + "/");
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+void CFileSystem::MountSearchPath( const CGameInfo &info, const SearchPath_t &searchPath )
+{
+	std::string szExpanded = searchPath.m_szPath;
+	const auto substitute = [ &szExpanded ]( std::string_view szToken, const fs::path &value ) {
+		for ( auto nPos = szExpanded.find( szToken ); nPos != std::string::npos; nPos = szExpanded.find( szToken ) )
+		{
+			szExpanded.replace( nPos, szToken.size(), ToUtf8( value ) + "/" );
 		}
 	};
-	substitute("|gameinfo_path|", info.gameDir);
-	substitute("|all_source_engine_paths|", info.baseDir);
+	substitute( "|gameinfo_path|", info.m_GameDir );
+	substitute( "|all_source_engine_paths|", info.m_BaseDir );
 
-	fs::path path = fromUtf8(expanded);
-	if (path.is_relative()) {
-		path = info.baseDir / path;
+	fs::path path = FromUtf8( szExpanded );
+	if ( path.is_relative() )
+	{
+		path = info.m_BaseDir / path;
 	}
 	path = path.lexically_normal();
 	std::error_code ec;
 
 	// "custom/*": every folder and VPK inside, alphabetically.
-	if (path.filename() == "*") {
-		const fs::path directory = findCaseInsensitive(path.parent_path());
-		if (!fs::is_directory(directory, ec)) {
-			record(searchPath, directory, MountRecord::Status::Missing, "folder not found", nullptr);
+	if ( path.filename() == "*" )
+	{
+		const fs::path directory = FindCaseInsensitive( path.parent_path() );
+		if ( !fs::is_directory( directory, ec ) )
+		{
+			Record( searchPath, directory, MountRecord_t::Status_t::STATUS_MISSING, "folder not found", nullptr );
 			return;
 		}
-		std::vector<fs::directory_entry> entries = entriesOf(directory);
-		std::ranges::sort(entries, {}, [](const fs::directory_entry& e) { return lowerAscii(toUtf8(e.path().filename())); });
-		for (const auto& entry : entries) {
-			std::string error;
-			const Mount* mount = nullptr;
-			if (entry.is_directory(ec)) {
-				mount = addDirectory(entry.path(), searchPath.ids, &error);
-			} else if (lowerAscii(toUtf8(entry.path().extension())) == ".vpk" && !isVpkArchivePart(entry.path())) {
-				mount = addVpk(entry.path(), searchPath.ids, &error);
-			} else {
+		std::vector<fs::directory_entry> entries = EntriesOf( directory );
+		std::ranges::sort( entries, {}, []( const fs::directory_entry &e ) { return LowerAscii( ToUtf8( e.path().filename() ) ); } );
+		for ( const auto &entry : entries )
+		{
+			std::string szError;
+			const CMount *pMount = nullptr;
+			if ( entry.is_directory( ec ) )
+			{
+				pMount = AddDirectory( entry.path(), searchPath.m_Ids, &szError );
+			}
+			else if ( LowerAscii( ToUtf8( entry.path().extension() ) ) == ".vpk" && !IsVpkArchivePart( entry.path() ) )
+			{
+				pMount = AddVpk( entry.path(), searchPath.m_Ids, &szError );
+			}
+			else
+			{
 				continue;
 			}
-			record(searchPath, entry.path(), MountRecord::Status::Failed, std::move(error), mount);
+			Record( searchPath, entry.path(), MountRecord_t::Status_t::STATUS_FAILED, std::move( szError ), pMount );
 		}
 		return;
 	}
 
 	// "cstrike/cstrike_pak.vpk" means cstrike_pak_dir.vpk when the VPK is split into archives.
-	if (lowerAscii(toUtf8(path.extension())) == ".vpk") {
-		const fs::path split = findCaseInsensitive(path.parent_path() / fromUtf8(toUtf8(path.stem()) + "_dir.vpk"));
-		const fs::path single = findCaseInsensitive(path);
-		const fs::path file = fs::exists(split, ec) ? split : single;
-		if (!fs::exists(file, ec)) {
-			record(searchPath, path, MountRecord::Status::Missing, "VPK not found", nullptr);
+	if ( LowerAscii( ToUtf8( path.extension() ) ) == ".vpk" )
+	{
+		const fs::path split = FindCaseInsensitive( path.parent_path() / FromUtf8( ToUtf8( path.stem() ) + "_dir.vpk" ) );
+		const fs::path single = FindCaseInsensitive( path );
+		const fs::path file = fs::exists( split, ec ) ? split : single;
+		if ( !fs::exists( file, ec ) )
+		{
+			Record( searchPath, path, MountRecord_t::Status_t::STATUS_MISSING, "VPK not found", nullptr );
 			return;
 		}
-		std::string error;
-		const Mount* mount = addVpk(file, searchPath.ids, &error);
-		record(searchPath, file, MountRecord::Status::Failed, std::move(error), mount);
+		std::string szError;
+		const CMount *pMount = AddVpk( file, searchPath.m_Ids, &szError );
+		Record( searchPath, file, MountRecord_t::Status_t::STATUS_FAILED, std::move( szError ), pMount );
 		return;
 	}
 
-	const fs::path directory = findCaseInsensitive(path);
-	if (!fs::is_directory(directory, ec)) {
-		record(searchPath, directory, MountRecord::Status::Missing, "folder not found", nullptr);
+	const fs::path directory = FindCaseInsensitive( path );
+	if ( !fs::is_directory( directory, ec ) )
+	{
+		Record( searchPath, directory, MountRecord_t::Status_t::STATUS_MISSING, "folder not found", nullptr );
 		return;
 	}
-	std::string error;
-	const Mount* mount = addDirectory(directory, searchPath.ids, &error);
-	record(searchPath, directory, MountRecord::Status::Failed, std::move(error), mount);
+	std::string szError;
+	const CMount *pMount = AddDirectory( directory, searchPath.m_Ids, &szError );
+	Record( searchPath, directory, MountRecord_t::Status_t::STATUS_FAILED, std::move( szError ), pMount );
 }
 
-const Mount* FileSystem::resolve(std::string_view path, std::string_view pathId) const {
-	const std::string normalized = normalizePath(path);
-	for (const auto& mount : mounts_) {
-		if (mount->hasId(pathId) && mount->contains(normalized)) {
-			return mount.get();
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+const CMount *CFileSystem::Resolve( std::string_view szPath, std::string_view szPathId ) const
+{
+	const std::string szNormalized = NormalizePath( szPath );
+	for ( const auto &pMount : m_Mounts )
+	{
+		if ( pMount->HasId( szPathId ) && pMount->Contains( szNormalized ) )
+		{
+			return pMount.get();
 		}
 	}
 	return nullptr;
 }
 
-std::optional<std::vector<std::byte>> FileSystem::read(std::string_view path, std::string_view pathId) const {
-	const Mount* mount = resolve(path, pathId);
-	return mount ? mount->read(normalizePath(path)) : std::nullopt;
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+std::optional<std::vector<std::byte>> CFileSystem::Read( std::string_view szPath, std::string_view szPathId ) const
+{
+	const CMount *pMount = Resolve( szPath, szPathId );
+	return pMount ? pMount->Read( NormalizePath( szPath ) ) : std::nullopt;
 }
 
-std::optional<std::string> FileSystem::readText(std::string_view path, std::string_view pathId) const {
-	const auto bytes = read(path, pathId);
-	if (!bytes) {
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+std::optional<std::string> CFileSystem::ReadText( std::string_view szPath, std::string_view szPathId ) const
+{
+	const auto bytes = Read( szPath, szPathId );
+	if ( !bytes )
+	{
 		return std::nullopt;
 	}
-	return std::string{reinterpret_cast<const char*>(bytes->data()), bytes->size()};
+	return std::string{ reinterpret_cast<const char *>( bytes->data() ), bytes->size() };
 }
 
-std::map<std::string, const Mount*> FileSystem::files(std::string_view pathId) const {
-	std::map<std::string, const Mount*> out;
-	for (const auto& mount : mounts_) {
-		if (mount->hasId(pathId)) {
-			mount->forEachFile([&out, m = mount.get()](const std::string& path) { out.emplace(path, m); });
+//-----------------------------------------------------------------------------
+// Purpose: Every file visible under pathId, with the mount it is read from.
+//-----------------------------------------------------------------------------
+std::map<std::string, const CMount *> CFileSystem::Files( std::string_view szPathId ) const
+{
+	std::map<std::string, const CMount *> out;
+	for ( const auto &pMount : m_Mounts )
+	{
+		if ( pMount->HasId( szPathId ) )
+		{
+			pMount->ForEachFile( [ &out, m = pMount.get() ]( const std::string &szPath ) { out.emplace( szPath, m ); } );
 		}
 	}
 	return out;
 }
 
-std::vector<std::string> FileSystem::find(std::string_view directory, std::string_view extension, bool recursive, std::string_view pathId) const {
-	std::string prefix = normalizePath(directory);
-	if (!prefix.empty() && !prefix.ends_with('/')) {
-		prefix += '/';
+//-----------------------------------------------------------------------------
+// Purpose: Visible files under a directory with the given extension ("" for all), e.g. ("scripts",
+//          ".txt").
+//-----------------------------------------------------------------------------
+std::vector<std::string> CFileSystem::Find( std::string_view szDirectory, std::string_view szExtension, bool bRecursive, std::string_view szPathId ) const
+{
+	std::string szPrefix = NormalizePath( szDirectory );
+	if ( !szPrefix.empty() && !szPrefix.ends_with( '/' ) )
+	{
+		szPrefix += '/';
 	}
-	const std::string suffix = lowerAscii(extension);
+	const std::string szSuffix = LowerAscii( szExtension );
 	std::set<std::string> found;
-	for (const auto& mount : mounts_) {
-		if (!mount->hasId(pathId)) {
+	for ( const auto &pMount : m_Mounts )
+	{
+		if ( !pMount->HasId( szPathId ) )
+		{
 			continue;
 		}
-		mount->forEachFile([&](const std::string& path) {
-			if (path.starts_with(prefix) && path.ends_with(suffix)
-				&& (recursive || path.find('/', prefix.size()) == std::string::npos)) {
-				found.insert(path);
+		pMount->ForEachFile( [ & ]( const std::string &szPath ) {
+			if ( szPath.starts_with( szPrefix ) && szPath.ends_with( szSuffix ) && ( bRecursive || szPath.find( '/', szPrefix.size() ) == std::string::npos ) )
+			{
+				found.insert( szPath );
 			}
-		});
+		} );
 	}
-	return {found.begin(), found.end()};
+	return { found.begin(), found.end() };
 }
 
 } // namespace xv::vfs

@@ -1,4 +1,9 @@
+//===========================================================================//
 // SPDX-License-Identifier: GPL-3.0-or-later
+//
+// Purpose: See KvCard.h.
+//
+//===========================================================================//
 #include "KvCard.h"
 
 #include <algorithm>
@@ -23,37 +28,52 @@
 #include "SoundValues.h"
 #include "sound/SoundPlayback.h"
 
-using xv::kv1::Node;
-using xv::sound::Issue;
-using xv::sound::NodePath;
+using xv::kv1::CNode;
+using xv::sound::Issue_t;
+using xv::sound::NodePath_t;
 
-namespace {
+namespace
+{
 
-QString qs(std::string_view text) {
-	return QString::fromUtf8(text.data(), static_cast<qsizetype>(text.size()));
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+QString Qs( std::string_view szText )
+{
+	return QString::fromUtf8( szText.data(), static_cast<qsizetype>( szText.size() ) );
 }
 
-NodePath childPath(NodePath path, std::size_t child) {
-	path.push_back(child);
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+NodePath_t ChildPath( NodePath_t path, std::size_t nChild )
+{
+	path.push_back( nChild );
 	return path;
 }
 
-// A light tint of the severity colour over the base colour, so it reads in light and dark themes.
-// (Translucent brushes are not blended on stylesheet-styled tables, so the mix is done here.)
-QColor issueColor(Issue::Severity severity, const QColor& base) {
+//-----------------------------------------------------------------------------
+// Purpose: A light tint of the severity colour over the base colour, so it reads in light and dark
+//          themes.
+//          (Translucent brushes are not blended on stylesheet-styled tables, so the mix is done
+//          here.)
+//-----------------------------------------------------------------------------
+QColor IssueColor( Issue_t::Severity_t nSeverity, const QColor &base )
+{
 	QColor tint;
-	switch (severity) {
-		case Issue::Severity::Error:   tint = QColor{220, 50, 50}; break;
-		case Issue::Severity::Warning: tint = QColor{235, 160, 20}; break;
-		default:                       tint = QColor{60, 140, 230}; break;
+	switch ( nSeverity )
+	{
+		case Issue_t::Severity_t::SEVERITY_ERROR: tint = QColor{ 220, 50, 50 }; break;
+		case Issue_t::Severity_t::SEVERITY_WARNING: tint = QColor{ 235, 160, 20 }; break;
+		default: tint = QColor{ 60, 140, 230 }; break;
 	}
-	constexpr double strength = 0.3;
-	return QColor::fromRgbF(static_cast<float>(base.redF() + (tint.redF() - base.redF()) * strength),
-	                        static_cast<float>(base.greenF() + (tint.greenF() - base.greenF()) * strength),
-	                        static_cast<float>(base.blueF() + (tint.blueF() - base.blueF()) * strength));
+	constexpr double flStrength = 0.3;
+	return QColor::fromRgbF( static_cast<float>( base.redF() + ( tint.redF() - base.redF() ) * flStrength ),
+		static_cast<float>( base.greenF() + ( tint.greenF() - base.greenF() ) * flStrength ),
+		static_cast<float>( base.blueF() + ( tint.blueF() - base.blueF() ) * flStrength ) );
 }
 
-const char* const CARD_STYLE = R"(
+const char *const CARD_STYLE = R"(
 QLabel#cardTab {
 	border: 1px solid palette(mid);
 	border-bottom: none;
@@ -78,448 +98,587 @@ QTableWidget#cardTable {
 
 } // namespace
 
-KvCard::KvCard(SoundDocument& document, const SoundIndex& index, SoundPlayer* player, NodePath path, QWidget* parent)
-		: QWidget(parent)
-		, document_(document)
-		, index_(index)
-		, player_(player)
-		, path_(std::move(path)) {
-	const Node* node = document_.node(path_);
-	Q_ASSERT(node && node->isBlock());
-	const xv::sound::BlockDef* def = document_.blockDef(path_);
-	const bool entry = path_.size() == 1;
-	if (entry) {
-		setStyleSheet(QString::fromLatin1(CARD_STYLE));
+//-----------------------------------------------------------------------------
+// Purpose: player may be null: no play buttons then.
+//-----------------------------------------------------------------------------
+CKvCard::CKvCard( CSoundDocument &document, const CSoundIndex &index, CSoundPlayer *pPlayer, NodePath_t path, QWidget *pParent )
+	: QWidget( pParent ),
+	  m_Document( document ),
+	  m_Index( index ),
+	  m_pPlayer( pPlayer ),
+	  m_Path( std::move( path ) )
+{
+	const CNode *pNode = m_Document.Node( m_Path );
+	Q_ASSERT( pNode && pNode->IsBlock() );
+	const xv::sound::BlockDef_t *pDef = m_Document.BlockDef( m_Path );
+	const bool bEntry = m_Path.size() == 1;
+	if ( bEntry )
+	{
+		setStyleSheet( QString::fromLatin1( CARD_STYLE ) );
 	}
 
-	tab_ = new QLabel(qs(node->key()));
-	tab_->setObjectName(QStringLiteral("cardTab"));
-	tab_->setToolTip(def ? qs(def->help) : tr("Not a block the engine knows here"));
-	if (entry) {
-		tab_->setToolTip(tab_->toolTip() + tr("\nDouble-click to rename"));
-		tab_->installEventFilter(this);
+	m_pTab = new QLabel( Qs( pNode->GetKey() ) );
+	m_pTab->setObjectName( QStringLiteral( "cardTab" ) );
+	m_pTab->setToolTip( pDef ? Qs( pDef->m_szHelp ) : tr( "Not a block the engine knows here" ) );
+	if ( bEntry )
+	{
+		m_pTab->setToolTip( m_pTab->toolTip() + tr( "\nDouble-click to rename" ) );
+		m_pTab->installEventFilter( this );
 	}
 
-	auto* add = new QToolButton;
-	add->setText(QStringLiteral("+"));
-	add->setToolTip(tr("Add a key or block"));
-	add->setAutoRaise(true);
-	add->setPopupMode(QToolButton::InstantPopup);
-	auto* addMenu = new QMenu(add);
-	connect(addMenu, &QMenu::aboutToShow, this, [this, addMenu] { fillAddMenu(addMenu); });
-	add->setMenu(addMenu);
+	auto *pAdd = new QToolButton;
+	pAdd->setText( QStringLiteral( "+" ) );
+	pAdd->setToolTip( tr( "Add a key or block" ) );
+	pAdd->setAutoRaise( true );
+	pAdd->setPopupMode( QToolButton::InstantPopup );
+	auto *pAddMenu = new QMenu( pAdd );
+	connect( pAddMenu, &QMenu::aboutToShow, this, [ this, pAddMenu ] { FillAddMenu( pAddMenu ); } );
+	pAdd->setMenu( pAddMenu );
 
-	auto* header = new QHBoxLayout;
-	header->setContentsMargins(0, 0, 0, 0);
-	header->setSpacing(2);
-	header->addWidget(tab_, 0, Qt::AlignBottom);
-	if (player_ && playable()) {
-		auto* play = new QToolButton;
-		play->setText(QStringLiteral("▶"));
-		play->setAutoRaise(true);
-		play->setToolTip(entry && document_.kind() == xv::sound::FileKind::Soundscape
-			? tr("Play this soundscape: its loops, random sounds and nested soundscapes")
-			: tr("Play with these settings (volume, pitch, random picks)"));
-		connect(play, &QToolButton::clicked, this, &KvCard::play);
-		header->addWidget(play, 0, Qt::AlignBottom);
+	auto *pHeader = new QHBoxLayout;
+	pHeader->setContentsMargins( 0, 0, 0, 0 );
+	pHeader->setSpacing( 2 );
+	pHeader->addWidget( m_pTab, 0, Qt::AlignBottom );
+	if ( m_pPlayer && GetPlayable() )
+	{
+		auto *pPlay = new QToolButton;
+		pPlay->setText( QStringLiteral( "▶" ) );
+		pPlay->setAutoRaise( true );
+		pPlay->setToolTip( bEntry && m_Document.GetKind() == xv::sound::FileKind_t::FILE_KIND_SOUNDSCAPE
+				? tr( "Play this soundscape: its loops, random sounds and nested soundscapes" )
+				: tr( "Play with these settings (volume, pitch, random picks)" ) );
+		connect( pPlay, &QToolButton::clicked, this, &CKvCard::Play );
+		pHeader->addWidget( pPlay, 0, Qt::AlignBottom );
 	}
-	header->addStretch();
-	header->addWidget(add, 0, Qt::AlignBottom);
-	if (!entry) {
-		auto* remove = new QToolButton;
-		remove->setText(QStringLiteral("✕"));
-		remove->setToolTip(tr("Delete this block"));
-		remove->setAutoRaise(true);
-		connect(remove, &QToolButton::clicked, this, [this] { document_.removeNode(path_); });
-		header->addWidget(remove, 0, Qt::AlignBottom);
+	pHeader->addStretch();
+	pHeader->addWidget( pAdd, 0, Qt::AlignBottom );
+	if ( !bEntry )
+	{
+		auto *pRemove = new QToolButton;
+		pRemove->setText( QStringLiteral( "✕" ) );
+		pRemove->setToolTip( tr( "Delete this block" ) );
+		pRemove->setAutoRaise( true );
+		connect( pRemove, &QToolButton::clicked, this, [ this ] { m_Document.RemoveNode( m_Path ); } );
+		pHeader->addWidget( pRemove, 0, Qt::AlignBottom );
 	}
 
-	auto* body = new QFrame;
-	body->setObjectName(QStringLiteral("cardBody"));
-	auto* bodyLayout = new QVBoxLayout(body);
-	bodyLayout->setContentsMargins(6, 6, 6, 6);
-	bodyLayout->setSpacing(8);
+	auto *pBody = new QFrame;
+	pBody->setObjectName( QStringLiteral( "cardBody" ) );
+	auto *pBodyLayout = new QVBoxLayout( pBody );
+	pBodyLayout->setContentsMargins( 6, 6, 6, 6 );
+	pBodyLayout->setSpacing( 8 );
 
-	buildTable(*node);
-	bodyLayout->addWidget(table_);
-	table_->setVisible(!rowChild_.empty());
+	BuildTable( *pNode );
+	pBodyLayout->addWidget( m_pTable );
+	m_pTable->setVisible( !m_RowChild.empty() );
 
-	for (std::size_t i = 0; i < node->children().size(); i++) {
-		if (node->child(i).isBlock()) {
-			auto* card = new KvCard(document_, index_, player_, childPath(path_, i));
-			connect(card, &KvCard::added, this, &KvCard::added);
-			children_.push_back(card);
-			bodyLayout->addWidget(card);
+	for ( std::size_t i = 0; i < pNode->GetChildren().size(); i++ )
+	{
+		if ( pNode->Child( i ).IsBlock() )
+		{
+			auto *pCard = new CKvCard( m_Document, m_Index, m_pPlayer, ChildPath( m_Path, i ) );
+			connect( pCard, &CKvCard::Added, this, &CKvCard::Added );
+			m_Children.push_back( pCard );
+			pBodyLayout->addWidget( pCard );
 		}
 	}
-	if (rowChild_.empty() && children_.empty()) {
-		auto* empty = new QLabel(tr("Empty. Use + to add keys or blocks."));
-		empty->setEnabled(false);
-		bodyLayout->addWidget(empty);
+	if ( m_RowChild.empty() && m_Children.empty() )
+	{
+		auto *pEmpty = new QLabel( tr( "Empty. Use + to add keys or blocks." ) );
+		pEmpty->setEnabled( false );
+		pBodyLayout->addWidget( pEmpty );
 	}
 
-	auto* layout = new QVBoxLayout(this);
-	layout->setContentsMargins(0, 0, 0, 0);
-	layout->setSpacing(0);
-	layout->addLayout(header);
-	layout->addWidget(body);
+	auto *pLayout = new QVBoxLayout( this );
+	pLayout->setContentsMargins( 0, 0, 0, 0 );
+	pLayout->setSpacing( 0 );
+	pLayout->addLayout( pHeader );
+	pLayout->addWidget( pBody );
 }
 
-void KvCard::buildTable(const Node& node) {
-	const xv::sound::BlockDef* def = document_.blockDef(path_);
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+void CKvCard::BuildTable( const CNode &node )
+{
+	const xv::sound::BlockDef_t *pDef = m_Document.BlockDef( m_Path );
 
-	table_ = new QTableWidget(0, 3);
-	table_->setObjectName(QStringLiteral("cardTable"));
-	table_->horizontalHeader()->hide();
-	table_->verticalHeader()->hide();
-	table_->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
-	table_->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
-	table_->setEditTriggers(QAbstractItemView::DoubleClicked | QAbstractItemView::EditKeyPressed | QAbstractItemView::AnyKeyPressed);
-	table_->setWordWrap(false);
-	table_->setItemDelegate(new SoundValueDelegate(def, index_, document_, table_));
-	table_->horizontalHeader()->setSectionResizeMode(SoundValueDelegate::KeyColumn, QHeaderView::ResizeToContents);
-	table_->horizontalHeader()->setSectionResizeMode(SoundValueDelegate::ValueColumn, QHeaderView::Stretch);
-	table_->horizontalHeader()->setSectionResizeMode(SoundValueDelegate::MeaningColumn, QHeaderView::ResizeToContents);
-	table_->setContextMenuPolicy(Qt::CustomContextMenu);
+	m_pTable = new QTableWidget( 0, 3 );
+	m_pTable->setObjectName( QStringLiteral( "cardTable" ) );
+	m_pTable->horizontalHeader()->hide();
+	m_pTable->verticalHeader()->hide();
+	m_pTable->setHorizontalScrollBarPolicy( Qt::ScrollBarAlwaysOff );
+	m_pTable->setVerticalScrollBarPolicy( Qt::ScrollBarAlwaysOff );
+	m_pTable->setEditTriggers( QAbstractItemView::DoubleClicked | QAbstractItemView::EditKeyPressed | QAbstractItemView::AnyKeyPressed );
+	m_pTable->setWordWrap( false );
+	m_pTable->setItemDelegate( new CSoundValueDelegate( pDef, m_Index, m_Document, m_pTable ) );
+	m_pTable->horizontalHeader()->setSectionResizeMode( CSoundValueDelegate::COLUMN_KEY_COLUMN, QHeaderView::ResizeToContents );
+	m_pTable->horizontalHeader()->setSectionResizeMode( CSoundValueDelegate::COLUMN_VALUE_COLUMN, QHeaderView::Stretch );
+	m_pTable->horizontalHeader()->setSectionResizeMode( CSoundValueDelegate::COLUMN_MEANING_COLUMN, QHeaderView::ResizeToContents );
+	m_pTable->setContextMenuPolicy( Qt::CustomContextMenu );
 
-	filling_ = true;
-	QFont meaningFont = table_->font();
-	meaningFont.setItalic(true);
-	const QColor meaningColor = palette().color(QPalette::PlaceholderText);
-	for (std::size_t i = 0; i < node.children().size(); i++) {
-		const Node& child = node.child(i);
-		if (!child.isPair()) {
+	m_bFilling = true;
+	QFont meaningFont = m_pTable->font();
+	meaningFont.setItalic( true );
+	const QColor meaningColor = palette().color( QPalette::PlaceholderText );
+	for ( std::size_t i = 0; i < node.GetChildren().size(); i++ )
+	{
+		const CNode &child = node.Child( i );
+		if ( !child.IsPair() )
+		{
 			continue;
 		}
-		const int row = table_->rowCount();
-		table_->insertRow(row);
-		rowChild_.push_back(i);
+		const int nRow = m_pTable->rowCount();
+		m_pTable->insertRow( nRow );
+		m_RowChild.push_back( i );
 
-		const QString key = qs(child.key());
-		const QString value = qs(child.value());
-		const auto kind = SoundValueDelegate::kindOf(def, key);
+		const QString szKey = Qs( child.GetKey() );
+		const QString szValue = Qs( child.GetValue() );
+		const auto nKind = CSoundValueDelegate::KindOf( pDef, szKey );
 
-		auto* keyItem = new QTableWidgetItem(key);
-		const xv::sound::KeyDef* keyDef = def ? xv::sound::findKey(*def, key.toStdString()) : nullptr;
-		keyItem->setToolTip(keyDef ? qs(keyDef->help) : tr("Not a key the engine reads here"));
-		auto* valueItem = new QTableWidgetItem(value);
-		auto* meaningItem = new QTableWidgetItem(describeValue(kind, value));
-		meaningItem->setFlags(Qt::ItemIsEnabled);
-		meaningItem->setFont(meaningFont);
-		meaningItem->setForeground(meaningColor);
+		auto *pKeyItem = new QTableWidgetItem( szKey );
+		const xv::sound::KeyDef_t *pKeyDef = pDef ? xv::sound::FindKey( *pDef, szKey.toStdString() ) : nullptr;
+		pKeyItem->setToolTip( pKeyDef ? Qs( pKeyDef->m_szHelp ) : tr( "Not a key the engine reads here" ) );
+		auto *pValueItem = new QTableWidgetItem( szValue );
+		auto *pMeaningItem = new QTableWidgetItem( DescribeValue( nKind, szValue ) );
+		pMeaningItem->setFlags( Qt::ItemIsEnabled );
+		pMeaningItem->setFont( meaningFont );
+		pMeaningItem->setForeground( meaningColor );
 
-		table_->setItem(row, SoundValueDelegate::KeyColumn, keyItem);
-		table_->setItem(row, SoundValueDelegate::ValueColumn, valueItem);
-		table_->setItem(row, SoundValueDelegate::MeaningColumn, meaningItem);
+		m_pTable->setItem( nRow, CSoundValueDelegate::COLUMN_KEY_COLUMN, pKeyItem );
+		m_pTable->setItem( nRow, CSoundValueDelegate::COLUMN_VALUE_COLUMN, pValueItem );
+		m_pTable->setItem( nRow, CSoundValueDelegate::COLUMN_MEANING_COLUMN, pMeaningItem );
 
-		const std::string gamePath = kind == xv::sound::ValueKind::Wave ? xv::sound::waveGamePath(child.value()) : std::string{};
-		if (player_ && !gamePath.empty()) {
-			auto* cell = new QWidget;
-			auto* cellLayout = new QHBoxLayout(cell);
-			cellLayout->setContentsMargins(2, 0, 4, 0);
-			cellLayout->setSpacing(4);
-			auto* play = new QToolButton;
-			play->setText(QStringLiteral("▶"));
-			play->setAutoRaise(true);
-			play->setToolTip(tr("Play %1 as it is").arg(QString::fromStdString(gamePath)));
-			connect(play, &QToolButton::clicked, this, [this, gamePath] { player_->playGameSound(gamePath, document_.localRoot()); });
-			auto* meaning = new QLabel(meaningItem->text());
-			meaning->setFont(meaningFont);
-			meaning->setStyleSheet(QStringLiteral("color: %1;").arg(meaningColor.name()));
-			cellLayout->addWidget(play);
-			cellLayout->addWidget(meaning);
-			cellLayout->addStretch();
-			meaningItem->setText({});
-			table_->setCellWidget(row, SoundValueDelegate::MeaningColumn, cell);
+		const std::string szGamePath = nKind == xv::sound::ValueKind_t::VALUE_KIND_WAVE ? xv::sound::WaveGamePath( child.GetValue() ) : std::string{};
+		if ( m_pPlayer && !szGamePath.empty() )
+		{
+			auto *pCell = new QWidget;
+			auto *pCellLayout = new QHBoxLayout( pCell );
+			pCellLayout->setContentsMargins( 2, 0, 4, 0 );
+			pCellLayout->setSpacing( 4 );
+			auto *pPlay = new QToolButton;
+			pPlay->setText( QStringLiteral( "▶" ) );
+			pPlay->setAutoRaise( true );
+			pPlay->setToolTip( tr( "Play %1 as it is" ).arg( QString::fromStdString( szGamePath ) ) );
+			connect( pPlay, &QToolButton::clicked, this, [ this, szGamePath ] { m_pPlayer->PlayGameSound( szGamePath, m_Document.GetLocalRoot() ); } );
+			auto *pMeaning = new QLabel( pMeaningItem->text() );
+			pMeaning->setFont( meaningFont );
+			pMeaning->setStyleSheet( QStringLiteral( "color: %1;" ).arg( meaningColor.name() ) );
+			pCellLayout->addWidget( pPlay );
+			pCellLayout->addWidget( pMeaning );
+			pCellLayout->addStretch();
+			pMeaningItem->setText( {} );
+			m_pTable->setCellWidget( nRow, CSoundValueDelegate::COLUMN_MEANING_COLUMN, pCell );
 		}
 	}
-	filling_ = false;
+	m_bFilling = false;
 	// Exactly as tall as its rows: the card grows instead of the table scrolling.
-	table_->resizeRowsToContents();
-	table_->setFixedHeight(table_->verticalHeader()->length() + 2 * table_->frameWidth());
+	m_pTable->resizeRowsToContents();
+	m_pTable->setFixedHeight( m_pTable->verticalHeader()->length() + 2 * m_pTable->frameWidth() );
 
-	connect(table_, &QTableWidget::itemChanged, this, [this](QTableWidgetItem* item) {
-		if (filling_ || item->row() >= static_cast<int>(rowChild_.size())) {
+	connect( m_pTable, &QTableWidget::itemChanged, this, [ this ]( QTableWidgetItem *pItem ) {
+		if ( m_bFilling || pItem->row() >= static_cast<int>( m_RowChild.size() ) )
+		{
 			return;
 		}
-		const NodePath target = childPath(path_, rowChild_[static_cast<std::size_t>(item->row())]);
-		if (item->column() == SoundValueDelegate::KeyColumn) {
-			document_.setKey(target, item->text());
-		} else if (item->column() == SoundValueDelegate::ValueColumn) {
-			document_.setValue(target, item->text());
+		const NodePath_t target = ChildPath( m_Path, m_RowChild[ static_cast<std::size_t>( pItem->row() ) ] );
+		if ( pItem->column() == CSoundValueDelegate::COLUMN_KEY_COLUMN )
+		{
+			m_Document.SetKey( target, pItem->text() );
 		}
-	});
+		else if ( pItem->column() == CSoundValueDelegate::COLUMN_VALUE_COLUMN )
+		{
+			m_Document.SetValue( target, pItem->text() );
+		}
+	} );
 
-	auto* remove = new QAction(tr("Delete Key"), table_);
-	remove->setShortcut(QKeySequence::Delete);
-	remove->setShortcutContext(Qt::WidgetShortcut);
-	connect(remove, &QAction::triggered, this, [this] { removeRow(table_->currentRow()); });
-	table_->addAction(remove);
+	auto *pRemove = new QAction( tr( "Delete Key" ), m_pTable );
+	pRemove->setShortcut( QKeySequence::Delete );
+	pRemove->setShortcutContext( Qt::WidgetShortcut );
+	connect( pRemove, &QAction::triggered, this, [ this ] { RemoveRow( m_pTable->currentRow() ); } );
+	m_pTable->addAction( pRemove );
 
-	connect(table_, &QTableWidget::customContextMenuRequested, this, [this, remove](const QPoint& position) {
+	connect( m_pTable, &QTableWidget::customContextMenuRequested, this, [ this, pRemove ]( const QPoint &position ) {
 		QMenu menu;
-		const int row = table_->rowAt(position.y());
-		if (row >= 0) {
-			table_->setCurrentCell(row, SoundValueDelegate::ValueColumn);
-			remove->setText(tr("Delete \"%1\"").arg(table_->item(row, SoundValueDelegate::KeyColumn)->text()));
-			menu.addAction(remove);
+		const int nRow = m_pTable->rowAt( position.y() );
+		if ( nRow >= 0 )
+		{
+			m_pTable->setCurrentCell( nRow, CSoundValueDelegate::COLUMN_VALUE_COLUMN );
+			pRemove->setText( tr( "Delete \"%1\"" ).arg( m_pTable->item( nRow, CSoundValueDelegate::COLUMN_KEY_COLUMN )->text() ) );
+			menu.addAction( pRemove );
 			menu.addSeparator();
 		}
-		fillAddMenu(&menu);
-		menu.exec(table_->viewport()->mapToGlobal(position));
-	});
+		FillAddMenu( &menu );
+		menu.exec( m_pTable->viewport()->mapToGlobal( position ) );
+	} );
 }
 
-void KvCard::fillAddMenu(QMenu* menu) {
-	menu->clear();
-	const Node* node = document_.node(path_);
-	const xv::sound::BlockDef* def = document_.blockDef(path_);
-	if (!node || !def) {
-		menu->addAction(tr("Custom Key…"), this, [this] {
-			const QString key = QInputDialog::getText(this, tr("Add Key"), tr("Key:"));
-			if (!key.isEmpty()) {
-				addKey(key);
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+void CKvCard::FillAddMenu( QMenu *pMenu )
+{
+	pMenu->clear();
+	const CNode *pNode = m_Document.Node( m_Path );
+	const xv::sound::BlockDef_t *pDef = m_Document.BlockDef( m_Path );
+	if ( !pNode || !pDef )
+	{
+		pMenu->addAction( tr( "Custom Key…" ), this, [ this ] {
+			const QString szKey = QInputDialog::getText( this, tr( "Add Key" ), tr( "Key:" ) );
+			if ( !szKey.isEmpty() )
+			{
+				AddKey( szKey );
 			}
-		});
+		} );
 		return;
 	}
 
-	menu->addSection(tr("Keys"));
-	for (const xv::sound::KeyDef& key : def->keys) {
+	pMenu->addSection( tr( "Keys" ) );
+	for ( const xv::sound::KeyDef_t &key : pDef->m_Keys )
+	{
 		// Only rndwave's "wave" may repeat; other keys are offered once.
-		const bool repeatable = xv::kv1::equalsIgnoreCase(def->key, "rndwave");
-		if (!repeatable && node->find(key.key)) {
+		const bool bRepeatable = xv::kv1::EqualsIgnoreCase( pDef->m_szKey, "rndwave" );
+		if ( !bRepeatable && pNode->Find( key.m_szKey ) )
+		{
 			continue;
 		}
-		QAction* action = menu->addAction(qs(key.key), this, [this, name = qs(key.key)] { addKey(name); });
-		action->setToolTip(qs(key.help));
+		QAction *pAction = pMenu->addAction( Qs( key.m_szKey ), this, [ this, szName = Qs( key.m_szKey ) ] { AddKey( szName ); } );
+		pAction->setToolTip( Qs( key.m_szHelp ) );
 	}
-	menu->addAction(tr("Custom Key…"), this, [this] {
-		const QString key = QInputDialog::getText(this, tr("Add Key"), tr("Key:"));
-		if (!key.isEmpty()) {
-			addKey(key);
+	pMenu->addAction( tr( "Custom Key…" ), this, [ this ] {
+		const QString szKey = QInputDialog::getText( this, tr( "Add Key" ), tr( "Key:" ) );
+		if ( !szKey.isEmpty() )
+		{
+			AddKey( szKey );
 		}
-	});
-	if (!def->blocks.empty()) {
-		menu->addSection(tr("Blocks"));
-		for (const std::string_view block : def->blocks) {
-			const xv::sound::BlockDef* blockDef = document_.schema().block(block);
-			QAction* action = menu->addAction(qs(block), this, [this, name = qs(block)] { addBlock(name); });
-			action->setToolTip(blockDef ? qs(blockDef->help) : QString{});
+	} );
+	if ( !pDef->m_Blocks.empty() )
+	{
+		pMenu->addSection( tr( "Blocks" ) );
+		for ( const std::string_view szBlock : pDef->m_Blocks )
+		{
+			const xv::sound::BlockDef_t *pBlockDef = m_Document.GetSchema().Block( szBlock );
+			QAction *pAction = pMenu->addAction( Qs( szBlock ), this, [ this, szName = Qs( szBlock ) ] { AddBlock( szName ); } );
+			pAction->setToolTip( pBlockDef ? Qs( pBlockDef->m_szHelp ) : QString{} );
 		}
 	}
-	menu->setToolTipsVisible(true);
+	pMenu->setToolTipsVisible( true );
 }
 
-std::size_t KvCard::pairInsertIndex() const {
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+std::size_t CKvCard::GetPairInsertIndex() const
+{
 	// New keys go after the existing keys, above any sub-blocks.
-	const Node* node = document_.node(path_);
-	std::size_t index = 0;
-	for (std::size_t i = 0; i < node->children().size(); i++) {
-		if (node->child(i).isPair()) {
-			index = i + 1;
+	const CNode *pNode = m_Document.Node( m_Path );
+	std::size_t nIndex = 0;
+	for ( std::size_t i = 0; i < pNode->GetChildren().size(); i++ )
+	{
+		if ( pNode->Child( i ).IsPair() )
+		{
+			nIndex = i + 1;
 		}
 	}
-	return index;
+	return nIndex;
 }
 
-void KvCard::addKey(const QString& key) {
-	const std::size_t index = pairInsertIndex();
-	const std::string name = key.toStdString();
-	document_.insertChild(path_, index, Node::makePair(name, defaultValue(document_, name).toStdString()), tr("Add %1").arg(key));
-	emit added(childPath(path_, index));
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+void CKvCard::AddKey( const QString &szKey )
+{
+	const std::size_t nIndex = GetPairInsertIndex();
+	const std::string szName = szKey.toStdString();
+	m_Document.InsertChild( m_Path, nIndex, CNode::MakePair( szName, DefaultValue( m_Document, szName ).toStdString() ), tr( "Add %1" ).arg( szKey ) );
+	emit Added( ChildPath( m_Path, nIndex ) );
 }
 
-void KvCard::addBlock(const QString& key) {
-	const Node* node = document_.node(path_);
-	const std::size_t index = node->children().size();
-	document_.insertChild(path_, index, blockTemplate(document_, key.toStdString()), tr("Add %1").arg(key));
-	emit added(childPath(path_, index));
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+void CKvCard::AddBlock( const QString &szKey )
+{
+	const CNode *pNode = m_Document.Node( m_Path );
+	const std::size_t nIndex = pNode->GetChildren().size();
+	m_Document.InsertChild( m_Path, nIndex, BlockTemplate( m_Document, szKey.toStdString() ), tr( "Add %1" ).arg( szKey ) );
+	emit Added( ChildPath( m_Path, nIndex ) );
 }
 
-void KvCard::removeRow(int row) {
-	if (row >= 0 && row < static_cast<int>(rowChild_.size())) {
-		document_.removeNode(childPath(path_, rowChild_[static_cast<std::size_t>(row)]));
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+void CKvCard::RemoveRow( int nRow )
+{
+	if ( nRow >= 0 && nRow < static_cast<int>( m_RowChild.size() ) )
+	{
+		m_Document.RemoveNode( ChildPath( m_Path, m_RowChild[ static_cast<std::size_t>( nRow ) ] ) );
 	}
 }
 
-void KvCard::rename() {
-	const Node* node = document_.node(path_);
-	bool ok = false;
-	const QString name = QInputDialog::getText(this, tr("Rename"), tr("Name:"), QLineEdit::Normal, qs(node->key()), &ok);
-	if (ok && !name.isEmpty()) {
-		document_.setKey(path_, name);
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+void CKvCard::Rename()
+{
+	const CNode *pNode = m_Document.Node( m_Path );
+	bool bOk = false;
+	const QString szName = QInputDialog::getText( this, tr( "Rename" ), tr( "Name:" ), QLineEdit::Normal, Qs( pNode->GetKey() ), &bOk );
+	if ( bOk && !szName.isEmpty() )
+	{
+		m_Document.SetKey( m_Path, szName );
 	}
 }
 
-bool KvCard::eventFilter(QObject* watched, QEvent* event) {
-	if (watched == tab_ && event->type() == QEvent::MouseButtonDblClick) {
-		rename();
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+bool CKvCard::eventFilter( QObject *pWatched, QEvent *pEvent )
+{
+	if ( pWatched == m_pTab && pEvent->type() == QEvent::MouseButtonDblClick )
+	{
+		Rename();
 		return true;
 	}
-	return QWidget::eventFilter(watched, event);
+	return QWidget::eventFilter( pWatched, pEvent );
 }
 
-void KvCard::showIssues(const std::vector<Issue>& issues) {
-	QString tabProblems;
-	std::optional<Issue::Severity> tabSeverity;
-	for (const Issue& issue : issues) {
-		if (issue.path == path_) {
-			tabProblems += (tabProblems.isEmpty() ? QString{} : QStringLiteral("\n")) + QString::fromStdString(issue.message);
-			tabSeverity = std::max(tabSeverity.value_or(issue.severity), issue.severity);
+//-----------------------------------------------------------------------------
+// Purpose: Tints the rows and tabs that issues point at, here and in nested cards.
+//-----------------------------------------------------------------------------
+void CKvCard::ShowIssues( const std::vector<Issue_t> &issues )
+{
+	QString szTabProblems;
+	std::optional<Issue_t::Severity_t> tabSeverity;
+	for ( const Issue_t &issue : issues )
+	{
+		if ( issue.m_Path == m_Path )
+		{
+			szTabProblems += ( szTabProblems.isEmpty() ? QString{} : QStringLiteral( "\n" ) ) + QString::fromStdString( issue.m_szMessage );
+			tabSeverity = std::max( tabSeverity.value_or( issue.m_nSeverity ), issue.m_nSeverity );
 			continue;
 		}
-		if (issue.path.size() != path_.size() + 1 || !std::equal(path_.begin(), path_.end(), issue.path.begin())) {
+		if ( issue.m_Path.size() != m_Path.size() + 1 || !std::equal( m_Path.begin(), m_Path.end(), issue.m_Path.begin() ) )
+		{
 			continue;
 		}
-		const auto row = std::ranges::find(rowChild_, issue.path.back());
-		if (row == rowChild_.end()) {
+		const auto row = std::ranges::find( m_RowChild, issue.m_Path.back() );
+		if ( row == m_RowChild.end() )
+		{
 			continue;
 		}
-		const int r = static_cast<int>(row - rowChild_.begin());
-		for (const int column : {SoundValueDelegate::KeyColumn, SoundValueDelegate::ValueColumn}) {
-			QTableWidgetItem* item = table_->item(r, column);
-			item->setBackground(issueColor(issue.severity, palette().color(QPalette::Base)));
-			item->setToolTip(QString::fromStdString(issue.message));
+		const int r = static_cast<int>( row - m_RowChild.begin() );
+		for ( const int nColumn : { CSoundValueDelegate::COLUMN_KEY_COLUMN, CSoundValueDelegate::COLUMN_VALUE_COLUMN } )
+		{
+			QTableWidgetItem *pItem = m_pTable->item( r, nColumn );
+			pItem->setBackground( IssueColor( issue.m_nSeverity, palette().color( QPalette::Base ) ) );
+			pItem->setToolTip( QString::fromStdString( issue.m_szMessage ) );
 		}
 	}
-	if (tabSeverity) {
-		tab_->setToolTip(tabProblems);
-		tab_->setStyleSheet(QStringLiteral("background: %1;").arg(issueColor(*tabSeverity, palette().color(QPalette::Button)).name()));
+	if ( tabSeverity )
+	{
+		m_pTab->setToolTip( szTabProblems );
+		m_pTab->setStyleSheet( QStringLiteral( "background: %1;" ).arg( IssueColor( *tabSeverity, palette().color( QPalette::Button ) ).name() ) );
 	}
-	for (KvCard* child : children_) {
-		child->showIssues(issues);
+	for ( CKvCard *pChild : m_Children )
+	{
+		pChild->ShowIssues( issues );
 	}
 }
 
-bool KvCard::beginEdit(const NodePath& path) {
-	if (path.size() == path_.size() + 1 && std::equal(path_.begin(), path_.end(), path.begin())) {
-		const auto row = std::ranges::find(rowChild_, path.back());
-		if (row != rowChild_.end()) {
-			const int r = static_cast<int>(row - rowChild_.begin());
-			table_->setFocus();
-			table_->setCurrentCell(r, SoundValueDelegate::ValueColumn);
-			table_->editItem(table_->item(r, SoundValueDelegate::ValueColumn));
+//-----------------------------------------------------------------------------
+// Purpose: Opens the value editor of the pair at path, if it is in this card or a nested one.
+//-----------------------------------------------------------------------------
+bool CKvCard::BeginEdit( const NodePath_t &path )
+{
+	if ( path.size() == m_Path.size() + 1 && std::equal( m_Path.begin(), m_Path.end(), path.begin() ) )
+	{
+		const auto row = std::ranges::find( m_RowChild, path.back() );
+		if ( row != m_RowChild.end() )
+		{
+			const int r = static_cast<int>( row - m_RowChild.begin() );
+			m_pTable->setFocus();
+			m_pTable->setCurrentCell( r, CSoundValueDelegate::COLUMN_VALUE_COLUMN );
+			m_pTable->editItem( m_pTable->item( r, CSoundValueDelegate::COLUMN_VALUE_COLUMN ) );
 			return true;
 		}
 	}
-	return std::ranges::any_of(children_, [&path](KvCard* child) { return child->beginEdit(path); });
+	return std::ranges::any_of( m_Children, [ &path ]( CKvCard *pChild ) { return pChild->BeginEdit( path ); } );
 }
 
-bool KvCard::playable() const {
-	const Node* node = document_.node(path_);
-	if (!node) {
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+bool CKvCard::GetPlayable() const
+{
+	const CNode *pNode = m_Document.Node( m_Path );
+	if ( !pNode )
+	{
 		return false;
 	}
-	if (path_.size() == 1) {
+	if ( m_Path.size() == 1 )
+	{
 		return true;
 	}
-	const std::string key = xv::sound::toLower(node->key());
-	if (key == "rndwave") {
+	const std::string szKey = xv::sound::ToLower( pNode->GetKey() );
+	if ( szKey == "rndwave" )
+	{
 		return true;
 	}
-	return document_.kind() == xv::sound::FileKind::Soundscape && (key == "playlooping" || key == "playrandom" || key == "playsoundscape");
+	return m_Document.GetKind() == xv::sound::FileKind_t::FILE_KIND_SOUNDSCAPE && ( szKey == "playlooping" || szKey == "playrandom" || szKey == "playsoundscape" );
 }
 
-void KvCard::play() {
-	const Node* node = document_.node(path_);
-	if (!player_ || !node) {
+//-----------------------------------------------------------------------------
+// Purpose: Plays this block with its settings; a soundscape entry plays as a whole soundscape.
+//-----------------------------------------------------------------------------
+void CKvCard::Play()
+{
+	const CNode *pNode = m_Document.Node( m_Path );
+	if ( !m_pPlayer || !pNode )
+	{
 		return;
 	}
-	const auto lookup = [this](std::string_view name) { return index_.findSoundscape(name, &document_); };
-	const bool soundscape = document_.kind() == xv::sound::FileKind::Soundscape;
-	if (soundscape && path_.size() == 1) {
-		player_->playSoundscape(xv::sound::planSoundscape(*node, lookup), qs(node->key()), document_.localRoot());
+	const auto lookup = [ this ]( std::string_view szName ) { return m_Index.FindSoundscape( szName, &m_Document ); };
+	const bool bSoundscape = m_Document.GetKind() == xv::sound::FileKind_t::FILE_KIND_SOUNDSCAPE;
+	if ( bSoundscape && m_Path.size() == 1 )
+	{
+		m_pPlayer->PlaySoundscape( xv::sound::PlanSoundscape( *pNode, lookup ), Qs( pNode->GetKey() ), m_Document.GetLocalRoot() );
 		return;
 	}
-	if (soundscape && xv::kv1::equalsIgnoreCase(node->key(), "playsoundscape")) {
-		const Node* name = node->find("name");
-		const Node* target = name ? lookup(name->value()) : nullptr;
-		if (!target) {
-			emit player_->failed(tr("No soundscape named “%1”").arg(name ? qs(name->value()) : QString{}));
+	if ( bSoundscape && xv::kv1::EqualsIgnoreCase( pNode->GetKey(), "playsoundscape" ) )
+	{
+		const CNode *pName = pNode->Find( "name" );
+		const CNode *pTarget = pName ? lookup( pName->GetValue() ) : nullptr;
+		if ( !pTarget )
+		{
+			emit m_pPlayer->Failed( tr( "No soundscape named “%1”" ).arg( pName ? Qs( pName->GetValue() ) : QString{} ) );
 			return;
 		}
-		player_->playSoundscape(xv::sound::planSoundscape(*target, lookup), qs(target->key()), document_.localRoot());
+		m_pPlayer->PlaySoundscape( xv::sound::PlanSoundscape( *pTarget, lookup ), Qs( pTarget->GetKey() ), m_Document.GetLocalRoot() );
 		return;
 	}
 
-	static std::mt19937 random{std::random_device{}()};
-	NodePath parentPath = path_;
+	static std::mt19937 random{ std::random_device{}() };
+	NodePath_t parentPath = m_Path;
 	parentPath.pop_back();
-	const Node* parent = path_.size() > 1 ? document_.node(parentPath) : nullptr;
-	if (const auto request = xv::sound::playBlock(document_.kind(), *node, parent, random)) {
-		player_->play(*request, document_.localRoot());
-	} else {
-		emit player_->failed(tr("“%1” has no sound to play").arg(qs(node->key())));
+	const CNode *pParent = m_Path.size() > 1 ? m_Document.Node( parentPath ) : nullptr;
+	if ( const auto request = xv::sound::PlayBlock( m_Document.GetKind(), *pNode, pParent, random ) )
+	{
+		m_pPlayer->Play( *request, m_Document.GetLocalRoot() );
+	}
+	else
+	{
+		emit m_pPlayer->Failed( tr( "“%1” has no sound to play" ).arg( Qs( pNode->GetKey() ) ) );
 	}
 }
 
-KvCard* KvCard::cardFor(const NodePath& path) {
-	if (path == path_) {
+//-----------------------------------------------------------------------------
+// Purpose: The card for the block at path, or nullptr.
+//-----------------------------------------------------------------------------
+CKvCard *CKvCard::CardFor( const NodePath_t &path )
+{
+	if ( path == m_Path )
+	{
 		return this;
 	}
-	for (KvCard* child : children_) {
-		if (KvCard* card = child->cardFor(path)) {
-			return card;
+	for ( CKvCard *pChild : m_Children )
+	{
+		if ( CKvCard *pCard = pChild->CardFor( path ) )
+		{
+			return pCard;
 		}
 	}
 	return nullptr;
 }
 
-QString defaultValue(const SoundDocument& document, std::string_view key) {
-	using xv::kv1::equalsIgnoreCase;
-	const bool script = document.kind() == xv::sound::FileKind::Soundscript;
-	if (equalsIgnoreCase(key, "channel")) return QStringLiteral("CHAN_AUTO");
-	if (equalsIgnoreCase(key, "volume")) return script ? QStringLiteral("VOL_NORM") : QStringLiteral("1");
-	if (equalsIgnoreCase(key, "pitch")) return script ? QStringLiteral("PITCH_NORM") : QStringLiteral("100");
-	if (equalsIgnoreCase(key, "soundlevel")) return QStringLiteral("SNDLVL_NORM");
-	if (equalsIgnoreCase(key, "attenuation") || equalsIgnoreCase(key, "compatibilityattenuation")) return QStringLiteral("ATTN_NORM");
-	if (equalsIgnoreCase(key, "dsp") || equalsIgnoreCase(key, "dsp_volume")) return QStringLiteral("1");
-	if (equalsIgnoreCase(key, "time")) return QStringLiteral("10,20");
-	if (equalsIgnoreCase(key, "origin")) return QStringLiteral("0 0 0");
-	if (equalsIgnoreCase(key, "delay_msec")) return QStringLiteral("0");
-	if (equalsIgnoreCase(key, "position") || equalsIgnoreCase(key, "positionoverride") || equalsIgnoreCase(key, "ambientpositionoverride")) return QStringLiteral("0");
-	if (equalsIgnoreCase(key, "play_to_owner_only") || equalsIgnoreCase(key, "suppress_on_restore")) return QStringLiteral("1");
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+QString DefaultValue( const CSoundDocument &document, std::string_view szKey )
+{
+	using xv::kv1::EqualsIgnoreCase;
+	const bool bScript = document.GetKind() == xv::sound::FileKind_t::FILE_KIND_SOUNDSCRIPT;
+	if ( EqualsIgnoreCase( szKey, "channel" ) )
+		return QStringLiteral( "CHAN_AUTO" );
+	if ( EqualsIgnoreCase( szKey, "volume" ) )
+		return bScript ? QStringLiteral( "VOL_NORM" ) : QStringLiteral( "1" );
+	if ( EqualsIgnoreCase( szKey, "pitch" ) )
+		return bScript ? QStringLiteral( "PITCH_NORM" ) : QStringLiteral( "100" );
+	if ( EqualsIgnoreCase( szKey, "soundlevel" ) )
+		return QStringLiteral( "SNDLVL_NORM" );
+	if ( EqualsIgnoreCase( szKey, "attenuation" ) || EqualsIgnoreCase( szKey, "compatibilityattenuation" ) )
+		return QStringLiteral( "ATTN_NORM" );
+	if ( EqualsIgnoreCase( szKey, "dsp" ) || EqualsIgnoreCase( szKey, "dsp_volume" ) )
+		return QStringLiteral( "1" );
+	if ( EqualsIgnoreCase( szKey, "time" ) )
+		return QStringLiteral( "10,20" );
+	if ( EqualsIgnoreCase( szKey, "origin" ) )
+		return QStringLiteral( "0 0 0" );
+	if ( EqualsIgnoreCase( szKey, "delay_msec" ) )
+		return QStringLiteral( "0" );
+	if ( EqualsIgnoreCase( szKey, "position" ) || EqualsIgnoreCase( szKey, "positionoverride" ) || EqualsIgnoreCase( szKey, "ambientpositionoverride" ) )
+		return QStringLiteral( "0" );
+	if ( EqualsIgnoreCase( szKey, "play_to_owner_only" ) || EqualsIgnoreCase( szKey, "suppress_on_restore" ) )
+		return QStringLiteral( "1" );
 	return {};
 }
 
-Node blockTemplate(const SoundDocument& document, std::string_view key) {
-	using xv::kv1::equalsIgnoreCase;
-	Node block = Node::makeBlock(key);
-	const auto add = [&](std::string_view name) {
-		block.appendChild(Node::makePair(name, defaultValue(document, name).toStdString()));
+//-----------------------------------------------------------------------------
+// Purpose: Starting content for new blocks and entries, so they are valid as soon as they are
+//          added.
+//-----------------------------------------------------------------------------
+CNode BlockTemplate( const CSoundDocument &document, std::string_view szKey )
+{
+	using xv::kv1::EqualsIgnoreCase;
+	CNode block = CNode::MakeBlock( szKey );
+	const auto add = [ & ]( std::string_view szName ) {
+		block.AppendChild( CNode::MakePair( szName, DefaultValue( document, szName ).toStdString() ) );
 	};
-	if (equalsIgnoreCase(key, "playlooping")) {
-		add("volume");
-		add("pitch");
-		add("wave");
-	} else if (equalsIgnoreCase(key, "playrandom")) {
-		add("time");
-		add("volume");
-		add("pitch");
-		block.appendChild(blockTemplate(document, "rndwave"));
-	} else if (equalsIgnoreCase(key, "playsoundscape")) {
-		add("name");
-		add("volume");
-	} else if (equalsIgnoreCase(key, "rndwave")) {
-		add("wave");
+	if ( EqualsIgnoreCase( szKey, "playlooping" ) )
+	{
+		add( "volume" );
+		add( "pitch" );
+		add( "wave" );
+	}
+	else if ( EqualsIgnoreCase( szKey, "playrandom" ) )
+	{
+		add( "time" );
+		add( "volume" );
+		add( "pitch" );
+		block.AppendChild( BlockTemplate( document, "rndwave" ) );
+	}
+	else if ( EqualsIgnoreCase( szKey, "playsoundscape" ) )
+	{
+		add( "name" );
+		add( "volume" );
+	}
+	else if ( EqualsIgnoreCase( szKey, "rndwave" ) )
+	{
+		add( "wave" );
 	}
 	return block;
 }
 
-Node entryTemplate(const SoundDocument& document, std::string_view name) {
-	Node entry = Node::makeBlock(name);
-	const auto add = [&](std::string_view key) {
-		entry.appendChild(Node::makePair(key, defaultValue(document, key).toStdString()));
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+CNode EntryTemplate( const CSoundDocument &document, std::string_view szName )
+{
+	CNode entry = CNode::MakeBlock( szName );
+	const auto add = [ & ]( std::string_view szKey ) {
+		entry.AppendChild( CNode::MakePair( szKey, DefaultValue( document, szKey ).toStdString() ) );
 	};
-	if (document.kind() == xv::sound::FileKind::Soundscape) {
-		add("dsp");
-	} else {
-		add("channel");
-		add("volume");
-		add("pitch");
-		add("soundlevel");
-		add("wave");
+	if ( document.GetKind() == xv::sound::FileKind_t::FILE_KIND_SOUNDSCAPE )
+	{
+		add( "dsp" );
+	}
+	else
+	{
+		add( "channel" );
+		add( "volume" );
+		add( "pitch" );
+		add( "soundlevel" );
+		add( "wave" );
 	}
 	return entry;
 }

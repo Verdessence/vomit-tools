@@ -1,4 +1,9 @@
+//===========================================================================//
 // SPDX-License-Identifier: GPL-3.0-or-later
+//
+// Purpose: KeyValues1 text, with parse diagnostics and a lossless round-trip check.
+//
+//===========================================================================//
 #pragma once
 
 #include <cstddef>
@@ -7,50 +12,54 @@
 #include <QString>
 #include <QWidget>
 
-class SoundPlayer;
+class CSoundPlayer;
 
 // Read-only inspectors for files picked in the VFS browser. Editors replace these per format later.
 
-// KeyValues1 text, with parse diagnostics and a lossless round-trip check.
-class KeyValuesView : public QWidget {
+class CKeyValuesView : public QWidget
+{
 	Q_OBJECT
 
 public:
-	KeyValuesView(const QString& path, std::span<const std::byte> bytes, QWidget* parent = nullptr);
+	CKeyValuesView( const QString &szPath, std::span<const std::byte> bytes, QWidget *pParent = nullptr );
 };
 
 // DMX / PCF element graph, plus its keyvalues2 text form.
-class DmxView : public QWidget {
+class CDmxView : public QWidget
+{
 	Q_OBJECT
 
 public:
-	DmxView(const QString& path, std::span<const std::byte> bytes, QWidget* parent = nullptr);
+	CDmxView( const QString &szPath, std::span<const std::byte> bytes, QWidget *pParent = nullptr );
 };
 
 // WAV/MP3: format, a waveform with the loop point, and playback when a player is given.
-class AudioView : public QWidget {
+class CAudioView : public QWidget
+{
 	Q_OBJECT
 
 public:
-	AudioView(const QString& path, const QString& source, std::span<const std::byte> bytes, SoundPlayer* player, QWidget* parent = nullptr);
+	CAudioView( const QString &szPath, const QString &szSource, std::span<const std::byte> bytes, CSoundPlayer *pPlayer, QWidget *pParent = nullptr );
 };
 
 // VTFs and image files: the picture, fitted to the view over a checkerboard where it's
 // transparent, and its size and format.
-class ImageView : public QWidget {
+class CImageView : public QWidget
+{
 	Q_OBJECT
 
 public:
-	ImageView(const QString& path, const QString& source, std::span<const std::byte> bytes, QWidget* parent = nullptr);
+	CImageView( const QString &szPath, const QString &szSource, std::span<const std::byte> bytes, QWidget *pParent = nullptr );
 };
 
 // Anything without a dedicated view.
-class FileInfoView : public QWidget {
+class CFileInfoView : public QWidget
+{
 	Q_OBJECT
 
 public:
-	FileInfoView(const QString& path, const QString& source, std::size_t size, QWidget* parent = nullptr);
+	CFileInfoView( const QString &szPath, const QString &szSource, std::size_t nSize, QWidget *pParent = nullptr );
 };
 
 // Picks the view for a path, by extension. player may be null.
-[[nodiscard]] QWidget* createFileView(const QString& path, const QString& source, std::span<const std::byte> bytes, SoundPlayer* player = nullptr, QWidget* parent = nullptr);
+[[nodiscard]] QWidget *CreateFileView( const QString &szPath, const QString &szSource, std::span<const std::byte> bytes, CSoundPlayer *pPlayer = nullptr, QWidget *pParent = nullptr );

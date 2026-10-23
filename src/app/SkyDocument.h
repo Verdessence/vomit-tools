@@ -1,4 +1,10 @@
+//===========================================================================//
 // SPDX-License-Identifier: GPL-3.0-or-later
+//
+// Purpose: A sky being made: an image for each face (turned or mirrored as needed), the sky's name
+//          and how it's written. Face changes go through the undo stack.
+//
+//===========================================================================//
 #pragma once
 
 #include <array>
@@ -15,84 +21,84 @@
 
 class QUndoStack;
 
-// A sky being made: an image for each face (turned or mirrored as needed), the sky's name and
-// how it's written. Face changes go through the undo stack.
-class SkyDocument : public QObject {
+class CSkyDocument : public QObject
+{
 	Q_OBJECT
 
 public:
-	struct Slot {
-		std::shared_ptr<const xv::texture::Image> image; // as loaded; null for an empty face
-		QString source;                                  // the file or game path it came from
-		xv::texture::Orientation orientation;            // applied to image
-		xv::sky::UvTransform transform;                  // from a stock material ($basetexturetransform)
+	struct Slot_t
+	{
+		std::shared_ptr<const xv::texture::CImage> m_pImage; // as loaded; null for an empty face
+		QString m_szSource;                                  // the file or game path it came from
+		xv::texture::COrientation m_Orientation;            // applied to image
+		xv::sky::CUvTransform m_Transform;                  // from a stock material ($basetexturetransform)
 	};
 
-	explicit SkyDocument(QObject* parent = nullptr);
-	~SkyDocument() override;
+	explicit CSkyDocument( QObject *pParent = nullptr );
+	~CSkyDocument() override;
 
-	[[nodiscard]] QString name() const { return name_; }
-	void setName(const QString& name);
+	[[nodiscard]] QString GetName() const { return m_szName; }
+	void SetName( const QString &szName );
 
-	[[nodiscard]] const Slot& slot(xv::sky::Face face) const { return slots_[xv::sky::indexOf(face)]; }
+	[[nodiscard]] const Slot_t &Slot( xv::sky::Face_t nFace ) const { return m_Slots[ xv::sky::IndexOf( nFace ) ]; }
 	// Undoable. Faces left as nullopt are unchanged; all the changes are one undo step.
-	void setSlots(const std::array<std::optional<Slot>, 6>& changes, const QString& text);
-	void setSlot(xv::sky::Face face, Slot slot, const QString& text);
-	void clearFace(xv::sky::Face face);
+	void SetSlots( const std::array<std::optional<Slot_t>, 6> &changes, const QString &szText );
+	void SetSlot( xv::sky::Face_t nFace, Slot_t slot, const QString &szText );
+	void ClearFace( xv::sky::Face_t nFace );
 	// Turns and/or mirrors a face further (undoable).
-	void orient(xv::sky::Face face, xv::texture::Orientation change, const QString& text);
+	void Orient( xv::sky::Face_t nFace, xv::texture::COrientation change, const QString &szText );
 
 	// The faces as they will be written, for previews, checks and export.
-	[[nodiscard]] const xv::sky::Cube& cube() const;
-	[[nodiscard]] bool complete() const;
+	[[nodiscard]] const xv::sky::CCube &GetCube() const;
+	[[nodiscard]] bool GetComplete() const;
 
 	// How it is written: VTF format, face size (0 keeps the images' own) and mipmaps.
-	[[nodiscard]] xv::texture::VtfFormat format() const { return format_; }
-	[[nodiscard]] int size() const { return size_; }
-	[[nodiscard]] bool mipmaps() const { return mipmaps_; }
-	void setFormat(xv::texture::VtfFormat format);
-	void setSize(int size);
-	void setMipmaps(bool mipmaps);
-	[[nodiscard]] xv::sky::ExportOptions exportOptions() const;
+	[[nodiscard]] xv::texture::VtfFormat_t GetFormat() const { return m_nFormat; }
+	[[nodiscard]] int size() const { return m_nSize; }
+	[[nodiscard]] bool GetMipmaps() const { return m_bMipmaps; }
+	void SetFormat( xv::texture::VtfFormat_t nFormat );
+	void SetSize( int nSize );
+	void SetMipmaps( bool bMipmaps );
+	[[nodiscard]] xv::sky::ExportOptions_t GetExportOptions() const;
 
 	// Where Export writes when the sky came from a folder on disk: the folder holding its
 	// materials/skybox (empty: the game's write folder). The last folder exported to, so replacing
 	// files there again needs no confirmation.
-	[[nodiscard]] const std::filesystem::path& exportFolder() const { return exportFolder_; }
-	void setExportFolder(std::filesystem::path folder) { exportFolder_ = std::move(folder); }
-	[[nodiscard]] const std::filesystem::path& lastExportFolder() const { return lastExportFolder_; }
-	void setLastExportFolder(std::filesystem::path folder) { lastExportFolder_ = std::move(folder); }
+	[[nodiscard]] const std::filesystem::path &GetExportFolder() const { return m_ExportFolder; }
+	void SetExportFolder( std::filesystem::path folder ) { m_ExportFolder = std::move( folder ); }
+	[[nodiscard]] const std::filesystem::path &GetLastExportFolder() const { return m_LastExportFolder; }
+	void SetLastExportFolder( std::filesystem::path folder ) { m_LastExportFolder = std::move( folder ); }
 	// What the sky was opened from (a folder and base name, or a game sky), to find it among open tabs.
-	[[nodiscard]] QString origin() const { return origin_; }
-	void setOrigin(const QString& origin) { origin_ = origin; }
+	[[nodiscard]] QString GetOrigin() const { return m_szOrigin; }
+	void SetOrigin( const QString &szOrigin ) { m_szOrigin = szOrigin; }
 
-	[[nodiscard]] QUndoStack* undoStack() const { return undoStack_; }
+	[[nodiscard]] QUndoStack *GetUndoStack() const { return m_pUndoStack; }
 	// Changed since the last export (or since it was opened).
-	[[nodiscard]] bool isModified() const;
-	void markExported();
+	[[nodiscard]] bool IsModified() const;
+	void MarkExported();
 
 signals:
-	void facesChanged();
-	void nameChanged();
-	void optionsChanged(); // format, size or mipmaps
-	void modifiedChanged(bool modified);
+	void FacesChanged();
+	void NameChanged();
+	void OptionsChanged(); // format, size or mipmaps
+	void ModifiedChanged( bool bModified );
 
 private:
-	friend class SkySlotsCommand;
-	void applySlots(const std::array<Slot, 6>& all);
-	void settingChanged();
-	void updateModified();
+	friend class CSkySlotsCommand;
+	void ApplySlots( const std::array<Slot_t, 6> &all );
+	void SettingChanged();
+	void UpdateModified();
 
-	QString name_;
-	std::array<Slot, 6> slots_;
-	mutable std::optional<xv::sky::Cube> cube_;
-	xv::texture::VtfFormat format_ = xv::texture::VtfFormat::BGR888;
-	int size_ = 0;
-	bool mipmaps_ = false;
-	std::filesystem::path exportFolder_;
-	std::filesystem::path lastExportFolder_;
-	QString origin_;
-	QUndoStack* undoStack_ = nullptr;
-	bool settingsChanged_ = false; // name or options; they aren't undoable
-	bool modified_ = false;        // as last signalled
+	QString m_szName;
+	std::array<Slot_t, 6> m_Slots;
+	mutable std::optional<xv::sky::CCube> m_Cube;
+	xv::texture::VtfFormat_t m_nFormat = xv::texture::VtfFormat_t::BGR888;
+	int m_nSize = 0;
+	bool m_bMipmaps = false;
+	std::filesystem::path m_ExportFolder;
+	std::filesystem::path m_LastExportFolder;
+	QString m_szOrigin;
+	QUndoStack *m_pUndoStack = nullptr;
+	bool m_bSettingsChanged = false; // name or options; they aren't undoable
+	bool m_bModified = false;        // as last signalled
 };

@@ -1,4 +1,10 @@
+//===========================================================================//
 // SPDX-License-Identifier: GPL-3.0-or-later
+//
+// Purpose: Reads the RIFF header chunks only. Input is untrusted; returns nullopt for anything
+//          malformed.
+//
+//===========================================================================//
 #pragma once
 
 #include <cstddef>
@@ -6,25 +12,26 @@
 #include <optional>
 #include <span>
 
-namespace xv::sound {
+namespace xv::sound
+{
 
-struct WavInfo {
-	std::uint16_t format = 0; // 1 PCM, 2 Microsoft ADPCM, 0x11 IMA ADPCM, 0x55 MP3, ...
-	std::uint16_t channels = 0;
-	std::uint32_t sampleRate = 0;
-	std::uint32_t bytesPerSecond = 0;
-	std::uint16_t bitsPerSample = 0;
-	std::uint32_t dataBytes = 0;
-	std::optional<std::uint32_t> sampleCount; // from the "fact" chunk, for compressed formats
+struct CWavInfo
+{
+	std::uint16_t m_nFormat = 0; // 1 PCM, 2 Microsoft ADPCM, 0x11 IMA ADPCM, 0x55 MP3, ...
+	std::uint16_t m_nChannels = 0;
+	std::uint32_t m_nSampleRate = 0;
+	std::uint32_t m_nBytesPerSecond = 0;
+	std::uint16_t m_nBitsPerSample = 0;
+	std::uint32_t m_nDataBytes = 0;
+	std::optional<std::uint32_t> m_SampleCount; // from the "fact" chunk, for compressed formats
 
 	// The engine loops a sound from its first cue point (or sampler loop) to the end.
 	// Without one, playlooping plays it once.
-	std::optional<std::uint32_t> loopStart;
+	std::optional<std::uint32_t> m_LoopStart;
 
-	[[nodiscard]] double seconds() const;
+	[[nodiscard]] double GetSeconds() const;
 };
 
-// Reads the RIFF header chunks only. Input is untrusted; returns nullopt for anything malformed.
-[[nodiscard]] std::optional<WavInfo> readWavInfo(std::span<const std::byte> data);
+[[nodiscard]] std::optional<CWavInfo> ReadWavInfo( std::span<const std::byte> data );
 
 } // namespace xv::sound

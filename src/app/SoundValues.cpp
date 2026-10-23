@@ -1,4 +1,9 @@
+//===========================================================================//
 // SPDX-License-Identifier: GPL-3.0-or-later
+//
+// Purpose: See SoundValues.h.
+//
+//===========================================================================//
 #include "SoundValues.h"
 
 #include <algorithm>
@@ -19,288 +24,397 @@
 
 using namespace xv::sound;
 
-namespace {
+namespace
+{
 
-QString qs(std::string_view text) {
-	return QString::fromUtf8(text.data(), static_cast<qsizetype>(text.size()));
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+QString Qs( std::string_view szText )
+{
+	return QString::fromUtf8( szText.data(), static_cast<qsizetype>( szText.size() ) );
 }
 
-QString formatNumber(double value) {
-	return QString::number(value, 'g', 4);
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+QString FormatNumber( double flValue )
+{
+	return QString::number( flValue, 'g', 4 );
 }
 
-std::optional<double> toNumber(const QString& text) {
-	bool ok = false;
-	const double value = text.trimmed().toDouble(&ok);
-	return ok ? std::optional{value} : std::nullopt;
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+std::optional<double> ToNumber( const QString &szText )
+{
+	bool bOk = false;
+	const double flValue = szText.trimmed().toDouble( &bOk );
+	return bOk ? std::optional{ flValue } : std::nullopt;
 }
 
-QStringList rangeParts(const QString& text) {
-	QStringList parts = text.split(u',');
-	for (QString& part : parts) {
-		part = part.trimmed();
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+QStringList RangeParts( const QString &szText )
+{
+	QStringList parts = szText.split( u',' );
+	for ( QString &szPart : parts )
+	{
+		szPart = szPart.trimmed();
 	}
 	return parts;
 }
 
-struct Choice {
-	QString value;
-	QString meaning;
+struct Choice_t
+{
+	QString m_szValue;
+	QString m_szMeaning;
 };
 
-std::vector<Choice> constantChoices(std::span<const Constant> table) {
-	std::vector<Choice> choices;
-	for (const Constant& constant : table) {
-		choices.push_back({qs(constant.name), qs(constant.note)});
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+std::vector<Choice_t> ConstantChoices( std::span<const Constant_t> table )
+{
+	std::vector<Choice_t> choices;
+	for ( const Constant_t &constant : table )
+	{
+		choices.push_back( { Qs( constant.m_szName ), Qs( constant.m_szNote ) } );
 	}
 	return choices;
 }
 
-std::vector<Choice> choicesFor(ValueKind kind) {
-	switch (kind) {
-		case ValueKind::Channel:
-			return constantChoices(channels());
-		case ValueKind::Volume:
-			return constantChoices(volumes());
-		case ValueKind::Pitch:
-			return constantChoices(pitches());
-		case ValueKind::Attenuation:
-			return constantChoices(attenuations());
-		case ValueKind::SoundLevel: {
-			std::vector<Choice> choices;
-			for (const Constant& level : soundLevels()) {
-				const QString note = level.note.empty() ? QString{} : QStringLiteral(" · %1").arg(qs(level.note));
-				choices.push_back({qs(level.name), QStringLiteral("%1 dB%2").arg(level.value).arg(note)});
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+std::vector<Choice_t> ChoicesFor( ValueKind_t nKind )
+{
+	switch ( nKind )
+	{
+		case ValueKind_t::VALUE_KIND_CHANNEL:
+			return ConstantChoices( Channels() );
+		case ValueKind_t::VALUE_KIND_VOLUME:
+			return ConstantChoices( Volumes() );
+		case ValueKind_t::VALUE_KIND_PITCH:
+			return ConstantChoices( Pitches() );
+		case ValueKind_t::VALUE_KIND_ATTENUATION:
+			return ConstantChoices( Attenuations() );
+		case ValueKind_t::VALUE_KIND_SOUND_LEVEL:
+		{
+			std::vector<Choice_t> choices;
+			for ( const Constant_t &level : SoundLevels() )
+			{
+				const QString szNote = level.m_szNote.empty() ? QString{} : QStringLiteral( " · %1" ).arg( Qs( level.m_szNote ) );
+				choices.push_back( { Qs( level.m_szName ), QStringLiteral( "%1 dB%2" ).arg( level.m_flValue ).arg( szNote ) } );
 			}
 			return choices;
 		}
-		case ValueKind::DspPreset: {
-			std::vector<Choice> choices;
-			for (const Constant& preset : dspPresets()) {
-				choices.push_back({QString::number(static_cast<int>(preset.value)), qs(preset.name)});
+		case ValueKind_t::VALUE_KIND_DSP_PRESET:
+		{
+			std::vector<Choice_t> choices;
+			for ( const Constant_t &preset : DspPresets() )
+			{
+				choices.push_back( { QString::number( static_cast<int>( preset.m_flValue ) ), Qs( preset.m_szName ) } );
 			}
 			return choices;
 		}
-		case ValueKind::Position:
-		case ValueKind::RandomPosition: {
-			std::vector<Choice> choices;
-			for (int i = 0; i < 8; i++) {
-				choices.push_back({QString::number(i), QObject::tr("env_soundscape's position%1 target").arg(i)});
+		case ValueKind_t::VALUE_KIND_POSITION:
+		case ValueKind_t::VALUE_KIND_RANDOM_POSITION:
+		{
+			std::vector<Choice_t> choices;
+			for ( int i = 0; i < 8; i++ )
+			{
+				choices.push_back( { QString::number( i ), QObject::tr( "env_soundscape's position%1 target" ).arg( i ) } );
 			}
-			if (kind == ValueKind::RandomPosition) {
-				choices.push_back({QStringLiteral("random"), QObject::tr("Random spots around the listener")});
+			if ( nKind == ValueKind_t::VALUE_KIND_RANDOM_POSITION )
+			{
+				choices.push_back( { QStringLiteral( "random" ), QObject::tr( "Random spots around the listener" ) } );
 			}
 			return choices;
 		}
-		case ValueKind::Bool:
-			return {{QStringLiteral("0"), QObject::tr("No")}, {QStringLiteral("1"), QObject::tr("Yes")}};
+		case ValueKind_t::VALUE_KIND_BOOL:
+			return { { QStringLiteral( "0" ), QObject::tr( "No" ) }, { QStringLiteral( "1" ), QObject::tr( "Yes" ) } };
 		default:
 			return {};
 	}
 }
 
-// An editable dropdown whose popup lists each choice next to what it means.
-QComboBox* makeChoiceCombo(const std::vector<Choice>& choices, QWidget* parent) {
-	auto* combo = new QComboBox(parent);
-	combo->setEditable(true);
-	combo->setInsertPolicy(QComboBox::NoInsert);
+//-----------------------------------------------------------------------------
+// Purpose: An editable dropdown whose popup lists each choice next to what it means.
+//-----------------------------------------------------------------------------
+QComboBox *MakeChoiceCombo( const std::vector<Choice_t> &choices, QWidget *pParent )
+{
+	auto *pCombo = new QComboBox( pParent );
+	pCombo->setEditable( true );
+	pCombo->setInsertPolicy( QComboBox::NoInsert );
 
-	auto* model = new QStandardItemModel(0, 2, combo);
-	for (const Choice& choice : choices) {
-		auto* meaning = new QStandardItem(choice.meaning);
-		meaning->setEnabled(false);
-		model->appendRow({new QStandardItem(choice.value), meaning});
+	auto *pModel = new QStandardItemModel( 0, 2, pCombo );
+	for ( const Choice_t &choice : choices )
+	{
+		auto *pMeaning = new QStandardItem( choice.m_szMeaning );
+		pMeaning->setEnabled( false );
+		pModel->appendRow( { new QStandardItem( choice.m_szValue ), pMeaning } );
 	}
-	auto* view = new QTreeView;
-	view->setHeaderHidden(true);
-	view->setRootIsDecorated(false);
-	view->setUniformRowHeights(true);
-	view->setAllColumnsShowFocus(true);
-	combo->setModel(model);
-	combo->setView(view);
-	combo->setModelColumn(0);
-	view->header()->setSectionResizeMode(QHeaderView::ResizeToContents);
-	view->setMinimumWidth(460);
+	auto *pView = new QTreeView;
+	pView->setHeaderHidden( true );
+	pView->setRootIsDecorated( false );
+	pView->setUniformRowHeights( true );
+	pView->setAllColumnsShowFocus( true );
+	pCombo->setModel( pModel );
+	pCombo->setView( pView );
+	pCombo->setModelColumn( 0 );
+	pView->header()->setSectionResizeMode( QHeaderView::ResizeToContents );
+	pView->setMinimumWidth( 460 );
 
-	combo->completer()->setCompletionMode(QCompleter::PopupCompletion);
-	combo->completer()->setFilterMode(Qt::MatchContains);
-	combo->completer()->setCaseSensitivity(Qt::CaseInsensitive);
-	return combo;
+	pCombo->completer()->setCompletionMode( QCompleter::PopupCompletion );
+	pCombo->completer()->setFilterMode( Qt::MatchContains );
+	pCombo->completer()->setCaseSensitivity( Qt::CaseInsensitive );
+	return pCombo;
 }
 
-QString betweenText(const QString& low, const QString& high) {
-	return QObject::tr("random from %1 to %2").arg(low, high);
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+QString BetweenText( const QString &szLow, const QString &szHigh )
+{
+	return QObject::tr( "random from %1 to %2" ).arg( szLow, szHigh );
 }
 
 } // namespace
 
-QString describeValue(ValueKind kind, const QString& value) {
-	const QString text = value.trimmed();
-	const QStringList range = rangeParts(text);
-	const bool isRange = range.size() == 2;
-	const std::string utf8 = text.toStdString();
+//-----------------------------------------------------------------------------
+// Purpose: What a value means, for the grey column next to it: "140 dB · attenuation 0.22",
+//          "Tunnel Medium", ...
+//-----------------------------------------------------------------------------
+QString DescribeValue( ValueKind_t nKind, const QString &szValue )
+{
+	const QString szText = szValue.trimmed();
+	const QStringList range = RangeParts( szText );
+	const bool bIsRange = range.size() == 2;
+	const std::string szUtf8 = szText.toStdString();
 
-	switch (kind) {
-		case ValueKind::Channel: {
-			if (const Constant* channel = findConstant(channels(), utf8)) {
-				return qs(channel->note);
+	switch ( nKind )
+	{
+		case ValueKind_t::VALUE_KIND_CHANNEL:
+		{
+			if ( const Constant_t *pChannel = FindConstant( Channels(), szUtf8 ) )
+			{
+				return Qs( pChannel->m_szNote );
 			}
-			if (const auto number = toNumber(text)) {
-				for (const Constant& channel : channels()) {
-					if (channel.value == *number) {
-						return qs(channel.name);
+			if ( const auto number = ToNumber( szText ) )
+			{
+				for ( const Constant_t &channel : Channels() )
+				{
+					if ( channel.m_flValue == *number )
+					{
+						return Qs( channel.m_szName );
 					}
 				}
 			}
 			return {};
 		}
-		case ValueKind::Volume:
-		case ValueKind::Pitch: {
-			const auto table = kind == ValueKind::Volume ? volumes() : pitches();
-			const auto resolve = [table](const QString& part) {
-				const Constant* constant = findConstant(table, part.toStdString());
-				return constant ? formatNumber(constant->value) : part;
+		case ValueKind_t::VALUE_KIND_VOLUME:
+		case ValueKind_t::VALUE_KIND_PITCH:
+		{
+			const auto table = nKind == ValueKind_t::VALUE_KIND_VOLUME ? Volumes() : Pitches();
+			const auto resolve = [ table ]( const QString &szPart ) {
+				const Constant_t *pConstant = FindConstant( table, szPart.toStdString() );
+				return pConstant ? FormatNumber( pConstant->m_flValue ) : szPart;
 			};
-			if (isRange) {
-				return betweenText(resolve(range[0]), resolve(range[1]));
+			if ( bIsRange )
+			{
+				return BetweenText( resolve( range[ 0 ] ), resolve( range[ 1 ] ) );
 			}
-			if (const Constant* constant = findConstant(table, utf8)) {
-				return formatNumber(constant->value);
+			if ( const Constant_t *pConstant = FindConstant( table, szUtf8 ) )
+			{
+				return FormatNumber( pConstant->m_flValue );
 			}
 			return {};
 		}
-		case ValueKind::NumberRange:
-			return isRange ? betweenText(range[0], range[1]) : QString{};
-		case ValueKind::SoundLevel: {
-			const auto decibels = [](const QString& part) {
-				const auto level = parseSoundLevel(part.toStdString());
-				return level ? QObject::tr("%1 dB").arg(*level) : part;
+		case ValueKind_t::VALUE_KIND_NUMBER_RANGE:
+			return bIsRange ? BetweenText( range[ 0 ], range[ 1 ] ) : QString{};
+		case ValueKind_t::VALUE_KIND_SOUND_LEVEL:
+		{
+			const auto decibels = []( const QString &szPart ) {
+				const auto level = ParseSoundLevel( szPart.toStdString() );
+				return level ? QObject::tr( "%1 dB" ).arg( *level ) : szPart;
 			};
-			if (isRange) {
-				return betweenText(decibels(range[0]), decibels(range[1]));
+			if ( bIsRange )
+			{
+				return BetweenText( decibels( range[ 0 ] ), decibels( range[ 1 ] ) );
 			}
-			if (const auto level = parseSoundLevel(utf8)) {
-				if (*level == 0) {
-					return QObject::tr("no falloff, heard everywhere");
+			if ( const auto level = ParseSoundLevel( szUtf8 ) )
+			{
+				if ( *level == 0 )
+				{
+					return QObject::tr( "no falloff, heard everywhere" );
 				}
-				return QObject::tr("%1 dB · attenuation %2").arg(*level).arg(formatNumber(soundLevelToAttenuation(*level)));
+				return QObject::tr( "%1 dB · attenuation %2" ).arg( *level ).arg( FormatNumber( SoundLevelToAttenuation( *level ) ) );
 			}
 			return {};
 		}
-		case ValueKind::Attenuation: {
-			const Constant* constant = findConstant(attenuations(), utf8);
-			const auto attenuation = constant ? std::optional{constant->value} : toNumber(text);
-			if (!attenuation) {
+		case ValueKind_t::VALUE_KIND_ATTENUATION:
+		{
+			const Constant_t *pConstant = FindConstant( Attenuations(), szUtf8 );
+			const auto attenuation = pConstant ? std::optional{ pConstant->m_flValue } : ToNumber( szText );
+			if ( !attenuation )
+			{
 				return {};
 			}
-			if (*attenuation == 0) {
-				return QObject::tr("no falloff, heard everywhere");
+			if ( *attenuation == 0 )
+			{
+				return QObject::tr( "no falloff, heard everywhere" );
 			}
-			return QObject::tr("about %1 dB").arg(std::round(attenuationToSoundLevel(*attenuation)));
+			return QObject::tr( "about %1 dB" ).arg( std::round( AttenuationToSoundLevel( *attenuation ) ) );
 		}
-		case ValueKind::DspPreset: {
-			const auto number = toNumber(text);
-			if (!number) {
+		case ValueKind_t::VALUE_KIND_DSP_PRESET:
+		{
+			const auto number = ToNumber( szText );
+			if ( !number )
+			{
 				return {};
 			}
-			for (const Constant& preset : dspPresets()) {
-				if (preset.value == *number) {
-					return qs(preset.name);
+			for ( const Constant_t &preset : DspPresets() )
+			{
+				if ( preset.m_flValue == *number )
+				{
+					return Qs( preset.m_szName );
 				}
 			}
-			return QObject::tr("not a stock preset");
+			return QObject::tr( "not a stock preset" );
 		}
-		case ValueKind::Position:
-		case ValueKind::RandomPosition:
-			if (text.compare(u"random", Qt::CaseInsensitive) == 0) {
-				return QObject::tr("random spots around the listener");
+		case ValueKind_t::VALUE_KIND_POSITION:
+		case ValueKind_t::VALUE_KIND_RANDOM_POSITION:
+			if ( szText.compare( u"random", Qt::CaseInsensitive ) == 0 )
+			{
+				return QObject::tr( "random spots around the listener" );
 			}
-			return toNumber(text) ? QObject::tr("position%1 target").arg(text) : QString{};
-		case ValueKind::Wave: {
+			return ToNumber( szText ) ? QObject::tr( "position%1 target" ).arg( szText ) : QString{};
+		case ValueKind_t::VALUE_KIND_WAVE:
+		{
 			QStringList meanings;
-			for (qsizetype i = 0; i < 2 && i < text.size(); i++) {
-				const auto flags = pathFlags();
-				const auto it = std::ranges::find(flags, text[i].toLatin1(), &PathFlag::character);
-				if (it == flags.end()) {
+			for ( qsizetype i = 0; i < 2 && i < szText.size(); i++ )
+			{
+				const auto flags = PathFlags();
+				const auto it = std::ranges::find( flags, szText[ i ].toLatin1(), &PathFlag_t::m_chCharacter );
+				if ( it == flags.end() )
+				{
 					break;
 				}
-				meanings << qs(it->meaning);
+				meanings << Qs( it->m_szMeaning );
 			}
-			return meanings.join(QStringLiteral(" · "));
+			return meanings.join( QStringLiteral( " · " ) );
 		}
-		case ValueKind::Bool:
-			return text == u"1" ? QObject::tr("yes") : text == u"0" ? QObject::tr("no") : QString{};
+		case ValueKind_t::VALUE_KIND_BOOL:
+			return szText == u"1" ? QObject::tr( "yes" ) : szText == u"0" ? QObject::tr( "no" )
+																		  : QString{};
 		default:
 			return {};
 	}
 }
 
-SoundValueDelegate::SoundValueDelegate(const BlockDef* block, const SoundIndex& index, const SoundDocument& document, QObject* parent)
-		: QStyledItemDelegate(parent)
-		, block_(block)
-		, index_(index)
-		, document_(document) {}
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+CSoundValueDelegate::CSoundValueDelegate( const BlockDef_t *pBlock, const CSoundIndex &index, const CSoundDocument &document, QObject *pParent )
+	: QStyledItemDelegate( pParent ),
+	  m_pBlock( pBlock ),
+	  m_Index( index ),
+	  m_Document( document )
+{}
 
-ValueKind SoundValueDelegate::kindOf(const BlockDef* block, const QString& key) {
-	if (!block) {
-		return ValueKind::Text;
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+ValueKind_t CSoundValueDelegate::KindOf( const BlockDef_t *pBlock, const QString &szKey )
+{
+	if ( !pBlock )
+	{
+		return ValueKind_t::VALUE_KIND_TEXT;
 	}
-	const KeyDef* def = findKey(*block, key.toStdString());
-	return def ? def->kind : ValueKind::Text;
+	const KeyDef_t *pDef = FindKey( *pBlock, szKey.toStdString() );
+	return pDef ? pDef->m_nKind : ValueKind_t::VALUE_KIND_TEXT;
 }
 
-QWidget* SoundValueDelegate::createEditor(QWidget* parent, const QStyleOptionViewItem&, const QModelIndex& index) const {
-	if (index.column() == KeyColumn) {
-		std::vector<Choice> keys;
-		if (block_) {
-			for (const KeyDef& key : block_->keys) {
-				keys.push_back({qs(key.key), qs(key.help)});
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+QWidget *CSoundValueDelegate::createEditor( QWidget *pParent, const QStyleOptionViewItem &, const QModelIndex &index ) const
+{
+	if ( index.column() == COLUMN_KEY_COLUMN )
+	{
+		std::vector<Choice_t> keys;
+		if ( m_pBlock )
+		{
+			for ( const KeyDef_t &key : m_pBlock->m_Keys )
+			{
+				keys.push_back( { Qs( key.m_szKey ), Qs( key.m_szHelp ) } );
 			}
 		}
-		return makeChoiceCombo(keys, parent);
+		return MakeChoiceCombo( keys, pParent );
 	}
-	if (index.column() != ValueColumn) {
+	if ( index.column() != COLUMN_VALUE_COLUMN )
+	{
 		return nullptr;
 	}
 
-	const ValueKind kind = kindOf(block_, index.siblingAtColumn(KeyColumn).data().toString());
-	if (kind == ValueKind::Wave) {
-		auto* edit = new QLineEdit(parent);
-		auto* completer = new QCompleter(index_.soundFiles(), edit);
-		completer->setCaseSensitivity(Qt::CaseInsensitive);
-		completer->setFilterMode(Qt::MatchContains);
-		completer->setMaxVisibleItems(16);
-		edit->setCompleter(completer);
-		edit->setPlaceholderText(tr("Type to search sound files"));
-		return edit;
+	const ValueKind_t nKind = KindOf( m_pBlock, index.siblingAtColumn( COLUMN_KEY_COLUMN ).data().toString() );
+	if ( nKind == ValueKind_t::VALUE_KIND_WAVE )
+	{
+		auto *pEdit = new QLineEdit( pParent );
+		auto *pCompleter = new QCompleter( m_Index.GetSoundFiles(), pEdit );
+		pCompleter->setCaseSensitivity( Qt::CaseInsensitive );
+		pCompleter->setFilterMode( Qt::MatchContains );
+		pCompleter->setMaxVisibleItems( 16 );
+		pEdit->setCompleter( pCompleter );
+		pEdit->setPlaceholderText( tr( "Type to search sound files" ) );
+		return pEdit;
 	}
-	if (kind == ValueKind::SoundscapeName) {
-		std::vector<Choice> names;
-		for (const QString& name : index_.soundscapeNames(&document_)) {
-			names.push_back({name, {}});
+	if ( nKind == ValueKind_t::VALUE_KIND_SOUNDSCAPE_NAME )
+	{
+		std::vector<Choice_t> names;
+		for ( const QString &szName : m_Index.SoundscapeNames( &m_Document ) )
+		{
+			names.push_back( { szName, {} } );
 		}
-		return makeChoiceCombo(names, parent);
+		return MakeChoiceCombo( names, pParent );
 	}
-	if (const auto choices = choicesFor(kind); !choices.empty()) {
-		return makeChoiceCombo(choices, parent);
+	if ( const auto choices = ChoicesFor( nKind ); !choices.empty() )
+	{
+		return MakeChoiceCombo( choices, pParent );
 	}
-	return new QLineEdit(parent);
+	return new QLineEdit( pParent );
 }
 
-void SoundValueDelegate::setEditorData(QWidget* editor, const QModelIndex& index) const {
-	const QString text = index.data(Qt::EditRole).toString();
-	if (auto* combo = qobject_cast<QComboBox*>(editor)) {
-		combo->setCurrentIndex(-1);
-		combo->setEditText(text);
-	} else if (auto* edit = qobject_cast<QLineEdit*>(editor)) {
-		edit->setText(text);
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+void CSoundValueDelegate::setEditorData( QWidget *pEditor, const QModelIndex &index ) const
+{
+	const QString szText = index.data( Qt::EditRole ).toString();
+	if ( auto *pCombo = qobject_cast<QComboBox *>( pEditor ) )
+	{
+		pCombo->setCurrentIndex( -1 );
+		pCombo->setEditText( szText );
+	}
+	else if ( auto *pEdit = qobject_cast<QLineEdit *>( pEditor ) )
+	{
+		pEdit->setText( szText );
 	}
 }
 
-void SoundValueDelegate::setModelData(QWidget* editor, QAbstractItemModel* model, const QModelIndex& index) const {
-	if (auto* combo = qobject_cast<QComboBox*>(editor)) {
-		model->setData(index, combo->currentText(), Qt::EditRole);
-	} else if (auto* edit = qobject_cast<QLineEdit*>(editor)) {
-		model->setData(index, edit->text(), Qt::EditRole);
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+void CSoundValueDelegate::setModelData( QWidget *pEditor, QAbstractItemModel *pModel, const QModelIndex &index ) const
+{
+	if ( auto *pCombo = qobject_cast<QComboBox *>( pEditor ) )
+	{
+		pModel->setData( index, pCombo->currentText(), Qt::EditRole );
+	}
+	else if ( auto *pEdit = qobject_cast<QLineEdit *>( pEditor ) )
+	{
+		pModel->setData( index, pEdit->text(), Qt::EditRole );
 	}
 }
