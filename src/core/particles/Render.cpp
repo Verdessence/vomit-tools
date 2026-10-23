@@ -771,11 +771,14 @@ CCamera Framed( const CSimulation &simulation, CCamera camera, float flSeconds )
 	// The model the effect stands on is part of the picture too.
 	if ( const model::CModel *pModel = copy.GetModel() )
 	{
-		const CVec3 vecOrigin = copy.ControlPoint( copy.GetModelControlPoint() );
-		const CVec3 vecLow = vecOrigin + pModel->m_vecMin;
-		const CVec3 vecHigh = vecOrigin + pModel->m_vecMax;
-		a = { std::min( a.m_flX, vecLow.m_flX ), std::min( a.m_flY, vecLow.m_flY ), std::min( a.m_flZ, vecLow.m_flZ ) };
-		b = { std::max( b.m_flX, vecHigh.m_flX ), std::max( b.m_flY, vecHigh.m_flY ), std::max( b.m_flZ, vecHigh.m_flZ ) };
+		const model::CTransform toWorld = copy.ModelToWorld();
+		for ( int i = 0; i < 8; i++ )
+		{
+			const CVec3 vecCorner = toWorld.Apply( { ( i & 1 ) ? pModel->m_vecMax.m_flX : pModel->m_vecMin.m_flX, ( i & 2 ) ? pModel->m_vecMax.m_flY : pModel->m_vecMin.m_flY,
+				( i & 4 ) ? pModel->m_vecMax.m_flZ : pModel->m_vecMin.m_flZ } );
+			a = { std::min( a.m_flX, vecCorner.m_flX ), std::min( a.m_flY, vecCorner.m_flY ), std::min( a.m_flZ, vecCorner.m_flZ ) };
+			b = { std::max( b.m_flX, vecCorner.m_flX ), std::max( b.m_flY, vecCorner.m_flY ), std::max( b.m_flZ, vecCorner.m_flZ ) };
+		}
 	}
 	camera.m_vecTarget = ( a + b ) * 0.5f;
 	const float flExtent = std::max( 16.0f, Length( b - a ) );
@@ -965,7 +968,7 @@ std::vector<ScreenMesh_t> LayoutModel( const CSimulation &simulation, const CCam
 	{
 		return meshes;
 	}
-	const CVec3 vecOrigin = simulation.ControlPoint( simulation.GetModelControlPoint() );
+	const model::CTransform toWorld = simulation.ModelToWorld();
 	const CVec3 vecForward = camera.GetForward();
 	const CVec3 vecRight = Normalized( Cross( vecForward, { 0, 0, 1 } ) );
 	const CVec3 vecLight = Normalized( -vecForward + CVec3{ 0, 0, 0.8f } - vecRight * 0.4f );
@@ -973,9 +976,9 @@ std::vector<ScreenMesh_t> LayoutModel( const CSimulation &simulation, const CCam
 	for ( std::size_t i = 0; i < pModel->m_Vertices.size(); i++ )
 	{
 		const model::Vertex_t &vertex = pModel->m_Vertices[ i ];
-		if ( const auto at = camera.Project( vecOrigin + vertex.m_vecPosition ) )
+		if ( const auto at = camera.Project( toWorld.Apply( vertex.m_vecPosition ) ) )
 		{
-			const float flLight = 0.5f + 0.7f * std::max( 0.0f, Dot( Normalized( vertex.m_vecNormal ), vecLight ) );
+			const float flLight = 0.5f + 0.7f * std::max( 0.0f, Dot( Normalized( toWorld.Rotate( vertex.m_vecNormal ) ), vecLight ) );
 			projected[ i ] = ScreenVertex_t{ *at, vertex.m_Uv, { flLight, flLight, flLight } };
 		}
 	}

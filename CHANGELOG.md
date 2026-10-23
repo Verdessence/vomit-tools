@@ -53,6 +53,10 @@
     still in its reference pose.
   - **Put a CP on an Attachment** puts a control point where one of the model's attachments is; it
     moves with the model after.
+  - **Moving and turning:** drag the model to move it (its control point moves with it, in the view
+    only), drag the ring at its feet to turn it (15° steps while the grid shows), or set its pitch,
+    yaw and roll under **Model → Turn**. Particles locked to it and points on its attachments turn
+    with it, and every move and turn undoes.
   - With **Bounds**, its hitboxes and attachment names show; selecting Position on Model Random shows
     the hitboxes either way. **Frame** takes the model in.
   - Reads MDL versions 44–49 with their `.vvd` and `.vtx`: every CS:S and HL2 model that has

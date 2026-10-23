@@ -22,6 +22,9 @@
 #include <QCheckBox>
 #include <QComboBox>
 #include <QGuiApplication>
+#include <QWidgetAction>
+#include <QFormLayout>
+#include <QDoubleSpinBox>
 #include <QMessageBox>
 #include <QMenu>
 #include <QFileInfo>
@@ -107,7 +110,22 @@ public:
 		setToolTip( tr( "Drag to turn around the effect, right-drag to move, scroll to zoom, double-click to frame it.\n"
 						"Drag a control point (CP) to move it; hold Shift to move it up and down. It snaps to the grid while the grid shows.\n"
 						"CP0 is where the effect is: moving it changes only the view. Moving another CP writes it into the file "
-						"(Set Control Point Positions); hold Ctrl to move one the file doesn't place in the view only" ) );
+						"(Set Control Point Positions); hold Ctrl to move one the file doesn't place in the view only.\n"
+						"A model moves by dragging it (its control point moves with it, in the view only) and turns by the ring at its feet" ) );
+	}
+
+	// What the cursor shows over a canvas position.
+	[[nodiscard]] Qt::CursorShape HoverCursor( QPointF at ) const
+	{
+		if ( HandleAt( at ) >= 0 )
+		{
+			return Qt::PointingHandCursor;
+		}
+		if ( m_pPreview->IsOnModelRing( at ) )
+		{
+			return Qt::SizeHorCursor;
+		}
+		return m_pPreview->IsOnModel( at ) ? Qt::SizeAllCursor : Qt::OpenHandCursor;
 	}
 
 	// The control point whose handle is under a canvas position, or -1.
@@ -161,10 +179,28 @@ protected:
 	void mousePressEvent( QMouseEvent *pEvent ) override
 	{
 		m_Last = pEvent->position();
-		const int nHandle = pEvent->button() == Qt::LeftButton ? HandleAt( pEvent->position() ) : -1;
+		// Control points first, then the model's ring (turns it), then the model (moves it).
+		int nHandle = pEvent->button() == Qt::LeftButton ? HandleAt( pEvent->position() ) : -1;
+		if ( nHandle < 0 && pEvent->button() == Qt::LeftButton && m_pPreview->IsOnModelRing( pEvent->position() ) )
+		{
+			if ( const auto heading = m_pPreview->HeadingAt( pEvent->position() ) )
+			{
+				m_pPreview->BeginTurn( *heading );
+				setCursor( Qt::SizeHorCursor );
+				return;
+			}
+		}
+		// The model is the preview's: moving it by its body moves its point in the view only (unless
+		// the file places that point).
+		bool bViewOnly = pEvent->modifiers() & Qt::ControlModifier;
+		if ( nHandle < 0 && pEvent->button() == Qt::LeftButton && m_pPreview->IsOnModel( pEvent->position() ) )
+		{
+			nHandle = m_pPreview->GetModelControlPoint();
+			bViewOnly = true;
+		}
 		if ( nHandle >= 0 )
 		{
-			m_pPreview->BeginDrag( nHandle, pEvent->modifiers() & Qt::ControlModifier );
+			m_pPreview->BeginDrag( nHandle, bViewOnly );
 		}
 		setCursor( nHandle >= 0 ? Qt::SizeAllCursor : Qt::ClosedHandCursor );
 	}
@@ -173,9 +209,10 @@ protected:
 	{
 		if ( pEvent->button() == Qt::LeftButton )
 		{
+			m_pPreview->EndTurn();
 			m_pPreview->EndDrag();
 		}
-		setCursor( HandleAt( pEvent->position() ) >= 0 ? Qt::PointingHandCursor : Qt::OpenHandCursor );
+		setCursor( HoverCursor( pEvent->position() ) );
 	}
 
 	void mouseMoveEvent( QMouseEvent *pEvent ) override
@@ -184,12 +221,19 @@ protected:
 		m_Last = pEvent->position();
 		if ( pEvent->buttons() == Qt::NoButton )
 		{
-			setCursor( HandleAt( pEvent->position() ) >= 0 ? Qt::PointingHandCursor : Qt::OpenHandCursor );
+			setCursor( HoverCursor( pEvent->position() ) );
 			return;
 		}
 		particles::CCamera &camera = m_pPreview->m_Camera;
 		const int nDragging = m_pPreview->GetDragged();
-		if ( nDragging >= 0 && m_pPreview->m_pSimulation )
+		if ( m_pPreview->IsTurning() )
+		{
+			if ( const auto heading = m_pPreview->HeadingAt( pEvent->position() ) )
+			{
+				m_pPreview->TurnTo( *heading );
+			}
+		}
+		else if ( nDragging >= 0 && m_pPreview->m_pSimulation )
 		{
 			// Along a plane through the point facing the camera; with Shift, only up and down.
 			const particles::CCamera view = m_pPreview->GetCanvasCamera();
@@ -550,6 +594,7 @@ void CParticlePreview::Rebuild( bool bKeepTime )
 				m_pSimulation->SetControlPoint( i, m_ControlPoints[ static_cast<std::size_t>( i ) ] );
 			}
 			m_pSimulation->SetModel( m_pModel, m_nModelPoint );
+			m_pSimulation->SetModelAngles( m_ModelAngles );
 			if ( m_Drag.m_nIndex >= 0 && m_Drag.m_bInFile && m_Drag.m_bMoved )
 			{
 				// Still being dragged, or let go and not back from the file yet.
@@ -782,7 +827,7 @@ void CParticlePreview::EndDrag()
 	if ( !drag.m_bInFile )
 	{
 		m_Drag = {};
-		emit ControlPointsMoved( drag.m_Before, m_ControlPoints, tr( "Move CP%1" ).arg( drag.m_nIndex ) );
+		emit ControlPointsMoved( drag.m_Before, m_ControlPoints, m_pModel && drag.m_nIndex == m_nModelPoint ? tr( "Move model" ) : tr( "Move CP%1" ).arg( drag.m_nIndex ) );
 		return;
 	}
 	m_Drag.m_bEnded = true;
@@ -976,16 +1021,44 @@ void CParticlePreview::PaintOverlays( QPainter &painter )
 	// The model's attachments, where control points can be put (with Bounds on).
 	if ( m_pModel && m_pBounds->isChecked() )
 	{
-		const CVec3 vecOrigin = m_pSimulation->ControlPoint( m_nModelPoint );
+		const xv::model::CTransform toWorld = m_pSimulation->ModelToWorld();
 		painter.setPen( QColor( 170, 230, 170, 200 ) );
 		for ( std::size_t i = 0; i < m_pModel->m_Attachments.size(); i++ )
 		{
-			if ( const auto at = camera.Project( vecOrigin + m_pModel->AttachmentToModel( i ).GetOrigin() ) )
+			if ( const auto at = camera.Project( toWorld.Apply( m_pModel->AttachmentToModel( i ).GetOrigin() ) ) )
 			{
 				const QPointF p{ ( *at )[ 0 ], ( *at )[ 1 ] };
 				painter.drawEllipse( p, 2.0, 2.0 );
 				painter.drawText( p + QPointF{ 4, 3 }, Qs( m_pModel->m_Attachments[ i ].m_szName ) );
 			}
+		}
+	}
+	// The ring the model turns by, with a tick the way it faces.
+	if ( m_pModel )
+	{
+		const auto [ vecCenter, flRadius ] = ModelRing();
+		painter.setPen( QPen( m_bTurning ? QColor( 255, 220, 140, 230 ) : QColor( 255, 200, 120, 130 ), m_bTurning ? 2.0 : 1.2 ) );
+		painter.setBrush( Qt::NoBrush );
+		constexpr int SEGMENTS = 64;
+		std::optional<QPointF> previous;
+		for ( int i = 0; i <= SEGMENTS; i++ )
+		{
+			const float flAngle = 2.0f * std::numbers::pi_v<float> * static_cast<float>( i ) / SEGMENTS;
+			const auto p = camera.Project( vecCenter + CVec3{ std::cos( flAngle ), std::sin( flAngle ), 0.0f } * flRadius );
+			const std::optional<QPointF> here = p ? std::optional{ QPointF{ ( *p )[ 0 ], ( *p )[ 1 ] } } : std::nullopt;
+			if ( here && previous )
+			{
+				painter.drawLine( *previous, *here );
+			}
+			previous = here;
+		}
+		const float flYaw = m_ModelAngles[ 1 ] * std::numbers::pi_v<float> / 180.0f;
+		const CVec3 vecFacing{ std::cos( flYaw ), std::sin( flYaw ), 0.0f };
+		const auto inner = camera.Project( vecCenter + vecFacing * ( flRadius * 0.8f ) );
+		const auto outer = camera.Project( vecCenter + vecFacing * ( flRadius * 1.15f ) );
+		if ( inner && outer )
+		{
+			painter.drawLine( QPointF{ ( *inner )[ 0 ], ( *inner )[ 1 ] }, QPointF{ ( *outer )[ 0 ], ( *outer )[ 1 ] } );
 		}
 	}
 	// The control points the systems use, as handles.
@@ -1176,10 +1249,10 @@ void CParticlePreview::PaintShapes( QPainter &painter, const particles::CCamera 
 			else if ( op.m_szFunction == "Position on Model Random" && m_pModel && op.Integer( "control_point_number" ) == m_nModelPoint )
 			{
 				// The hitboxes the particles start in, each turned with its bone.
-				const CVec3 vecOrigin = m_pSimulation->ControlPoint( m_nModelPoint );
+				const xv::model::CTransform toWorld = m_pSimulation->ModelToWorld();
 				for ( std::size_t nBox = 0; nBox < m_pModel->m_Hitboxes.size(); nBox++ )
 				{
-					const auto corner = [ & ]( int i ) { return vecOrigin + m_pModel->HitboxPoint( nBox, { ( i & 1 ) ? 1.0f : 0.0f, ( i & 2 ) ? 1.0f : 0.0f, ( i & 4 ) ? 1.0f : 0.0f } ); };
+					const auto corner = [ & ]( int i ) { return toWorld.Apply( m_pModel->HitboxPoint( nBox, { ( i & 1 ) ? 1.0f : 0.0f, ( i & 2 ) ? 1.0f : 0.0f, ( i & 4 ) ? 1.0f : 0.0f } ) ); };
 					for ( int a = 0; a < 8; a++ )
 					{
 						for ( int nBit : { 1, 2, 4 } )
@@ -1298,6 +1371,10 @@ bool CParticlePreview::SetModel( const QString &szPath, int nControlPoint, QStri
 	}
 	m_pModel = std::move( pModel );
 	m_szModelPath = m_pModel ? szPath : QString{};
+	if ( !m_pModel )
+	{
+		m_ModelAngles = {};
+	}
 	m_nModelPoint = std::clamp( nControlPoint, 0, particles::CSimulation::CONTROL_POINTS - 1 );
 	m_Attached.clear();
 	m_ModelSprites.clear();
@@ -1340,15 +1417,174 @@ void CParticlePreview::FollowModel()
 	{
 		return;
 	}
-	const CVec3 vecOrigin = m_ControlPoints[ static_cast<std::size_t>( m_nModelPoint ) ];
+	const xv::model::CTransform toWorld = xv::model::CTransform::Translation( m_ControlPoints[ static_cast<std::size_t>( m_nModelPoint ) ] ) *
+		xv::model::CTransform::Rotation( m_ModelAngles[ 0 ], m_ModelAngles[ 1 ], m_ModelAngles[ 2 ] );
 	for ( const auto &[ nPoint, nAttachment ] : m_Attached )
 	{
-		const CVec3 vecAt = vecOrigin + m_pModel->AttachmentToModel( static_cast<std::size_t>( nAttachment ) ).GetOrigin();
+		const CVec3 vecAt = toWorld.Apply( m_pModel->AttachmentToModel( static_cast<std::size_t>( nAttachment ) ).GetOrigin() );
 		m_ControlPoints[ static_cast<std::size_t>( nPoint ) ] = vecAt;
 		if ( m_pSimulation )
 		{
 			m_pSimulation->SetControlPoint( nPoint, vecAt );
 		}
+	}
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: The model's turn; points on its attachments turn with it.
+//-----------------------------------------------------------------------------
+void CParticlePreview::SetModelAngles( const Angles_t &angles )
+{
+	m_ModelAngles = angles;
+	if ( m_pSimulation )
+	{
+		m_pSimulation->SetModelAngles( angles );
+	}
+	FollowModel();
+	Redraw();
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: The ring the model turns by: around its feet, a little wider than it.
+//-----------------------------------------------------------------------------
+std::pair<CVec3, float> CParticlePreview::ModelRing() const
+{
+	if ( !m_pModel )
+	{
+		return { {}, 0.0f };
+	}
+	const CVec3 vecSize = m_pModel->m_vecMax - m_pModel->m_vecMin;
+	return { m_ControlPoints[ static_cast<std::size_t>( m_nModelPoint ) ], 0.6f * std::max( { vecSize.m_flX, vecSize.m_flY, 16.0f } ) + 6.0f };
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: The direction (degrees) from the model's feet to where a canvas position meets the
+//          ground the model stands on.
+//-----------------------------------------------------------------------------
+std::optional<float> CParticlePreview::HeadingAt( QPointF at ) const
+{
+	if ( !m_pModel )
+	{
+		return std::nullopt;
+	}
+	const CVec3 vecCenter = ModelRing().first;
+	const particles::CCamera camera = GetCanvasCamera();
+	const CVec3 vecEye = camera.GetEye();
+	const CVec3 vecRay = camera.Ray( static_cast<float>( at.x() ), static_cast<float>( at.y() ) );
+	if ( std::abs( vecRay.m_flZ ) < 1e-4f )
+	{
+		return std::nullopt;
+	}
+	const float t = ( vecCenter.m_flZ - vecEye.m_flZ ) / vecRay.m_flZ;
+	if ( t <= 0.0f )
+	{
+		return std::nullopt;
+	}
+	const CVec3 vecOn = vecEye + vecRay * t - vecCenter;
+	return std::atan2( vecOn.m_flY, vecOn.m_flX ) * 180.0f / std::numbers::pi_v<float>;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Whether a canvas position is on the ring (within a few pixels of it on screen).
+//-----------------------------------------------------------------------------
+bool CParticlePreview::IsOnModelRing( QPointF at ) const
+{
+	if ( !m_pModel || !m_pSimulation )
+	{
+		return false;
+	}
+	const auto [ vecCenter, flRadius ] = ModelRing();
+	const particles::CCamera camera = GetCanvasCamera();
+	constexpr int SEGMENTS = 64;
+	std::optional<QPointF> previous;
+	for ( int i = 0; i <= SEGMENTS; i++ )
+	{
+		const float flAngle = 2.0f * std::numbers::pi_v<float> * static_cast<float>( i ) / SEGMENTS;
+		const auto p = camera.Project( vecCenter + CVec3{ std::cos( flAngle ), std::sin( flAngle ), 0.0f } * flRadius );
+		const std::optional<QPointF> here = p ? std::optional{ QPointF{ ( *p )[ 0 ], ( *p )[ 1 ] } } : std::nullopt;
+		if ( here && previous )
+		{
+			// Distance to this piece of the ring.
+			const QPointF d = *here - *previous;
+			const double flLength = QPointF::dotProduct( d, d );
+			const double t = flLength > 0.0 ? std::clamp( QPointF::dotProduct( at - *previous, d ) / flLength, 0.0, 1.0 ) : 0.0;
+			const QPointF closest = *previous + d * t;
+			if ( std::hypot( closest.x() - at.x(), closest.y() - at.y() ) <= 5.0 )
+			{
+				return true;
+			}
+		}
+		previous = here;
+	}
+	return false;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Whether a canvas position is on the model (inside its box as seen on screen).
+//-----------------------------------------------------------------------------
+bool CParticlePreview::IsOnModel( QPointF at ) const
+{
+	if ( !m_pModel || !m_pSimulation )
+	{
+		return false;
+	}
+	const particles::CCamera camera = GetCanvasCamera();
+	const xv::model::CTransform toWorld = m_pSimulation->ModelToWorld();
+	std::optional<QRectF> area;
+	for ( int i = 0; i < 8; i++ )
+	{
+		const CVec3 vecCorner = toWorld.Apply( { ( i & 1 ) ? m_pModel->m_vecMax.m_flX : m_pModel->m_vecMin.m_flX, ( i & 2 ) ? m_pModel->m_vecMax.m_flY : m_pModel->m_vecMin.m_flY,
+			( i & 4 ) ? m_pModel->m_vecMax.m_flZ : m_pModel->m_vecMin.m_flZ } );
+		if ( const auto p = camera.Project( vecCorner ) )
+		{
+			const QRectF corner{ QPointF{ ( *p )[ 0 ], ( *p )[ 1 ] }, QSizeF{ 0.01, 0.01 } };
+			area = area ? area->united( corner ) : corner;
+		}
+	}
+	return area && area->contains( at );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Turning by the ring: the yaw follows the mouse around the model.
+//-----------------------------------------------------------------------------
+void CParticlePreview::BeginTurn( float flHeading )
+{
+	m_bTurning = true;
+	m_flTurnFrom = flHeading;
+	m_TurnBefore = m_ModelAngles;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+void CParticlePreview::TurnTo( float flHeading )
+{
+	if ( !m_bTurning )
+	{
+		return;
+	}
+	float flYaw = m_TurnBefore[ 1 ] + std::remainder( flHeading - m_flTurnFrom, 360.0f );
+	if ( m_pGrid->isChecked() )
+	{
+		flYaw = std::round( flYaw / 15.0f ) * 15.0f;
+	}
+	flYaw = std::remainder( flYaw, 360.0f ) + 0.0f; // + 0 turns -0 into 0
+	SetModelAngles( { m_TurnBefore[ 0 ], flYaw, m_TurnBefore[ 2 ] } );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Lets go of the ring: the turn is an undo step.
+//-----------------------------------------------------------------------------
+void CParticlePreview::EndTurn()
+{
+	if ( !m_bTurning )
+	{
+		return;
+	}
+	m_bTurning = false;
+	if ( m_TurnBefore != m_ModelAngles )
+	{
+		emit ModelTurned( m_TurnBefore, m_ModelAngles );
 	}
 }
 
@@ -1420,6 +1656,43 @@ void CParticlePreview::FillModelMenu( QMenu *pMenu )
 			pAction->setChecked( found != m_Attached.end() && found->second == static_cast<int>( a ) );
 		}
 	}
+	// Pitch, yaw and roll as numbers (the ring at its feet turns the yaw).
+	QMenu *pTurn = pMenu->addMenu( tr( "Turn" ) );
+	auto *pBox = new QWidget;
+	auto *pForm = new QFormLayout( pBox );
+	pForm->setContentsMargins( 8, 4, 8, 4 );
+	const std::array<QString, 3> labels{ tr( "Pitch" ), tr( "Yaw" ), tr( "Roll" ) };
+	for ( std::size_t i = 0; i < 3; i++ )
+	{
+		auto *pSpin = new QDoubleSpinBox;
+		pSpin->setObjectName( QStringLiteral( "modelAngle%1" ).arg( i ) );
+		pSpin->setRange( -360.0, 360.0 );
+		pSpin->setSingleStep( 15.0 );
+		pSpin->setDecimals( 1 );
+		pSpin->setSuffix( QStringLiteral( "°" ) );
+		pSpin->setWrapping( true );
+		pSpin->setValue( static_cast<double>( m_ModelAngles[ i ] ) );
+		pSpin->setKeyboardTracking( false );
+		connect( pSpin, &QDoubleSpinBox::valueChanged, this, [ this, i ]( double flValue ) {
+			Angles_t angles = m_ModelAngles;
+			angles[ i ] = static_cast<float>( flValue );
+			const Angles_t before = m_ModelAngles;
+			SetModelAngles( angles );
+			emit ModelTurned( before, m_ModelAngles );
+		} );
+		pForm->addRow( labels[ i ], pSpin );
+	}
+	auto *pTurnAction = new QWidgetAction( pTurn );
+	pTurnAction->setDefaultWidget( pBox );
+	pTurn->addAction( pTurnAction );
+	pTurn->addAction( tr( "Face Forward" ), this, [ this ] {
+		const Angles_t before = m_ModelAngles;
+		SetModelAngles( {} );
+		if ( before != m_ModelAngles )
+		{
+			emit ModelTurned( before, m_ModelAngles );
+		}
+	} );
 	pMenu->addSeparator();
 	pMenu->addAction( tr( "Remove Model" ), this, [ this ] { SetModel( {} ); } );
 }

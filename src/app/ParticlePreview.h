@@ -13,6 +13,8 @@
 #include <cstdint>
 #include <functional>
 #include <map>
+#include <optional>
+#include <utility>
 #include <memory>
 #include <string>
 #include <vector>
@@ -93,6 +95,22 @@ public:
 	[[nodiscard]] const xv::model::CModel *GetModel() const { return m_pModel.get(); }
 	// Puts a control point on one of the model's attachments; it moves with the model after.
 	void AttachControlPoint( int nIndex, int nAttachment );
+	// The model's turn: pitch, yaw and roll in degrees (it is moved by its control point).
+	using Angles_t = std::array<float, 3>;
+	void SetModelAngles( const Angles_t &angles );
+	[[nodiscard]] const Angles_t &GetModelAngles() const { return m_ModelAngles; }
+	// Turning the model by the ring at its feet, as the mouse does it: begin at a heading (degrees
+	// around the model, on the ground), turn to others (snapped to 15 degrees while the grid
+	// shows), end to keep it (an undo step).
+	void BeginTurn( float flHeading );
+	void TurnTo( float flHeading );
+	void EndTurn();
+	[[nodiscard]] bool IsTurning() const { return m_bTurning; }
+	// What is under a canvas position: the model's turning ring, the model itself; and the heading
+	// around the model there.
+	[[nodiscard]] bool IsOnModelRing( QPointF at ) const;
+	[[nodiscard]] bool IsOnModel( QPointF at ) const;
+	[[nodiscard]] std::optional<float> HeadingAt( QPointF at ) const;
 
 	// The operator selected in the editor: its emission shape shows even without Bounds.
 	void SetSelectedElement( std::int32_t nElement );
@@ -129,6 +147,8 @@ public:
 signals:
 	// Points moved in the view only (dragged or reset), for undo.
 	void ControlPointsMoved( const ControlPoints_t &before, const ControlPoints_t &after, const QString &szDescription );
+	// The model turned, for undo.
+	void ModelTurned( const Angles_t &before, const Angles_t &after );
 
 private:
 	friend class CParticleCanvas;
@@ -163,6 +183,8 @@ private:
 	// their control points.
 	void PaintShapes( QPainter &painter, const xv::particles::CCamera &camera );
 	void FillModelMenu( QMenu *pMenu );
+	// The ring the model turns by: its centre (the model's feet) and radius, in the world.
+	[[nodiscard]] std::pair<xv::CVec3, float> ModelRing() const;
 	// Moves the points on attachments to where their attachments are now.
 	void FollowModel();
 	[[nodiscard]] const xv::particles::Sprite_t *ModelSprite( std::size_t nMaterial );
@@ -184,6 +206,10 @@ private:
 	std::shared_ptr<const xv::model::CModel> m_pModel;
 	int m_nModelPoint = 0;
 	std::map<int, int> m_Attached; // control point -> the model's attachment it is on
+	Angles_t m_ModelAngles{};
+	bool m_bTurning = false;
+	float m_flTurnFrom = 0.0f; // heading the turn started at
+	Angles_t m_TurnBefore{};
 	std::map<std::size_t, std::shared_ptr<const xv::particles::Sprite_t>> m_ModelSprites; // by material
 	std::int32_t m_nSelectedElement = -1;
 	xv::particles::CCamera m_Camera;

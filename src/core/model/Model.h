@@ -30,6 +30,9 @@ struct CTransform
 	std::array<float, 12> m_Values{ 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0 };
 
 	[[nodiscard]] static CTransform Translation( CVec3 vecOffset );
+	// A turn by Source angles in degrees: pitch (positive looks down), yaw (around up, 0 facing
+	// +X), roll (around the facing).
+	[[nodiscard]] static CTransform Rotation( float flPitch, float flYaw, float flRoll );
 	[[nodiscard]] CVec3 Apply( CVec3 vecPoint ) const;
 	[[nodiscard]] CVec3 Rotate( CVec3 vecDirection ) const;
 	[[nodiscard]] CVec3 GetOrigin() const { return { m_Values[ 3 ], m_Values[ 7 ], m_Values[ 11 ] }; }

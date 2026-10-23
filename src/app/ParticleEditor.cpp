@@ -525,6 +525,23 @@ CParticleEditor::CParticleEditor( CParticleDocument *pDocument, QWidget *pParent
 		}
 		return bChanged;
 	} );
+	connect( m_pPreview, &CParticlePreview::ModelTurned, this, [ this ]( const CParticlePreview::Angles_t &before, const CParticlePreview::Angles_t &after ) {
+		const QPointer<CParticlePreview> pPreview = m_pPreview;
+		m_pDocument->AddViewStep(
+			tr( "Turn model" ),
+			[ pPreview, before ] {
+				if ( pPreview )
+				{
+					pPreview->SetModelAngles( before );
+				}
+			},
+			[ pPreview, after ] {
+				if ( pPreview )
+				{
+					pPreview->SetModelAngles( after );
+				}
+			} );
+	} );
 	connect( m_pPreview, &CParticlePreview::ControlPointsMoved, this,
 		[ this ]( const CParticlePreview::ControlPoints_t &before, const CParticlePreview::ControlPoints_t &after, const QString &szDescription ) {
 			const QPointer<CParticlePreview> pPreview = m_pPreview;

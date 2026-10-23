@@ -868,6 +868,14 @@ void CSimulation::SetModel( std::shared_ptr<const model::CModel> pModel, int nCo
 }
 
 //-----------------------------------------------------------------------------
+// Purpose: Model space to the world.
+//-----------------------------------------------------------------------------
+model::CTransform CSimulation::ModelToWorld() const
+{
+	return model::CTransform::Translation( ControlPoint( m_nModelPoint ) ) * model::CTransform::Rotation( m_ModelAngles[ 0 ], m_ModelAngles[ 1 ], m_ModelAngles[ 2 ] );
+}
+
+//-----------------------------------------------------------------------------
 // Purpose: Keeps a control point where it is put, whatever the operators say, until released.
 //-----------------------------------------------------------------------------
 void CSimulation::HoldControlPoint( int nIndex, CVec3 vecPosition )
@@ -1093,6 +1101,7 @@ void CSimulation::Restart()
 	pfnPlace( m_Root );
 	m_pCurrent = nullptr;
 	m_PreviousControlPoints = m_ControlPoints;
+	m_PreviousModelAngles = m_ModelAngles;
 }
 
 //-----------------------------------------------------------------------------
@@ -1117,6 +1126,7 @@ void CSimulation::Advance( float flSeconds )
 			pfnStepAll( m_Root, nullptr );
 		}
 		m_PreviousControlPoints = m_ControlPoints;
+		m_PreviousModelAngles = m_ModelAngles;
 	}
 }
 
@@ -1359,13 +1369,14 @@ void CSimulation::Initialize( Instance_t &instance, Particle_t &p, const CCompil
 		}
 		nTries = std::min( nTries, 16 );
 		const std::size_t nBoxes = m_pModel->m_Hitboxes.size();
+		const model::CTransform toWorld = ModelToWorld();
 		float flBest = -1e30f;
 		for ( int nTry = 0; nTry <= nTries; nTry++ )
 		{
 			const auto nSalt = static_cast<std::uint32_t>( 10 + nTry * 5 );
 			const std::size_t nBox = std::min( nBoxes - 1, static_cast<std::size_t>( r( nSalt ) * static_cast<float>( nBoxes ) ) );
 			const CVec3 vecUvw{ Lerp( 1.0f - flScale, flScale, r( nSalt + 1 ) ), Lerp( 1.0f - flScale, flScale, r( nSalt + 2 ) ), Lerp( 1.0f - flScale, flScale, r( nSalt + 3 ) ) };
-			const CVec3 vecAt = vecBase + m_pModel->HitboxPoint( nBox, vecUvw );
+			const CVec3 vecAt = toWorld.Apply( m_pModel->HitboxPoint( nBox, vecUvw ) );
 			const float flGoodness = r( nSalt + 4 ) * 72.0f + Dot( vecAt - vecBase, vecBias );
 			if ( flGoodness > flBest )
 			{
@@ -2210,7 +2221,11 @@ void CSimulation::Operate( Instance_t &instance, const CCompiledOperator &op, st
 		{
 			return;
 		}
-		const CVec3 vecOrigin = Point( nPoint );
+		const auto toModel = ModelToWorld().Inverse();
+		if ( !toModel )
+		{
+			return;
+		}
 		const bool bOutside = op.Flag( "cull outside instead of inside" );
 		const bool bBox = op.Flag( "use only bounding box" );
 		std::vector<std::pair<model::CTransform, std::size_t>> boxes; // model space to hitbox space
@@ -2225,7 +2240,7 @@ void CSimulation::Operate( Instance_t &instance, const CCompiledOperator &op, st
 		const auto inside = []( CVec3 v, CVec3 a, CVec3 b ) { return v.m_flX >= a.m_flX && v.m_flX <= b.m_flX && v.m_flY >= a.m_flY && v.m_flY <= b.m_flY && v.m_flZ >= a.m_flZ && v.m_flZ <= b.m_flZ; };
 		for ( Particle_t &p : particles )
 		{
-			const CVec3 vecLocal = p.m_vecPosition - vecOrigin;
+			const CVec3 vecLocal = toModel->Apply( p.m_vecPosition );
 			bool bIn = bBox && inside( vecLocal, m_pModel->m_vecMin, m_pModel->m_vecMax );
 			for ( const auto &[ toBone, nBox ] : boxes )
 			{
@@ -2524,14 +2539,17 @@ void CSimulation::Operate( Instance_t &instance, const CCompiledOperator &op, st
 	}
 	if ( f == "Movement Lock to Bone" )
 	{
-		// The model doesn't animate, so its bones move only as its control point does; particles
-		// put in a hitbox go along, letting go between the fade start and end (shares of life).
+		// The model doesn't animate, so its bones move only as it is moved and turned; particles put
+		// in a hitbox go along with their place in it, letting go between the fade start and end
+		// (shares of life).
 		const int nPoint = op.Integer( "control_point_number" );
 		if ( !m_pModel || nPoint != m_nModelPoint )
 		{
 			return;
 		}
-		const CVec3 vecMoved = Point( nPoint ) - PreviousPoint( nPoint );
+		const model::CTransform now = ModelToWorld();
+		const model::CTransform before = model::CTransform::Translation( PreviousPoint( nPoint ) ) *
+			model::CTransform::Rotation( m_PreviousModelAngles[ 0 ], m_PreviousModelAngles[ 1 ], m_PreviousModelAngles[ 2 ] );
 		const float flStart = op.Number( "lifetime fade start" );
 		const float flEnd = op.Number( "lifetime fade end" );
 		for ( Particle_t &p : particles )
@@ -2545,7 +2563,8 @@ void CSimulation::Operate( Instance_t &instance, const CCompiledOperator &op, st
 			{
 				flHold = flEnd > flStart ? 1.0f - Clamp01( ( life( p ) - flStart ) / ( flEnd - flStart ) ) : ( life( p ) < flStart ? 1.0f : 0.0f );
 			}
-			p.m_vecPosition += vecMoved * flHold;
+			const CVec3 vecInBox = m_pModel->HitboxPoint( static_cast<std::size_t>( p.m_nHitbox ), p.m_vecHitboxUvw );
+			p.m_vecPosition += ( now.Apply( vecInBox ) - before.Apply( vecInBox ) ) * flHold;
 		}
 	}
 	if ( f == "Movement Lock to Control Point" )

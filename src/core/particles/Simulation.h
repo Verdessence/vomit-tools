@@ -188,12 +188,17 @@ public:
 	[[nodiscard]] CVec3 SetterOrigin( const CCompiledOperator &op ) const;
 	// A model standing on a control point, as the game's effects stand on players and props:
 	// Position on Model Random puts particles in its hitboxes and Movement Lock to Bone keeps them
-	// there. It stays in its reference pose, facing +X.
+	// there. It stays in its reference pose, turned by its angles.
 	void SetModel( std::shared_ptr<const model::CModel> pModel, int nControlPoint );
 	[[nodiscard]] const model::CModel *GetModel() const { return m_pModel.get(); }
+	[[nodiscard]] int GetModelControlPoint() const { return m_nModelPoint; }
+	// Pitch, yaw and roll in degrees; what is locked to the model turns with it on the next step.
+	void SetModelAngles( std::array<float, 3> angles ) { m_ModelAngles = angles; }
+	[[nodiscard]] const std::array<float, 3> &GetModelAngles() const { return m_ModelAngles; }
+	// Model space to the world: turned by its angles, standing on its control point.
+	[[nodiscard]] model::CTransform ModelToWorld() const;
 	// Where the viewer is (the camera), which stands in for the player.
 	void SetViewer( CVec3 vecPosition ) { m_vecViewer = vecPosition; }
-	[[nodiscard]] int GetModelControlPoint() const { return m_nModelPoint; }
 	// The control points an instance takes from the shared ones (those its parent doesn't set).
 	[[nodiscard]] std::vector<int> GetSharedControlPoints( const Instance_t &instance ) const;
 	// Advances by seconds, in steps of STEP (the remainder carries over to the next call).
@@ -236,6 +241,8 @@ private:
 	Instance_t m_Root;
 	std::shared_ptr<const model::CModel> m_pModel;
 	int m_nModelPoint = 0;
+	std::array<float, 3> m_ModelAngles{};
+	std::array<float, 3> m_PreviousModelAngles{}; // a step ago, for what is locked to it
 	CVec3 m_vecViewer{ -200, 0, 60 };
 	const Instance_t *m_pCurrent = nullptr; // being stepped
 	const Instance_t *m_pParent = nullptr;  // its parent

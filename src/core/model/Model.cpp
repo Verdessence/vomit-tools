@@ -168,6 +168,25 @@ CTransform CTransform::Translation( CVec3 vecOffset )
 }
 
 //-----------------------------------------------------------------------------
+// Purpose: Roll around X, then pitch around Y, then yaw around Z: the model's +X ends up facing
+//          the way the angles look.
+//-----------------------------------------------------------------------------
+CTransform CTransform::Rotation( float flPitch, float flYaw, float flRoll )
+{
+	constexpr float DEGREES = 3.14159265358979f / 180.0f;
+	const float cp = std::cos( flPitch * DEGREES ), sp = std::sin( flPitch * DEGREES );
+	const float cy = std::cos( flYaw * DEGREES ), sy = std::sin( flYaw * DEGREES );
+	const float cr = std::cos( flRoll * DEGREES ), sr = std::sin( flRoll * DEGREES );
+	CTransform yaw;
+	yaw.m_Values = { cy, -sy, 0, 0, sy, cy, 0, 0, 0, 0, 1, 0 };
+	CTransform pitch;
+	pitch.m_Values = { cp, 0, sp, 0, 0, 1, 0, 0, -sp, 0, cp, 0 };
+	CTransform roll;
+	roll.m_Values = { 1, 0, 0, 0, 0, cr, -sr, 0, 0, sr, cr, 0 };
+	return yaw * pitch * roll;
+}
+
+//-----------------------------------------------------------------------------
 // Purpose:
 //-----------------------------------------------------------------------------
 CVec3 CTransform::Rotate( CVec3 v ) const
