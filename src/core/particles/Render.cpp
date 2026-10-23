@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cmath>
+#include <limits>
 #include <cstring>
 #include <numbers>
 #include <thread>
@@ -189,7 +190,7 @@ std::array<float, 4> Sample( const texture::CImage &image, float x, float y )
 //-----------------------------------------------------------------------------
 // Purpose:
 //-----------------------------------------------------------------------------
-void Fill( const CQuad &quad, std::vector<float> &buffer, int nWidth, int nRowStart, int nRowEnd )
+void Fill( const CQuad &quad, std::vector<float> &buffer, const std::vector<float> &depth, int nWidth, int nRowStart, int nRowEnd )
 {
 	const int nY0 = std::max( quad.m_nMinY, nRowStart );
 	const int nY1 = std::min( quad.m_nMaxY, nRowEnd - 1 );
@@ -201,6 +202,11 @@ void Fill( const CQuad &quad, std::vector<float> &buffer, int nWidth, int nRowSt
 		const double flPy = static_cast<double>( y ) + 0.5;
 		for ( int x = quad.m_nMinX; x <= quad.m_nMaxX; x++ )
 		{
+			// Behind the model (when there is one, depth holds how far it is at each pixel).
+			if ( !depth.empty() && quad.m_flDepth > depth[ static_cast<std::size_t>( y ) * static_cast<std::size_t>( nWidth ) + static_cast<std::size_t>( x ) ] )
+			{
+				continue;
+			}
 			const double flPx = static_cast<double>( x ) + 0.5;
 			const double w = m[ 6 ] * flPx + m[ 7 ] * flPy + m[ 8 ];
 			if ( w == 0.0 )
@@ -230,6 +236,80 @@ void Fill( const CQuad &quad, std::vector<float> &buffer, int nWidth, int nRowSt
 				else
 				{
 					pOut[ c ] = pOut[ c ] * ( 1.0f - flAlpha ) + flSrc * flAlpha + flSrc * quad.m_flAddSelf * flAlpha;
+				}
+			}
+		}
+	}
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: A model's triangles into the colour and depth buffers, for the rows of one band:
+//          nearest wins, textures follow the perspective and repeat, the mip picked by how many
+//          texels a triangle squeezes into each pixel.
+//-----------------------------------------------------------------------------
+void FillMesh( const ScreenMesh_t &mesh, std::vector<float> &buffer, std::vector<float> &depth, int nWidth, int nHeight, int nRowStart, int nRowEnd )
+{
+	for ( std::size_t t = 0; t + 2 < mesh.m_Vertices.size(); t += 3 )
+	{
+		const ScreenVertex_t &a = mesh.m_Vertices[ t ];
+		const ScreenVertex_t &b = mesh.m_Vertices[ t + 1 ];
+		const ScreenVertex_t &c = mesh.m_Vertices[ t + 2 ];
+		const float flArea = ( b.m_vecPosition[ 0 ] - a.m_vecPosition[ 0 ] ) * ( c.m_vecPosition[ 1 ] - a.m_vecPosition[ 1 ] ) - ( b.m_vecPosition[ 1 ] - a.m_vecPosition[ 1 ] ) * ( c.m_vecPosition[ 0 ] - a.m_vecPosition[ 0 ] );
+		if ( std::abs( flArea ) < 1e-6f )
+		{
+			continue;
+		}
+		const int nY0 = std::max( { nRowStart, 0, static_cast<int>( std::floor( std::min( { a.m_vecPosition[ 1 ], b.m_vecPosition[ 1 ], c.m_vecPosition[ 1 ] } ) ) ) } );
+		const int nY1 = std::min( { nRowEnd - 1, nHeight - 1, static_cast<int>( std::ceil( std::max( { a.m_vecPosition[ 1 ], b.m_vecPosition[ 1 ], c.m_vecPosition[ 1 ] } ) ) ) } );
+		const int nX0 = std::max( 0, static_cast<int>( std::floor( std::min( { a.m_vecPosition[ 0 ], b.m_vecPosition[ 0 ], c.m_vecPosition[ 0 ] } ) ) ) );
+		const int nX1 = std::min( nWidth - 1, static_cast<int>( std::ceil( std::max( { a.m_vecPosition[ 0 ], b.m_vecPosition[ 0 ], c.m_vecPosition[ 0 ] } ) ) ) );
+		if ( nY0 > nY1 || nX0 > nX1 )
+		{
+			continue;
+		}
+		const texture::CImage *pImage = nullptr;
+		if ( mesh.m_pSprite && !mesh.m_pSprite->m_Mips.empty() )
+		{
+			const auto &base = mesh.m_pSprite->m_Mips.front();
+			const float flUvArea = std::abs( ( b.m_Uv[ 0 ] - a.m_Uv[ 0 ] ) * ( c.m_Uv[ 1 ] - a.m_Uv[ 1 ] ) - ( b.m_Uv[ 1 ] - a.m_Uv[ 1 ] ) * ( c.m_Uv[ 0 ] - a.m_Uv[ 0 ] ) ) * static_cast<float>( base.m_nWidth ) * static_cast<float>( base.m_nHeight );
+			const int nLevel = std::clamp( static_cast<int>( std::floor( 0.5f * std::log2( std::max( 1.0f, flUvArea / std::abs( flArea ) ) ) ) ), 0, static_cast<int>( mesh.m_pSprite->m_Mips.size() ) - 1 );
+			pImage = &mesh.m_pSprite->m_Mips[ static_cast<std::size_t>( nLevel ) ];
+		}
+		// Interpolated across the screen: 1/depth, and everything else over depth.
+		const float flInvA = 1.0f / a.m_vecPosition[ 2 ], flInvB = 1.0f / b.m_vecPosition[ 2 ], flInvC = 1.0f / c.m_vecPosition[ 2 ];
+		for ( int y = nY0; y <= nY1; y++ )
+		{
+			const float flPy = static_cast<float>( y ) + 0.5f;
+			for ( int x = nX0; x <= nX1; x++ )
+			{
+				const float flPx = static_cast<float>( x ) + 0.5f;
+				const float w0 = ( ( b.m_vecPosition[ 0 ] - flPx ) * ( c.m_vecPosition[ 1 ] - flPy ) - ( b.m_vecPosition[ 1 ] - flPy ) * ( c.m_vecPosition[ 0 ] - flPx ) ) / flArea;
+				const float w1 = ( ( c.m_vecPosition[ 0 ] - flPx ) * ( a.m_vecPosition[ 1 ] - flPy ) - ( c.m_vecPosition[ 1 ] - flPy ) * ( a.m_vecPosition[ 0 ] - flPx ) ) / flArea;
+				const float w2 = 1.0f - w0 - w1;
+				if ( w0 < 0.0f || w1 < 0.0f || w2 < 0.0f )
+				{
+					continue;
+				}
+				const float flInv = w0 * flInvA + w1 * flInvB + w2 * flInvC;
+				const float flDepth = 1.0f / flInv;
+				float &flNearest = depth[ static_cast<std::size_t>( y ) * static_cast<std::size_t>( nWidth ) + static_cast<std::size_t>( x ) ];
+				if ( flDepth >= flNearest )
+				{
+					continue;
+				}
+				flNearest = flDepth;
+				const auto mix = [ & ]( float fa, float fb, float fc ) { return ( w0 * fa * flInvA + w1 * fb * flInvB + w2 * fc * flInvC ) / flInv; };
+				std::array<float, 4> texel{ 0.6f, 0.6f, 0.6f, 1.0f };
+				if ( pImage )
+				{
+					const float u = mix( a.m_Uv[ 0 ], b.m_Uv[ 0 ], c.m_Uv[ 0 ] );
+					const float v = mix( a.m_Uv[ 1 ], b.m_Uv[ 1 ], c.m_Uv[ 1 ] );
+					texel = Sample( *pImage, u - std::floor( u ), v - std::floor( v ) );
+				}
+				float *pOut = buffer.data() + ( static_cast<std::size_t>( y ) * static_cast<std::size_t>( nWidth ) + static_cast<std::size_t>( x ) ) * 3;
+				for ( std::size_t k = 0; k < 3; k++ )
+				{
+					pOut[ k ] = texel[ k ] * mix( a.m_vecColor[ k ], b.m_vecColor[ k ], c.m_vecColor[ k ] );
 				}
 			}
 		}
@@ -688,6 +768,15 @@ CCamera Framed( const CSimulation &simulation, CCamera camera, float flSeconds )
 	{
 		return camera;
 	}
+	// The model the effect stands on is part of the picture too.
+	if ( const model::CModel *pModel = copy.GetModel() )
+	{
+		const CVec3 vecOrigin = copy.ControlPoint( copy.GetModelControlPoint() );
+		const CVec3 vecLow = vecOrigin + pModel->m_vecMin;
+		const CVec3 vecHigh = vecOrigin + pModel->m_vecMax;
+		a = { std::min( a.m_flX, vecLow.m_flX ), std::min( a.m_flY, vecLow.m_flY ), std::min( a.m_flZ, vecLow.m_flZ ) };
+		b = { std::max( b.m_flX, vecHigh.m_flX ), std::max( b.m_flY, vecHigh.m_flY ), std::max( b.m_flZ, vecHigh.m_flZ ) };
+	}
 	camera.m_vecTarget = ( a + b ) * 0.5f;
 	const float flExtent = std::max( 16.0f, Length( b - a ) );
 	camera.m_flDistance = std::clamp( flExtent * 0.5f / std::tan( camera.m_flFov * 0.5f * DEGREES ), 24.0f, 20000.0f );
@@ -853,6 +942,55 @@ std::vector<ScreenQuad_t> Layout( const CSimulation &simulation, const CCamera &
 }
 
 //-----------------------------------------------------------------------------
+// Purpose: The simulation's model on the screen, a mesh per texture, lit from over the camera's
+//          shoulder with some light all round so the far side isn't black.
+//-----------------------------------------------------------------------------
+std::vector<ScreenMesh_t> LayoutModel( const CSimulation &simulation, const CCamera &camera, const ModelSpriteLookup_t &pfnSprites )
+{
+	std::vector<ScreenMesh_t> meshes;
+	const model::CModel *pModel = simulation.GetModel();
+	if ( !pModel )
+	{
+		return meshes;
+	}
+	const CVec3 vecOrigin = simulation.ControlPoint( simulation.GetModelControlPoint() );
+	const CVec3 vecForward = camera.GetForward();
+	const CVec3 vecRight = Normalized( Cross( vecForward, { 0, 0, 1 } ) );
+	const CVec3 vecLight = Normalized( -vecForward + CVec3{ 0, 0, 0.8f } - vecRight * 0.4f );
+	std::vector<std::optional<ScreenVertex_t>> projected( pModel->m_Vertices.size() );
+	for ( std::size_t i = 0; i < pModel->m_Vertices.size(); i++ )
+	{
+		const model::Vertex_t &vertex = pModel->m_Vertices[ i ];
+		if ( const auto at = camera.Project( vecOrigin + vertex.m_vecPosition ) )
+		{
+			const float flLight = 0.5f + 0.7f * std::max( 0.0f, Dot( Normalized( vertex.m_vecNormal ), vecLight ) );
+			projected[ i ] = ScreenVertex_t{ *at, vertex.m_Uv, { flLight, flLight, flLight } };
+		}
+	}
+	for ( const model::Mesh_t &mesh : pModel->m_Meshes )
+	{
+		const Sprite_t *pSprite = mesh.m_nMaterial >= 0 && pfnSprites ? pfnSprites( static_cast<std::size_t>( mesh.m_nMaterial ) ) : nullptr;
+		auto found = std::ranges::find( meshes, pSprite, &ScreenMesh_t::m_pSprite );
+		if ( found == meshes.end() )
+		{
+			meshes.push_back( { pSprite, {} } );
+			found = meshes.end() - 1;
+		}
+		for ( std::size_t t = 0; t + 2 < mesh.m_Indices.size(); t += 3 )
+		{
+			const auto &a = projected[ mesh.m_Indices[ t ] ];
+			const auto &b = projected[ mesh.m_Indices[ t + 1 ] ];
+			const auto &c = projected[ mesh.m_Indices[ t + 2 ] ];
+			if ( a && b && c )
+			{
+				found->m_Vertices.insert( found->m_Vertices.end(), { *a, *b, *c } );
+			}
+		}
+	}
+	return meshes;
+}
+
+//-----------------------------------------------------------------------------
 // Purpose: The ground grid, as thin quads.
 //-----------------------------------------------------------------------------
 std::vector<ScreenQuad_t> GridQuads( const CCamera &camera )
@@ -897,6 +1035,14 @@ void Render( const CSimulation &simulation, const CCamera &camera, const SpriteL
 		DrawGrid( camera, buffer );
 	}
 
+	// The model, if any, first: it fills the depth the particles are tested against.
+	const std::vector<ScreenMesh_t> meshes = LayoutModel( simulation, camera, options.m_pfnModelSprites );
+	std::vector<float> depth;
+	if ( !meshes.empty() )
+	{
+		depth.assign( static_cast<std::size_t>( nWidth ) * static_cast<std::size_t>( nHeight ), std::numeric_limits<float>::infinity() );
+	}
+
 	std::vector<CQuad> quads;
 	for ( const ScreenQuad_t &shape : Layout( simulation, camera, pfnSprites ) )
 	{
@@ -932,11 +1078,15 @@ void Render( const CSimulation &simulation, const CCamera &camera, const SpriteL
 			break;
 		}
 		workers.emplace_back( [ &, nStart, nEnd ] {
+			for ( const ScreenMesh_t &mesh : meshes )
+			{
+				FillMesh( mesh, buffer, depth, nWidth, nHeight, nStart, nEnd );
+			}
 			for ( const CQuad &quad : quads )
 			{
 				if ( quad.m_nMaxY >= nStart && quad.m_nMinY < nEnd )
 				{
-					Fill( quad, buffer, nWidth, nStart, nEnd );
+					Fill( quad, buffer, depth, nWidth, nStart, nEnd );
 				}
 			}
 		} );

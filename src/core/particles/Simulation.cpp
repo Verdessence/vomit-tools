@@ -249,6 +249,7 @@ const std::set<std::pair<Category_t, std::string_view>> &SimulatedFunctions()
 		{ Category_t::CATEGORY_INITIALIZERS, "Position In CP Hierarchy" },
 		{ Category_t::CATEGORY_INITIALIZERS, "Position From Parent Particles" },
 		{ Category_t::CATEGORY_INITIALIZERS, "Position Modify Warp Random" },
+		{ Category_t::CATEGORY_INITIALIZERS, "Position on Model Random" },
 		{ Category_t::CATEGORY_OPERATORS, "Lifespan Decay" },
 		{ Category_t::CATEGORY_OPERATORS, "Movement Basic" },
 		{ Category_t::CATEGORY_OPERATORS, "Alpha Fade In Random" },
@@ -269,6 +270,7 @@ const std::set<std::pair<Category_t, std::string_view>> &SimulatedFunctions()
 		{ Category_t::CATEGORY_OPERATORS, "Set Control Point Positions" },
 		{ Category_t::CATEGORY_OPERATORS, "Set child control points from particle positions" },
 		{ Category_t::CATEGORY_OPERATORS, "oscillating_movement" },
+		{ Category_t::CATEGORY_OPERATORS, "Movement Lock to Bone" },
 		{ Category_t::CATEGORY_RENDERERS, "render_animated_sprites" },
 		{ Category_t::CATEGORY_RENDERERS, "render_sprite_trail" },
 		{ Category_t::CATEGORY_RENDERERS, "render_rope" },
@@ -445,6 +447,10 @@ std::string_view PreviewNote( Category_t nCategory, std::string_view szFunction 
 	{
 		return "The preview has no map: particles hit only the floor under the grid";
 	}
+	if ( ( nCategory == Category_t::CATEGORY_INITIALIZERS && szFunction == "Position on Model Random" ) || ( nCategory == Category_t::CATEGORY_OPERATORS && szFunction == "Movement Lock to Bone" ) )
+	{
+		return "Needs a model on its control point (Model, under the preview); the model stands still in its reference pose";
+	}
 	if ( nCategory == Category_t::CATEGORY_OPERATORS && szFunction == "Set child control points from particle positions" )
 	{
 		return "Sets the points of every child system; the group ID isn't used";
@@ -604,6 +610,15 @@ void CSimulation::SetControlPoint( int nIndex, CVec3 vecPosition )
 CVec3 CSimulation::ControlPoint( int nIndex ) const
 {
 	return nIndex >= 0 && nIndex < CONTROL_POINTS ? m_ControlPoints[ static_cast<std::size_t>( nIndex ) ] : CVec3{};
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: A model standing on a control point.
+//-----------------------------------------------------------------------------
+void CSimulation::SetModel( std::shared_ptr<const model::CModel> pModel, int nControlPoint )
+{
+	m_pModel = std::move( pModel );
+	m_nModelPoint = std::clamp( nControlPoint, 0, CONTROL_POINTS - 1 );
 }
 
 //-----------------------------------------------------------------------------
@@ -1109,6 +1124,45 @@ void CSimulation::Initialize( Instance_t &instance, Particle_t &p, const CCompil
 		p.m_vecPosition = parent.m_vecPosition;
 		p.m_vecVelocity += parent.m_vecVelocity * op.Number( "Inherited Velocity Scale" );
 	}
+	else if ( f == "Position on Model Random" )
+	{
+		// In one of the model's hitboxes, picked at random; between 1 - scale and scale of the box
+		// each way (so 0 and 1 both cover all of it). With a direction bias, the best of several
+		// tries: a random score plus how far the point lies along the bias. Without a model there,
+		// at the control point.
+		const int nPoint = op.Integer( "control_point_number" );
+		const CVec3 vecBase = Point( nPoint );
+		if ( !m_pModel || nPoint != m_nModelPoint || m_pModel->m_Hitboxes.empty() )
+		{
+			p.m_vecPosition = vecBase;
+			return;
+		}
+		const float flScale = op.Number( "hitbox scale", 1.0f );
+		const CVec3 vecBias = op.Vector( "direction bias" );
+		int nTries = std::max( 0, op.Integer( "force to be inside model" ) );
+		if ( Dot( vecBias, vecBias ) > 1e-8f )
+		{
+			nTries = std::max( nTries, 5 );
+		}
+		nTries = std::min( nTries, 16 );
+		const std::size_t nBoxes = m_pModel->m_Hitboxes.size();
+		float flBest = -1e30f;
+		for ( int nTry = 0; nTry <= nTries; nTry++ )
+		{
+			const auto nSalt = static_cast<std::uint32_t>( 10 + nTry * 5 );
+			const std::size_t nBox = std::min( nBoxes - 1, static_cast<std::size_t>( r( nSalt ) * static_cast<float>( nBoxes ) ) );
+			const CVec3 vecUvw{ Lerp( 1.0f - flScale, flScale, r( nSalt + 1 ) ), Lerp( 1.0f - flScale, flScale, r( nSalt + 2 ) ), Lerp( 1.0f - flScale, flScale, r( nSalt + 3 ) ) };
+			const CVec3 vecAt = vecBase + m_pModel->HitboxPoint( nBox, vecUvw );
+			const float flGoodness = r( nSalt + 4 ) * 72.0f + Dot( vecAt - vecBase, vecBias );
+			if ( flGoodness > flBest )
+			{
+				flBest = flGoodness;
+				p.m_vecPosition = vecAt;
+				p.m_nHitbox = static_cast<int>( nBox );
+				p.m_vecHitboxUvw = vecUvw;
+			}
+		}
+	}
 	else if ( f == "Velocity Random" )
 	{
 		// A speed in a random direction, plus a random vector.
@@ -1573,6 +1627,32 @@ void CSimulation::Operate( Instance_t &instance, const CCompiledOperator &op, st
 					p.m_vecVelocity -= vecNormal * flInto;
 				}
 			}
+		}
+	}
+	if ( f == "Movement Lock to Bone" )
+	{
+		// The model doesn't animate, so its bones move only as its control point does; particles
+		// put in a hitbox go along, letting go between the fade start and end (shares of life).
+		const int nPoint = op.Integer( "control_point_number" );
+		if ( !m_pModel || nPoint != m_nModelPoint )
+		{
+			return;
+		}
+		const CVec3 vecMoved = Point( nPoint ) - PreviousPoint( nPoint );
+		const float flStart = op.Number( "lifetime fade start" );
+		const float flEnd = op.Number( "lifetime fade end" );
+		for ( Particle_t &p : particles )
+		{
+			if ( p.m_nHitbox < 0 )
+			{
+				continue;
+			}
+			float flHold = 1.0f;
+			if ( flStart > 0.0f || flEnd > 0.0f )
+			{
+				flHold = flEnd > flStart ? 1.0f - Clamp01( ( life( p ) - flStart ) / ( flEnd - flStart ) ) : ( life( p ) < flStart ? 1.0f : 0.0f );
+			}
+			p.m_vecPosition += vecMoved * flHold;
 		}
 	}
 	if ( f == "Movement Lock to Control Point" )

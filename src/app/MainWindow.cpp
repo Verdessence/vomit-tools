@@ -1548,6 +1548,10 @@ const ParticleGame_t &CMainWindow::ParticleGame()
 			{
 				game.m_Materials << QString::fromStdString( path.substr( 10 ) );
 			}
+			else if ( path.starts_with( "models/" ) && path.ends_with( ".mdl" ) )
+			{
+				game.m_Models << QString::fromStdString( path );
+			}
 		}
 		QApplication::restoreOverrideCursor();
 	}

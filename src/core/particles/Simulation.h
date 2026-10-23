@@ -21,6 +21,7 @@
 #include <vector>
 
 #include "dmx/Dmx.h"
+#include "model/Model.h"
 #include "particles/Particles.h"
 #include "util/Vec3.h"
 
@@ -115,6 +116,8 @@ struct Particle_t
 	float m_flCreationTime = 0.0f;
 	std::uint32_t m_nId = 0;
 	bool m_bAlive = true;
+	int m_nHitbox = -1;   // the model's hitbox it was put in, for Movement Lock to Bone
+	CVec3 m_vecHitboxUvw; // where in that hitbox's box (0-1 each way)
 };
 
 class CSimulation
@@ -166,6 +169,12 @@ public:
 	[[nodiscard]] std::optional<ControlPointSetter_t> FindSpareSetter() const;
 	// Where a "Set Control Point Positions" operator measures its locations from.
 	[[nodiscard]] CVec3 SetterOrigin( const CCompiledOperator &op ) const;
+	// A model standing on a control point, as the game's effects stand on players and props:
+	// Position on Model Random puts particles in its hitboxes and Movement Lock to Bone keeps them
+	// there. It stays in its reference pose, facing +X.
+	void SetModel( std::shared_ptr<const model::CModel> pModel, int nControlPoint );
+	[[nodiscard]] const model::CModel *GetModel() const { return m_pModel.get(); }
+	[[nodiscard]] int GetModelControlPoint() const { return m_nModelPoint; }
 	// The control points an instance takes from the shared ones (those its parent doesn't set).
 	[[nodiscard]] std::vector<int> GetSharedControlPoints( const Instance_t &instance ) const;
 	// Advances by seconds, in steps of STEP (the remainder carries over to the next call).
@@ -203,6 +212,8 @@ private:
 	std::array<CVec3, CONTROL_POINTS> m_PreviousControlPoints{}; // a step ago, for what follows them
 	std::array<std::optional<CVec3>, CONTROL_POINTS> m_HeldControlPoints{};
 	Instance_t m_Root;
+	std::shared_ptr<const model::CModel> m_pModel;
+	int m_nModelPoint = 0;
 	const Instance_t *m_pCurrent = nullptr; // being stepped
 	const Instance_t *m_pParent = nullptr;  // its parent
 };

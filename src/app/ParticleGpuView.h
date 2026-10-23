@@ -32,8 +32,10 @@ class CParticleGpuView : public QRhiWidget
 	Q_OBJECT
 
 public:
-	// Fills quads (grid first, then particles) for a picture of width x height device pixels.
-	using Source_t = std::function<void( int nWidth, int nHeight, std::vector<xv::particles::ScreenQuad_t> &quads, std::array<float, 3> &vecBackground )>;
+	// Fills quads (grid first, then particles) and a model's triangles for a picture of width x
+	// height device pixels. The model is drawn first; what it hides isn't drawn over it.
+	using Source_t = std::function<void( int nWidth, int nHeight, std::vector<xv::particles::ScreenQuad_t> &quads, std::vector<xv::particles::ScreenMesh_t> &meshes,
+		std::array<float, 3> &vecBackground )>;
 
 	explicit CParticleGpuView( Source_t pfnSource, QWidget *pParent = nullptr );
 	~CParticleGpuView() override;
@@ -52,19 +54,31 @@ private:
 		std::unique_ptr<QRhiTexture> m_pTexture;
 		std::unique_ptr<QRhiShaderResourceBindings> m_pBindings;
 	};
-	Texture_t &TextureFor( const xv::particles::Sprite_t *pSprite, QRhiResourceUpdateBatch *pUpdates );
-	std::unique_ptr<QRhiGraphicsPipeline> MakePipeline( bool bAdditive );
+	// Particle textures clamp at their edges; a model's (bRepeat) tile.
+	Texture_t &TextureFor( const xv::particles::Sprite_t *pSprite, QRhiResourceUpdateBatch *pUpdates, bool bRepeat = false );
+	enum class Pipeline_t
+	{
+		PIPELINE_BLENDED,
+		PIPELINE_ADDED,
+		PIPELINE_SOLID // the model: opaque, and nearest wins
+	};
+	std::unique_ptr<QRhiGraphicsPipeline> MakePipeline( Pipeline_t nKind );
 
 	Source_t m_pfnSource;
 	QRhi *m_pRhi = nullptr;
 	std::unique_ptr<QRhiBuffer> m_pVertices;
 	std::unique_ptr<QRhiBuffer> m_pIndices;
+	std::unique_ptr<QRhiBuffer> m_pModelVertices;
 	std::unique_ptr<QRhiBuffer> m_pUniforms;
 	std::unique_ptr<QRhiSampler> m_pSampler;
+	std::unique_ptr<QRhiSampler> m_pRepeatSampler;
+	std::unique_ptr<QRhiGraphicsPipeline> m_pSolid;
 	std::unique_ptr<QRhiGraphicsPipeline> m_pBlended;
 	std::unique_ptr<QRhiGraphicsPipeline> m_pAdded;
 	Texture_t m_White; // for grid lines; its bindings also describe the pipelines' layout
 	std::map<const xv::particles::Sprite_t *, Texture_t> m_Textures;
+	std::map<const xv::particles::Sprite_t *, Texture_t> m_ModelTextures;
+	Texture_t m_ModelWhite; // for a model mesh without a texture
 	quint32 m_nVertexCapacity = 0; // in quads
 	quint32 m_nIndexCapacity = 0;
 };

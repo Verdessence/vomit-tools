@@ -6,6 +6,8 @@
 //===========================================================================//
 #include "ParticlePreview.h"
 
+#include "MenuPicker.h"
+
 #ifdef VOMIT_TOOLS_GPU_PREVIEW
 #include "ParticleGpuView.h"
 #endif
@@ -20,6 +22,9 @@
 #include <QCheckBox>
 #include <QComboBox>
 #include <QGuiApplication>
+#include <QMessageBox>
+#include <QMenu>
+#include <QFileInfo>
 #include <QSettings>
 #include <QHBoxLayout>
 #include <QLabel>
@@ -329,6 +334,15 @@ CParticlePreview::CParticlePreview( QWidget *pParent )
 		SetUseGpu( bOn );
 		QSettings{}.setValue( GPU_KEY, bOn );
 	} );
+	m_pModelButton = new QToolButton;
+	m_pModelButton->setObjectName( QStringLiteral( "particleModel" ) );
+	m_pModelButton->setText( tr( "Model" ) );
+	m_pModelButton->setToolTip( tr( "A model standing on a control point, for effects made for players and props: "
+									"Position on Model Random puts particles in its hitboxes" ) );
+	m_pModelButton->setPopupMode( QToolButton::InstantPopup );
+	auto *pModelMenu = new QMenu( m_pModelButton );
+	connect( pModelMenu, &QMenu::aboutToShow, this, [ this, pModelMenu ] { FillModelMenu( pModelMenu ); } );
+	m_pModelButton->setMenu( pModelMenu );
 	auto *pResetPoints = new QToolButton;
 	pResetPoints->setText( tr( "Reset CPs" ) );
 	pResetPoints->setToolTip( tr( "Put the control points the file doesn't place (CP0 among them) back where they started. "
@@ -350,6 +364,7 @@ CParticlePreview::CParticlePreview( QWidget *pParent )
 	pBar->addWidget( m_pBounds );
 	pBar->addWidget( m_pGpuBox );
 	pBar->addStretch();
+	pBar->addWidget( m_pModelButton );
 	pBar->addWidget( pFrame );
 	pBar->addWidget( pResetPoints );
 
@@ -387,7 +402,7 @@ void CParticlePreview::SetUseGpu( bool bOn )
 #ifdef VOMIT_TOOLS_GPU_PREVIEW
 	if ( bOn )
 	{
-		auto *pView = new CParticleGpuView( [ this ]( int nWidth, int nHeight, std::vector<particles::ScreenQuad_t> &quads, std::array<float, 3> & ) {
+		auto *pView = new CParticleGpuView( [ this ]( int nWidth, int nHeight, std::vector<particles::ScreenQuad_t> &quads, std::vector<particles::ScreenMesh_t> &meshes, std::array<float, 3> & ) {
 			if ( !m_pSimulation )
 			{
 				return;
@@ -405,6 +420,7 @@ void CParticlePreview::SetUseGpu( bool bOn )
 			}
 			const auto drawn = particles::Layout( *m_pSimulation, camera, [ this ]( std::size_t i ) { return Sprite( i ); } );
 			quads.insert( quads.end(), drawn.begin(), drawn.end() );
+			meshes = particles::LayoutModel( *m_pSimulation, camera, [ this ]( std::size_t i ) { return ModelSprite( i ); } );
 		},
 			m_pCanvas );
 		pView->setAttribute( Qt::WA_TransparentForMouseEvents );
@@ -463,6 +479,7 @@ void CParticlePreview::SetReader( particles::FileReader_t pfnReader )
 	}
 #endif
 	m_SpriteCache.clear();
+	m_ModelSprites.clear();
 	m_Sprites.assign( m_pLibrary ? m_pLibrary->m_Definitions.size() : 0, nullptr );
 	Redraw();
 }
@@ -519,6 +536,7 @@ void CParticlePreview::Rebuild( bool bKeepTime )
 			{
 				m_pSimulation->SetControlPoint( i, m_ControlPoints[ static_cast<std::size_t>( i ) ] );
 			}
+			m_pSimulation->SetModel( m_pModel, m_nModelPoint );
 			if ( m_Drag.m_nIndex >= 0 && m_Drag.m_bInFile && m_Drag.m_bMoved )
 			{
 				// Still being dragged, or let go and not back from the file yet.
@@ -602,6 +620,10 @@ void CParticlePreview::MoveControlPoint( int nIndex, CVec3 vecPosition )
 	{
 		m_pSimulation->SetControlPoint( nIndex, vecPosition );
 	}
+	if ( m_pModel && nIndex == m_nModelPoint )
+	{
+		FollowModel();
+	}
 	Redraw();
 }
 
@@ -655,6 +677,7 @@ void CParticlePreview::BeginDrag( int nIndex, bool bViewOnly )
 	}
 	m_Drag.m_nIndex = nIndex;
 	m_Drag.m_Before = m_ControlPoints;
+	m_Attached.erase( nIndex ); // moved by hand: off its attachment
 	const auto setter = m_pSimulation->FindControlPointSetter( nIndex );
 	m_Drag.m_bInFile = m_pfnPlace && ( setter || ( nIndex > 0 && !bViewOnly ) );
 	if ( !m_Drag.m_bInFile )
@@ -828,7 +851,8 @@ QImage CParticlePreview::Frame()
 	xv::texture::CImage out;
 	if ( m_pSimulation )
 	{
-		particles::Render( *m_pSimulation, camera, [ this ]( std::size_t i ) { return Sprite( i ); }, out, { .m_bGrid = m_pGrid->isChecked() } );
+		particles::Render( *m_pSimulation, camera, [ this ]( std::size_t i ) { return Sprite( i ); }, out,
+			{ .m_bGrid = m_pGrid->isChecked(), .m_pfnModelSprites = [ this ]( std::size_t i ) { return ModelSprite( i ); } } );
 	}
 	else
 	{
@@ -869,7 +893,7 @@ QImage CParticlePreview::Thumbnail( const std::string &szName, int nSize )
 	camera.m_nWidth = nSize;
 	camera.m_nHeight = nSize;
 	xv::texture::CImage out;
-	particles::Render( simulation, camera, [ this ]( std::size_t i ) { return Sprite( i ); }, out, { .m_bGrid = false } );
+	particles::Render( simulation, camera, [ this ]( std::size_t i ) { return Sprite( i ); }, out, { .m_bGrid = false, .m_pfnModelSprites = {} } );
 	return QImage( out.m_Pixels.data(), out.m_nWidth, out.m_nHeight, out.m_nWidth * 4, QImage::Format_RGBA8888 ).copy();
 }
 
@@ -917,6 +941,21 @@ void CParticlePreview::PaintOverlays( QPainter &painter )
 		PaintBounds( painter, camera );
 	}
 	PaintShapes( painter, camera );
+	// The model's attachments, where control points can be put (with Bounds on).
+	if ( m_pModel && m_pBounds->isChecked() )
+	{
+		const CVec3 vecOrigin = m_pSimulation->ControlPoint( m_nModelPoint );
+		painter.setPen( QColor( 170, 230, 170, 200 ) );
+		for ( std::size_t i = 0; i < m_pModel->m_Attachments.size(); i++ )
+		{
+			if ( const auto at = camera.Project( vecOrigin + m_pModel->AttachmentToModel( i ).GetOrigin() ) )
+			{
+				const QPointF p{ ( *at )[ 0 ], ( *at )[ 1 ] };
+				painter.drawEllipse( p, 2.0, 2.0 );
+				painter.drawText( p + QPointF{ 4, 3 }, Qs( m_pModel->m_Attachments[ i ].m_szName ) );
+			}
+		}
+	}
 	// The control points the systems use, as handles.
 	for ( int nIndex : GetUsedControlPoints() )
 	{
@@ -1102,6 +1141,25 @@ void CParticlePreview::PaintShapes( QPainter &painter, const particles::CCamera 
 				painter.setPen( QPen( color, flWidth, Qt::DashLine ) );
 				box( vecCenter + op.Vector( "offset min" ) * flScale, vecCenter + op.Vector( "offset max" ) * flScale );
 			}
+			else if ( op.m_szFunction == "Position on Model Random" && m_pModel && op.Integer( "control_point_number" ) == m_nModelPoint )
+			{
+				// The hitboxes the particles start in, each turned with its bone.
+				const CVec3 vecOrigin = m_pSimulation->ControlPoint( m_nModelPoint );
+				for ( std::size_t nBox = 0; nBox < m_pModel->m_Hitboxes.size(); nBox++ )
+				{
+					const auto corner = [ & ]( int i ) { return vecOrigin + m_pModel->HitboxPoint( nBox, { ( i & 1 ) ? 1.0f : 0.0f, ( i & 2 ) ? 1.0f : 0.0f, ( i & 4 ) ? 1.0f : 0.0f } ); };
+					for ( int a = 0; a < 8; a++ )
+					{
+						for ( int nBit : { 1, 2, 4 } )
+						{
+							if ( !( a & nBit ) )
+							{
+								polyline( { corner( a ), corner( a | nBit ) } );
+							}
+						}
+					}
+				}
+			}
 		}
 	} );
 }
@@ -1178,6 +1236,163 @@ void CParticlePreview::PaintCounts( QPainter &painter )
 }
 
 //-----------------------------------------------------------------------------
+// Purpose: The models the game has, for the Model menu.
+//-----------------------------------------------------------------------------
+void CParticlePreview::SetModelList( QStringList models )
+{
+	m_Models = std::move( models );
+	m_Models.sort( Qt::CaseInsensitive );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Stands a model on a control point; an empty path takes it away.
+//-----------------------------------------------------------------------------
+bool CParticlePreview::SetModel( const QString &szPath, int nControlPoint, QString *pError )
+{
+	std::shared_ptr<const xv::model::CModel> pModel;
+	if ( !szPath.isEmpty() )
+	{
+		std::string szError;
+		auto loaded = m_pfnReader ? xv::model::LoadModel( szPath.toStdString(), m_pfnReader, &szError ) : std::nullopt;
+		if ( !loaded )
+		{
+			if ( pError )
+			{
+				*pError = szError.empty() ? tr( "No game files to read the model from" ) : Qs( szError );
+			}
+			return false;
+		}
+		pModel = std::make_shared<const xv::model::CModel>( std::move( *loaded ) );
+	}
+	m_pModel = std::move( pModel );
+	m_szModelPath = m_pModel ? szPath : QString{};
+	m_nModelPoint = std::clamp( nControlPoint, 0, particles::CSimulation::CONTROL_POINTS - 1 );
+	m_Attached.clear();
+	m_ModelSprites.clear();
+#ifdef VOMIT_TOOLS_GPU_PREVIEW
+	if ( auto *pView = qobject_cast<CParticleGpuView *>( m_pGpu ) )
+	{
+		pView->ForgetTextures();
+	}
+#endif
+	m_pModelButton->setText( m_pModel ? tr( "Model: %1" ).arg( QFileInfo{ m_szModelPath }.completeBaseName() ) : tr( "Model" ) );
+	Rebuild( false );
+	return true;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Puts a control point on one of the model's attachments.
+//-----------------------------------------------------------------------------
+void CParticlePreview::AttachControlPoint( int nIndex, int nAttachment )
+{
+	if ( !m_pModel || nIndex == m_nModelPoint || nIndex < 0 || nIndex >= particles::CSimulation::CONTROL_POINTS || nAttachment < 0 ||
+		static_cast<std::size_t>( nAttachment ) >= m_pModel->m_Attachments.size() )
+	{
+		return;
+	}
+	const ControlPoints_t before = m_ControlPoints;
+	m_Attached[ nIndex ] = nAttachment;
+	FollowModel();
+	if ( before != m_ControlPoints )
+	{
+		emit ControlPointsMoved( before, m_ControlPoints, tr( "Put CP%1 on %2" ).arg( nIndex ).arg( Qs( m_pModel->m_Attachments[ static_cast<std::size_t>( nAttachment ) ].m_szName ) ) );
+	}
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Moves the points on attachments to where their attachments are now.
+//-----------------------------------------------------------------------------
+void CParticlePreview::FollowModel()
+{
+	if ( !m_pModel )
+	{
+		return;
+	}
+	const CVec3 vecOrigin = m_ControlPoints[ static_cast<std::size_t>( m_nModelPoint ) ];
+	for ( const auto &[ nPoint, nAttachment ] : m_Attached )
+	{
+		const CVec3 vecAt = vecOrigin + m_pModel->AttachmentToModel( static_cast<std::size_t>( nAttachment ) ).GetOrigin();
+		m_ControlPoints[ static_cast<std::size_t>( nPoint ) ] = vecAt;
+		if ( m_pSimulation )
+		{
+			m_pSimulation->SetControlPoint( nPoint, vecAt );
+		}
+	}
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: The model's textures, read when first drawn. One that can't be read draws plain grey.
+//-----------------------------------------------------------------------------
+const particles::Sprite_t *CParticlePreview::ModelSprite( std::size_t nMaterial )
+{
+	if ( !m_pModel || nMaterial >= m_pModel->m_Materials.size() )
+	{
+		return nullptr;
+	}
+	auto &pSprite = m_ModelSprites[ nMaterial ];
+	if ( !pSprite )
+	{
+		pSprite = std::make_shared<const particles::Sprite_t>( particles::LoadSprite( m_pModel->m_Materials[ nMaterial ], m_pfnReader ) );
+	}
+	return pSprite->m_szProblem.empty() ? pSprite.get() : nullptr;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: The Model menu: pick one of the game's models, the control point it stands on, and
+//          control points to put on its attachments.
+//-----------------------------------------------------------------------------
+void CParticlePreview::FillModelMenu( QMenu *pMenu )
+{
+	pMenu->clear();
+	QMenu *pChoose = pMenu->addMenu( m_pModel ? tr( "Other Model" ) : tr( "Choose Model" ) );
+	std::vector<PickerItem_t> items;
+	for ( const QString &szPath : std::as_const( m_Models ) )
+	{
+		items.push_back( { szPath, {}, [ this, szPath ] {
+							  QString szError;
+							  if ( !SetModel( szPath, m_nModelPoint, &szError ) )
+							  {
+								  QMessageBox::warning( this, tr( "Model" ), tr( "Could not read %1:\n\n%2" ).arg( szPath, szError ) );
+							  }
+						  } } );
+	}
+	FillPicker( pChoose, std::move( items ), tr( "No models: open a game" ) );
+	if ( !m_pModel )
+	{
+		return;
+	}
+	QMenu *pPoint = pMenu->addMenu( tr( "Stands on" ) );
+	for ( int i = 0; i < particles::CSimulation::CONTROL_POINTS; i++ )
+	{
+		QAction *pAction = pPoint->addAction( QStringLiteral( "CP%1" ).arg( i ), this, [ this, i ] { SetModel( m_szModelPath, i ); } );
+		pAction->setCheckable( true );
+		pAction->setChecked( i == m_nModelPoint );
+	}
+	QMenu *pAttach = pMenu->addMenu( tr( "Put a CP on an Attachment" ) );
+	if ( m_pModel->m_Attachments.empty() )
+	{
+		pAttach->addAction( tr( "This model has no attachments" ) )->setEnabled( false );
+	}
+	for ( std::size_t a = 0; a < m_pModel->m_Attachments.size(); a++ )
+	{
+		QMenu *pTo = pAttach->addMenu( Qs( m_pModel->m_Attachments[ a ].m_szName ) );
+		for ( int i = 0; i < particles::CSimulation::CONTROL_POINTS; i++ )
+		{
+			if ( i == m_nModelPoint )
+			{
+				continue;
+			}
+			const auto found = m_Attached.find( i );
+			QAction *pAction = pTo->addAction( QStringLiteral( "CP%1" ).arg( i ), this, [ this, i, a ] { AttachControlPoint( i, static_cast<int>( a ) ); } );
+			pAction->setCheckable( true );
+			pAction->setChecked( found != m_Attached.end() && found->second == static_cast<int>( a ) );
+		}
+	}
+	pMenu->addSeparator();
+	pMenu->addAction( tr( "Remove Model" ), this, [ this ] { SetModel( {} ); } );
+}
+
+//-----------------------------------------------------------------------------
 // Purpose: Functions in the shown systems that the preview leaves out, and materials it couldn't
 //          load.
 //-----------------------------------------------------------------------------
@@ -1190,12 +1405,17 @@ QStringList CParticlePreview::GetNotes() const
 	}
 	std::set<std::string> functions;
 	std::set<std::string> problems;
+	std::set<int> modelPoints; // where Position on Model Random looks for a model
 	ForEachInstance( m_pSimulation->GetRoot(), [ & ]( const particles::CSimulation::Instance_t &instance ) {
 		for ( const particles::CCompiledOperator &op : instance.m_pDefinition->operators )
 		{
 			if ( !op.m_bSimulated )
 			{
 				functions.insert( op.m_szFunction );
+			}
+			if ( op.m_szFunction == "Position on Model Random" )
+			{
+				modelPoints.insert( op.Integer( "control_point_number" ) );
 			}
 		}
 		const auto nIndex = static_cast<std::size_t>( instance.m_pDefinition - m_pLibrary->m_Definitions.data() );
@@ -1204,6 +1424,17 @@ QStringList CParticlePreview::GetNotes() const
 			problems.insert( m_Sprites[ nIndex ]->m_szProblem );
 		}
 	} );
+	if ( !m_pModel || std::ranges::any_of( modelPoints, [ this ]( int n ) { return n != m_nModelPoint; } ) )
+	{
+		for ( int nPoint : modelPoints )
+		{
+			if ( !m_pModel || nPoint != m_nModelPoint )
+			{
+				notes << tr( "Position on Model Random needs a model on CP%1: choose one under Model" ).arg( nPoint );
+				break;
+			}
+		}
+	}
 	if ( !functions.empty() )
 	{
 		QStringList names;

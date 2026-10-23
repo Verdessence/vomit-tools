@@ -96,9 +96,13 @@ struct CCamera
 // its current direction. Falls back to the system's bounding box when nothing appears.
 [[nodiscard]] CCamera Framed( const CSimulation &simulation, CCamera camera, float flSeconds = 1.5f );
 
+// A model's textures, by its material index.
+using ModelSpriteLookup_t = std::function<const Sprite_t *( std::size_t nMaterial )>;
+
 struct RenderOptions_t
 {
 	bool m_bGrid = true;
+	ModelSpriteLookup_t m_pfnModelSprites; // unset: the model is drawn plain grey
 	std::array<float, 3> m_vecBackground{ 0.13f, 0.14f, 0.15f };
 };
 
@@ -124,6 +128,23 @@ struct ScreenQuad_t
 [[nodiscard]] std::vector<ScreenQuad_t> Layout( const CSimulation &simulation, const CCamera &camera, const SpriteLookup_t &pfnSprites );
 // The distance between the ground grid's lines, which depends on how far away the camera is.
 [[nodiscard]] float GridSpacing( const CCamera &camera );
+// A corner of a model's triangle as it lands on the screen: x, y (pixels) and depth; texture
+// coordinates; the light on it.
+struct ScreenVertex_t
+{
+	std::array<float, 3> m_vecPosition{};
+	std::array<float, 2> m_Uv{};
+	std::array<float, 3> m_vecColor{ 1, 1, 1 };
+};
+// The triangles of one texture (three vertices each); a null sprite is plain grey.
+struct ScreenMesh_t
+{
+	const Sprite_t *m_pSprite = nullptr;
+	std::vector<ScreenVertex_t> m_Vertices;
+};
+// The simulation's model, if it has one, lit from over the camera's shoulder. Triangles reaching
+// behind the camera are left out.
+[[nodiscard]] std::vector<ScreenMesh_t> LayoutModel( const CSimulation &simulation, const CCamera &camera, const ModelSpriteLookup_t &pfnSprites );
 // The ground grid, as thin quads.
 [[nodiscard]] std::vector<ScreenQuad_t> GridQuads( const CCamera &camera );
 // Draws into out (camera.width x camera.height). Rows are split over the available cores.

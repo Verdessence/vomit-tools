@@ -67,6 +67,7 @@ CParticleGpuView::~CParticleGpuView() = default;
 void CParticleGpuView::ForgetTextures()
 {
 	m_Textures.clear();
+	m_ModelTextures.clear();
 	update();
 }
 
@@ -76,9 +77,14 @@ void CParticleGpuView::ForgetTextures()
 void CParticleGpuView::releaseResources()
 {
 	m_Textures.clear();
+	m_ModelTextures.clear();
 	m_White = {};
+	m_ModelWhite = {};
 	m_pBlended.reset();
 	m_pAdded.reset();
+	m_pSolid.reset();
+	m_pModelVertices.reset();
+	m_pRepeatSampler.reset();
 	m_pSampler.reset();
 	m_pUniforms.reset();
 	m_pIndices.reset();
@@ -105,20 +111,30 @@ void CParticleGpuView::initialize( QRhiCommandBuffer * )
 		m_pSampler.reset( m_pRhi->newSampler( QRhiSampler::Linear, QRhiSampler::Linear, QRhiSampler::Linear,
 			QRhiSampler::ClampToEdge, QRhiSampler::ClampToEdge ) );
 		m_pSampler->create();
+		m_pRepeatSampler.reset( m_pRhi->newSampler( QRhiSampler::Linear, QRhiSampler::Linear, QRhiSampler::Linear, QRhiSampler::Repeat, QRhiSampler::Repeat ) );
+		m_pRepeatSampler->create();
 	}
 	// The render target may be new (a resize, a different sample count); the pipelines follow it.
 	m_pBlended.reset();
 	m_pAdded.reset();
+	m_pSolid.reset();
 }
 
 //-----------------------------------------------------------------------------
 // Purpose:
 //-----------------------------------------------------------------------------
-std::unique_ptr<QRhiGraphicsPipeline> CParticleGpuView::MakePipeline( bool bAdditive )
+std::unique_ptr<QRhiGraphicsPipeline> CParticleGpuView::MakePipeline( Pipeline_t nKind )
 {
 	std::unique_ptr<QRhiGraphicsPipeline> pPipeline{ m_pRhi->newGraphicsPipeline() };
+	const bool bAdditive = nKind == Pipeline_t::PIPELINE_ADDED;
+	const bool bSolid = nKind == Pipeline_t::PIPELINE_SOLID;
+	// Particles are hidden by the model in front of them but don't hide each other: they're
+	// drawn in their own order, back to front.
+	pPipeline->setDepthTest( true );
+	pPipeline->setDepthWrite( bSolid );
+	pPipeline->setDepthOp( QRhiGraphicsPipeline::LessOrEqual );
 	QRhiGraphicsPipeline::TargetBlend blend;
-	blend.enable = true;
+	blend.enable = !bSolid;
 	blend.srcColor = QRhiGraphicsPipeline::One;
 	blend.dstColor = bAdditive ? QRhiGraphicsPipeline::One : QRhiGraphicsPipeline::OneMinusSrcAlpha;
 	blend.srcAlpha = QRhiGraphicsPipeline::One;
@@ -148,13 +164,15 @@ std::unique_ptr<QRhiGraphicsPipeline> CParticleGpuView::MakePipeline( bool bAddi
 //-----------------------------------------------------------------------------
 // Purpose:
 //-----------------------------------------------------------------------------
-CParticleGpuView::Texture_t &CParticleGpuView::TextureFor( const particles::Sprite_t *pSprite, QRhiResourceUpdateBatch *pUpdates )
+CParticleGpuView::Texture_t &CParticleGpuView::TextureFor( const particles::Sprite_t *pSprite, QRhiResourceUpdateBatch *pUpdates, bool bRepeat )
 {
-	if ( !pSprite && m_White.m_pTexture )
+	Texture_t &white = bRepeat ? m_ModelWhite : m_White;
+	auto &cache = bRepeat ? m_ModelTextures : m_Textures;
+	if ( !pSprite && white.m_pTexture )
 	{
-		return m_White;
+		return white;
 	}
-	if ( const auto it = m_Textures.find( pSprite ); pSprite && it != m_Textures.end() )
+	if ( const auto it = cache.find( pSprite ); pSprite && it != cache.end() )
 	{
 		return it->second;
 	}
@@ -168,11 +186,12 @@ CParticleGpuView::Texture_t &CParticleGpuView::TextureFor( const particles::Spri
 	}
 	else
 	{
-		QImage white( 4, 4, QImage::Format_RGBA8888 );
-		white.fill( Qt::white );
-		levels = { white, white.scaled( 2, 2 ), white.scaled( 1, 1 ) };
+		// Plain: white for particles' grid lines, grey for a model without its texture.
+		QImage plain( 4, 4, QImage::Format_RGBA8888 );
+		plain.fill( bRepeat ? QColor( 153, 153, 153 ) : QColor( Qt::white ) );
+		levels = { plain, plain.scaled( 2, 2 ), plain.scaled( 1, 1 ) };
 	}
-	Texture_t &entry = pSprite ? m_Textures[ pSprite ] : m_White;
+	Texture_t &entry = pSprite ? cache[ pSprite ] : white;
 	entry.m_pTexture.reset( m_pRhi->newTexture( QRhiTexture::RGBA8, levels.front().size(), 1, QRhiTexture::MipMapped ) );
 	entry.m_pTexture->create();
 	QList<QRhiTextureUploadEntry> uploads;
@@ -186,7 +205,7 @@ CParticleGpuView::Texture_t &CParticleGpuView::TextureFor( const particles::Spri
 	entry.m_pBindings.reset( m_pRhi->newShaderResourceBindings() );
 	entry.m_pBindings->setBindings( {
 		QRhiShaderResourceBinding::uniformBuffer( 0, QRhiShaderResourceBinding::VertexStage, m_pUniforms.get() ),
-		QRhiShaderResourceBinding::sampledTexture( 1, QRhiShaderResourceBinding::FragmentStage, entry.m_pTexture.get(), m_pSampler.get() ),
+		QRhiShaderResourceBinding::sampledTexture( 1, QRhiShaderResourceBinding::FragmentStage, entry.m_pTexture.get(), bRepeat ? m_pRepeatSampler.get() : m_pSampler.get() ),
 	} );
 	entry.m_pBindings->create();
 	return entry;
@@ -199,10 +218,11 @@ void CParticleGpuView::render( QRhiCommandBuffer *pCommands )
 {
 	const QSize size = renderTarget()->pixelSize();
 	std::vector<particles::ScreenQuad_t> quads;
+	std::vector<particles::ScreenMesh_t> meshes;
 	std::array<float, 3> vecBackground{ 0.13f, 0.14f, 0.15f };
 	if ( m_pfnSource )
 	{
-		m_pfnSource( size.width(), size.height(), quads, vecBackground );
+		m_pfnSource( size.width(), size.height(), quads, meshes, vecBackground );
 	}
 	QRhiResourceUpdateBatch *pUpdates = m_pRhi->nextResourceUpdateBatch();
 
@@ -234,6 +254,33 @@ void CParticleGpuView::render( QRhiCommandBuffer *pCommands )
 			data.insert( data.end(), { quad.m_Corners[ c ][ 0 ], quad.m_Corners[ c ][ 1 ], quad.m_Corners[ c ][ 2 ], uv[ c ][ 0 ], uv[ c ][ 1 ], quad.m_vecColor[ 0 ], quad.m_vecColor[ 1 ], quad.m_vecColor[ 2 ], quad.m_flAlpha, quad.m_flAddSelf } );
 		}
 	}
+	// The model: its triangles in one buffer, a run per texture.
+	struct MeshRun_t
+	{
+		Texture_t *m_pTexture = nullptr;
+		quint32 m_nFirst = 0; // vertices
+		quint32 m_nCount = 0;
+	};
+	std::vector<MeshRun_t> meshRuns;
+	std::vector<float> modelData;
+	for ( const particles::ScreenMesh_t &mesh : meshes )
+	{
+		if ( mesh.m_Vertices.empty() )
+		{
+			continue;
+		}
+		meshRuns.push_back( { &TextureFor( mesh.m_pSprite, pUpdates, true ), static_cast<quint32>( modelData.size() / FLOATS_PER_VERTEX ), static_cast<quint32>( mesh.m_Vertices.size() ) } );
+		for ( const particles::ScreenVertex_t &vertex : mesh.m_Vertices )
+		{
+			modelData.insert( modelData.end(), { vertex.m_vecPosition[ 0 ], vertex.m_vecPosition[ 1 ], vertex.m_vecPosition[ 2 ], vertex.m_Uv[ 0 ], vertex.m_Uv[ 1 ], vertex.m_vecColor[ 0 ], vertex.m_vecColor[ 1 ], vertex.m_vecColor[ 2 ], 1.0f, 0.0f } );
+		}
+	}
+	if ( !modelData.empty() )
+	{
+		Reserve( m_pRhi, m_pModelVertices, QRhiBuffer::Dynamic, QRhiBuffer::VertexBuffer, static_cast<quint32>( modelData.size() * sizeof( float ) ) );
+		pUpdates->updateDynamicBuffer( m_pModelVertices.get(), 0, static_cast<quint32>( modelData.size() * sizeof( float ) ), modelData.data() );
+	}
+
 	const auto nQuadCount = static_cast<quint32>( data.size() / ( 4 * FLOATS_PER_VERTEX ) );
 	if ( nQuadCount > 0 )
 	{
@@ -255,17 +302,29 @@ void CParticleGpuView::render( QRhiCommandBuffer *pCommands )
 			m_nIndexCapacity = nCapacity;
 		}
 	}
-	const float frame[ 4 ]{ static_cast<float>( size.width() ), static_cast<float>( size.height() ), m_pRhi->isYUpInNDC() ? 1.0f : -1.0f, 0.0f };
+	const float frame[ 4 ]{ static_cast<float>( size.width() ), static_cast<float>( size.height() ), m_pRhi->isYUpInNDC() ? 1.0f : -1.0f, m_pRhi->isClipDepthZeroToOne() ? 1.0f : 0.0f };
 	pUpdates->updateDynamicBuffer( m_pUniforms.get(), 0, sizeof frame, frame );
 
 	if ( !m_pBlended )
 	{
-		m_pBlended = MakePipeline( false );
-		m_pAdded = MakePipeline( true );
+		m_pBlended = MakePipeline( Pipeline_t::PIPELINE_BLENDED );
+		m_pAdded = MakePipeline( Pipeline_t::PIPELINE_ADDED );
+		m_pSolid = MakePipeline( Pipeline_t::PIPELINE_SOLID );
 	}
 
 	pCommands->beginPass( renderTarget(), QColor::fromRgbF( vecBackground[ 0 ], vecBackground[ 1 ], vecBackground[ 2 ] ), { 1.0f, 0 }, pUpdates );
 	pCommands->setViewport( { 0, 0, static_cast<float>( size.width() ), static_cast<float>( size.height() ) } );
+	if ( !meshRuns.empty() )
+	{
+		pCommands->setGraphicsPipeline( m_pSolid.get() );
+		const QRhiCommandBuffer::VertexInput input{ m_pModelVertices.get(), 0 };
+		for ( const MeshRun_t &run : meshRuns )
+		{
+			pCommands->setShaderResources( run.m_pTexture->m_pBindings.get() );
+			pCommands->setVertexInput( 0, 1, &input );
+			pCommands->draw( run.m_nCount, 1, run.m_nFirst );
+		}
+	}
 	for ( const Run_t &run : runs )
 	{
 		pCommands->setGraphicsPipeline( run.m_bAdditive ? m_pAdded.get() : m_pBlended.get() );

@@ -133,12 +133,16 @@ puts the sun.
     it's full. **Bounds** shows each system's bounding box and where its particles really are.
   - The selected position initializer's sphere, box or offset range shows around its control
     point; with **Bounds**, every one does.
+  - **Model** stands one of the game's models on a control point, for effects made for players
+    and props: Position on Model Random starts particles in its hitboxes, and control points can be
+    put on its attachments. The model is drawn, hides what's behind it, and stays in its reference
+    pose.
   - Play/pause, restart, speeds from 0.1× to 2×, looping and a ground grid. It draws on the graphics
     card where Qt can (**GPU**), in software otherwise.
   - Edits show at once, without starting the effect over.
   - It's an approximation worked out from what each operator's name and settings say, not the
     game's code. Operators it doesn't run yet are greyed out in the list and named under the
-    preview. Collisions hit only the floor under the grid; models and refraction aren't drawn.
+    preview. Collisions hit only the floor under the grid, and refraction isn't drawn.
 - **Properties:** the right column edits the selected system, operator or child link. Numbers, vectors,
   colours (with a picker), on/off values, materials (completed from the game's materials) and child
   systems each get a fitting field. Names in bold differ from the value the game's files use most,

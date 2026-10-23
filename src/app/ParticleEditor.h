@@ -42,6 +42,7 @@ struct ParticleGame_t
 	QStringList m_Materials;                                      // "effects/fire_cloud1.vmt", for completion
 	xv::particles::FileReader_t m_pfnReadFile;                         // game files, for the preview's materials
 	std::vector<xv::particles::SystemSummary_t> m_Systems;          // every system in the game's particle files
+	QStringList m_Models;                                         // "models/player/ct_gign.mdl", for the preview's model
 };
 
 // Editor for one particle file: its systems on the left, the selected system's operators in the

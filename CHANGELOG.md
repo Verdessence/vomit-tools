@@ -17,9 +17,20 @@
   Particles, Position Modify Warp Random, Set child control points from particle positions,
   oscillating_movement and Collision via traces (against the floor under the grid; the preview has
   no map). Also Velocity Random and Position Along Path Random, which no CS:S or HL2 file uses.
-  - 55 of the 57 functions CS:S and HL2 use now run; 279 of their 288 systems run completely.
-  - The two left need a model: Position on Model Random and Movement Lock to Bone.
+  - All 57 functions CS:S and HL2 use now run, so all 288 of their systems run completely.
   - An operator's tooltip says where the preview's version falls short.
+- **Models:** **Model** under the preview stands any of the game's models on a control point, as the
+  game's effects stand on players and props. It's drawn in both the software and GPU previews,
+  textured and lit, and hides the particles behind it.
+  - **Position on Model Random** puts particles in its hitboxes (with the hitbox scale, tries and
+    direction bias); **Movement Lock to Bone** keeps them there as the model moves. The model stands
+    still in its reference pose.
+  - **Put a CP on an Attachment** puts a control point where one of the model's attachments is; it
+    moves with the model after.
+  - With **Bounds**, its hitboxes and attachment names show; selecting Position on Model Random shows
+    the hitboxes either way. **Frame** takes the model in.
+  - Reads MDL versions 44–49 with their `.vvd` and `.vtx`: every CS:S and HL2 model that has
+    geometry (3,743 of 3,785; the rest only hold animations).
 - **Velocity kept:** placing a particle (Position Within Sphere Random) no longer drops the speed an
   earlier initializer such as Velocity Random gave it.
 - **Emission shapes:** the selected position initializer's sphere (with its inner shell and bias),

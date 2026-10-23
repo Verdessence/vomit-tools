@@ -595,6 +595,7 @@ void CParticleEditor::SetGame( ParticleGame_t game )
 		const auto *pBegin = reinterpret_cast<const std::byte *>( bytes.constData() );
 		return std::vector<std::byte>( pBegin, pBegin + bytes.size() );
 	} );
+	m_pPreview->SetModelList( m_Game.m_Models );
 	RebuildSchema();
 	Refresh();
 }

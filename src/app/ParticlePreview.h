@@ -18,6 +18,7 @@
 #include <vector>
 
 #include <QElapsedTimer>
+#include <QStringList>
 #include <QImage>
 #include <QWidget>
 
@@ -27,6 +28,7 @@
 class QCheckBox;
 class QComboBox;
 class QLabel;
+class QMenu;
 class QTimer;
 class QToolButton;
 
@@ -36,7 +38,8 @@ class QToolButton;
 // shows, it snaps to it. Control point 0 is where the effect is, so moving it only changes the
 // view. Moving any other point writes it into the file, through a "Set Control Point Positions"
 // operator (one is added when needed); with Ctrl held, a point the file doesn't place moves in the
-// view only. Below the view: play/pause, restart, speed, looping, the grid and the bounding boxes.
+// view only. Below the view: play/pause, restart, speed, looping, the grid, the bounding boxes, and
+// a model to stand on a control point (for effects made for players and props).
 class CParticlePreview : public QWidget
 {
 	Q_OBJECT
@@ -76,6 +79,17 @@ public:
 	void DragTo( xv::CVec3 vecPosition );
 	void EndDrag();
 	[[nodiscard]] int GetDragged() const { return m_Drag.m_nIndex; }
+	// The models the game has ("models/player/ct_gign.mdl"), for the Model menu.
+	void SetModelList( QStringList models );
+	// Stands a model on a control point (and forgets which points were on its attachments). An
+	// empty path takes the model away. Returns false (with the reason) when it can't be read.
+	bool SetModel( const QString &szPath, int nControlPoint = 0, QString *pError = nullptr );
+	[[nodiscard]] const QString &GetModelPath() const { return m_szModelPath; }
+	[[nodiscard]] int GetModelControlPoint() const { return m_nModelPoint; }
+	[[nodiscard]] const xv::model::CModel *GetModel() const { return m_pModel.get(); }
+	// Puts a control point on one of the model's attachments; it moves with the model after.
+	void AttachControlPoint( int nIndex, int nAttachment );
+
 	// The operator selected in the editor: its emission shape shows even without Bounds.
 	void SetSelectedElement( std::int32_t nElement );
 	// Whether a "Set Control Point Positions" operator of the shown systems places a point.
@@ -144,6 +158,10 @@ private:
 	// Where the position initializers put particles: spheres, boxes and offset ranges, around
 	// their control points.
 	void PaintShapes( QPainter &painter, const xv::particles::CCamera &camera );
+	void FillModelMenu( QMenu *pMenu );
+	// Moves the points on attachments to where their attachments are now.
+	void FollowModel();
+	[[nodiscard]] const xv::particles::Sprite_t *ModelSprite( std::size_t nMaterial );
 	void PaintCounts( QPainter &painter );
 	// The camera as it maps onto the canvas (the picture itself may be drawn smaller).
 	[[nodiscard]] xv::particles::CCamera GetCanvasCamera() const;
@@ -157,6 +175,12 @@ private:
 	ControlPoints_t m_ControlPoints{};
 	Drag_t m_Drag;
 	Placer_t m_pfnPlace;
+	QStringList m_Models;
+	QString m_szModelPath;
+	std::shared_ptr<const xv::model::CModel> m_pModel;
+	int m_nModelPoint = 0;
+	std::map<int, int> m_Attached; // control point -> the model's attachment it is on
+	std::map<std::size_t, std::shared_ptr<const xv::particles::Sprite_t>> m_ModelSprites; // by material
 	std::int32_t m_nSelectedElement = -1;
 	xv::particles::CCamera m_Camera;
 	bool m_bCameraSet = false;
@@ -177,4 +201,5 @@ private:
 	QWidget *m_pGpu = nullptr;     // the GPU view, when drawing on the graphics card
 	QWidget *m_pOverlay = nullptr; // what is painted over it
 	QLabel *m_pInfo = nullptr;
+	QToolButton *m_pModelButton = nullptr;
 };
