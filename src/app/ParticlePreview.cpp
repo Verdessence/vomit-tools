@@ -601,6 +601,7 @@ void CParticlePreview::Advance( float flSeconds )
 	{
 		return;
 	}
+	m_pSimulation->SetViewer( m_Camera.GetEye() ); // the player, for Set Control Point To Player
 	m_pSimulation->Advance( flSeconds );
 	Redraw();
 	UpdateInfo();

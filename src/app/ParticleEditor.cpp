@@ -908,7 +908,8 @@ void CParticleEditor::RebuildStack()
 				italic.setItalic( true );
 				pItem->setFont( 0, italic );
 				pItem->setForeground( 0, palette().color( QPalette::PlaceholderText ) );
-				pItem->setToolTip( 0, tr( "Not in the preview yet: it plays without this one" ) );
+				const std::string_view szWhy = particles::PreviewNote( *category, labels[ i ].toStdString() );
+				pItem->setToolTip( 0, szWhy.empty() ? tr( "Not in the preview yet: it plays without this one" ) : tr( "Not in the preview: %1. It plays without this one" ).arg( Qs( szWhy ) ) );
 			}
 			else if ( const std::string_view szNote = category ? particles::PreviewNote( *category, labels[ i ].toStdString() ) : std::string_view{}; !szNote.empty() )
 			{

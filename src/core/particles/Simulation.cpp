@@ -216,6 +216,90 @@ std::array<float, 4> ColorOf( const dmx::CColor &c )
 }
 
 //-----------------------------------------------------------------------------
+// Purpose: Smooth noise over space, -1 to 1: random values at whole coordinates, blended between
+//          with a smooth curve. Our own; it only has to look like the game's noise, not match it.
+//-----------------------------------------------------------------------------
+float Noise( CVec3 vecAt, std::uint32_t nSeed = 0 )
+{
+	const auto lattice = [ nSeed ]( int x, int y, int z ) {
+		const std::uint64_t nKey = ( static_cast<std::uint64_t>( static_cast<std::uint32_t>( x ) ) * 73856093ULL ) ^ ( static_cast<std::uint64_t>( static_cast<std::uint32_t>( y ) ) * 19349663ULL ) ^
+			( static_cast<std::uint64_t>( static_cast<std::uint32_t>( z ) ) * 83492791ULL ) ^ ( static_cast<std::uint64_t>( nSeed ) << 32 );
+		return Unit( Mix( nKey ) ) * 2.0f - 1.0f;
+	};
+	const float fx = std::floor( vecAt.m_flX ), fy = std::floor( vecAt.m_flY ), fz = std::floor( vecAt.m_flZ );
+	const int x = static_cast<int>( fx ), y = static_cast<int>( fy ), z = static_cast<int>( fz );
+	const float tx = Smooth( vecAt.m_flX - fx ), ty = Smooth( vecAt.m_flY - fy ), tz = Smooth( vecAt.m_flZ - fz );
+	const auto edge = [ & ]( int dy, int dz ) { return Lerp( lattice( x, y + dy, z + dz ), lattice( x + 1, y + dy, z + dz ), tx ); };
+	return Lerp( Lerp( edge( 0, 0 ), edge( 1, 0 ), ty ), Lerp( edge( 0, 1 ), edge( 1, 1 ), ty ), tz );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Noise (-1 to 1) to 0-1, with the absolute value options noise functions have: absolute
+//          bounces off zero, inverted turns its valleys into peaks.
+//-----------------------------------------------------------------------------
+float NoiseShare( float flNoise, bool bAbsolute, bool bInvert )
+{
+	if ( bAbsolute )
+	{
+		const float a = std::abs( flNoise );
+		return bInvert ? 1.0f - a : a;
+	}
+	return flNoise * 0.5f + 0.5f;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+std::string Lower( std::string_view szText )
+{
+	std::string szOut{ szText };
+	std::ranges::transform( szOut, szOut.begin(), []( unsigned char c ) { return static_cast<char>( std::tolower( c ) ); } );
+	return szOut;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Older names files still use, from early versions of Valve's editor (the VDC articles
+//          name some of them, "movement_basic", "lifespan_decay" and "alpha_fade"). Their settings
+//          are the current functions' settings.
+//-----------------------------------------------------------------------------
+const std::map<std::pair<Category_t, std::string>, std::string_view> &OlderNames()
+{
+	static const std::map<std::pair<Category_t, std::string>, std::string_view> names{
+		{ { Category_t::CATEGORY_OPERATORS, "basic_movement" }, "Movement Basic" },
+		{ { Category_t::CATEGORY_OPERATORS, "movement_basic" }, "Movement Basic" },
+		{ { Category_t::CATEGORY_OPERATORS, "lifespan_decay" }, "Lifespan Decay" },
+		{ { Category_t::CATEGORY_OPERATORS, "alpha_fade" }, "Alpha Fade and Decay" },
+		{ { Category_t::CATEGORY_OPERATORS, "alpha_fade_in_random" }, "Alpha Fade In Random" },
+		{ { Category_t::CATEGORY_OPERATORS, "alpha_fade_out_random" }, "Alpha Fade Out Random" },
+		{ { Category_t::CATEGORY_OPERATORS, "color_fade" }, "Color Fade" },
+		{ { Category_t::CATEGORY_OPERATORS, "radius_scale" }, "Radius Scale" },
+		{ { Category_t::CATEGORY_OPERATORS, "rotation_spin" }, "Rotation Spin Roll" },
+		{ { Category_t::CATEGORY_OPERATORS, "rotation_spin yaw" }, "Rotation Spin Yaw" },
+		{ { Category_t::CATEGORY_OPERATORS, "basic_rotation" }, "Rotation Basic" },
+		{ { Category_t::CATEGORY_OPERATORS, "oscillate_scalar" }, "Oscillate Scalar" },
+		{ { Category_t::CATEGORY_OPERATORS, "oscillate_vector" }, "Oscillate Vector" },
+		{ { Category_t::CATEGORY_OPERATORS, "postion_lock_to_controlpoint" }, "Movement Lock to Control Point" },
+		{ { Category_t::CATEGORY_OPERATORS, "position_lock_to_controlpoint" }, "Movement Lock to Control Point" },
+		{ { Category_t::CATEGORY_OPERATORS, "noise" }, "Noise Scalar" },
+		{ { Category_t::CATEGORY_OPERATORS, "vector noise" }, "Noise Vector" },
+		{ { Category_t::CATEGORY_OPERATORS, "controlpoint_light" }, "Color Light from Control Point" },
+		{ { Category_t::CATEGORY_INITIALIZERS, "alpha_random" }, "Alpha Random" },
+		{ { Category_t::CATEGORY_INITIALIZERS, "color_random" }, "Color Random" },
+		{ { Category_t::CATEGORY_INITIALIZERS, "lifetime_random" }, "Lifetime Random" },
+		{ { Category_t::CATEGORY_INITIALIZERS, "position_offset_random" }, "Position Modify Offset Random" },
+		{ { Category_t::CATEGORY_INITIALIZERS, "position_within_box" }, "Position Within Box Random" },
+		{ { Category_t::CATEGORY_INITIALIZERS, "position_within_sphere" }, "Position Within Sphere Random" },
+		{ { Category_t::CATEGORY_INITIALIZERS, "radius_random" }, "Radius Random" },
+		{ { Category_t::CATEGORY_INITIALIZERS, "random yaw" }, "Rotation Yaw Random" },
+		{ { Category_t::CATEGORY_INITIALIZERS, "rotation_random" }, "Rotation Random" },
+		{ { Category_t::CATEGORY_INITIALIZERS, "sequence_random" }, "Sequence Random" },
+		{ { Category_t::CATEGORY_INITIALIZERS, "trail_length_random" }, "Trail Length Random" },
+		{ { Category_t::CATEGORY_INITIALIZERS, "initial velocity noise" }, "Velocity Noise" },
+	};
+	return names;
+}
+
+//-----------------------------------------------------------------------------
 // Purpose: The functions the preview runs, by category.
 //-----------------------------------------------------------------------------
 const std::set<std::pair<Category_t, std::string_view>> &SimulatedFunctions()
@@ -250,6 +334,20 @@ const std::set<std::pair<Category_t, std::string_view>> &SimulatedFunctions()
 		{ Category_t::CATEGORY_INITIALIZERS, "Position From Parent Particles" },
 		{ Category_t::CATEGORY_INITIALIZERS, "Position Modify Warp Random" },
 		{ Category_t::CATEGORY_INITIALIZERS, "Position on Model Random" },
+		{ Category_t::CATEGORY_INITIALIZERS, "Rotation Speed Random" },
+		{ Category_t::CATEGORY_INITIALIZERS, "Move Particles Between 2 Control Points" },
+		{ Category_t::CATEGORY_INITIALIZERS, "Remap Control Point to Scalar" },
+		{ Category_t::CATEGORY_INITIALIZERS, "Remap Initial Distance to Control Point to Scalar" },
+		{ Category_t::CATEGORY_INITIALIZERS, "remap scalar to vector" },
+		{ Category_t::CATEGORY_INITIALIZERS, "Position Along Ring" },
+		{ Category_t::CATEGORY_INITIALIZERS, "Position from Parent Cache" },
+		{ Category_t::CATEGORY_INITIALIZERS, "Color Lit Per Particle" },
+		{ Category_t::CATEGORY_INITIALIZERS, "Lifetime from Time to Impact" },
+		{ Category_t::CATEGORY_INITIALIZERS, "Scalar Random" },
+		{ Category_t::CATEGORY_INITIALIZERS, "Vector Random" },
+		{ Category_t::CATEGORY_INITIALIZERS, "Inherit Velocity" },
+		{ Category_t::CATEGORY_INITIALIZERS, "Remap Particle Count to Scalar" },
+		{ Category_t::CATEGORY_INITIALIZERS, "Inherit Initial Value From Parent Particle" },
 		{ Category_t::CATEGORY_OPERATORS, "Lifespan Decay" },
 		{ Category_t::CATEGORY_OPERATORS, "Movement Basic" },
 		{ Category_t::CATEGORY_OPERATORS, "Alpha Fade In Random" },
@@ -271,9 +369,42 @@ const std::set<std::pair<Category_t, std::string_view>> &SimulatedFunctions()
 		{ Category_t::CATEGORY_OPERATORS, "Set child control points from particle positions" },
 		{ Category_t::CATEGORY_OPERATORS, "oscillating_movement" },
 		{ Category_t::CATEGORY_OPERATORS, "Movement Lock to Bone" },
+		{ Category_t::CATEGORY_OPERATORS, "Rotation Basic" },
+		{ Category_t::CATEGORY_OPERATORS, "Movement Rotate Particle Around Axis" },
+		{ Category_t::CATEGORY_OPERATORS, "Movement Max Velocity" },
+		{ Category_t::CATEGORY_OPERATORS, "Noise Scalar" },
+		{ Category_t::CATEGORY_OPERATORS, "Remap Scalar" },
+		{ Category_t::CATEGORY_OPERATORS, "Remap Distance to Control Point to Vector" },
+		{ Category_t::CATEGORY_OPERATORS, "Remap Distance Between Two Control Points to Scalar" },
+		{ Category_t::CATEGORY_OPERATORS, "Remap Dot Product to Scalar" },
+		{ Category_t::CATEGORY_OPERATORS, "Remap Speed To Scalar" },
+		{ Category_t::CATEGORY_OPERATORS, "Set Control Point To Particles' Center" },
+		{ Category_t::CATEGORY_OPERATORS, "Set Control Point To Player" },
+		{ Category_t::CATEGORY_OPERATORS, "Color Light from Control Point" },
+		{ Category_t::CATEGORY_OPERATORS, "Rotation Orient Relative to CP" },
+		{ Category_t::CATEGORY_OPERATORS, "Rotation Orient to 2D Direction" },
+		{ Category_t::CATEGORY_OPERATORS, "Movement Maintain Position Along Path" },
+		{ Category_t::CATEGORY_OPERATORS, "Movement Lock to Saved Position Along Path" },
+		{ Category_t::CATEGORY_OPERATORS, "Cull relative to model" },
+		{ Category_t::CATEGORY_OPERATORS, "Clamp Scalar" },
+		{ Category_t::CATEGORY_OPERATORS, "Cull when crossing sphere" },
+		{ Category_t::CATEGORY_OPERATORS, "Lerp Initial Scalar" },
+		{ Category_t::CATEGORY_OPERATORS, "Lerp Initial Vector" },
+		{ Category_t::CATEGORY_OPERATORS, "Lifespan Minimum Radius Decay" },
+		{ Category_t::CATEGORY_OPERATORS, "Lifespan Minimum Velocity Decay" },
+		{ Category_t::CATEGORY_OPERATORS, "Lifespan Maintain Count Decay" },
+		{ Category_t::CATEGORY_OPERATORS, "Normalize Vector" },
+		{ Category_t::CATEGORY_OPERATORS, "Ramp Scalar Linear Simple" },
+		{ Category_t::CATEGORY_OPERATORS, "Stop Effect after Duration" },
+		{ Category_t::CATEGORY_OPERATORS, "Inherit Attribute From Parent Particle" },
 		{ Category_t::CATEGORY_RENDERERS, "render_animated_sprites" },
 		{ Category_t::CATEGORY_RENDERERS, "render_sprite_trail" },
 		{ Category_t::CATEGORY_RENDERERS, "render_rope" },
+		{ Category_t::CATEGORY_RENDERERS, "render_screen_velocity_rotate" },
+		{ Category_t::CATEGORY_EMITTERS, "emit noise" },
+		{ Category_t::CATEGORY_FORCES, "turbulent force" },
+		{ Category_t::CATEGORY_CONSTRAINTS, "Constrain distance to path between two control points" },
+		{ Category_t::CATEGORY_CONSTRAINTS, "Prevent passing through static part of world" },
 		{ Category_t::CATEGORY_FORCES, "random force" },
 		{ Category_t::CATEGORY_FORCES, "twist around axis" },
 		{ Category_t::CATEGORY_FORCES, "Pull towards control point" },
@@ -361,6 +492,11 @@ float CCompiledOperator::Weight( float flTime ) const
 	{
 		return 1.0f;
 	}
+	if ( m_flFadeOscillate > 0.0f )
+	{
+		// The fade times become shares of a cycle that repeats.
+		flTime = std::fmod( flTime, m_flFadeOscillate ) / m_flFadeOscillate;
+	}
 	float flIn = 1.0f;
 	if ( m_flEndFadeIn > 0.0f || m_flStartFadeIn > 0.0f )
 	{
@@ -434,7 +570,47 @@ std::optional<std::size_t> CLibrary::Find( std::string_view szName ) const
 //-----------------------------------------------------------------------------
 bool IsSimulated( Category_t nCategory, std::string_view szFunction )
 {
-	return SimulatedFunctions().contains( { nCategory, szFunction } );
+	return SimulatedFunctions().contains( { nCategory, CurrentFunctionName( nCategory, szFunction ) } );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: A function's current name, whatever case or older name the file uses.
+//-----------------------------------------------------------------------------
+std::string_view CurrentFunctionName( Category_t nCategory, std::string_view szFunction )
+{
+	static const std::map<std::pair<Category_t, std::string>, std::string_view> byLowerName = [] {
+		std::map<std::pair<Category_t, std::string>, std::string_view> names;
+		for ( const auto &[ nCategory, szName ] : SimulatedFunctions() )
+		{
+			names.emplace( std::pair{ nCategory, Lower( szName ) }, szName );
+		}
+		for ( const auto &[ key, szName ] : OlderNames() )
+		{
+			names.emplace( key, szName );
+		}
+		return names;
+	}();
+	const auto found = byLowerName.find( { nCategory, Lower( szFunction ) } );
+	return found == byLowerName.end() ? szFunction : found->second;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+bool CLessNoCase::operator()( std::string_view a, std::string_view b ) const
+{
+	// ASCII only, as the names are, and without the locale: settings are looked up per particle.
+	const std::size_t n = std::min( a.size(), b.size() );
+	for ( std::size_t i = 0; i < n; i++ )
+	{
+		const auto x = static_cast<unsigned char>( a[ i ] >= 'A' && a[ i ] <= 'Z' ? a[ i ] + ( 'a' - 'A' ) : a[ i ] );
+		const auto y = static_cast<unsigned char>( b[ i ] >= 'A' && b[ i ] <= 'Z' ? b[ i ] + ( 'a' - 'A' ) : b[ i ] );
+		if ( x != y )
+		{
+			return x < y;
+		}
+	}
+	return a.size() < b.size();
 }
 
 //-----------------------------------------------------------------------------
@@ -443,19 +619,41 @@ bool IsSimulated( Category_t nCategory, std::string_view szFunction )
 //-----------------------------------------------------------------------------
 std::string_view PreviewNote( Category_t nCategory, std::string_view szFunction )
 {
-	if ( nCategory == Category_t::CATEGORY_CONSTRAINTS && szFunction == "Collision via traces" )
-	{
-		return "The preview has no map: particles hit only the floor under the grid";
-	}
-	if ( ( nCategory == Category_t::CATEGORY_INITIALIZERS && szFunction == "Position on Model Random" ) || ( nCategory == Category_t::CATEGORY_OPERATORS && szFunction == "Movement Lock to Bone" ) )
-	{
-		return "Needs a model on its control point (Model, under the preview); the model stands still in its reference pose";
-	}
-	if ( nCategory == Category_t::CATEGORY_OPERATORS && szFunction == "Set child control points from particle positions" )
-	{
-		return "Sets the points of every child system; the group ID isn't used";
-	}
-	return {};
+	using enum Category_t;
+	static const std::map<std::pair<Category_t, std::string_view>, std::string_view> notes{
+		// Run, approximately.
+		{ { CATEGORY_CONSTRAINTS, "Collision via traces" }, "The preview has no map: particles hit only the floor under the grid" },
+		{ { CATEGORY_CONSTRAINTS, "Prevent passing through static part of world" }, "The preview has no map: particles stop only at the floor under the grid" },
+		{ { CATEGORY_INITIALIZERS, "Lifetime from Time to Impact" }, "The preview has no map: particles live until they would reach the floor under the grid" },
+		{ { CATEGORY_OPERATORS, "Set child control points from particle positions" }, "Sets the points of every child system; the group ID isn't used" },
+		{ { CATEGORY_INITIALIZERS, "Position on Model Random" }, "Needs a model on its control point (Model, under the preview); the model stands still in its reference pose" },
+		{ { CATEGORY_OPERATORS, "Movement Lock to Bone" }, "Needs a model on its control point (Model, under the preview); the model stands still in its reference pose" },
+		{ { CATEGORY_OPERATORS, "Cull relative to model" }, "Needs a model on its control point (Model, under the preview)" },
+		{ { CATEGORY_OPERATORS, "Set Control Point To Player" }, "The player is where the preview's camera is" },
+		{ { CATEGORY_OPERATORS, "Remap Dot Product to Scalar" }, "The preview's control points all face +X" },
+		{ { CATEGORY_OPERATORS, "Rotation Orient Relative to CP" }, "Turns in the ground plane" },
+		{ { CATEGORY_OPERATORS, "Rotation Orient to 2D Direction" }, "Turns to the way the particle moves, in the ground plane" },
+		{ { CATEGORY_OPERATORS, "Color Light from Control Point" }, "Lights by distance and spot cone only; the normal settings aren't used" },
+		{ { CATEGORY_INITIALIZERS, "Color Lit Per Particle" }, "The preview has no world light: the colour isn't lit" },
+		{ { CATEGORY_INITIALIZERS, "Position from Parent Cache" }, "Uses the parent's particles as they are now" },
+		{ { CATEGORY_INITIALIZERS, "Position Along Ring" }, "On a ring in the ground plane" },
+		{ { CATEGORY_OPERATORS, "Noise Scalar" }, "Noise of the preview's own, not the game's" },
+		{ { CATEGORY_OPERATORS, "Noise Vector" }, "Noise of the preview's own, not the game's" },
+		{ { CATEGORY_FORCES, "turbulent force" }, "Noise of the preview's own, not the game's" },
+		{ { CATEGORY_EMITTERS, "emit noise" }, "Noise of the preview's own, not the game's" },
+		// Left out, and why.
+		{ { CATEGORY_INITIALIZERS, "Velocity Repulse from World" }, "It pushes away from the map's walls, which the preview doesn't have" },
+		{ { CATEGORY_INITIALIZERS, "Cull relative to Ray Trace Environment" }, "It needs the map's ray-trace environments" },
+		{ { CATEGORY_INITIALIZERS, "Assign target CP" }, "It works with a chain of control points the game's code sets up (TF2's flamethrower)" },
+		{ { CATEGORY_OPERATORS, "Movement Follow CP" }, "It works with a chain of control points the game's code sets up (TF2's flamethrower)" },
+		{ { CATEGORY_INITIALIZERS, "Random position within a curved cylinder" }, "It works with a chain of control points the game's code sets up (TF2's flamethrower)" },
+		{ { CATEGORY_INITIALIZERS, "Lifetime From Control Point Life Time" }, "It works with a chain of control points the game's code sets up (TF2's flamethrower)" },
+		{ { CATEGORY_INITIALIZERS, "Movement Lock to Control Point" }, "An operator in the initializers' list, where the game doesn't run it" },
+		{ { CATEGORY_OPERATORS, "Alpha Fade In Simple" }, "Its settings aren't known yet: no file here sets any" },
+		{ { CATEGORY_OPERATORS, "Alpha Fade Out Simple" }, "Its settings aren't known yet: no file here sets any" },
+	};
+	const auto found = notes.find( { nCategory, CurrentFunctionName( nCategory, szFunction ) } );
+	return found == notes.end() ? std::string_view{} : found->second;
 }
 
 //-----------------------------------------------------------------------------
@@ -542,7 +740,7 @@ CLibrary Compile( const dmx::Document_t &document )
 				}
 				CCompiledOperator compiled;
 				compiled.m_nCategory = nCategory;
-				compiled.m_szFunction = std::string{ FunctionName( opElement ) };
+				compiled.m_szFunction = std::string{ CurrentFunctionName( nCategory, FunctionName( opElement ) ) };
 				compiled.m_nElement = nOp;
 				compiled.m_bSimulated = IsSimulated( nCategory, compiled.m_szFunction );
 				for ( const dmx::Attribute_t &attribute : opElement.m_Attributes )
@@ -553,6 +751,7 @@ CLibrary Compile( const dmx::Document_t &document )
 				compiled.m_flEndFadeIn = compiled.Number( "operator end fadein" );
 				compiled.m_flStartFadeOut = compiled.Number( "operator start fadeout" );
 				compiled.m_flEndFadeOut = compiled.Number( "operator end fadeout" );
+				compiled.m_flFadeOscillate = compiled.Number( "operator fade oscillate" );
 				definition.operators.push_back( std::move( compiled ) );
 			}
 		}
@@ -610,6 +809,53 @@ void CSimulation::SetControlPoint( int nIndex, CVec3 vecPosition )
 CVec3 CSimulation::ControlPoint( int nIndex ) const
 {
 	return nIndex >= 0 && nIndex < CONTROL_POINTS ? m_ControlPoints[ static_cast<std::size_t>( nIndex ) ] : CVec3{};
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: A point t (0-1) of the way from one place to another, bowed out by the operator's bulge
+//          (most at its mid point) to a random side, and spread up to its maximum distance off the
+//          path. The game can also bow towards the end points' facing, which the preview's points
+//          don't have.
+//-----------------------------------------------------------------------------
+CVec3 CSimulation::PathPoint( const CCompiledOperator &op, float t, CVec3 vecFrom, CVec3 vecTo, std::array<float, 5> r )
+{
+	CVec3 vecAt = vecFrom + ( vecTo - vecFrom ) * t;
+	const float flBulge = op.Number( "bulge" );
+	if ( flBulge != 0.0f )
+	{
+		const float flMid = std::clamp( op.Number( "mid point position", 0.5f ), 0.01f, 0.99f );
+		const float flShape = std::sin( std::numbers::pi_v<float> * ( t < flMid ? 0.5f * t / flMid : 0.5f + 0.5f * ( t - flMid ) / ( 1.0f - flMid ) ) );
+		const CVec3 vecAlong = Normalized( vecTo - vecFrom );
+		const CVec3 vecSide = Normalized( Cross( vecAlong, std::abs( vecAlong.m_flZ ) < 0.9f ? CVec3{ 0, 0, 1 } : CVec3{ 1, 0, 0 } ) );
+		const CVec3 vecOther = Cross( vecAlong, vecSide );
+		const float flAngle = 2.0f * std::numbers::pi_v<float> * r[ 0 ];
+		vecAt += ( vecSide * std::cos( flAngle ) + vecOther * std::sin( flAngle ) ) * ( flBulge * flShape );
+	}
+	const float flSpread = op.Number( "maximum distance" );
+	if ( flSpread > 0.0f )
+	{
+		const float z = 2.0f * r[ 1 ] - 1.0f;
+		const float flAngle = 2.0f * std::numbers::pi_v<float> * r[ 2 ];
+		const float flFlat = std::sqrt( std::max( 0.0f, 1.0f - z * z ) );
+		CVec3 vecOffset = CVec3{ flFlat * std::cos( flAngle ), flFlat * std::sin( flAngle ), z } * ( flSpread * std::cbrt( r[ 3 ] ) );
+		const CVec3 vecBias = op.Vector( "distance_bias", { 1, 1, 1 } );
+		vecOffset = { vecOffset.m_flX * vecBias.m_flX, vecOffset.m_flY * vecBias.m_flY, vecOffset.m_flZ * vecBias.m_flZ };
+		const CVec3 vecAbsolute = op.Vector( "distance_bias_absolute_value" );
+		if ( vecAbsolute.m_flX != 0.0f )
+		{
+			vecOffset.m_flX = std::abs( vecOffset.m_flX );
+		}
+		if ( vecAbsolute.m_flY != 0.0f )
+		{
+			vecOffset.m_flY = std::abs( vecOffset.m_flY );
+		}
+		if ( vecAbsolute.m_flZ != 0.0f )
+		{
+			vecOffset.m_flZ = std::abs( vecOffset.m_flZ );
+		}
+		vecAt += vecOffset;
+	}
+	return vecAt;
 }
 
 //-----------------------------------------------------------------------------
@@ -937,7 +1183,14 @@ void CSimulation::Spawn( Instance_t &instance, int nCount )
 				Initialize( instance, p, compiled, nOp );
 			}
 		}
+		// What it started as, for the operators that work from there.
+		p.m_vecInitialPosition = p.m_vecPosition;
+		for ( std::size_t nField = 0; nField < p.m_InitialScalars.size(); nField++ )
+		{
+			p.m_InitialScalars[ nField ] = GetField( p, static_cast<int>( nField ) );
+		}
 		instance.m_Particles.push_back( p );
+		instance.m_nEmitted++;
 	}
 }
 
@@ -1063,48 +1316,8 @@ void CSimulation::Initialize( Instance_t &instance, Particle_t &p, const CCompil
 		}
 		const float flAlong = t * static_cast<float>( path.size() - 1 );
 		const std::size_t nPiece = std::min( path.size() - 2, static_cast<std::size_t>( flAlong ) );
-		const float flPiece = flAlong - static_cast<float>( nPiece );
-		const CVec3 vecFrom = path[ nPiece ];
-		const CVec3 vecTo = path[ nPiece + 1 ];
-		CVec3 vecAt = vecFrom + ( vecTo - vecFrom ) * flPiece;
-		const float flBulge = op.Number( "bulge" );
-		if ( flBulge != 0.0f )
-		{
-			const float flMid = std::clamp( op.Number( "mid point position", 0.5f ), 0.01f, 0.99f );
-			const float flShape = std::sin( std::numbers::pi_v<float> * ( t < flMid ? 0.5f * t / flMid : 0.5f + 0.5f * ( t - flMid ) / ( 1.0f - flMid ) ) );
-			// Off to a random side of the path (the game can also use the end points' facing,
-			// which the preview's points don't have).
-			const CVec3 vecAlong = Normalized( vecTo - vecFrom );
-			CVec3 vecSide = Cross( vecAlong, std::abs( vecAlong.m_flZ ) < 0.9f ? CVec3{ 0, 0, 1 } : CVec3{ 1, 0, 0 } );
-			vecSide = Normalized( vecSide );
-			const CVec3 vecOther = Cross( vecAlong, vecSide );
-			const float flAngle = 2.0f * std::numbers::pi_v<float> * r( 2 );
-			vecAt += ( vecSide * std::cos( flAngle ) + vecOther * std::sin( flAngle ) ) * ( flBulge * flShape );
-		}
-		const float flSpread = op.Number( "maximum distance" );
-		if ( flSpread > 0.0f )
-		{
-			const float z = 2.0f * r( 3 ) - 1.0f;
-			const float flAngle = 2.0f * std::numbers::pi_v<float> * r( 4 );
-			const float flFlat = std::sqrt( std::max( 0.0f, 1.0f - z * z ) );
-			CVec3 vecOffset = CVec3{ flFlat * std::cos( flAngle ), flFlat * std::sin( flAngle ), z } * ( flSpread * std::cbrt( r( 5 ) ) );
-			const CVec3 vecBias = op.Vector( "distance_bias", { 1, 1, 1 } );
-			vecOffset = { vecOffset.m_flX * vecBias.m_flX, vecOffset.m_flY * vecBias.m_flY, vecOffset.m_flZ * vecBias.m_flZ };
-			const CVec3 vecAbsolute = op.Vector( "distance_bias_absolute_value" );
-			if ( vecAbsolute.m_flX != 0.0f )
-			{
-				vecOffset.m_flX = std::abs( vecOffset.m_flX );
-			}
-			if ( vecAbsolute.m_flY != 0.0f )
-			{
-				vecOffset.m_flY = std::abs( vecOffset.m_flY );
-			}
-			if ( vecAbsolute.m_flZ != 0.0f )
-			{
-				vecOffset.m_flZ = std::abs( vecOffset.m_flZ );
-			}
-			vecAt += vecOffset;
-		}
+		const CVec3 vecAt = PathPoint( op, flAlong - static_cast<float>( nPiece ), path[ nPiece ], path[ nPiece + 1 ], { r( 2 ), r( 3 ), r( 4 ), r( 5 ), 0.0f } );
+		p.m_flPathT = t;
 		p.m_vecPosition = vecAt;
 	}
 	else if ( f == "Position From Parent Particles" )
@@ -1173,6 +1386,167 @@ void CSimulation::Initialize( Instance_t &instance, Particle_t &p, const CCompil
 		p.m_vecVelocity += CVec3{ flFlat * std::cos( flAngle ), flFlat * std::sin( flAngle ), z } * flSpeed;
 		p.m_vecVelocity += randomVector( op.Vector( "speed_in_local_coordinate_system_min" ), op.Vector( "speed_in_local_coordinate_system_max" ), 4 );
 	}
+	else if ( f == "Rotation Speed Random" )
+	{
+		// Degrees a second, which Rotation Basic turns the particle by.
+		float flSpeed = op.Number( "rotation_speed_constant" ) + RandomRange( op.Number( "rotation_speed_random_min" ), op.Number( "rotation_speed_random_max", 360.0f ), r( 1 ), op.Number( "rotation_speed_random_exponent", 1.0f ) );
+		if ( op.Flag( "randomly_flip_direction", true ) && r( 2 ) < 0.5f )
+		{
+			flSpeed = -flSpeed;
+		}
+		p.m_flRotationSpeed = flSpeed * DEGREES;
+	}
+	else if ( f == "Move Particles Between 2 Control Points" )
+	{
+		// Aimed from where the particle is at the end point (spread around it), at a speed that
+		// gets it there; it lives as long as the trip takes.
+		const CVec3 vecEnd = Point( op.Integer( "end control point", 1 ) );
+		const float flSpread = op.Number( "end spread" );
+		const CVec3 vecTarget = vecEnd + CVec3{ r( 1 ) * 2.0f - 1.0f, r( 2 ) * 2.0f - 1.0f, r( 3 ) * 2.0f - 1.0f } * flSpread;
+		const CVec3 vecToward = vecTarget - p.m_vecPosition;
+		const float flDistance = Length( vecToward );
+		const float flSpeed = std::max( 0.001f, Lerp( op.Number( "minimum speed", 1.0f ), op.Number( "maximum speed", 1.0f ), r( 4 ) ) );
+		if ( flDistance > 0.0f )
+		{
+			const CVec3 vecAlong = vecToward * ( 1.0f / flDistance );
+			p.m_vecPosition += vecAlong * op.Number( "start offset" );
+			p.m_vecVelocity = vecAlong * flSpeed;
+			p.m_flLifetime = std::max( 0.0f, flDistance - op.Number( "start offset" ) ) / flSpeed;
+		}
+	}
+	else if ( f == "Remap Control Point to Scalar" )
+	{
+		// One axis of a control point's place, mapped to a setting.
+		const CVec3 vecPoint = Point( op.Integer( "input control point number" ) );
+		const int nAxis = std::clamp( op.Integer( "input field 0-2 X/Y/Z" ), 0, 2 );
+		const float flInput = nAxis == 0 ? vecPoint.m_flX : nAxis == 1 ? vecPoint.m_flY
+																	   : vecPoint.m_flZ;
+		const float flInMin = op.Number( "input minimum" ), flInMax = op.Number( "input maximum", 1.0f );
+		const float t = flInMax != flInMin ? Clamp01( ( flInput - flInMin ) / ( flInMax - flInMin ) ) : 0.0f;
+		const int nField = op.Integer( "output field", FIELD_RADIUS );
+		const float flValue = Lerp( op.Number( "output minimum" ), op.Number( "output maximum", 1.0f ), t );
+		SetField( p, nField, op.Flag( "output is scalar of initial random range" ) ? GetField( p, nField ) * flValue : flValue, true );
+	}
+	else if ( f == "Remap Initial Distance to Control Point to Scalar" )
+	{
+		const float flDistance = Length( p.m_vecPosition - Point( op.Integer( "control point" ) ) );
+		const float flDMin = op.Number( "distance minimum" ), flDMax = op.Number( "distance maximum", 128.0f );
+		if ( op.Flag( "only active within specified distance" ) && ( flDistance < std::min( flDMin, flDMax ) || flDistance > std::max( flDMin, flDMax ) ) )
+		{
+			return;
+		}
+		const float t = flDMax != flDMin ? Clamp01( ( flDistance - flDMin ) / ( flDMax - flDMin ) ) : 0.0f;
+		const int nField = op.Integer( "output field", FIELD_RADIUS );
+		const float flValue = Lerp( op.Number( "output minimum" ), op.Number( "output maximum", 1.0f ), t );
+		SetField( p, nField, op.Flag( "output is scalar of initial random range" ) ? GetField( p, nField ) * flValue : flValue, true );
+	}
+	else if ( f == "remap scalar to vector" )
+	{
+		// A scalar setting mapped to a vector one (position or colour).
+		const float flInput = GetField( p, op.Integer( "input field", FIELD_CREATION_TIME ) );
+		const float flInMin = op.Number( "input minimum" ), flInMax = op.Number( "input maximum", 1.0f );
+		const float t = flInMax != flInMin ? Clamp01( ( flInput - flInMin ) / ( flInMax - flInMin ) ) : 0.0f;
+		const int nField = op.Integer( "output field", FIELD_POSITION );
+		const CVec3 vecValue = Lerp( op.Vector( "output minimum" ), op.Vector( "output maximum" ), CVec3{ t, t, t } );
+		if ( nField == FIELD_POSITION )
+		{
+			p.m_vecPosition = Point( op.Integer( "control_point_number" ) ) + vecValue;
+		}
+		else
+		{
+			SetVectorField( p, nField, vecValue, true );
+		}
+	}
+	else if ( f == "Position Along Ring" )
+	{
+		// Around the control point in the ground plane, at the ring's radius.
+		const float flAngle = 2.0f * std::numbers::pi_v<float> * r( 1 );
+		const float flRadius = op.Number( "initial radius" );
+		p.m_vecPosition = Point( op.Integer( "control point number" ) ) + CVec3{ std::cos( flAngle ), std::sin( flAngle ), 0.0f } * flRadius;
+	}
+	else if ( f == "Position from Parent Cache" )
+	{
+		// At one of the parent's particles, moved by a random offset.
+		const std::vector<Particle_t> *pFrom = m_pParent ? &m_pParent->m_Particles : nullptr;
+		if ( !pFrom || pFrom->empty() )
+		{
+			p.m_bAlive = false;
+			return;
+		}
+		const std::size_t nPick = std::min( pFrom->size() - 1, static_cast<std::size_t>( r( 1 ) * static_cast<float>( pFrom->size() ) ) );
+		p.m_vecPosition = ( *pFrom )[ nPick ].m_vecPosition + randomVector( op.Vector( "Local Offset Min" ), op.Vector( "Local Offset Max" ), 2 );
+	}
+	else if ( f == "Color Lit Per Particle" )
+	{
+		// A colour between the two; the game also lights it by the world, which the preview has none of.
+		const auto a = op.Color( "color1" );
+		const auto b = op.Color( "color2" );
+		const float t = r( 1 );
+		p.m_vecColor = p.m_vecInitialColor = { Lerp( a[ 0 ], b[ 0 ], t ), Lerp( a[ 1 ], b[ 1 ], t ), Lerp( a[ 2 ], b[ 2 ], t ) };
+	}
+	else if ( f == "Lifetime from Time to Impact" )
+	{
+		// Lives until it would hit the floor under the grid along its velocity (the preview's world).
+		const float flDown = -p.m_vecVelocity.m_flZ;
+		const float flSpeed = Length( p.m_vecVelocity );
+		const float flMax = op.Number( "maximum trace length", 1024.0f );
+		if ( flSpeed > 0.0f )
+		{
+			p.m_flLifetime = flDown > 0.0f && p.m_vecPosition.m_flZ > 0.0f ? std::min( p.m_vecPosition.m_flZ / flDown, flMax / flSpeed ) : flMax / flSpeed;
+		}
+	}
+	else if ( f == "Scalar Random" )
+	{
+		SetField( p, op.Integer( "output field", FIELD_RADIUS ), RandomRange( op.Number( "min" ), op.Number( "max", 1.0f ), r( 1 ), op.Number( "exponent", 1.0f ) ), true );
+	}
+	else if ( f == "Vector Random" )
+	{
+		const int nField = op.Integer( "output field", FIELD_COLOR );
+		const CVec3 vecValue = randomVector( op.Vector( "min" ), op.Vector( "max" ), 1 );
+		SetVectorField( p, nField, nField == FIELD_POSITION ? p.m_vecPosition + vecValue : vecValue, true );
+	}
+	else if ( f == "Inherit Velocity" )
+	{
+		// Some of how fast the control point is moving (when it is dragged).
+		const int nPoint = op.Integer( "control_point_number" );
+		p.m_vecVelocity += ( Point( nPoint ) - PreviousPoint( nPoint ) ) * ( op.Number( "velocity scale", 1.0f ) / STEP );
+	}
+	else if ( f == "Remap Particle Count to Scalar" )
+	{
+		// How many particles the system has made so far, mapped to a setting.
+		const auto flCount = static_cast<float>( instance.m_nEmitted );
+		const float flInMin = op.Number( "input minimum" ), flInMax = op.Number( "input maximum", 10.0f );
+		if ( op.Flag( "only active within specified input range" ) && ( flCount < std::min( flInMin, flInMax ) || flCount > std::max( flInMin, flInMax ) ) )
+		{
+			return;
+		}
+		const float t = flInMax != flInMin ? Clamp01( ( flCount - flInMin ) / ( flInMax - flInMin ) ) : 0.0f;
+		const int nField = op.Integer( "output field", FIELD_RADIUS );
+		const float flValue = Lerp( op.Number( "output minimum" ), op.Number( "output maximum", 1.0f ), t );
+		SetField( p, nField, op.Flag( "output is scalar of initial random range" ) ? GetField( p, nField ) * flValue : flValue, true );
+	}
+	else if ( f == "Inherit Initial Value From Parent Particle" )
+	{
+		const std::vector<Particle_t> *pFrom = m_pParent ? &m_pParent->m_Particles : nullptr;
+		if ( !pFrom || pFrom->empty() )
+		{
+			return;
+		}
+		const std::size_t nIncrement = static_cast<std::size_t>( std::max( 1, op.Integer( "Particle Increment Amount", 1 ) ) );
+		const std::size_t nPick = op.Flag( "Random Parent Particle Distribution" ) ? std::min( pFrom->size() - 1, static_cast<std::size_t>( r( 1 ) * static_cast<float>( pFrom->size() ) ) )
+																				   : ( static_cast<std::size_t>( instance.m_nEmitted ) / nIncrement ) % pFrom->size();
+		const Particle_t &parent = ( *pFrom )[ nPick ];
+		const int nField = op.Integer( "Inherited Field", FIELD_COLOR );
+		const float flScale = op.Number( "Scale", 1.0f );
+		if ( nField == FIELD_POSITION || nField == FIELD_COLOR )
+		{
+			SetVectorField( p, nField, GetVectorField( parent, nField ) * flScale, true );
+		}
+		else
+		{
+			SetField( p, nField, GetField( parent, nField ) * flScale, true );
+		}
+	}
 	else if ( f == "Lifetime Random" )
 	{
 		p.m_flLifetime = RandomRange( op.Number( "lifetime_min" ), op.Number( "lifetime_max" ), r( 1 ), op.Number( "lifetime_random_exponent", 1.0f ) );
@@ -1209,6 +1583,16 @@ void CSimulation::Initialize( Instance_t &instance, Particle_t &p, const CCompil
 	else if ( f == "Rotation Random" )
 	{
 		p.m_flRotation = ( op.Number( "rotation_initial" ) + RandomRange( op.Number( "rotation_offset_min" ), op.Number( "rotation_offset_max", 360.0f ), r( 1 ), op.Number( "rotation_random_exponent", 1.0f ) ) ) * DEGREES;
+		// The older rotation_random also gave a speed.
+		if ( op.m_Values.contains( "rotation_speed_max" ) )
+		{
+			float flSpeed = Lerp( op.Number( "rotation_speed_min" ), op.Number( "rotation_speed_max" ), r( 2 ) );
+			if ( op.Flag( "rotation_speed_random_dir" ) && r( 3 ) < 0.5f )
+			{
+				flSpeed = -flSpeed;
+			}
+			p.m_flRotationSpeed = flSpeed * DEGREES;
+		}
 	}
 	else if ( f == "Rotation Yaw Random" )
 	{
@@ -1395,31 +1779,36 @@ void CSimulation::Operate( Instance_t &instance, const CCompiledOperator &op, st
 				// Slows down to the minimum rate by the stop time (a share of the lifetime).
 				flSpeed = Lerp( flRate, flMinRate, Clamp01( life( p ) / flStop ) );
 			}
-			( bRoll ? p.m_flRotation : p.m_flYaw ) += ( flSpeed * DEGREES + ( bRoll ? p.m_flRotationSpeed : 0.0f ) ) * flDt;
+			( bRoll ? p.m_flRotation : p.m_flYaw ) += flSpeed * DEGREES * flDt;
 		}
 	}
 	else if ( f == "Oscillate Scalar" || f == "Oscillate Vector" )
 	{
+		// The wave's frequency counts over the particle's life (proportional) or per second; the
+		// start and end times are shares of its life (start/end proportional) or seconds.
 		const bool bVector = f == "Oscillate Vector";
 		const int nField = op.Integer( "oscillation field" );
 		const bool bProportional = op.Flag( "proportional 0/1", true );
+		const bool bWindowProportional = op.Flag( "start/end proportional", true );
 		const float flMultiplier = op.Number( "oscillation multiplier", 2.0f );
 		const float flPhase = op.Number( "oscillation start phase", 0.5f );
 		for ( Particle_t &p : particles )
 		{
-			float flStart = Lerp( op.Number( "start time min" ), op.Number( "start time max" ), r( p, 1 ) );
-			float flEnd = Lerp( op.Number( "end time min", 1.0f ), op.Number( "end time max", 1.0f ), r( p, 2 ) );
-			const float flTime = bProportional ? life( p ) : p.m_flAge;
-			if ( flTime < flStart || flTime > flEnd )
+			const float flStart = Lerp( op.Number( "start time min" ), op.Number( "start time max" ), r( p, 1 ) );
+			const float flEnd = Lerp( op.Number( "end time min", 1.0f ), op.Number( "end time max", 1.0f ), r( p, 2 ) );
+			const float flWindowTime = bWindowProportional ? life( p ) : p.m_flAge;
+			if ( flWindowTime < flStart || flWindowTime > flEnd )
 			{
 				continue;
 			}
-			const float flCycle = 2.0f * std::numbers::pi_v<float> * ( p.m_flAge + flPhase );
+			// Cycles so far, plus the start phase; each frequency scales the first part only.
+			const float flTime = bProportional ? life( p ) : p.m_flAge;
+			const float flTwoPi = 2.0f * std::numbers::pi_v<float>;
 			if ( bVector )
 			{
 				const CVec3 vecRate = Lerp( op.Vector( "oscillation rate min" ), op.Vector( "oscillation rate max" ), CVec3{ r( p, 3 ), r( p, 4 ), r( p, 5 ) } );
 				const CVec3 vecFrequency = Lerp( op.Vector( "oscillation frequency min", { 1, 1, 1 } ), op.Vector( "oscillation frequency max", { 1, 1, 1 } ), CVec3{ r( p, 6 ), r( p, 7 ), r( p, 8 ) } );
-				const CVec3 vecWave{ std::sin( flCycle * vecFrequency.m_flX ), std::sin( flCycle * vecFrequency.m_flY ), std::sin( flCycle * vecFrequency.m_flZ ) };
+				const CVec3 vecWave{ std::sin( flTwoPi * ( flTime * vecFrequency.m_flX + flPhase ) ), std::sin( flTwoPi * ( flTime * vecFrequency.m_flY + flPhase ) ), std::sin( flTwoPi * ( flTime * vecFrequency.m_flZ + flPhase ) ) };
 				const CVec3 vecChange = CVec3{ vecRate.m_flX * vecWave.m_flX, vecRate.m_flY * vecWave.m_flY, vecRate.m_flZ * vecWave.m_flZ } * ( flMultiplier * flDt );
 				SetVectorField( p, nField, GetVectorField( p, nField ) + vecChange, false );
 			}
@@ -1427,7 +1816,7 @@ void CSimulation::Operate( Instance_t &instance, const CCompiledOperator &op, st
 			{
 				const float flRate = Lerp( op.Number( "oscillation rate min" ), op.Number( "oscillation rate max" ), r( p, 3 ) );
 				const float flFrequency = Lerp( op.Number( "oscillation frequency min", 1.0f ), op.Number( "oscillation frequency max", 1.0f ), r( p, 4 ) );
-				SetField( p, nField, GetField( p, nField ) + flRate * std::sin( flCycle * flFrequency ) * flMultiplier * flDt, false );
+				SetField( p, nField, GetField( p, nField ) + flRate * std::sin( flTwoPi * ( flTime * flFrequency + flPhase ) ) * flMultiplier * flDt, false );
 			}
 		}
 	}
@@ -1472,10 +1861,14 @@ void CSimulation::Operate( Instance_t &instance, const CCompiledOperator &op, st
 	}
 	else if ( f == "Noise Vector" )
 	{
+		// Smooth noise over where each particle is (and the time), one per axis.
 		const int nField = op.Integer( "output field", FIELD_COLOR );
+		const float flScale = op.Number( "noise coordinate scale", 1.0f );
 		for ( Particle_t &p : particles )
 		{
-			SetVectorField( p, nField, Lerp( op.Vector( "output minimum" ), op.Vector( "output maximum" ), CVec3{ r( p, 1 ), r( p, 2 ), r( p, 3 ) } ), false );
+			const CVec3 vecAt = p.m_vecPosition * flScale + CVec3{ 0, 0, instance.m_flTime * flScale };
+			const CVec3 vecShare{ NoiseShare( Noise( vecAt, 1 ), false, false ), NoiseShare( Noise( vecAt, 2 ), false, false ), NoiseShare( Noise( vecAt, 3 ), false, false ) };
+			SetVectorField( p, nField, Lerp( op.Vector( "output minimum" ), op.Vector( "output maximum" ), vecShare ), false );
 		}
 	}
 	else if ( f == "Remap Distance to Control Point to Scalar" )
@@ -1546,6 +1939,506 @@ void CSimulation::Operate( Instance_t &instance, const CCompiledOperator &op, st
 			const CVec3 vecPeriod = Lerp( vecPeriodMin, vecPeriodMax, CVec3{ r( p, 6 ), r( p, 7 ), r( p, 8 ) } );
 			const auto wave = [ &p ]( float flPeriod ) { return flPeriod > 0.0f ? std::sin( 2.0f * std::numbers::pi_v<float> * p.m_flAge / flPeriod ) : 0.0f; };
 			p.m_vecPosition += CVec3{ vecSpeed.m_flX * wave( vecPeriod.m_flX ), vecSpeed.m_flY * wave( vecPeriod.m_flY ), vecSpeed.m_flZ * wave( vecPeriod.m_flZ ) } * flDt;
+		}
+	}
+	else if ( f == "Rotation Basic" )
+	{
+		// Turns each particle by its rotation speed: without this, a speed set at creation does
+		// nothing (the VDC article calls it a prerequisite for rotating continuously).
+		for ( Particle_t &p : particles )
+		{
+			p.m_flRotation += p.m_flRotationSpeed * flDt;
+		}
+	}
+	else if ( f == "Movement Rotate Particle Around Axis" )
+	{
+		// Around an axis through the control point, speed and all.
+		const CVec3 vecCenter = Point( op.Integer( "Control Point" ) );
+		const CVec3 vecAxis = Normalized( op.Vector( "Rotation Axis", { 0, 0, 1 } ) );
+		const float flAngle = op.Number( "Rotation Rate", 180.0f ) * DEGREES * flDt;
+		const float c = std::cos( flAngle ), d = std::sin( flAngle );
+		const auto turn = [ & ]( CVec3 v ) { return v * c + Cross( vecAxis, v ) * d + vecAxis * ( Dot( vecAxis, v ) * ( 1.0f - c ) ); };
+		for ( Particle_t &p : particles )
+		{
+			p.m_vecPosition = vecCenter + turn( p.m_vecPosition - vecCenter );
+			p.m_vecVelocity = turn( p.m_vecVelocity );
+		}
+	}
+	else if ( f == "Movement Max Velocity" )
+	{
+		const float flMax = op.Number( "Maximum Velocity", 1000.0f );
+		for ( Particle_t &p : particles )
+		{
+			const float flSpeed = Length( p.m_vecVelocity );
+			if ( flSpeed > flMax && flSpeed > 0.0f )
+			{
+				p.m_vecVelocity *= flMax / flSpeed;
+			}
+		}
+	}
+	else if ( f == "Noise Scalar" )
+	{
+		// Smooth noise over where each particle is (and the time), mapped to a setting.
+		const int nField = op.Integer( "output field", FIELD_RADIUS );
+		const float flScale = op.Number( "noise coordinate scale", 0.1f );
+		for ( Particle_t &p : particles )
+		{
+			const CVec3 vecAt = p.m_vecPosition * flScale + CVec3{ 0, 0, instance.m_flTime * flScale };
+			SetField( p, nField, Lerp( op.Number( "output minimum" ), op.Number( "output maximum", 1.0f ), NoiseShare( Noise( vecAt ), false, false ) ), false );
+		}
+	}
+	else if ( f == "Remap Scalar" )
+	{
+		const int nIn = op.Integer( "input field", FIELD_CREATION_TIME );
+		const int nOut = op.Integer( "output field", FIELD_RADIUS );
+		const float flInMin = op.Number( "input minimum" ), flInMax = op.Number( "input maximum", 1.0f );
+		for ( Particle_t &p : particles )
+		{
+			const float t = flInMax != flInMin ? Clamp01( ( GetField( p, nIn ) - flInMin ) / ( flInMax - flInMin ) ) : 0.0f;
+			SetField( p, nOut, Lerp( op.Number( "output minimum" ), op.Number( "output maximum", 1.0f ), t ), false );
+		}
+	}
+	else if ( f == "Remap Distance to Control Point to Vector" )
+	{
+		const CVec3 vecCenter = Point( op.Integer( "control point" ) );
+		const float flDMin = op.Number( "distance minimum" ), flDMax = op.Number( "distance maximum", 128.0f );
+		const int nField = op.Integer( "output field", FIELD_COLOR );
+		const bool bWithin = op.Flag( "only active within specified distance" );
+		for ( Particle_t &p : particles )
+		{
+			const float flDistance = Length( p.m_vecPosition - vecCenter );
+			if ( bWithin && ( flDistance < std::min( flDMin, flDMax ) || flDistance > std::max( flDMin, flDMax ) ) )
+			{
+				continue;
+			}
+			const float t = flDMax != flDMin ? Clamp01( ( flDistance - flDMin ) / ( flDMax - flDMin ) ) : 0.0f;
+			SetVectorField( p, nField, Lerp( op.Vector( "output minimum" ), op.Vector( "output maximum", { 1, 1, 1 } ), CVec3{ t, t, t } ), false );
+		}
+	}
+	else if ( f == "Remap Distance Between Two Control Points to Scalar" )
+	{
+		// How far apart two control points are, mapped to a setting of every particle.
+		const float flDistance = Length( Point( op.Integer( "ending control point", 1 ) ) - Point( op.Integer( "starting control point" ) ) );
+		const float flDMin = op.Number( "distance minimum" ), flDMax = op.Number( "distance maximum", 128.0f );
+		const float t = flDMax != flDMin ? Clamp01( ( flDistance - flDMin ) / ( flDMax - flDMin ) ) : 0.0f;
+		const float flValue = Lerp( op.Number( "output minimum" ), op.Number( "output maximum", 1.0f ), t );
+		const int nField = op.Integer( "output field", FIELD_RADIUS );
+		const bool bScalar = op.Flag( "output is scalar of initial random range" );
+		for ( Particle_t &p : particles )
+		{
+			SetField( p, nField, bScalar ? GetField( p, nField ) * flValue : flValue, false );
+		}
+	}
+	else if ( f == "Remap Dot Product to Scalar" )
+	{
+		// How much two directions agree (-1 to 1), mapped to a setting. The preview's control points
+		// all face +X, so only the particle's velocity (when used) varies.
+		const CVec3 vecFacing{ 1, 0, 0 };
+		const float flInMin = op.Number( "input minimum (-1 to 1)" ), flInMax = op.Number( "input maximum (-1 to 1)", 1.0f );
+		const int nField = op.Integer( "output field", FIELD_RADIUS );
+		const bool bScalar = op.Flag( "output is scalar of initial random range" );
+		const bool bVelocity = op.Flag( "use particle velocity for first input" );
+		for ( Particle_t &p : particles )
+		{
+			const float flDot = bVelocity ? Dot( Normalized( p.m_vecVelocity ), vecFacing ) : 1.0f;
+			if ( op.Flag( "only active within specified input range" ) && ( flDot < std::min( flInMin, flInMax ) || flDot > std::max( flInMin, flInMax ) ) )
+			{
+				continue;
+			}
+			const float t = flInMax != flInMin ? Clamp01( ( flDot - flInMin ) / ( flInMax - flInMin ) ) : 0.0f;
+			const float flValue = Lerp( op.Number( "output minimum" ), op.Number( "output maximum", 1.0f ), t );
+			SetField( p, nField, bScalar ? GetField( p, nField ) * flValue : flValue, false );
+		}
+	}
+	else if ( f == "Remap Speed To Scalar" )
+	{
+		const float flInMin = op.Number( "input minimum" ), flInMax = op.Number( "input maximum", 128.0f );
+		const int nField = op.Integer( "output field", FIELD_RADIUS );
+		const bool bScalar = op.Flag( "output is scalar of initial random range" ) || op.Flag( "output is scalar of current value" );
+		for ( Particle_t &p : particles )
+		{
+			const float t = flInMax != flInMin ? Clamp01( ( Length( p.m_vecVelocity ) - flInMin ) / ( flInMax - flInMin ) ) : 0.0f;
+			const float flValue = Lerp( op.Number( "output minimum" ), op.Number( "output maximum", 1.0f ), t );
+			SetField( p, nField, bScalar ? GetField( p, nField ) * flValue : flValue, false );
+		}
+	}
+	else if ( f == "Set Control Point To Particles' Center" )
+	{
+		const int nNumber = op.Integer( "Control Point Number to Set", 1 );
+		if ( !particles.empty() && nNumber > 0 && nNumber < CONTROL_POINTS && !m_HeldControlPoints[ static_cast<std::size_t>( nNumber ) ] )
+		{
+			CVec3 vecSum;
+			for ( const Particle_t &p : particles )
+			{
+				vecSum += p.m_vecPosition;
+			}
+			m_ControlPoints[ static_cast<std::size_t>( nNumber ) ] = vecSum * ( 1.0f / static_cast<float>( particles.size() ) ) + op.Vector( "Center Offset" );
+		}
+	}
+	else if ( f == "Set Control Point To Player" )
+	{
+		// The player is where the preview's camera is.
+		const int nNumber = op.Integer( "Control Point Number", 1 );
+		if ( nNumber > 0 && nNumber < CONTROL_POINTS && !m_HeldControlPoints[ static_cast<std::size_t>( nNumber ) ] )
+		{
+			m_ControlPoints[ static_cast<std::size_t>( nNumber ) ] = m_vecViewer + op.Vector( "Control Point Offset" );
+		}
+	}
+	else if ( f == "Color Light from Control Point" )
+	{
+		// Up to four lights on control points: full at the light, half at its 50% distance, none at
+		// its 0% distance; spots only inside their cone. A particle's colour is its own, lit by them;
+		// the initial colour bias keeps that share of it unlit.
+		struct Light_t
+		{
+			CVec3 m_vecAt;
+			std::array<float, 3> m_vecColor;
+			float m_flHalf, m_flZero;
+			bool m_bSpot;
+			CVec3 m_vecDirection;
+			float m_flInner, m_flOuter;
+		};
+		std::vector<Light_t> lights;
+		for ( int i = 1; i <= 4; i++ )
+		{
+			const std::string szLight = "Light " + std::to_string( i ) + " ";
+			const auto color = op.Color( szLight + "Color", { 0, 0, 0, 0 } );
+			if ( color[ 0 ] + color[ 1 ] + color[ 2 ] <= 0.0f )
+			{
+				continue;
+			}
+			lights.push_back( { Point( op.Integer( szLight + "Control Point" ) ) + op.Vector( szLight + "Control Point Offset" ), { color[ 0 ], color[ 1 ], color[ 2 ] },
+				std::max( 0.001f, op.Number( szLight + "50% Distance", 100.0f ) ), std::max( 0.002f, op.Number( szLight + "0% Distance", 200.0f ) ), op.Flag( szLight + "Type 0=Point 1=Spot" ),
+				Normalized( op.Vector( szLight + "Direction" ) ), std::cos( op.Number( szLight + "Spot Inner Cone", 30.0f ) * DEGREES ), std::cos( op.Number( szLight + "Spot Outer Cone", 45.0f ) * DEGREES ) } );
+		}
+		const float flBias = Clamp01( op.Number( "Initial Color Bias" ) );
+		const bool bAtLeast = op.Flag( "Clamp Minimum Light Value to Initial Color" );
+		const bool bAtMost = op.Flag( "Clamp Maximum Light Value to Initial Color" );
+		for ( Particle_t &p : particles )
+		{
+			std::array<float, 3> vecLight{};
+			for ( const Light_t &light : lights )
+			{
+				const CVec3 vecTo = p.m_vecPosition - light.m_vecAt;
+				const float flDistance = Length( vecTo );
+				float flAmount = flDistance <= light.m_flHalf ? 1.0f - 0.5f * flDistance / light.m_flHalf
+															  : 0.5f * ( 1.0f - Clamp01( ( flDistance - light.m_flHalf ) / std::max( 0.001f, light.m_flZero - light.m_flHalf ) ) );
+				if ( light.m_bSpot && Dot( light.m_vecDirection, light.m_vecDirection ) > 0.0f && flDistance > 0.0f )
+				{
+					const float flCos = Dot( vecTo * ( 1.0f / flDistance ), light.m_vecDirection );
+					flAmount *= light.m_flInner > light.m_flOuter ? Clamp01( ( flCos - light.m_flOuter ) / ( light.m_flInner - light.m_flOuter ) ) : ( flCos >= light.m_flOuter ? 1.0f : 0.0f );
+				}
+				for ( std::size_t c = 0; c < 3; c++ )
+				{
+					vecLight[ c ] += light.m_vecColor[ c ] * flAmount;
+				}
+			}
+			for ( std::size_t c = 0; c < 3; c++ )
+			{
+				const float flOwn = p.m_vecColor[ c ];
+				float flLit = Lerp( flOwn * vecLight[ c ], flOwn, flBias );
+				flLit = bAtLeast ? std::max( flLit, flOwn ) : flLit;
+				flLit = bAtMost ? std::min( flLit, flOwn ) : flLit;
+				p.m_vecColor[ c ] = std::max( 0.0f, flLit );
+			}
+		}
+	}
+	else if ( f == "Rotation Orient Relative to CP" || f == "Rotation Orient to 2D Direction" )
+	{
+		// Turns the roll (or the field given) to face the control point, or the way the particle
+		// moves, in the ground plane; the spin strength is how much of the way it turns each step.
+		const int nField = op.Integer( "rotation field", FIELD_ROTATION );
+		const float flOffset = op.Number( "Rotation Offset" ) * DEGREES;
+		const float flStrength = Clamp01( op.Number( "Spin Strength", 1.0f ) );
+		const CVec3 vecPoint = Point( op.Integer( "Control Point" ) );
+		const bool bToPoint = f == "Rotation Orient Relative to CP";
+		for ( Particle_t &p : particles )
+		{
+			const CVec3 vecWay = bToPoint ? vecPoint - p.m_vecPosition : p.m_vecVelocity;
+			if ( std::abs( vecWay.m_flX ) + std::abs( vecWay.m_flY ) < 1e-6f )
+			{
+				continue;
+			}
+			const float flTarget = std::atan2( vecWay.m_flY, vecWay.m_flX ) + flOffset;
+			const float flNow = GetField( p, nField );
+			const float flTurn = std::remainder( flTarget - flNow, 2.0f * std::numbers::pi_v<float> );
+			SetField( p, nField, flNow + flTurn * flStrength, false );
+		}
+	}
+	else if ( f == "Movement Maintain Position Along Path" || f == "Movement Lock to Saved Position Along Path" )
+	{
+		// Keeps particles at their place along the path between two control points (bowed and
+		// spread as the path initializers do), following the points as they move. Maintain gives
+		// each particle its place in turn and pulls it there by the cohesion strength; Lock keeps
+		// the place a path initializer gave it.
+		const int nStart = std::clamp( op.Integer( "start control point number" ), 0, CONTROL_POINTS - 1 );
+		const int nEnd = std::clamp( op.Integer( "end control point number", 1 ), 0, CONTROL_POINTS - 1 );
+		const bool bMaintain = f == "Movement Maintain Position Along Path";
+		const float flCohesion = bMaintain ? Clamp01( op.Number( "cohesion strength", 1.0f ) ) : 1.0f;
+		const int nSteps = std::max( 1, op.Integer( "particles to map from start to end", 100 ) );
+		const bool bLoop = op.Flag( "restart behavior (0 = bounce, 1 = loop )", true );
+		int &nPlaced = instance.m_Counters[ nOpIndex ];
+		for ( Particle_t &p : particles )
+		{
+			if ( p.m_flPathT < 0.0f )
+			{
+				if ( !bMaintain )
+				{
+					continue;
+				}
+				const int nPhase = bLoop ? nPlaced % nSteps : nPlaced % ( 2 * nSteps );
+				p.m_flPathT = static_cast<float>( nPhase <= nSteps ? nPhase : 2 * nSteps - nPhase ) / static_cast<float>( nSteps );
+				nPlaced++;
+			}
+			const std::array<float, 5> randoms{ r( p, 2 ), r( p, 3 ), r( p, 4 ), r( p, 5 ), 0.0f };
+			const CVec3 vecNow = PathPoint( op, p.m_flPathT, Point( nStart ), Point( nEnd ), randoms );
+			if ( bMaintain )
+			{
+				p.m_vecPosition = Lerp( p.m_vecPosition, vecNow, CVec3{ flCohesion, flCohesion, flCohesion } );
+			}
+			else
+			{
+				p.m_vecPosition += vecNow - PathPoint( op, p.m_flPathT, PreviousPoint( nStart ), PreviousPoint( nEnd ), randoms );
+			}
+		}
+	}
+	else if ( f == "Cull relative to model" )
+	{
+		// Removes particles inside the model's hitboxes (or its box), or outside them.
+		const int nPoint = op.Integer( "control_point_number" );
+		if ( !m_pModel || nPoint != m_nModelPoint )
+		{
+			return;
+		}
+		const CVec3 vecOrigin = Point( nPoint );
+		const bool bOutside = op.Flag( "cull outside instead of inside" );
+		const bool bBox = op.Flag( "use only bounding box" );
+		std::vector<std::pair<model::CTransform, std::size_t>> boxes; // model space to hitbox space
+		for ( std::size_t i = 0; i < m_pModel->m_Hitboxes.size() && !bBox; i++ )
+		{
+			const auto &hitbox = m_pModel->m_Hitboxes[ i ];
+			if ( const auto inverse = m_pModel->m_Bones[ static_cast<std::size_t>( hitbox.m_nBone ) ].m_ToModel.Inverse() )
+			{
+				boxes.emplace_back( *inverse, i );
+			}
+		}
+		const auto inside = []( CVec3 v, CVec3 a, CVec3 b ) { return v.m_flX >= a.m_flX && v.m_flX <= b.m_flX && v.m_flY >= a.m_flY && v.m_flY <= b.m_flY && v.m_flZ >= a.m_flZ && v.m_flZ <= b.m_flZ; };
+		for ( Particle_t &p : particles )
+		{
+			const CVec3 vecLocal = p.m_vecPosition - vecOrigin;
+			bool bIn = bBox && inside( vecLocal, m_pModel->m_vecMin, m_pModel->m_vecMax );
+			for ( const auto &[ toBone, nBox ] : boxes )
+			{
+				bIn = bIn || inside( toBone.Apply( vecLocal ), m_pModel->m_Hitboxes[ nBox ].m_vecMin, m_pModel->m_Hitboxes[ nBox ].m_vecMax );
+			}
+			if ( bIn != bOutside )
+			{
+				p.m_bAlive = false;
+			}
+		}
+	}
+	else if ( f == "Clamp Scalar" )
+	{
+		const int nField = op.Integer( "output field", FIELD_RADIUS );
+		const float flMin = op.Number( "output minimum" ), flMax = op.Number( "output maximum", 1.0f );
+		for ( Particle_t &p : particles )
+		{
+			SetField( p, nField, std::clamp( GetField( p, nField ), std::min( flMin, flMax ), std::max( flMin, flMax ) ), false );
+		}
+	}
+	else if ( f == "Cull when crossing sphere" )
+	{
+		const CVec3 vecCenter = Point( op.Integer( "Control Point" ) ) + op.Vector( "Control Point Offset" );
+		const float flRadius = op.Number( "Cull Distance", 100.0f );
+		const bool bInside = op.Flag( "Cull inside instead of outside 0/1" );
+		for ( Particle_t &p : particles )
+		{
+			if ( ( Length( p.m_vecPosition - vecCenter ) < flRadius ) == bInside )
+			{
+				p.m_bAlive = false;
+			}
+		}
+	}
+	else if ( f == "Lerp Initial Scalar" || f == "Lerp Initial Vector" )
+	{
+		// From what the particle started with to the value given, between the start and end times
+		// (shares of its life).
+		const int nField = op.Integer( "output field", f == "Lerp Initial Scalar" ? FIELD_RADIUS : FIELD_COLOR );
+		const float flStart = op.Number( "start time" ), flEnd = op.Number( "end time", 1.0f );
+		for ( Particle_t &p : particles )
+		{
+			const float t = flEnd > flStart ? Clamp01( ( life( p ) - flStart ) / ( flEnd - flStart ) ) : ( life( p ) >= flStart ? 1.0f : 0.0f );
+			if ( f == "Lerp Initial Scalar" )
+			{
+				const float flInitial = nField >= 0 && static_cast<std::size_t>( nField ) < p.m_InitialScalars.size() ? p.m_InitialScalars[ static_cast<std::size_t>( nField ) ] : 0.0f;
+				SetField( p, nField, Lerp( flInitial, op.Number( "value to lerp to", 1.0f ), t ), false );
+			}
+			else
+			{
+				const CVec3 vecInitial = nField == FIELD_POSITION ? p.m_vecInitialPosition : CVec3{ p.m_vecInitialColor[ 0 ], p.m_vecInitialColor[ 1 ], p.m_vecInitialColor[ 2 ] };
+				SetVectorField( p, nField, Lerp( vecInitial, op.Vector( "value to lerp to", { 1, 1, 1 } ), CVec3{ t, t, t } ), false );
+			}
+		}
+	}
+	else if ( f == "Lifespan Minimum Radius Decay" || f == "Lifespan Minimum Velocity Decay" )
+	{
+		const bool bRadius = f == "Lifespan Minimum Radius Decay";
+		const float flMinimum = op.Number( bRadius ? "minimum radius" : "minimum velocity", 1.0f );
+		for ( Particle_t &p : particles )
+		{
+			if ( ( bRadius ? p.m_flRadius : Length( p.m_vecVelocity ) ) < flMinimum )
+			{
+				p.m_bAlive = false;
+			}
+		}
+	}
+	else if ( f == "Lifespan Maintain Count Decay" )
+	{
+		// Above the count, the oldest go once they are older than the decay delay.
+		const auto nKeep = static_cast<std::size_t>( std::max( 0, op.Integer( "count to maintain", 100 ) ) );
+		const float flDelay = op.Number( "decay delay", 0.2f );
+		std::size_t nAlive = std::ranges::count_if( particles, &Particle_t::m_bAlive );
+		for ( Particle_t &p : particles )
+		{
+			if ( nAlive <= nKeep )
+			{
+				break;
+			}
+			if ( p.m_bAlive && p.m_flAge >= flDelay )
+			{
+				p.m_bAlive = false;
+				nAlive--;
+			}
+		}
+	}
+	else if ( f == "Normalize Vector" )
+	{
+		const int nField = op.Integer( "output field", FIELD_COLOR );
+		const float flScale = op.Number( "scale factor", 1.0f );
+		for ( Particle_t &p : particles )
+		{
+			SetVectorField( p, nField, Normalized( GetVectorField( p, nField ) ) * flScale, false );
+		}
+	}
+	else if ( f == "Ramp Scalar Linear Simple" )
+	{
+		const int nField = op.Integer( "rate field", FIELD_RADIUS );
+		const float flRate = op.Number( "ramp rate" );
+		const float flStart = op.Number( "start time" ), flEnd = op.Number( "end time", 1.0f );
+		for ( Particle_t &p : particles )
+		{
+			if ( life( p ) >= flStart && life( p ) <= flEnd )
+			{
+				SetField( p, nField, GetField( p, nField ) + flRate * flDt, false );
+			}
+		}
+	}
+	else if ( f == "Stop Effect after Duration" )
+	{
+		if ( instance.m_flTime >= op.Number( "Duration at which to Stop", 1.0f ) && !instance.m_bStopped )
+		{
+			instance.m_bStopped = true;
+			if ( op.Flag( "Destroy All Particles Immediately 0/1" ) )
+			{
+				for ( Particle_t &p : particles )
+				{
+					p.m_bAlive = false;
+				}
+			}
+		}
+	}
+	else if ( f == "Inherit Attribute From Parent Particle" )
+	{
+		const std::vector<Particle_t> *pFrom = m_pParent ? &m_pParent->m_Particles : nullptr;
+		if ( !pFrom || pFrom->empty() )
+		{
+			return;
+		}
+		const int nField = op.Integer( "Inherited Field", FIELD_COLOR );
+		const float flScale = op.Number( "Scale", 1.0f );
+		const std::size_t nIncrement = static_cast<std::size_t>( std::max( 1, op.Integer( "Particle Increment Amount", 1 ) ) );
+		const bool bRandom = op.Flag( "Random Parent Particle Distribution" );
+		for ( std::size_t i = 0; i < particles.size(); i++ )
+		{
+			Particle_t &p = particles[ i ];
+			const std::size_t nPick = bRandom ? std::min( pFrom->size() - 1, static_cast<std::size_t>( r( p, 1 ) * static_cast<float>( pFrom->size() ) ) ) : ( i / nIncrement ) % pFrom->size();
+			const Particle_t &parent = ( *pFrom )[ nPick ];
+			if ( nField == FIELD_POSITION || nField == FIELD_COLOR )
+			{
+				SetVectorField( p, nField, GetVectorField( parent, nField ) * flScale, false );
+			}
+			else
+			{
+				SetField( p, nField, GetField( parent, nField ) * flScale, false );
+			}
+		}
+	}
+	else if ( f == "turbulent force" )
+	{
+		// Four layers of smooth noise over where the particles are, each with its own scale and
+		// strength per axis.
+		for ( Particle_t &p : particles )
+		{
+			CVec3 vecForce;
+			for ( int nLayer = 0; nLayer < 4; nLayer++ )
+			{
+				const std::string szLayer = std::to_string( nLayer );
+				const float flScale = op.Number( "Noise scale " + szLayer, 1.0f );
+				const CVec3 vecAmount = op.Vector( "Noise amount " + szLayer );
+				const CVec3 vecAt = p.m_vecPosition * ( flScale * 0.01f ) + CVec3{ 0, 0, instance.m_flTime * flScale * 0.1f };
+				const auto nSeed = static_cast<std::uint32_t>( nLayer * 3 );
+				vecForce += CVec3{ Noise( vecAt, nSeed ) * vecAmount.m_flX, Noise( vecAt, nSeed + 1 ) * vecAmount.m_flY, Noise( vecAt, nSeed + 2 ) * vecAmount.m_flZ };
+			}
+			p.m_vecVelocity += vecForce * flDt;
+		}
+	}
+	else if ( f == "Constrain distance to path between two control points" )
+	{
+		// Keeps each particle within a distance of a point that travels from the start control
+		// point to the end one over the travel time (the path bowed by a random bulge). The distance
+		// can narrow from the start to the middle and the end.
+		const CVec3 vecFrom = Point( op.Integer( "start control point number" ) );
+		const CVec3 vecTo = Point( op.Integer( "end control point number", 1 ) );
+		const float flTravel = op.Number( "travel time", 1.0f );
+		const float flMid = std::clamp( op.Number( "mid point position", 0.5f ), 0.01f, 0.99f );
+		const float flMax = op.Number( "maximum distance" );
+		const float flMiddle = op.Number( "maximum distance middle", -1.0f ) >= 0.0f ? op.Number( "maximum distance middle" ) : flMax;
+		const float flAtEnd = op.Number( "maximum distance end", -1.0f ) >= 0.0f ? op.Number( "maximum distance end" ) : flMiddle;
+		const float flMinimum = op.Number( "minimum distance" );
+		const float flRandomBulge = op.Number( "random bulge" );
+		for ( Particle_t &p : particles )
+		{
+			const float t = flTravel > 0.0f ? Clamp01( p.m_flAge / flTravel ) : 1.0f;
+			CVec3 vecOn = vecFrom + ( vecTo - vecFrom ) * t;
+			if ( flRandomBulge != 0.0f )
+			{
+				const CVec3 vecBulge{ r( p, 1 ) * 2.0f - 1.0f, r( p, 2 ) * 2.0f - 1.0f, r( p, 3 ) * 2.0f - 1.0f };
+				vecOn += vecBulge * ( flRandomBulge * std::sin( std::numbers::pi_v<float> * t ) );
+			}
+			const float flLimit = t < flMid ? Lerp( flMax, flMiddle, t / flMid ) : Lerp( flMiddle, flAtEnd, ( t - flMid ) / ( 1.0f - flMid ) );
+			const CVec3 vecOff = p.m_vecPosition - vecOn;
+			const float flDistance = Length( vecOff );
+			if ( flDistance > flLimit )
+			{
+				p.m_vecPosition = flDistance > 0.0f ? vecOn + vecOff * ( flLimit / flDistance ) : vecOn;
+			}
+			else if ( flDistance < flMinimum && flDistance > 0.0f )
+			{
+				p.m_vecPosition = vecOn + vecOff * ( flMinimum / flDistance );
+			}
+		}
+	}
+	else if ( f == "Prevent passing through static part of world" )
+	{
+		// The preview's world is the floor under the grid: particles crossing it stop on it.
+		for ( Particle_t &p : particles )
+		{
+			const float flWasAt = p.m_vecPosition.m_flZ - p.m_vecVelocity.m_flZ * flDt;
+			if ( p.m_vecPosition.m_flZ < 0.0f && flWasAt >= 0.0f )
+			{
+				p.m_vecPosition.m_flZ = 0.0f;
+				p.m_vecVelocity.m_flZ = std::max( 0.0f, p.m_vecVelocity.m_flZ );
+			}
 		}
 	}
 	else if ( f == "random force" )
@@ -1658,11 +2551,21 @@ void CSimulation::Operate( Instance_t &instance, const CCompiledOperator &op, st
 	if ( f == "Movement Lock to Control Point" )
 	{
 		// Carried along by however far the control point moved since the last step.
+		// Letting go between a start and an end (shares of life, picked per particle), and as it
+		// gets as far from the point as the fade distance.
 		const int nIndex = std::clamp( op.Integer( "control_point_number" ), 0, CONTROL_POINTS - 1 );
 		const CVec3 vecMoved = Point( nIndex ) - PreviousPoint( nIndex );
+		const float flFadeDistance = op.Number( "distance fade range" );
 		for ( Particle_t &p : particles )
 		{
-			p.m_vecPosition += vecMoved;
+			const float flStart = RandomRange( op.Number( "start_fadeout_min", 1.0f ), op.Number( "start_fadeout_max", 1.0f ), r( p, 1 ), op.Number( "start_fadeout_exponent", 1.0f ) );
+			const float flEnd = RandomRange( op.Number( "end_fadeout_min", 1.0f ), op.Number( "end_fadeout_max", 1.0f ), r( p, 2 ), op.Number( "end_fadeout_exponent", 1.0f ) );
+			float flHold = life( p ) < flStart ? 1.0f : ( flEnd > flStart ? 1.0f - Clamp01( ( life( p ) - flStart ) / ( flEnd - flStart ) ) : 0.0f );
+			if ( flFadeDistance > 0.0f )
+			{
+				flHold *= 1.0f - Clamp01( Length( p.m_vecPosition - Point( nIndex ) ) / flFadeDistance );
+			}
+			p.m_vecPosition += vecMoved * flHold;
 		}
 	}
 }
@@ -1691,6 +2594,10 @@ void CSimulation::Step( Instance_t &instance, const Instance_t *pParent, float f
 	for ( std::size_t i = 0; i < emitters.size(); i++ )
 	{
 		const CCompiledOperator &op = *emitters[ i ];
+		if ( instance.m_bStopped )
+		{
+			instance.m_Done[ i ] = true;
+		}
 		if ( instance.m_Done[ i ] )
 		{
 			continue;
@@ -1714,6 +2621,22 @@ void CSimulation::Step( Instance_t &instance, const Instance_t *pParent, float f
 				continue;
 			}
 			instance.m_Carry[ i ] += op.Number( "emission_rate", 100.0f ) * flDt;
+			const int nCount = static_cast<int>( instance.m_Carry[ i ] );
+			instance.m_Carry[ i ] -= static_cast<float>( nCount );
+			Spawn( instance, nCount );
+		}
+		else if ( op.m_szFunction == "emit noise" )
+		{
+			// A rate between the minimum and maximum that wanders with time.
+			const float flDuration = op.Number( "emission_duration" );
+			if ( flDuration > 0.0f && instance.m_flTime >= flStart + flDuration )
+			{
+				instance.m_Done[ i ] = true;
+				continue;
+			}
+			const float flCoordinate = instance.m_flTime * op.Number( "time noise coordinate scale", 0.1f ) + op.Number( "time coordinate offset" );
+			const float flShare = NoiseShare( Noise( { flCoordinate, 0.5f, 0.5f }, static_cast<std::uint32_t>( i ) ), op.Flag( "absolute value" ), op.Flag( "invert absolute value" ) );
+			instance.m_Carry[ i ] += Lerp( op.Number( "emission minimum" ), op.Number( "emission maximum", 100.0f ), flShare ) * flDt;
 			const int nCount = static_cast<int>( instance.m_Carry[ i ] );
 			instance.m_Carry[ i ] -= static_cast<float>( nCount );
 			Spawn( instance, nCount );

@@ -807,6 +807,7 @@ std::vector<ScreenQuad_t> Layout( const CSimulation &simulation, const CCamera &
 				}
 				const bool bTrail = pRenderer->m_szFunction == "render_sprite_trail";
 				const bool bRope = pRenderer->m_szFunction == "render_rope";
+				const bool bVelocityTurn = pRenderer->m_szFunction == "render_screen_velocity_rotate";
 				// 0 faces the camera; 1 stands upright and turns only around Z; 2 (and 3, along the
 				// particle's normal, which the preview doesn't track) lies flat on the ground.
 				const int nOrientation = pRenderer->m_szFunction == "render_animated_sprites" ? pRenderer->Integer( "orientation_type" ) : 0;
@@ -911,9 +912,20 @@ std::vector<ScreenQuad_t> Layout( const CSimulation &simulation, const CCamera &
 					}
 					else
 					{
-						// Facing the camera, turned by its rotation.
-						const float c = std::cos( p.m_flRotation ) * flSize;
-						const float s = std::sin( p.m_flRotation ) * flSize;
+						// Facing the camera, turned by its rotation; or, for the velocity renderer, so
+						// the texture's forward (forward_angle from its x axis, -90 being up) points the
+						// way the particle moves across the screen.
+						float flTurn = p.m_flRotation;
+						if ( bVelocityTurn )
+						{
+							const auto ahead = camera.Project( p.m_vecPosition + p.m_vecVelocity * 0.01f );
+							const float flDx = ahead ? ( *ahead )[ 0 ] - ( *center )[ 0 ] : 0.0f;
+							const float flDy = ahead ? ( *ahead )[ 1 ] - ( *center )[ 1 ] : 0.0f;
+							const float flWay = flDx != 0.0f || flDy != 0.0f ? std::atan2( flDy, flDx ) : 0.0f;
+							flTurn = flWay - pRenderer->Number( "forward_angle", -90.0f ) * DEGREES + pRenderer->Number( "rotate_rate(dps)" ) * DEGREES * p.m_flAge;
+						}
+						const float c = std::cos( flTurn ) * flSize;
+						const float s = std::sin( flTurn ) * flSize;
 						Around( quad, *center, 2.0f * c, 2.0f * s, -2.0f * s, 2.0f * c );
 					}
 					if ( OnScreen( quad, camera ) && quad.m_flAlpha > 0.0f )

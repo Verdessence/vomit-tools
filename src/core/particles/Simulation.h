@@ -28,19 +28,27 @@
 namespace xv::particles
 {
 
+// Names as the game compares them: without regard to case.
+struct CLessNoCase
+{
+	using is_transparent = void;
+	[[nodiscard]] bool operator()( std::string_view a, std::string_view b ) const;
+};
+
 // One operator of a compiled system, with its settings looked up by name.
 struct CCompiledOperator
 {
 	Category_t m_nCategory = Category_t::CATEGORY_OPERATORS;
-	std::string m_szFunction;
+	std::string m_szFunction; // its current name, whatever name or case the file uses
 	std::int32_t m_nElement = -1; // in the document it came from
-	std::map<std::string, dmx::Value_t, std::less<>> m_Values;
+	std::map<std::string, dmx::Value_t, CLessNoCase> m_Values;
 	bool m_bSimulated = false;
 	// The window of system time the operator works in (all zero: always).
 	float m_flStartFadeIn = 0.0f;
 	float m_flEndFadeIn = 0.0f;
 	float m_flStartFadeOut = 0.0f;
 	float m_flEndFadeOut = 0.0f;
+	float m_flFadeOscillate = 0.0f; // seconds; the window then repeats, as shares of it
 
 	[[nodiscard]] float Number( std::string_view szName, float flFallback = 0.0f ) const; // float, int or bool
 	[[nodiscard]] int Integer( std::string_view szName, int nFallback = 0 ) const;
@@ -88,10 +96,14 @@ struct CLibrary
 };
 [[nodiscard]] CLibrary Compile( const dmx::Document_t &document );
 
-// Whether the preview runs this function. Others are left out (and shown as such).
+// A function's current name: files may spell it in another case, or by the older name an early
+// editor gave it ("basic_movement" for Movement Basic). Unknown names come back as they are.
+[[nodiscard]] std::string_view CurrentFunctionName( Category_t nCategory, std::string_view szFunction );
+// Whether the preview runs this function (by any of its names). Others are left out (and shown as
+// such).
 [[nodiscard]] bool IsSimulated( Category_t nCategory, std::string_view szFunction );
-// How the preview's version of a function falls short of the game's, when it is worth saying;
-// empty otherwise.
+// How the preview's version of a function falls short of the game's, or why it leaves the
+// function out, when it is worth saying; empty otherwise.
 [[nodiscard]] std::string_view PreviewNote( Category_t nCategory, std::string_view szFunction );
 
 struct Particle_t
@@ -118,6 +130,9 @@ struct Particle_t
 	bool m_bAlive = true;
 	int m_nHitbox = -1;   // the model's hitbox it was put in, for Movement Lock to Bone
 	CVec3 m_vecHitboxUvw; // where in that hitbox's box (0-1 each way)
+	float m_flPathT = -1.0f; // where along a path between control points it was put (0-1), if it was
+	CVec3 m_vecInitialPosition;
+	std::array<float, 17> m_InitialScalars{}; // every scalar field as initialized, by field number
 };
 
 class CSimulation
@@ -139,6 +154,8 @@ public:
 		std::array<std::optional<CVec3>, CONTROL_POINTS> m_OwnControlPoints{};
 		std::array<std::optional<CVec3>, CONTROL_POINTS> m_PreviousOwnControlPoints{};
 		std::map<std::size_t, int> m_Counters; // per operator: particles placed so far, for sequences
+		int m_nEmitted = 0;                   // particles made so far
+		bool m_bStopped = false;              // Stop Effect after Duration: nothing more is emitted
 	};
 
 	// A slot of a "Set Control Point Positions" operator: which control point it places.
@@ -174,6 +191,8 @@ public:
 	// there. It stays in its reference pose, facing +X.
 	void SetModel( std::shared_ptr<const model::CModel> pModel, int nControlPoint );
 	[[nodiscard]] const model::CModel *GetModel() const { return m_pModel.get(); }
+	// Where the viewer is (the camera), which stands in for the player.
+	void SetViewer( CVec3 vecPosition ) { m_vecViewer = vecPosition; }
 	[[nodiscard]] int GetModelControlPoint() const { return m_nModelPoint; }
 	// The control points an instance takes from the shared ones (those its parent doesn't set).
 	[[nodiscard]] std::vector<int> GetSharedControlPoints( const Instance_t &instance ) const;
@@ -198,6 +217,9 @@ private:
 	// A control point as the instance being stepped sees it.
 	[[nodiscard]] CVec3 Point( int nIndex ) const;
 	[[nodiscard]] CVec3 PreviousPoint( int nIndex ) const;
+	// A point on a path between two places, bowed out by an operator's bulge and spread up to its
+	// maximum distance; r are the particle's randoms for the bulge's side and the spread.
+	[[nodiscard]] static CVec3 PathPoint( const CCompiledOperator &op, float t, CVec3 vecFrom, CVec3 vecTo, std::array<float, 5> r );
 
 	std::shared_ptr<const CLibrary> m_pLibrary;
 	std::size_t m_nDefinition;
@@ -214,6 +236,7 @@ private:
 	Instance_t m_Root;
 	std::shared_ptr<const model::CModel> m_pModel;
 	int m_nModelPoint = 0;
+	CVec3 m_vecViewer{ -200, 0, 60 };
 	const Instance_t *m_pCurrent = nullptr; // being stepped
 	const Instance_t *m_pParent = nullptr;  // its parent
 };

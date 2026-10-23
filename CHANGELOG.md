@@ -19,6 +19,32 @@
   no map). Also Velocity Random and Position Along Path Random, which no CS:S or HL2 file uses.
   - All 57 functions CS:S and HL2 use now run, so all 288 of their systems run completely.
   - An operator's tooltip says where the preview's version falls short.
+- **Functions from other games:** the preview now also runs what TF2's files and custom files made
+  with later editors use: Rotation Basic and Rotation Speed Random, Movement Rotate Particle Around
+  Axis, Movement Max Velocity, Movement Maintain / Lock to Saved Position Along Path, Noise Scalar,
+  Remap Scalar, Remap Distance to Control Point to Vector, Remap Distance Between Two Control
+  Points to Scalar, Remap Dot Product to Scalar, Set Control Point To Particles' Center / To Player,
+  Color Light from Control Point, Rotation Orient Relative to CP / to 2D Direction, Cull relative to
+  model, Move Particles Between 2 Control Points, Remap Control Point to Scalar, Remap Initial
+  Distance to Control Point to Scalar, remap scalar to vector, Position Along Ring, Position from
+  Parent Cache, Lifetime from Time to Impact, emit noise, turbulent force, Constrain distance to path
+  between two control points, Prevent passing through static part of world and
+  render_screen_velocity_rotate; and, from the VDC articles, Clamp Scalar, Cull when crossing
+  sphere, Lerp Initial Scalar/Vector, Lifespan Minimum Radius/Velocity Decay, Lifespan Maintain
+  Count Decay, Normalize Vector, Remap Speed To Scalar, Ramp Scalar Linear Simple, Stop Effect after
+  Duration, Inherit Attribute / Initial Value From Parent Particle, Scalar Random, Vector Random,
+  Inherit Velocity and Remap Particle Count to Scalar.
+- **Older names:** files that use an early editor's names (`basic_movement`, `lifespan_decay`,
+  `position_within_sphere`, …) or another case (`Lifetime From Sequence`) run too; setting names
+  match without regard to case.
+- **Checked against the VDC articles:** a particle's rotation speed now turns it only with Rotation
+  Basic; Oscillate counts its frequency over the life or per second as "proportional" says, and its
+  start and end as "start/end proportional" says; Movement Lock to Control Point lets go between its
+  fade-out times and by distance; operators' "fade oscillate" repeats their fade window.
+- Of the 93 particle files on this machine's second drive (TF2's and CS:S custom ones), everything
+  runs but what needs the map (Velocity Repulse from World, Cull relative to Ray Trace Environment),
+  the control point chain TF2's flamethrower code sets up, and Alpha Fade In/Out Simple, whose
+  settings no file shows. An operator's tooltip says why.
 - **Models:** **Model** under the preview stands any of the game's models on a control point, as the
   game's effects stand on players and props. It's drawn in both the software and GPU previews,
   textured and lit, and hides the particles behind it.
