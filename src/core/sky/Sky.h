@@ -103,6 +103,10 @@ struct CUvTransform
 	float m_flD = 1.0f;
 	float m_flTx = 0.0f;
 	float m_flTy = 0.0f;
+	// Whether the texture repeats past its edges (its VTF isn't CLAMPS / CLAMPT), as a face that
+	// shows part of a shared texture can need; clamped otherwise.
+	bool m_bRepeatU = false;
+	bool m_bRepeatV = false;
 
 	[[nodiscard]] bool IsIdentity() const;
 	// "center 0 0 scale 1 2 rotate 0 translate 0 0"; parts left out keep their defaults.
@@ -198,7 +202,8 @@ struct OutputFile_t
 struct LoadedSky_t
 {
 	CCube m_Cube;
-	std::array<std::string, 6> m_Textures; // the VTF each face came from
+	std::array<std::string, 6> m_Textures;  // the VTF each face came from
+	std::array<std::string, 6> m_Materials; // the VMT each face came from, if one did: a game path, or a file's for a sky on disk
 	std::vector<std::string> m_Problems;   // faces that could not be read, and why
 };
 // Uses each material's $basetexture (the LDR image), else its HDR texture. A face with no material

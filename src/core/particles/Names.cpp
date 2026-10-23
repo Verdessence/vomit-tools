@@ -105,8 +105,8 @@ CNames CNames::Parse( std::string_view szLanguage, std::string_view szInputs )
 				}
 				const std::string szKey = Lower( token.GetKey() );
 				names.m_Tokens[ szKey ] = std::string{ token.GetValue() };
-				// "set:<setting>@<value>": one of a setting's named values.
-				if ( const auto nAt = szKey.rfind( '@' ); szKey.starts_with( "set:" ) && nAt != std::string::npos )
+				// "set:<setting>@<value>" and "mat:<parameter>@<value>": one of its named values.
+				if ( const auto nAt = szKey.rfind( '@' ); ( szKey.starts_with( "set:" ) || szKey.starts_with( "mat:" ) ) && nAt != std::string::npos )
 				{
 					const std::string szOriginal{ token.GetKey() };
 					names.m_Choices[ szKey.substr( 4, nAt - 4 ) ].push_back( { szOriginal.substr( nAt + 1 ), std::string{ token.GetValue() } } );
@@ -188,6 +188,28 @@ PlainName_t CNames::Setting( std::string_view szFunction, std::string_view szAtt
 		plain.m_szMeaning = *pGeneralTip;
 	}
 	return plain;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+PlainName_t CNames::MaterialParameter( std::string_view szKey ) const
+{
+	const std::string szToken = "mat:" + std::string{ szKey };
+	const std::string *pName = Token( szToken );
+	const std::string *pTip = Token( szToken + "#tip" );
+	return { pName ? *pName : TidyMaterialKey( szKey ), pTip ? *pTip : std::string{} };
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+PlainName_t CNames::Shader( std::string_view szShader ) const
+{
+	const std::string szToken = "shader:" + std::string{ szShader };
+	const std::string *pName = Token( szToken );
+	const std::string *pTip = Token( szToken + "#tip" );
+	return { pName ? *pName : TidyName( szShader ), pTip ? *pTip : std::string{} };
 }
 
 //-----------------------------------------------------------------------------
@@ -286,6 +308,67 @@ std::string TidyName( std::string_view szKey, bool bFunction )
 		szOut += ( nWord++ > 0 ? " " : "" ) + szWord;
 	}
 	return szOut;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Material keys run their words together, so they are split at the words they are
+//          usually made of, longest first; underscores split too.
+//-----------------------------------------------------------------------------
+std::string TidyMaterialKey( std::string_view szKey )
+{
+	static const std::vector<std::string_view> WORDS = {
+		"abovewater", "additive", "albedo", "alpha", "ambient", "amount", "angle", "animated", "base", "blend", "blur",
+		"boost", "bottom", "bump", "center", "cheap", "clamp", "color", "compile", "contrast", "control", "coverage",
+		"cubemap", "cull", "decal", "depth", "detail", "distance", "dudv", "dynamic", "edge", "end", "entities", "env",
+		"expensive", "exponent", "factor", "fade", "flash", "flat", "flow", "fog", "force", "frame", "fresnel", "full",
+		"bright", "glow", "half", "lambert", "hdr", "height", "ignore", "illum", "light", "lit", "lod", "map", "mask",
+		"material", "max", "min", "mip", "mod", "mode", "model", "noise", "normal", "offset", "opaque", "origin",
+		"orientation", "outline", "over", "parallax", "phong", "pos", "prop", "ranges", "range", "reference",
+		"reflect", "refract", "render", "rim", "rotate", "saturation", "scale", "scroll", "self", "size", "speed",
+		"sphere", "sprite", "srgb", "ssbump", "start", "surface", "test", "texture", "time", "tint", "tool",
+		"transform", "translate", "translucent", "two", "vertex", "warp", "water", "write", "allow", "no", "z"
+	};
+	std::string szLower = Lower( szKey );
+	while ( !szLower.empty() && ( szLower.front() == '$' || szLower.front() == '%' ) )
+	{
+		szLower.erase( 0, 1 );
+	}
+	std::string szSpaced;
+	std::string szLoose; // letters that match no word, kept as one word
+	const auto flush = [ & ] {
+		if ( !szLoose.empty() )
+		{
+			szSpaced += ( szSpaced.empty() ? "" : " " ) + szLoose;
+			szLoose.clear();
+		}
+	};
+	for ( std::size_t i = 0; i < szLower.size(); )
+	{
+		if ( szLower[ i ] == '_' || szLower[ i ] == ' ' )
+		{
+			flush();
+			i++;
+			continue;
+		}
+		std::string_view szBest;
+		for ( std::string_view szWord : WORDS )
+		{
+			if ( szWord.size() > szBest.size() && std::string_view{ szLower }.substr( i ).starts_with( szWord ) )
+			{
+				szBest = szWord;
+			}
+		}
+		if ( szBest.empty() )
+		{
+			szLoose += szLower[ i++ ];
+			continue;
+		}
+		flush();
+		szSpaced += ( szSpaced.empty() ? "" : " " ) + std::string{ szBest };
+		i += szBest.size();
+	}
+	flush();
+	return TidyName( szSpaced );
 }
 
 //-----------------------------------------------------------------------------

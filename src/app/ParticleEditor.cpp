@@ -1679,7 +1679,7 @@ QWidget *CParticleEditor::ValueEditor( std::int32_t nElement, const Attribute_t 
 void CParticleEditor::FillAddMenu()
 {
 	QMenu *pMenu = m_pAdd->menu();
-	pMenu->clear();
+	ClearMenu( pMenu );
 	if ( m_nSystem < 0 )
 	{
 		pMenu->addAction( tr( "Add a system first" ) )->setEnabled( false );

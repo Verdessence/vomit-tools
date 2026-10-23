@@ -20,6 +20,7 @@
 #include <thread>
 
 #include "kv1/Kv1.h"
+#include "material/Material.h"
 #include "util/Numbers.h"
 #include "vfs/Vfs.h"
 
@@ -69,16 +70,29 @@ std::string Lower( std::string_view szText )
 //-----------------------------------------------------------------------------
 // Purpose:
 //-----------------------------------------------------------------------------
-std::array<float, 3> Bilinear( const CImage &image, float u, float v )
+std::array<float, 3> Bilinear( const CImage &image, float u, float v, bool bRepeatU = false, bool bRepeatV = false )
 {
-	const float flFx = std::clamp( u * static_cast<float>( image.m_nWidth ) - 0.5f, 0.0f, static_cast<float>( image.m_nWidth - 1 ) );
-	const float flFy = std::clamp( v * static_cast<float>( image.m_nHeight ) - 0.5f, 0.0f, static_cast<float>( image.m_nHeight - 1 ) );
-	const int nX0 = static_cast<int>( flFx );
-	const int nY0 = static_cast<int>( flFy );
-	const int nX1 = std::min( nX0 + 1, image.m_nWidth - 1 );
-	const int nY1 = std::min( nY0 + 1, image.m_nHeight - 1 );
-	const float flWx = flFx - static_cast<float>( nX0 );
-	const float flWy = flFy - static_cast<float>( nY0 );
+	// Clamped: the texels at the edge carry on. Repeated: the far side's texels come round.
+	const auto axis = []( float t, int nSize, bool bRepeat, int &n0, int &n1, float &flWeight ) {
+		const float f = t * static_cast<float>( nSize ) - 0.5f;
+		if ( bRepeat )
+		{
+			const float flFloor = std::floor( f );
+			flWeight = f - flFloor;
+			const long long nWhole = static_cast<long long>( flFloor );
+			n0 = static_cast<int>( ( ( nWhole % nSize ) + nSize ) % nSize );
+			n1 = ( n0 + 1 ) % nSize;
+			return;
+		}
+		const float flClamped = std::clamp( f, 0.0f, static_cast<float>( nSize - 1 ) );
+		n0 = static_cast<int>( flClamped );
+		n1 = std::min( n0 + 1, nSize - 1 );
+		flWeight = flClamped - static_cast<float>( n0 );
+	};
+	int nX0 = 0, nX1 = 0, nY0 = 0, nY1 = 0;
+	float flWx = 0.0f, flWy = 0.0f;
+	axis( u, image.m_nWidth, bRepeatU, nX0, nX1, flWx );
+	axis( v, image.m_nHeight, bRepeatV, nY0, nY1, flWy );
 	const std::uint8_t *pP00 = image.Pixel( nX0, nY0 );
 	const std::uint8_t *pP10 = image.Pixel( nX1, nY0 );
 	const std::uint8_t *pP01 = image.Pixel( nX0, nY1 );
@@ -106,7 +120,7 @@ std::array<float, 3> SampleWith( const CCube &cube, CVec3 vecDir, Face_t nSwappe
 		return {};
 	}
 	const CUvTransform &t = cube.m_Transforms[ IndexOf( point.m_nFace ) ];
-	return Bilinear( image, t.m_flA * point.m_flU + t.m_flB * point.m_flV + t.m_flTx, t.m_flC * point.m_flU + t.m_flD * point.m_flV + t.m_flTy );
+	return Bilinear( image, t.m_flA * point.m_flU + t.m_flB * point.m_flV + t.m_flTx, t.m_flC * point.m_flU + t.m_flD * point.m_flV + t.m_flTy, t.m_bRepeatU, t.m_bRepeatV );
 }
 
 //-----------------------------------------------------------------------------
@@ -220,9 +234,16 @@ std::optional<std::string> LoadMaterialFace( LoadedSky_t &sky, Face_t nFace, con
 	{
 		return szMaterialPath + " has no shader block";
 	}
-	if ( const kv1::CNode *pTransform = root->Find( "$basetexturetransform" ); pTransform && pTransform->IsPair() )
+	// The texture transform as it is when the map starts: some skies set it with proxies, picking
+	// their part of a texture shared by several faces (TextureTransform over an atlas).
+	const material::Reader_t pfnMaterialRead = [ &pfnRead ]( std::string_view szPath ) { return pfnRead( std::string{ szPath } ); };
+	if ( const auto material = material::ParseMaterial( szText, pfnMaterialRead ) )
 	{
-		sky.m_Cube.m_Transforms[ IndexOf( nFace ) ] = CUvTransform::Parse( pTransform->GetValue() );
+		const material::CMaterial start = material::CProxies( *material ).At( 0.0f, {} );
+		if ( const material::Parameter_t *pTransform = start.Find( "$basetexturetransform" ) )
+		{
+			sky.m_Cube.m_Transforms[ IndexOf( nFace ) ] = CUvTransform::Parse( pTransform->m_szValue );
+		}
 	}
 	std::optional<std::string> firstProblem;
 	for ( std::string_view szKey : { "$basetexture", "$hdrbasetexture", "$hdrcompressedtexture" } )
@@ -235,11 +256,19 @@ std::optional<std::string> LoadMaterialFace( LoadedSky_t &sky, Face_t nFace, con
 		const std::string szVtfPath = vfs::NormalizePath( "materials/" + pTexture->GetValue() + ".vtf" );
 		const auto bytes = pfnRead( szVtfPath );
 		std::string szError = "missing";
-		auto image = bytes ? DecodeTexture( *bytes, szError ) : std::nullopt;
+		const auto vtf = bytes ? texture::ReadVtf( *bytes, &szError ) : std::nullopt;
+		auto image = vtf ? vtf->Decode( 0, 0, 0, &szError ) : std::nullopt;
 		if ( !image )
 		{
 			firstProblem = firstProblem.value_or( szVtfPath + ": " + szError );
 			continue;
+		}
+		// A transformed face can reach past the texture's edges: it repeats there unless the
+		// texture is clamped, as sky textures usually are.
+		if ( CUvTransform &transform = sky.m_Cube.m_Transforms[ IndexOf( nFace ) ]; !transform.IsIdentity() )
+		{
+			transform.m_bRepeatU = ( vtf->m_Info.m_nFlags & texture::vtf_flag::CLAMPS ) == 0;
+			transform.m_bRepeatV = ( vtf->m_Info.m_nFlags & texture::vtf_flag::CLAMPT ) == 0;
 		}
 		sky.m_Cube.Face( nFace ) = std::move( *image );
 		sky.m_Textures[ IndexOf( nFace ) ] = szVtfPath;
@@ -317,7 +346,7 @@ CImage BakedFace( const CCube &cube, Face_t nFace )
 		{
 			const float u = ( static_cast<float>( x ) + 0.5f ) / static_cast<float>( nSize );
 			const float v = ( static_cast<float>( y ) + 0.5f ) / static_cast<float>( nSize );
-			const auto vecColour = Bilinear( image, t.m_flA * u + t.m_flB * v + t.m_flTx, t.m_flC * u + t.m_flD * v + t.m_flTy );
+			const auto vecColour = Bilinear( image, t.m_flA * u + t.m_flB * v + t.m_flTx, t.m_flC * u + t.m_flD * v + t.m_flTy, t.m_bRepeatU, t.m_bRepeatV );
 			std::uint8_t *p = out.Pixel( x, y );
 			for ( std::size_t c = 0; c < 3; c++ )
 			{
@@ -856,6 +885,7 @@ LoadedSky_t LoadSky( const vfs::CFileSystem &fileSystem, std::string_view szName
 			}
 			continue;
 		}
+		sky.m_Materials[ IndexOf( nFace ) ] = szMaterialPath;
 		if ( auto problem = LoadMaterialFace( sky, nFace, szMaterialPath, *text, pfnRead, cubeMaps ) )
 		{
 			sky.m_Problems.push_back( std::move( *problem ) );
@@ -975,6 +1005,7 @@ LoadedSky_t LoadSkyFiles( const CSkyFiles &files, const vfs::CFileSystem *pFileS
 				return pFileSystem ? pFileSystem->Read( szGamePath ) : std::nullopt;
 			};
 			const std::string szText{ reinterpret_cast<const char *>( bytes->data() ), bytes->size() };
+			sky.m_Materials[ IndexOf( nFace ) ] = szShown;
 			if ( auto problem = LoadMaterialFace( sky, nFace, szShown, szText, pfnRead, cubeMaps ) )
 			{
 				// Its texture can't be found: a VTF beside the material will do.

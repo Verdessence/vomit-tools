@@ -105,6 +105,26 @@ The faces' orientation comes from the game's own skies. In all of them, the pixe
 each cube edge match under it, and the sun drawn in a map's sky sits where its `light_environment`
 puts the sun.
 
+## Material view
+
+Picking a `.vmt` in the **Game** or **Folder** tab shows the material as the game would draw it,
+beside its parameters, its textures and its text. Right-clicking a face in the skybox creator and
+choosing **Show Material** shows that face's material.
+
+- **Preview:** a flat square or a ball, lit by a light you drag. It shows:
+  - textures, tints and blending (translucent, additive, alpha-tested)
+  - detail textures in every blend mode but 10 (the detail as a second bump map)
+  - bump maps, including self-shadowing ones
+  - self-illumination, reflections and phong
+  - the Sprite, Modulate, Refract, Water and WindowImposter shaders
+- **Animation:** proxies that only need time run (animated textures, scrolling, Sine and the
+  arithmetic ones).
+- **HDR skies:** a switch shows the HDR texture, with an exposure slider.
+- **Stand-ins:** what only a map has (lightmaps, `env_cubemap`, the water's reflection) gets a
+  plain stand-in. Under the preview, the view lists what it can't show.
+- **Parameters:** what the material ends up with on a DirectX 9 PC. A patch's include is followed,
+  and fallback and conditional blocks are applied. The simple interface names the parameters.
+
 ## Particle editor
 
 - **Opening:** double-click a `.pcf` in the **Game** or **Folder** tab, open one from **File → Open
@@ -233,8 +253,9 @@ The code follows the naming and layout conventions of Valve's Source SDK (the st
 | `src/core/audio` | Decoding (WAV PCM/ADPCM, MP3) and playback on [miniaudio](https://miniaud.io) |
 | `src/core/texture` | VTF 7.0–7.5 reading and 7.1/7.2 writing, DXT and other formats; image loading on [stb](https://github.com/nothings/stb) |
 | `src/core/sky` | Sky faces and their orientation, preview rendering, seam checks, export, loading the game's skies |
+| `src/core/material` | Materials (VMT): parameters after patches and fallbacks, proxies, and the preview's drawing |
 | `src/core/particles` | Particle systems in PCF files: reading, editing, copy and paste, operator defaults from the game's files, checks, manifest; the preview's simulation and drawing |
-| `src/app` | Qt app: game and folder browsers, sound editor (cards, value pickers, playback), skybox creator, particle editor, document tabs |
+| `src/app` | Qt app: game and folder browsers, sound editor (cards, value pickers, playback), skybox creator, material view, particle editor, document tabs |
 
 ## License
 

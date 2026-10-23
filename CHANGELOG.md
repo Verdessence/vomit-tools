@@ -95,6 +95,40 @@
 - **Cube-map skies:** a sky whose materials only name a cube map (`$envmap`, as WindowImposter skies
   do) opens from that cube map's faces, HDR ones included. The face order and turns were worked out
   from Valve's own cube maps, whose seams then meet exactly.
+- **Show Material:** right-click a face to see the material it came from.
+- **Fixed another crash picking a sky**, seen on Wayland. Closing the menu could hover **Open Sky
+  from Game** again and refill the list while it was still handling the click. Menus that refill
+  as they open (skies, recent files, games, the particle editor's **Add** menu, the preview's
+  **Model** menu) now delete their old entries after the click is over.
+- **Skies that share one texture:** faces that pick their part of a shared texture with proxies
+  (TextureTransform over an atlas) now show that part, as the map starts. The texture repeats past
+  its edge unless it is clamped.
+
+### Material view
+- **Any `.vmt`** picked in the **Game** or **Folder** tab now opens in a material view:
+  - **Preview:** the material the way the game draws it, on a flat square or a ball. Drag to move
+    the light. Its textures, `$color`, translucency, additive and alpha-tested cut-outs, detail
+    textures (every `$detailblendmode` but 10, the detail as a second bump map), bump and
+    self-shadowing bump maps, self-illumination, reflections (masked, tinted, with contrast and
+    saturation), phong and the Sprite, Modulate, Refract, Water and WindowImposter shaders all
+    show.
+  - **Proxies run:** animated textures, scrolling, Sine, LinearRamp, the arithmetic proxies and
+    TextureTransform play in the preview. Proxies that need the game (PlayerLogo and the like) are
+    listed instead.
+  - **HDR skies:** an **HDR** switch shows a sky's HDR texture, with an exposure slider. The sun and
+    bright clouds show when it's lowered.
+  - **Parameters** as the material ends up with them, on a DirectX 9 PC: a patch's include resolved,
+    and fallback blocks (`LightmappedGeneric_DX9`, `>=dx90`, …) and conditions applied, with where
+    each value came from. The simple interface names them ("Base Texture") and their values
+    ("Darken and Lighten").
+  - **Textures:** each texture with its size, format and frames. Missing ones are marked.
+    Double-click one, or an included material, to open it, then **Back** to return.
+  - **Text:** the file itself, with parse diagnostics.
+- **Said plainly:** what only the map has (lightmaps, `env_cubemap`, the water's views) gets a
+  stand-in, and the view says so, along with the parameters it doesn't show.
+- **Checked:** all 10,267 CS:S and HL2 materials read and draw. The only textures that don't load
+  are the 369 the game doesn't ship. 135 of the 139 HDR sky faces are as bright as their LDR ones;
+  the other four differ in the files themselves.
 
 ## 0.4.0 — The Particle (2026-10-23)
 

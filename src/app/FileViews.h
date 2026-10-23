@@ -12,6 +12,8 @@
 #include <QString>
 #include <QWidget>
 
+#include "material/Material.h"
+
 class CSoundPlayer;
 
 // Read-only inspectors for files picked in the VFS browser. Editors replace these per format later.
@@ -61,5 +63,6 @@ public:
 	CFileInfoView( const QString &szPath, const QString &szSource, std::size_t nSize, QWidget *pParent = nullptr );
 };
 
-// Picks the view for a path, by extension. player may be null.
-[[nodiscard]] QWidget *CreateFileView( const QString &szPath, const QString &szSource, std::span<const std::byte> bytes, CSoundPlayer *pPlayer = nullptr, QWidget *pParent = nullptr );
+// Picks the view for a path, by extension. player may be null; pfnRead reads the files a material
+// names (it may be empty).
+[[nodiscard]] QWidget *CreateFileView( const QString &szPath, const QString &szSource, std::span<const std::byte> bytes, CSoundPlayer *pPlayer = nullptr, QWidget *pParent = nullptr, const xv::material::Reader_t &pfnRead = {} );

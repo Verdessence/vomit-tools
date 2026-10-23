@@ -33,6 +33,7 @@
 #include <QVBoxLayout>
 
 #include "ImageFiles.h"
+#include "MaterialView.h"
 #include "SoundPlayer.h"
 #include "audio/Audio.h"
 #include "dmx/Dmx.h"
@@ -571,9 +572,13 @@ CImageView::CImageView( const QString &szPath, const QString &szSource, std::spa
 //-----------------------------------------------------------------------------
 // Purpose: Picks the view for a path, by extension. player may be null.
 //-----------------------------------------------------------------------------
-QWidget *CreateFileView( const QString &szPath, const QString &szSource, std::span<const std::byte> bytes, CSoundPlayer *pPlayer, QWidget *pParent )
+QWidget *CreateFileView( const QString &szPath, const QString &szSource, std::span<const std::byte> bytes, CSoundPlayer *pPlayer, QWidget *pParent, const xv::material::Reader_t &pfnRead )
 {
 	const QString szSuffix = QFileInfo{ szPath }.suffix().toLower();
+	if ( szSuffix == u"vmt" )
+	{
+		return new CMaterialView( szPath, szSource, bytes, pfnRead, pParent );
+	}
 	if ( IsImageFile( szPath ) )
 	{
 		return new CImageView( szPath, szSource, bytes, pParent );
@@ -586,7 +591,7 @@ QWidget *CreateFileView( const QString &szPath, const QString &szSource, std::sp
 	{
 		return new CDmxView( szPath, bytes, pParent );
 	}
-	if ( szSuffix == u"txt" || szSuffix == u"vmt" || szSuffix == u"vdf" || szSuffix == u"res" )
+	if ( szSuffix == u"txt" || szSuffix == u"vdf" || szSuffix == u"res" )
 	{
 		return new CKeyValuesView( szPath, bytes, pParent );
 	}

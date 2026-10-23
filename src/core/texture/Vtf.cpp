@@ -490,6 +490,23 @@ std::optional<CImage> CVtf::Decode( int nMip, int nFrame, int nFace, std::string
 }
 
 //-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+std::optional<CFloatImage> CVtf::DecodeFloat( int nMip, int nFrame, int nFace, std::string *pError ) const
+{
+	const auto bytes = Image( nMip, nFrame, nFace );
+	if ( bytes.empty() )
+	{
+		if ( pError )
+		{
+			*pError = "no such image in the file";
+		}
+		return std::nullopt;
+	}
+	return texture::DecodeFloat( m_Info.m_nFormat, std::max( 1, m_Info.m_nWidth >> nMip ), std::max( 1, m_Info.m_nHeight >> nMip ), bytes, pError );
+}
+
+//-----------------------------------------------------------------------------
 // Purpose: Input is untrusted: every size and offset is checked against the file.
 //-----------------------------------------------------------------------------
 std::optional<CVtf> ReadVtf( std::span<const std::byte> data, std::string *pError )
@@ -702,6 +719,91 @@ std::optional<CImage> DecodeImage( VtfFormat_t nFormat, int nWidth, int nHeight,
 			}
 			default:
 				break;
+		}
+	}
+	return out;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+bool IsFloatFormat( VtfFormat_t nFormat )
+{
+	return nFormat == VtfFormat_t::RGBA16161616F || nFormat == VtfFormat_t::RGBA16161616 || nFormat == VtfFormat_t::R32F || nFormat == VtfFormat_t::RGB323232F || nFormat == VtfFormat_t::RGBA32323232F;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Raw image data to light values. The float formats come back as they are; RGBA16161616
+//          as 0-1; 8-bit formats are taken as sRGB and made linear.
+//-----------------------------------------------------------------------------
+std::optional<CFloatImage> DecodeFloat( VtfFormat_t nFormat, int nWidth, int nHeight, std::span<const std::byte> data, std::string *pError )
+{
+	CFloatImage out;
+	if ( !IsFloatFormat( nFormat ) )
+	{
+		const auto image = DecodeImage( nFormat, nWidth, nHeight, data, pError );
+		if ( !image )
+		{
+			return std::nullopt;
+		}
+		out.m_nWidth = nWidth;
+		out.m_nHeight = nHeight;
+		out.m_Pixels.resize( image->m_Pixels.size() );
+		for ( std::size_t i = 0; i < image->m_Pixels.size(); i++ )
+		{
+			out.m_Pixels[ i ] = i % 4 == 3 ? static_cast<float>( image->m_Pixels[ i ] ) / 255.0f : ToLinear( image->m_Pixels[ i ] );
+		}
+		return out;
+	}
+	const std::size_t nSize = ImageSize( nFormat, nWidth, nHeight );
+	if ( nSize == 0 || data.size() < nSize )
+	{
+		if ( pError )
+		{
+			*pError = "the image data is cut off";
+		}
+		return std::nullopt;
+	}
+	out.m_nWidth = nWidth;
+	out.m_nHeight = nHeight;
+	const std::size_t nPixels = static_cast<std::size_t>( nWidth ) * static_cast<std::size_t>( nHeight );
+	out.m_Pixels.resize( nPixels * 4 );
+	const std::size_t nPixelBytes = nSize / nPixels;
+	for ( std::size_t i = 0; i < nPixels; i++ )
+	{
+		const std::span<const std::byte> pixel = data.subspan( i * nPixelBytes, nPixelBytes );
+		float *p = out.m_Pixels.data() + i * 4;
+		switch ( nFormat )
+		{
+			case VtfFormat_t::RGBA16161616F:
+				for ( int c = 0; c < 4; c++ )
+				{
+					p[ c ] = HalfToFloat( U16le( pixel.data() + c * 2 ) );
+				}
+				break;
+			case VtfFormat_t::RGBA16161616:
+				for ( int c = 0; c < 4; c++ )
+				{
+					p[ c ] = static_cast<float>( U16le( pixel.data() + c * 2 ) ) / 65535.0f;
+				}
+				break;
+			default:
+			{
+				const std::size_t nChannels = nPixelBytes / 4;
+				for ( std::size_t c = 0; c < 3; c++ )
+				{
+					p[ c ] = ReadAt<float>( pixel, std::min( c, nChannels - 1 ) * 4 );
+				}
+				p[ 3 ] = nChannels == 4 ? ReadAt<float>( pixel, 12 ) : 1.0f;
+				break;
+			}
+		}
+		for ( int c = 0; c < 4; c++ )
+		{
+			if ( !std::isfinite( p[ c ] ) )
+			{
+				p[ c ] = 0.0f;
+			}
 		}
 	}
 	return out;

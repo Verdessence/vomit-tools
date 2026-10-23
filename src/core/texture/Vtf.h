@@ -114,6 +114,18 @@ struct VtfResource_t
 };
 inline constexpr std::array<std::uint8_t, 3> SHEET_RESOURCE{ 0x10, 0, 0 }; // sprite sheet sequences
 
+// Light values as an HDR texture holds them: linear, not clamped, red, green, blue and alpha per
+// pixel, rows from the top.
+struct CFloatImage
+{
+	int m_nWidth = 0;
+	int m_nHeight = 0;
+	std::vector<float> m_Pixels; // width * height * 4
+
+	[[nodiscard]] bool Empty() const { return m_nWidth <= 0 || m_nHeight <= 0; }
+	[[nodiscard]] const float *Pixel( int x, int y ) const { return m_Pixels.data() + ( static_cast<std::size_t>( y ) * static_cast<std::size_t>( m_nWidth ) + static_cast<std::size_t>( x ) ) * 4; }
+};
+
 struct CVtf
 {
 	VtfInfo_t m_Info;
@@ -127,6 +139,8 @@ struct CVtf
 	// The bytes of one image: mip 0 is full size. Empty if out of range.
 	[[nodiscard]] std::span<const std::byte> Image( int nMip = 0, int nFrame = 0, int nFace = 0, int nSlice = 0 ) const;
 	[[nodiscard]] std::optional<CImage> Decode( int nMip = 0, int nFrame = 0, int nFace = 0, std::string *pError = nullptr ) const;
+	// See DecodeFloat.
+	[[nodiscard]] std::optional<CFloatImage> DecodeFloat( int nMip = 0, int nFrame = 0, int nFace = 0, std::string *pError = nullptr ) const;
 };
 
 // Input is untrusted: every size and offset is checked against the file.
@@ -134,6 +148,11 @@ struct CVtf
 
 // Raw image data to RGBA8. Float formats are clamped to 0-1 and converted from linear to sRGB.
 [[nodiscard]] std::optional<CImage> DecodeImage( VtfFormat_t nFormat, int nWidth, int nHeight, std::span<const std::byte> data, std::string *pError = nullptr );
+// Raw image data to light values. The float formats come back as they are; RGBA16161616 as 0-1;
+// 8-bit formats are taken as sRGB and made linear.
+[[nodiscard]] std::optional<CFloatImage> DecodeFloat( VtfFormat_t nFormat, int nWidth, int nHeight, std::span<const std::byte> data, std::string *pError = nullptr );
+// The formats whose values can go above 1.
+[[nodiscard]] bool IsFloatFormat( VtfFormat_t nFormat );
 // RGBA8 to raw image data. Writes DXT1, DXT5, BGR888, RGB888, BGRA8888, RGBA8888 and BGRX8888.
 [[nodiscard]] std::vector<std::byte> EncodeImage( const CImage &image, VtfFormat_t nFormat );
 [[nodiscard]] bool CanEncode( VtfFormat_t nFormat );

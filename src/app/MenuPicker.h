@@ -23,5 +23,9 @@ struct PickerItem_t
 
 // Fills menu with the picker (szEmpty, greyed, when there are no items).
 void FillPicker( QMenu *pMenu, std::vector<PickerItem_t> items, const QString &szEmpty );
+// Empties a menu that is filled again each time it shows. Its old actions, submenus and pickers are
+// deleted once the event being handled is over: the refill can come while one of them is still
+// handling a click (closing a menu can hover the entry that shows it again).
+void ClearMenu( QMenu *pMenu );
 // A submenu of parent holding the picker.
 QMenu *AddPicker( QMenu *pParent, const QString &szTitle, std::vector<PickerItem_t> items, const QString &szEmpty );

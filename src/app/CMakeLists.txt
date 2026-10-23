@@ -18,6 +18,8 @@ add_library(vomit_tools_ui STATIC
         KvCard.h
         MainWindow.cpp
         MainWindow.h
+        MaterialView.cpp
+        MaterialView.h
         MenuPicker.cpp
         MenuPicker.h
         ParticleDocument.cpp

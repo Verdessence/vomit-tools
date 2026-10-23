@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <memory>
 
+#include <QAction>
 #include <QApplication>
 #include <QLineEdit>
 #include <QListWidget>
@@ -52,19 +53,25 @@ void FillPicker( QMenu *pSub, std::vector<PickerItem_t> items, const QString &sz
 	pLayout->addWidget( pFilter );
 	pLayout->addWidget( pList );
 
-	const auto choose = [ pShared ]( QListWidgetItem *pItem ) {
-		if ( !pItem )
+	// A click can come as both clicked and activated; it runs once.
+	auto pChosen = std::make_shared<bool>( false );
+	const auto choose = [ pShared, pChosen ]( QListWidgetItem *pItem ) {
+		if ( !pItem || *pChosen )
 		{
 			return;
 		}
+		*pChosen = true;
 		const auto pfnRun = ( *pShared )[ static_cast<std::size_t>( pItem->data( Qt::UserRole ).toInt() ) ].m_pfnRun;
-		while ( QWidget *pPopup = QApplication::activePopupWidget() )
-		{
-			pPopup->close();
-		}
-		// After the click is over: what runs may show a dialog or refill the menu, deleting this
-		// list while it is still handling the mouse.
-		QTimer::singleShot( 0, qApp, pfnRun );
+		// Nothing happens until the click is over. Closing the menus moves the hover, which on
+		// some platforms shows this menu again at once and refills it; what runs may show a dialog.
+		QTimer::singleShot( 0, qApp, [ pfnRun, pChosen ] {
+			for ( int nTries = 0; nTries < 16 && QApplication::activePopupWidget(); nTries++ )
+			{
+				QApplication::activePopupWidget()->close();
+			}
+			*pChosen = false;
+			pfnRun();
+		} );
 	};
 	QObject::connect( pList, &QListWidget::itemClicked, pList, choose );
 	QObject::connect( pList, &QListWidget::itemActivated, pList, choose );
@@ -88,6 +95,25 @@ void FillPicker( QMenu *pSub, std::vector<PickerItem_t> items, const QString &sz
 	QObject::connect( pSub, &QMenu::aboutToShow, pFilter, [ pFilter ] { pFilter->setFocus(); } );
 	// Filled while the menu is about to show, the signal above comes too late.
 	QTimer::singleShot( 0, pFilter, [ pFilter ] { pFilter->setFocus(); } );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Empties a menu that is filled again each time it shows, deleting what it held later.
+//-----------------------------------------------------------------------------
+void ClearMenu( QMenu *pMenu )
+{
+	for ( QAction *pAction : pMenu->actions() )
+	{
+		pMenu->removeAction( pAction );
+		if ( QMenu *pSub = pAction->menu(); pSub && pSub->parent() == pMenu )
+		{
+			pSub->deleteLater();
+		}
+		else if ( pAction->parent() == pMenu )
+		{
+			pAction->deleteLater();
+		}
+	}
 }
 
 //-----------------------------------------------------------------------------

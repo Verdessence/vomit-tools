@@ -37,6 +37,7 @@
 #include <QToolBar>
 #include <QUndoStack>
 #include <QUrl>
+#include <QTimer>
 #include <QVBoxLayout>
 
 #include "ImageFiles.h"
@@ -140,6 +141,8 @@ QString FormatBytes( double flBytes )
 class CFaceSlot : public QWidget
 {
 public:
+	std::function<void( Face_t )> m_pfnShowMaterial;
+
 	CFaceSlot( CSkyDocument *pDocument, Face_t nFace, std::function<void( Face_t )> pfnBrowse, std::function<void( Face_t, QStringList )> pfnDropped )
 		: m_pDocument( pDocument ),
 		  m_nFace( nFace ),
@@ -218,6 +221,7 @@ protected:
 		menu.addAction( tr( "Turn 180°" ), this, orient( { 2, false }, tr( "Turn %1" ) ) )->setEnabled( bHas );
 		menu.addAction( tr( "Mirror" ), this, orient( { 0, true }, tr( "Mirror %1" ) ) )->setEnabled( bHas );
 		menu.addSeparator();
+		menu.addAction( tr( "Show Material" ), this, [ this ] { m_pfnShowMaterial( m_nFace ); } )->setEnabled( bHas && !slot.m_szMaterial.isEmpty() && m_pfnShowMaterial );
 		menu.addAction( tr( "Copy Source Path" ), this, [ szSource = slot.m_szSource ] { QApplication::clipboard()->setText( szSource ); } )->setEnabled( bHas && !slot.m_szSource.isEmpty() );
 		menu.addAction( tr( "Clear" ), this, [ this ] { m_pDocument->ClearFace( m_nFace ); } )->setEnabled( bHas );
 		menu.exec( pEvent->globalPos() );
@@ -391,6 +395,7 @@ CSkyEditor::CSkyEditor( CSkyDocument *pDocument, QWidget *pParent )
 			} else {
 				LoadFiles(paths);
 			} } );
+		pSlot->m_pfnShowMaterial = [ this ]( Face_t f ) { emit MaterialRequested( m_pDocument->Slot( f ).m_szMaterial ); };
 		m_Slots[ xv::sky::IndexOf( face ) ] = pSlot;
 		pGrid->addWidget( pSlot, row, column );
 	}
@@ -407,7 +412,8 @@ CSkyEditor::CSkyEditor( CSkyDocument *pDocument, QWidget *pParent )
 		const int nRow = m_pIssueList->row( pItem );
 		if ( nRow >= 0 && nRow < static_cast<int>( m_Issues.size() ) && m_Issues[ static_cast<std::size_t>( nRow ) ].m_Fix )
 		{
-			ApplyFix( *m_Issues[ static_cast<std::size_t>( nRow ) ].m_Fix );
+			// After the double-click: the fix rebuilds this list.
+			QTimer::singleShot( 0, this, [ this, fix = *m_Issues[ static_cast<std::size_t>( nRow ) ].m_Fix ] { ApplyFix( fix ); } );
 		}
 	} );
 
@@ -518,7 +524,7 @@ QStringList CSkyEditor::LoadFiles( const QStringList &given )
 			problems << tr( "%1: %2" ).arg( szName, szError );
 			continue;
 		}
-		changes[ xv::sky::IndexOf( *face ) ] = CSkyDocument::Slot_t{ std::make_shared<const xv::texture::CImage>( std::move( *image ) ), szPath, {}, {} };
+		changes[ xv::sky::IndexOf( *face ) ] = CSkyDocument::Slot_t{ std::make_shared<const xv::texture::CImage>( std::move( *image ) ), szPath, {}, {}, {} };
 	}
 	if ( std::ranges::any_of( changes, []( const auto &change ) { return change.has_value(); } ) )
 	{
@@ -543,7 +549,7 @@ bool CSkyEditor::LoadFace( Face_t nFace, const QString &szPath )
 		QMessageBox::warning( this, tr( "Load Image" ), tr( "Could not read %1:\n%2" ).arg( QDir::toNativeSeparators( szPath ), szError ) );
 		return false;
 	}
-	m_pDocument->SetSlot( nFace, { std::make_shared<const xv::texture::CImage>( std::move( *image ) ), szPath, {}, {} }, tr( "Set %1" ).arg( FaceName( nFace ) ) );
+	m_pDocument->SetSlot( nFace, { std::make_shared<const xv::texture::CImage>( std::move( *image ) ), szPath, {}, {}, {} }, tr( "Set %1" ).arg( FaceName( nFace ) ) );
 	return true;
 }
 
@@ -555,7 +561,7 @@ void CSkyEditor::UseTestPattern( int nSize )
 	std::array<std::optional<CSkyDocument::Slot_t>, 6> changes;
 	for ( Face_t nFace : xv::sky::FACES )
 	{
-		changes[ xv::sky::IndexOf( nFace ) ] = CSkyDocument::Slot_t{ std::make_shared<const xv::texture::CImage>( SkyTestPattern( nFace, nSize ) ), TestPatternSource(), {}, {} };
+		changes[ xv::sky::IndexOf( nFace ) ] = CSkyDocument::Slot_t{ std::make_shared<const xv::texture::CImage>( SkyTestPattern( nFace, nSize ) ), TestPatternSource(), {}, {}, {} };
 	}
 	m_pDocument->SetSlots( changes, tr( "Test Pattern" ) );
 	if ( m_pDocument->GetName().isEmpty() )

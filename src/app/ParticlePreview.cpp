@@ -1611,7 +1611,7 @@ const particles::Sprite_t *CParticlePreview::ModelSprite( std::size_t nMaterial 
 //-----------------------------------------------------------------------------
 void CParticlePreview::FillModelMenu( QMenu *pMenu )
 {
-	pMenu->clear();
+	ClearMenu( pMenu );
 	QMenu *pChoose = pMenu->addMenu( m_pModel ? tr( "Other Model" ) : tr( "Choose Model" ) );
 	std::vector<PickerItem_t> items;
 	for ( const QString &szPath : std::as_const( m_Models ) )

@@ -1,8 +1,8 @@
 //===========================================================================//
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
-// Purpose: What the simple interface calls particle functions and settings, how it takes their
-//          values, and a line on what each does. The text lives in a language file (lang_en.txt,
+// Purpose: What the simple interface calls particle functions and settings (and material
+//          parameters), how it takes their values, and a line on what each does. The text lives in a language file (lang_en.txt,
 //          in the layout of Valve's resource/*_english.txt) and the input kinds in
 //          particle_inputs.txt; this reads them. Anything they leave out gets its key tidied.
 //
@@ -59,7 +59,12 @@ public:
 	[[nodiscard]] PlainName_t Function( Category_t nCategory, std::string_view szFunction ) const;
 	// A setting's name, in a function (szFunction) or of the system itself (szFunction empty).
 	[[nodiscard]] PlainName_t Setting( std::string_view szFunction, std::string_view szAttribute ) const;
-	// The named values of a setting that picks from a few, in the file's order; empty for others.
+	// A material parameter's name ("Base Texture" for $basetexture), and what it does.
+	[[nodiscard]] PlainName_t MaterialParameter( std::string_view szKey ) const;
+	// A material shader's name ("Lightmapped Generic"), and what it is for.
+	[[nodiscard]] PlainName_t Shader( std::string_view szShader ) const;
+	// The named values of a setting (or material parameter) that picks from a few, in the file's
+	// order; empty for others.
 	[[nodiscard]] const std::vector<NamedValue_t> &Choices( std::string_view szAttribute ) const;
 	// A particle field's name ("Radius" for 3).
 	[[nodiscard]] std::string FieldName( int nField ) const;
@@ -80,6 +85,9 @@ private:
 // A key made readable: Title Case, underscores, camel case, switch hints ("0/1", "0=random ...")
 // and notes in brackets gone; for a function, without render_.
 [[nodiscard]] std::string TidyName( std::string_view szKey, bool bFunction = false );
+
+// A material key made readable: "$envmapmasktransform" is "Env Map Mask Transform".
+[[nodiscard]] std::string TidyMaterialKey( std::string_view szKey );
 
 // Settings that pick one of a particle's fields by number ("output field").
 [[nodiscard]] bool IsFieldSetting( std::string_view szAttribute );

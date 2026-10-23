@@ -14,6 +14,7 @@
 #include "ParticleEditor.h"
 #include "SoundIndex.h"
 #include "audio/Audio.h"
+#include "material/Material.h"
 #include "sky/Sky.h"
 #include "sound/SoundSchema.h"
 #include "vfs/Steam.h"
@@ -91,7 +92,9 @@ private:
 	void ChooseFolder();
 	void AutoMountFor( const QString &szPath );
 	void PreviewFile( const QModelIndex &proxyIndex );
+	void PreviewGameFile( const QString &szPath, const QString &szSource );
 	void PreviewDiskFile( const QString &szPath );
+	void LinkMaterial( QWidget *pView, const xv::material::Reader_t &pfnRead, const QString &szMaterial, const std::function<void()> &pfnBack );
 	[[nodiscard]] QWidget *WithEditButton( QWidget *pView, const QString &szText, const QString &szButton, const std::function<void()> &pfnOpen );
 	void NewSoundFile( xv::sound::FileKind_t nKind );
 	bool Save( CSoundEditor *pEditor );

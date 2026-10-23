@@ -53,6 +53,7 @@
 #include "ImageFiles.h"
 #include "InterfaceMode.h"
 #include "KvCard.h"
+#include "MaterialView.h"
 #include "MenuPicker.h"
 #include "ParticleDocument.h"
 #include "ParticleSearch.h"
@@ -565,7 +566,7 @@ void CMainWindow::BuildPlaybackBar()
 //-----------------------------------------------------------------------------
 void CMainWindow::FillGameMenu( QMenu *pMenu )
 {
-	pMenu->clear();
+	ClearMenu( pMenu );
 	if ( !m_SteamGames )
 	{
 		std::vector<fs::path> libraries;
@@ -602,7 +603,7 @@ void CMainWindow::FillGameMenu( QMenu *pMenu )
 //-----------------------------------------------------------------------------
 void CMainWindow::FillRecentMenu( QMenu *pMenu )
 {
-	pMenu->clear();
+	ClearMenu( pMenu );
 	const QStringList recent = QSettings{}.value( RECENT_KEY ).toStringList();
 	if ( recent.isEmpty() )
 	{
@@ -627,7 +628,7 @@ void CMainWindow::FillRecentMenu( QMenu *pMenu )
 //-----------------------------------------------------------------------------
 void CMainWindow::FillSkyMenu( QMenu *pMenu )
 {
-	pMenu->clear();
+	ClearMenu( pMenu );
 	if ( !m_Game )
 	{
 		pMenu->addAction( tr( "Open a game first" ) )->setEnabled( false );
@@ -919,7 +920,13 @@ void CMainWindow::SetPreview( QWidget *pView )
 	QLayout *pLayout = m_pPreviewHost->layout();
 	while ( QLayoutItem *pItem = pLayout->takeAt( 0 ) )
 	{
-		delete pItem->widget();
+		// Deleted later, not now: the old view may be what asked for this one (a double-click on
+		// a material's texture) and still be handling the mouse.
+		if ( QWidget *pOld = pItem->widget() )
+		{
+			pOld->hide();
+			pOld->deleteLater();
+		}
 		delete pItem;
 	}
 	pLayout->addWidget( pView );
@@ -955,15 +962,24 @@ void CMainWindow::PreviewFile( const QModelIndex &proxyIndex )
 	{
 		return;
 	}
-	const QString szPath = index.data( CVfsModel::ROLE_PATH_ROLE ).toString();
-	const QString szSource = index.siblingAtColumn( CVfsModel::COLUMN_SOURCE_COLUMN ).data( Qt::ToolTipRole ).toString();
+	PreviewGameFile( index.data( CVfsModel::ROLE_PATH_ROLE ).toString(), index.siblingAtColumn( CVfsModel::COLUMN_SOURCE_COLUMN ).data( Qt::ToolTipRole ).toString() );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: A file of the mounted game in the preview, with the button to edit it where it has an
+//          editor.
+//-----------------------------------------------------------------------------
+void CMainWindow::PreviewGameFile( const QString &szPath, const QString &szSource )
+{
 	const auto bytes = m_pFileSystem->Read( szPath.toStdString() );
 	if ( !bytes )
 	{
 		SetPreview( Placeholder( tr( "Could not read %1" ).arg( szPath ) ) );
 		return;
 	}
-	QWidget *pView = CreateFileView( szPath, szSource, *bytes, m_pPlayer );
+	const xv::material::Reader_t pfnRead = [ this ]( std::string_view szGamePath ) { return m_pFileSystem->Read( szGamePath ); };
+	QWidget *pView = CreateFileView( szPath, szSource, *bytes, m_pPlayer, nullptr, pfnRead );
+	LinkMaterial( pView, pfnRead, szPath, [ this, szPath, szSource ] { PreviewGameFile( szPath, szSource ); } );
 	if ( const FileKind_t nKind = xv::sound::FileKindForPath( szPath.toStdString() ); nKind != FileKind_t::FILE_KIND_UNKNOWN )
 	{
 		pView = WithEditButton( pView, tr( "This is a %1 file." ).arg( KindName( nKind ) ), tr( "Open in Editor" ), [ this, szPath ] { OpenSoundFile( szPath ); } );
@@ -981,6 +997,30 @@ void CMainWindow::PreviewFile( const QModelIndex &proxyIndex )
 }
 
 //-----------------------------------------------------------------------------
+// Purpose: A material's textures and included materials open in the preview when double-clicked,
+//          with a button back to the material.
+//-----------------------------------------------------------------------------
+void CMainWindow::LinkMaterial( QWidget *pView, const xv::material::Reader_t &pfnRead, const QString &szMaterial, const std::function<void()> &pfnBack )
+{
+	auto *pMaterial = qobject_cast<CMaterialView *>( pView );
+	if ( !pMaterial )
+	{
+		return;
+	}
+	connect( pMaterial, &CMaterialView::OpenRequested, this, [ this, pfnRead, szMaterial, pfnBack ]( const QString &szGamePath ) {
+		const auto bytes = pfnRead ? pfnRead( szGamePath.toStdString() ) : std::nullopt;
+		if ( !bytes )
+		{
+			statusBar()->showMessage( tr( "Could not read %1" ).arg( szGamePath ), 5000 );
+			return;
+		}
+		QWidget *pLinked = CreateFileView( szGamePath, {}, *bytes, m_pPlayer, nullptr, pfnRead );
+		LinkMaterial( pLinked, pfnRead, szGamePath, pfnBack );
+		SetPreview( WithEditButton( pLinked, tr( "%1, named by %2." ).arg( szGamePath, szMaterial ), tr( "Back" ), pfnBack ) );
+	} );
+}
+
+//-----------------------------------------------------------------------------
 // Purpose:
 //-----------------------------------------------------------------------------
 void CMainWindow::PreviewDiskFile( const QString &szPath )
@@ -992,7 +1032,9 @@ void CMainWindow::PreviewDiskFile( const QString &szPath )
 		return;
 	}
 	const QFileInfo info{ szPath };
-	QWidget *pView = CreateFileView( info.fileName(), QDir::toNativeSeparators( info.absolutePath() ), AsBytes( *data ), m_pPlayer );
+	const xv::material::Reader_t pfnRead = xv::material::DiskReader( ToPath( szPath ), m_Game ? m_pFileSystem.get() : nullptr );
+	QWidget *pView = CreateFileView( info.fileName(), QDir::toNativeSeparators( info.absolutePath() ), AsBytes( *data ), m_pPlayer, nullptr, pfnRead );
+	LinkMaterial( pView, pfnRead, info.fileName(), [ this, szPath ] { PreviewDiskFile( szPath ); } );
 	if ( const auto sky = SkyFilesFor( szPath ) )
 	{
 		const auto face = xv::sky::FaceFromFileName( info.fileName().toStdString() );
@@ -1221,6 +1263,16 @@ CSkyEditor *CMainWindow::NewSky( CSkyDocument *pDocument )
 	connect( pDocument, &CSkyDocument::FacesChanged, this, updateTab );
 	connect( pEditor, &CSkyEditor::ExportRequested, this, [ this, pEditor ] { ExportSky( pEditor, false ); } );
 	connect( pEditor, &CSkyEditor::ExportToRequested, this, [ this, pEditor ] { ExportSky( pEditor, true ); } );
+	connect( pEditor, &CSkyEditor::MaterialRequested, this, [ this ]( const QString &szMaterial ) {
+		if ( QDir::isAbsolutePath( szMaterial ) )
+		{
+			PreviewDiskFile( szMaterial );
+		}
+		else
+		{
+			PreviewGameFile( szMaterial, {} );
+		}
+	} );
 	updateTab();
 	m_pTabs->setTabToolTip( nIndex, tr( "Skybox editor" ) );
 	m_pTabs->setCurrentWidget( pEditor );
@@ -1260,7 +1312,7 @@ CSkyEditor *CMainWindow::OpenSky( const QString &szName )
 		const std::size_t i = xv::sky::IndexOf( nFace );
 		if ( !loaded.m_Cube.m_Faces[ i ].Empty() )
 		{
-			faces[ i ] = CSkyDocument::Slot_t{ std::make_shared<const xv::texture::CImage>( loaded.m_Cube.m_Faces[ i ] ), QString::fromStdString( loaded.m_Textures[ i ] ), {}, loaded.m_Cube.m_Transforms[ i ] };
+			faces[ i ] = CSkyDocument::Slot_t{ std::make_shared<const xv::texture::CImage>( loaded.m_Cube.m_Faces[ i ] ), QString::fromStdString( loaded.m_Textures[ i ] ), {}, loaded.m_Cube.m_Transforms[ i ], QString::fromStdString( loaded.m_Materials[ i ] ) };
 		}
 	}
 	pDocument->SetName( szName );
@@ -1305,7 +1357,7 @@ CSkyEditor *CMainWindow::OpenSkyFiles( const xv::sky::CSkyFiles &files )
 		const std::size_t i = xv::sky::IndexOf( nFace );
 		if ( !loaded.m_Cube.m_Faces[ i ].Empty() )
 		{
-			faces[ i ] = CSkyDocument::Slot_t{ std::make_shared<const xv::texture::CImage>( loaded.m_Cube.m_Faces[ i ] ), ToQString( files.m_Faces[ i ] ), {}, loaded.m_Cube.m_Transforms[ i ] };
+			faces[ i ] = CSkyDocument::Slot_t{ std::make_shared<const xv::texture::CImage>( loaded.m_Cube.m_Faces[ i ] ), ToQString( files.m_Faces[ i ] ), {}, loaded.m_Cube.m_Transforms[ i ], QString::fromStdString( loaded.m_Materials[ i ] ) };
 		}
 	}
 	pDocument->SetName( QString::fromStdString( files.m_szName ) );

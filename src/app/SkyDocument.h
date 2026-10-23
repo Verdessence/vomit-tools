@@ -32,6 +32,7 @@ public:
 		QString m_szSource;                                  // the file or game path it came from
 		xv::texture::COrientation m_Orientation;            // applied to image
 		xv::sky::CUvTransform m_Transform;                  // from a stock material ($basetexturetransform)
+		QString m_szMaterial;                               // the VMT it came from, if any: a game path, or a file
 	};
 
 	explicit CSkyDocument( QObject *pParent = nullptr );
