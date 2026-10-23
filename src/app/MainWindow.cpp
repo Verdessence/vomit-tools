@@ -106,13 +106,13 @@ std::vector<fs::path> SteamRoots()
 	std::vector<fs::path> roots;
 #if defined( Q_OS_WIN )
 	const QSettings registry( QStringLiteral( "HKEY_CURRENT_USER\\Software\\Valve\\Steam" ), QSettings::NativeFormat );
-	if ( const QString path = registry.value( QStringLiteral( "SteamPath" ) ).toString(); !path.isEmpty() )
+	if ( const QString szPath = registry.value( QStringLiteral( "SteamPath" ) ).toString(); !szPath.isEmpty() )
 	{
-		roots.push_back( toPath( path ) );
+		roots.push_back( ToPath( szPath ) );
 	}
-	roots.push_back( toPath( QStringLiteral( "C:/Program Files (x86)/Steam" ) ) );
+	roots.push_back( ToPath( QStringLiteral( "C:/Program Files (x86)/Steam" ) ) );
 #elif defined( Q_OS_MACOS )
-	roots.push_back( toPath( QDir::homePath() + QStringLiteral( "/Library/Application Support/Steam" ) ) );
+	roots.push_back( ToPath( QDir::homePath() + QStringLiteral( "/Library/Application Support/Steam" ) ) );
 #else
 	roots.push_back( ToPath( QDir::homePath() + QStringLiteral( "/.local/share/Steam" ) ) );
 	roots.push_back( ToPath( QDir::homePath() + QStringLiteral( "/.steam/steam" ) ) );

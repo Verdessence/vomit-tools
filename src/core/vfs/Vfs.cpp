@@ -84,9 +84,9 @@ bool ConditionHolds( std::optional<std::string_view> condition )
 	}
 	c.remove_prefix( 1 );
 #if defined( _WIN32 )
-	const bool holds = c == "WIN32" || c == "WIN64" || c == "WINDOWS";
+	const bool bHolds = c == "WIN32" || c == "WIN64" || c == "WINDOWS";
 #elif defined( __APPLE__ )
-	const bool holds = c == "OSX" || c == "POSIX";
+	const bool bHolds = c == "OSX" || c == "POSIX";
 #else
 	const bool bHolds = c == "LINUX" || c == "POSIX";
 #endif

@@ -39,7 +39,7 @@ template <typename T>
 	constexpr bool bUseFromChars = true;
 #else
 	// libc++ only gained floating-point from_chars in version 20 (llvm-mingw and Apple clang lag behind).
-	constexpr bool useFromChars = std::is_integral_v<T>;
+	constexpr bool bUseFromChars = std::is_integral_v<T>;
 #endif
 	if constexpr ( bUseFromChars )
 	{
@@ -53,11 +53,11 @@ template <typename T>
 	else
 	{
 		// from_chars rejects these; the stream would skip or accept them.
-		if ( text.front() == ' ' || text.front() == '\t' || text.front() == '+' )
+		if ( szText.front() == ' ' || szText.front() == '\t' || szText.front() == '+' )
 		{
 			return std::nullopt;
 		}
-		std::istringstream stream{ std::string{ text } };
+		std::istringstream stream{ std::string{ szText } };
 		stream.imbue( std::locale::classic() );
 		stream >> value;
 		if ( stream.fail() || stream.peek() != std::char_traits<char>::eof() )
