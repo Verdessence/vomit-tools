@@ -1675,6 +1675,7 @@ CParticleEditor *CMainWindow::AddParticleEditor( CParticleDocument *pDocument )
 	};
 	connect( pDocument, &CParticleDocument::ModifiedChanged, this, updateTab );
 	connect( pEditor, &CParticleEditor::AddToManifestRequested, this, qOverload<CParticleDocument *>( &CMainWindow::AddToManifest ) );
+	connect( pEditor, &CParticleEditor::AddToMapManifestRequested, this, &CMainWindow::ChooseMapManifest );
 	connect( pEditor, &CParticleEditor::SearchRequested, this, &CMainWindow::FindParticleSystem );
 	updateTab();
 	m_pTabs->setCurrentWidget( pEditor );
@@ -1841,6 +1842,58 @@ void CMainWindow::AddToManifest( CParticleDocument *pDocument )
 		Remount();
 		statusBar()->showMessage( tr( "Added %1 to %2" ).arg( pDocument->GetGamePath(), ToQString( *target ) ), 8000 );
 	}
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Asks which map (the game's maps are offered; any name will do), then lists the file in
+//          its manifest.
+//-----------------------------------------------------------------------------
+void CMainWindow::ChooseMapManifest( CParticleDocument *pDocument )
+{
+	if ( !m_Game )
+	{
+		QMessageBox::information( this, tr( "Manifest" ), tr( "Manifests belong to a game; open the game first." ) );
+		return;
+	}
+	QStringList maps;
+	for ( const std::string &szPath : m_pFileSystem->Find( "maps", ".bsp" ) )
+	{
+		maps << QFileInfo{ QString::fromStdString( szPath ) }.completeBaseName();
+	}
+	maps.removeDuplicates();
+	maps.sort( Qt::CaseInsensitive );
+	bool bOk = false;
+	const QString szMap = QInputDialog::getItem( this, tr( "Add to a Map's Manifest" ), tr( "The map that loads %1:" ).arg( pDocument->GetFileName() ), maps, 0, true, &bOk ).trimmed();
+	if ( bOk && !szMap.isEmpty() )
+	{
+		AddToMapManifest( pDocument, szMap );
+	}
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Lists a particle file in a map's manifest.
+//-----------------------------------------------------------------------------
+bool CMainWindow::AddToMapManifest( CParticleDocument *pDocument, const QString &szMap )
+{
+	if ( !m_Game || !xv::sky::IsValidName( szMap.toStdString() ) )
+	{
+		QMessageBox::information( this, tr( "Manifest" ), m_Game ? tr( "\"%1\" isn't a map name." ).arg( szMap ) : tr( "Manifests belong to a game; open the game first." ) );
+		return false;
+	}
+	const std::string szManifestPath = xv::particles::MapManifestPath( szMap.toStdString() );
+	auto parsed = xv::kv1::Parse( m_pFileSystem->ReadText( szManifestPath ).value_or( std::string{} ) );
+	if ( !xv::particles::AddToManifest( parsed.m_Document, pDocument->GetGamePath().toStdString() ) )
+	{
+		QMessageBox::information( this, tr( "Manifest" ), tr( "%1 is already listed for %2." ).arg( pDocument->GetGamePath(), szMap ) );
+		return false;
+	}
+	if ( const auto target = WriteGameFile( szManifestPath, xv::kv1::Write( parsed.m_Document ), tr( "Manifest" ) ) )
+	{
+		Remount();
+		statusBar()->showMessage( tr( "Added %1 to %2" ).arg( pDocument->GetGamePath(), ToQString( *target ) ), 8000 );
+		return true;
+	}
+	return false;
 }
 
 //-----------------------------------------------------------------------------

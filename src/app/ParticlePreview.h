@@ -28,6 +28,7 @@
 class QCheckBox;
 class QComboBox;
 class QLabel;
+class QSlider;
 class QMenu;
 class QTimer;
 class QToolButton;
@@ -65,6 +66,9 @@ public:
 	void FrameView();
 	// Advances the simulation by seconds (the timer does this while playing).
 	void Advance( float flSeconds );
+	// Shows the effect as it is so many seconds after it starts (going back replays it from the
+	// start: the simulation is the same every time).
+	void Seek( float flSeconds );
 	// Puts a control point somewhere else in the view, without starting over.
 	void MoveControlPoint( int nIndex, xv::CVec3 vecPosition );
 	// Puts the control points the file doesn't place back where they start.
@@ -201,5 +205,6 @@ private:
 	QWidget *m_pGpu = nullptr;     // the GPU view, when drawing on the graphics card
 	QWidget *m_pOverlay = nullptr; // what is painted over it
 	QLabel *m_pInfo = nullptr;
+	QSlider *m_pTimeline = nullptr; // milliseconds since the effect started
 	QToolButton *m_pModelButton = nullptr;
 };

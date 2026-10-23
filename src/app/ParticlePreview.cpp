@@ -26,6 +26,7 @@
 #include <QMenu>
 #include <QFileInfo>
 #include <QSettings>
+#include <QSlider>
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QMouseEvent>
@@ -45,6 +46,8 @@ constexpr int MAX_RENDER_WIDTH = 800; // pixels drawn across; larger views are s
 constexpr float CATCH_UP = 4.0f;      // seconds replayed after an edit, so the effect stays in step
 constexpr float LOOP_PAUSE = 0.6f;    // seconds of nothing before a finished system starts again
 constexpr float HANDLE_RADIUS = 9.0f; // how close (pixels) a click must be to grab a control point
+constexpr int TIMELINE_START = 5000;  // milliseconds the timeline spans at first; it grows to fit
+constexpr int TIMELINE_MOST = 120000;
 constexpr auto GPU_KEY = "particlePreviewGpu";
 
 // Where each control point starts: 0 at the origin, 1 above it (where effects usually aim), the
@@ -349,6 +352,15 @@ CParticlePreview::CParticlePreview( QWidget *pParent )
 								  "Points the file places move back with Undo" ) );
 	connect( pResetPoints, &QToolButton::clicked, this, &CParticlePreview::ResetControlPoints );
 
+	m_pTimeline = new QSlider( Qt::Horizontal );
+	m_pTimeline->setObjectName( QStringLiteral( "particleTimeline" ) );
+	m_pTimeline->setRange( 0, TIMELINE_START );
+	m_pTimeline->setToolTip( tr( "Where the effect is in its time; drag to go to a moment (it pauses)" ) );
+	connect( m_pTimeline, &QSlider::sliderMoved, this, [ this ]( int nMilliseconds ) {
+		SetPlaying( false );
+		Seek( static_cast<float>( nMilliseconds ) / 1000.0f );
+	} );
+
 	m_pInfo = new QLabel;
 	m_pInfo->setObjectName( QStringLiteral( "particleInfo" ) );
 	m_pInfo->setWordWrap( true );
@@ -373,6 +385,7 @@ CParticlePreview::CParticlePreview( QWidget *pParent )
 	pLayout->setSpacing( 4 );
 	pLayout->addWidget( m_pCanvas, 1 );
 	pLayout->addLayout( pBar );
+	pLayout->addWidget( m_pTimeline );
 	pLayout->addWidget( m_pInfo );
 
 	m_pTimer = new QTimer( this );
@@ -605,6 +618,24 @@ void CParticlePreview::Advance( float flSeconds )
 	m_pSimulation->Advance( flSeconds );
 	Redraw();
 	UpdateInfo();
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Shows the effect as it is so many seconds after it starts.
+//-----------------------------------------------------------------------------
+void CParticlePreview::Seek( float flSeconds )
+{
+	if ( !m_pSimulation )
+	{
+		return;
+	}
+	flSeconds = std::max( 0.0f, flSeconds );
+	if ( flSeconds < m_pSimulation->GetTime() )
+	{
+		m_pSimulation->Restart();
+		m_flIdle = 0.0f;
+	}
+	Advance( flSeconds - m_pSimulation->GetTime() );
 }
 
 //-----------------------------------------------------------------------------
@@ -1461,6 +1492,17 @@ void CParticlePreview::UpdateInfo()
 	{
 		m_pInfo->clear();
 		return;
+	}
+	// The timeline follows the effect, and grows (by whole seconds) to keep up with it.
+	const int nNow = static_cast<int>( std::lround( m_pSimulation->GetTime() * 1000.0f ) );
+	if ( nNow > m_pTimeline->maximum() && m_pTimeline->maximum() < TIMELINE_MOST )
+	{
+		m_pTimeline->setMaximum( std::min( TIMELINE_MOST, ( nNow / 1000 + 2 ) * 1000 ) );
+	}
+	if ( !m_pTimeline->isSliderDown() )
+	{
+		const QSignalBlocker blocker{ m_pTimeline };
+		m_pTimeline->setValue( nNow );
 	}
 	QString szText = tr( "%1 s · %n particle(s)", nullptr, static_cast<int>( m_pSimulation->GetParticleCount() ) )
 						 .arg( QString::number( static_cast<double>( m_pSimulation->GetTime() ), 'f', 2 ) );

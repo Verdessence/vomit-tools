@@ -86,6 +86,8 @@ public:
 
 signals:
 	void AddToManifestRequested( CParticleDocument *pDocument );
+	// List the file in one map's manifest (maps/<map>_particles.txt).
+	void AddToMapManifestRequested( CParticleDocument *pDocument );
 	// Look for systems in every particle file (starting with the selected system's name).
 	void SearchRequested( const QString &szQuery );
 

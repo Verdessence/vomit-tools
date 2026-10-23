@@ -57,6 +57,8 @@
     the hitboxes either way. **Frame** takes the model in.
   - Reads MDL versions 44–49 with their `.vvd` and `.vtx`: every CS:S and HL2 model that has
     geometry (3,743 of 3,785; the rest only hold animations).
+- **Timeline:** a slider under the preview follows the effect; drag it to go to any moment (it
+  pauses). Going back replays from the start, so it shows exactly what playing does.
 - **Velocity kept:** placing a particle (Position Within Sphere Random) no longer drops the speed an
   earlier initializer such as Velocity Random gave it.
 - **Emission shapes:** the selected position initializer's sphere (with its inner shell and bias),
@@ -69,6 +71,8 @@
   settings (when an operator runs, visibility tests, the system's simulation tuning) are tucked
   away while they have their usual value. The file is edited exactly the same; turn it off for the
   files' own keys and every setting.
+- **Add to a Map's Manifest…** lists the file in `maps/<map>_particles.txt` (made in the write
+  folder when the map has none), so only that map loads it.
 - In either interface, tooltips give the other name and the explanation, the Add menu finds
   operators by either name, and settings that pick a particle field ("output field") are a list of
   named fields instead of a number.

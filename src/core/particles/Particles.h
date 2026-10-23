@@ -251,6 +251,8 @@ struct LintContext_t
 // The particle manifest: particles/particles_manifest.txt, a block of "file" entries. A '!' before
 // the path ("!particles/muzzleflashes.pcf") precaches every system in the file.
 inline constexpr std::string_view MANIFEST_PATH = "particles/particles_manifest.txt";
+// A map's own manifest, which the game reads as the map loads (2013 branch on): the same format.
+[[nodiscard]] std::string MapManifestPath( std::string_view szMap );
 // The files a manifest lists, normalized and without the '!'.
 [[nodiscard]] std::vector<std::string> ManifestFiles( const kv1::CDocument &manifest );
 // Adds path to the manifest's block, creating the block in an empty manifest. Returns false if it

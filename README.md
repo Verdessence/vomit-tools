@@ -137,7 +137,8 @@ puts the sun.
     and props: Position on Model Random starts particles in its hitboxes, and control points can be
     put on its attachments. The model is drawn, hides what's behind it, and stays in its reference
     pose.
-  - Play/pause, restart, speeds from 0.1× to 2×, looping and a ground grid. It draws on the graphics
+  - Play/pause, restart, speeds from 0.1× to 2×, looping, a ground grid, and a timeline to drag
+    to any moment. It draws on the graphics
     card where Qt can (**GPU**), in software otherwise.
   - Edits show at once, without starting the effect over.
   - It's an approximation worked out from what each operator's name and settings say, not the

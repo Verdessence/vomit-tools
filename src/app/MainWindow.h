@@ -68,6 +68,9 @@ public:
 	CParticleSearch *FindParticleSystem( const QString &szQuery = {} );
 	// Closes a tab, asking first about unsaved changes. Returns false when the user keeps it.
 	bool CloseTab( int nIndex );
+	// Lists a particle file in a map's manifest (maps/<map>_particles.txt), written to the write
+	// folder unless it is a loose file already. Returns false (after saying why) when it isn't.
+	bool AddToMapManifest( CParticleDocument *pDocument, const QString &szMap );
 
 protected:
 	void closeEvent( QCloseEvent *pEvent ) override;
@@ -104,6 +107,8 @@ private:
 	bool SaveAs( CParticleEditor *pEditor );
 	bool WriteParticles( CParticleEditor *pEditor, const std::filesystem::path &target );
 	void AddToManifest( CParticleDocument *pDocument );
+	// Asks which map, then lists the file in its manifest.
+	void ChooseMapManifest( CParticleDocument *pDocument );
 	// Writes a file the game reads (a manifest): in place when it's loose, else an overriding copy in
 	// the write folder. Returns where it went, or nothing (after saying why) on failure.
 	std::optional<std::filesystem::path> WriteGameFile( const std::string &szGamePath, std::string_view szBytes, const QString &szTitle );

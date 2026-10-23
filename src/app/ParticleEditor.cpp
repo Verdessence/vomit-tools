@@ -336,6 +336,9 @@ CParticleEditor::CParticleEditor( CParticleDocument *pDocument, QWidget *pParent
 	pToolbar->addSeparator();
 	m_pAddToManifest = pToolbar->addAction( tr( "Add to Manifest" ), this, [ this ] { emit AddToManifestRequested( m_pDocument ); } );
 	m_pAddToManifest->setToolTip( tr( "Lists this file in particles/particles_manifest.txt so the game loads it" ) );
+	QAction *pMapManifest = pToolbar->addAction( tr( "Add to a Map's Manifest…" ), this, [ this ] { emit AddToMapManifestRequested( m_pDocument ); } );
+	pMapManifest->setObjectName( QStringLiteral( "particleMapManifest" ) );
+	pMapManifest->setToolTip( tr( "Lists this file in maps/<map>_particles.txt, so the game loads it with that map only" ) );
 	m_pSummary = new QLabel;
 	m_pSummary->setContentsMargins( 12, 0, 6, 0 );
 	pToolbar->addWidget( m_pSummary );

@@ -1456,6 +1456,14 @@ std::vector<std::string> ManifestFiles( const kv1::CDocument &manifest )
 //          false if it
 //          was already listed.
 //-----------------------------------------------------------------------------
+std::string MapManifestPath( std::string_view szMap )
+{
+	return "maps/" + std::string{ szMap } + "_particles.txt";
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Adds a file to a manifest's block.
+//-----------------------------------------------------------------------------
 bool AddToManifest( kv1::CDocument &manifest, std::string_view szPath, bool bPrecache )
 {
 	const auto listed = ManifestFiles( manifest );
