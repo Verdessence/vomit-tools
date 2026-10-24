@@ -8,6 +8,7 @@
 //===========================================================================//
 #pragma once
 
+#include <string_view>
 #include <vector>
 
 #include <QDialog>
@@ -29,6 +30,17 @@ struct NamedSource_t
 	QString m_szName;
 	xv::texture::SourceImage_t m_Source;
 };
+
+// A flag offered for ticking; a fixed one follows the pictures (ENVMAP follows the faces).
+struct ListedFlag_t
+{
+	std::uint32_t m_nBit;
+	std::string_view m_szName; // "CLAMPS"
+	bool m_bFixed;
+};
+// The flags to offer, as MakeFlagList lists them: the simple interface leaves rare ones out unless
+// set; bHeaderFlags also lists the ones made from the pictures.
+[[nodiscard]] std::vector<ListedFlag_t> ListedFlags( std::uint32_t nFlags, bool bHeaderFlags );
 
 // A list of the texture flags to tick, with what each does. bHeaderFlags also lists the ones
 // made from the pictures (alpha, cube map); the cube map flag can't be changed.
@@ -103,6 +115,10 @@ private:
 	QComboBox *m_pVersion = nullptr;
 	QComboBox *m_pResize = nullptr;
 	QComboBox *m_pMaxSize = nullptr;
+	QSpinBox *m_pExactWidth = nullptr; // for "Exact size"
+	QSpinBox *m_pExactHeight = nullptr;
+	QLabel *m_pExactBy = nullptr;
+	bool m_bApplying = false; // setting the controls from a preset or the starting choices
 	QLabel *m_pSize = nullptr;
 	QCheckBox *m_pMipmaps = nullptr;
 	QCheckBox *m_pLowRes = nullptr;

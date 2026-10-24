@@ -81,9 +81,6 @@ CTexturePropertiesDialog::CTexturePropertiesDialog( const CVtf &vtf, QWidget *pP
 	m_pVersion->setToolTip( tr( "7.2 opens in every Source game and tool. 7.3 and later can carry sprite sheets and other resources." ) );
 	pForm->addRow( tr( "Version" ), m_pVersion );
 
-	m_pFlags = MakeFlagList( m_Initial.m_nFlags, true );
-	pForm->addRow( tr( "Flags" ), m_pFlags );
-
 	m_pFirstFrame = new QSpinBox;
 	m_pFirstFrame->setRange( 0, 65535 );
 	m_pFirstFrame->setValue( m_Initial.m_nFirstFrame );
@@ -197,7 +194,6 @@ VtfHeaderEdit_t CTexturePropertiesDialog::GetEdit() const
 {
 	VtfHeaderEdit_t edit = m_Initial;
 	edit.m_nVersionMinor = m_pVersion->currentData().toInt();
-	edit.m_nFlags = FlagsFrom( m_pFlags, m_Initial.m_nFlags );
 	edit.m_nFirstFrame = m_pFirstFrame->value();
 	edit.m_flBumpScale = static_cast<float>( m_pBumpScale->value() );
 	for ( std::size_t c = 0; c < 3; c++ )

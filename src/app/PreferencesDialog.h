@@ -28,6 +28,7 @@ private:
 	[[nodiscard]] QWidget *BuildInterfacePage();
 	[[nodiscard]] QWidget *BuildGraphicsPage();
 	[[nodiscard]] QWidget *BuildParticlesPage();
+	[[nodiscard]] QWidget *BuildMaterialsPage();
 
 	QListWidget *m_pPages = nullptr;
 	QStackedWidget *m_pStack = nullptr;

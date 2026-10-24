@@ -25,6 +25,8 @@ struct TexturePreset_t
 // Saves (or replaces, by name) one of the user's presets. Built-in names can't be replaced.
 bool SaveTexturePreset( const QString &szName, const xv::texture::BuildOptions_t &options );
 void DeleteTexturePreset( const QString &szName );
+// Whether two sets of choices are the same, as far as a preset keeps them.
+[[nodiscard]] bool SameTextureChoices( const xv::texture::BuildOptions_t &a, const xv::texture::BuildOptions_t &b );
 // The preset picked last, to start the next import with; empty for none.
 [[nodiscard]] QString LastTexturePreset();
 void SetLastTexturePreset( const QString &szName );

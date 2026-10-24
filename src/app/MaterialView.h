@@ -14,6 +14,7 @@
 #include <span>
 
 #include <QElapsedTimer>
+#include <QIcon>
 #include <QImage>
 #include <QWidget>
 
@@ -48,6 +49,17 @@ public:
 	[[nodiscard]] QImage GetPreview() const;
 	// Draws the preview again now, as at a time (seconds) for the proxies.
 	void RenderAt( float flTime );
+	// Only the preview and its controls, without the parameter, texture and text tabs (an editor
+	// beside it shows those).
+	void SetPreviewOnly( bool bOnly );
+	// A small picture of the texture a parameter names, with what it is; a null icon when it
+	// names none that was read.
+	// The material on a flat square or a ball of side nSize, as at a time (seconds) for its proxies,
+	// lit from vecLight; empty when the text has no shader block.
+	[[nodiscard]] xv::texture::CImage RenderPicture( int nSize, xv::material::Shape_t nShape, xv::material::Backdrop_t nBackdrop, float flTime, xv::CVec3 vecLight ) const;
+	// Whether a proxy changes it over time.
+	[[nodiscard]] bool IsAnimated() const { return m_pProxies && m_pProxies->IsAnimated(); }
+	[[nodiscard]] QIcon TextureIcon( std::string_view szParameter, int nSize, QString *pDescription = nullptr ) const;
 
 signals:
 	// A texture or included material was double-clicked: its game path ("materials/x.vtf").
@@ -84,5 +96,6 @@ private:
 	QLabel *m_pNotes = nullptr;
 	QTreeWidget *m_pParameters = nullptr;
 	QListWidget *m_pTextureList = nullptr;
+	QWidget *m_pTabs = nullptr;
 	QTimer *m_pTimer = nullptr;
 };

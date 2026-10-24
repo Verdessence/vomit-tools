@@ -7,6 +7,8 @@ add_library(vomit_tools_core STATIC
         kv1/Kv1.h
         material/Material.cpp
         material/Material.h
+        material/Parameters.cpp
+        material/Parameters.h
         material/Preview.cpp
         material/Preview.h
         model/Model.cpp

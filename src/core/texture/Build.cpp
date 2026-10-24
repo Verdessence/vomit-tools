@@ -26,7 +26,8 @@ int TargetSize( int nSize, ResizeMode_t nResize, int nMaxSize )
 		case ResizeMode_t::RESIZE_UP: nTarget = static_cast<int>( std::bit_ceil( static_cast<unsigned>( nTarget ) ) ); break;
 		case ResizeMode_t::RESIZE_DOWN: nTarget = static_cast<int>( std::bit_floor( static_cast<unsigned>( nTarget ) ) ); break;
 		case ResizeMode_t::RESIZE_MULTIPLE_OF_4: nTarget = std::max( 4, ( nTarget + 2 ) / 4 * 4 ); break;
-		case ResizeMode_t::RESIZE_KEEP: break;
+		case ResizeMode_t::RESIZE_KEEP:
+		case ResizeMode_t::RESIZE_EXACT: break;
 	}
 	if ( nMaxSize > 0 )
 	{
@@ -40,6 +41,10 @@ int TargetSize( int nSize, ResizeMode_t nResize, int nMaxSize )
 //-----------------------------------------------------------------------------
 std::pair<int, int> TargetSizes( int nWidth, int nHeight, const BuildOptions_t &options )
 {
+	if ( options.m_nResize == ResizeMode_t::RESIZE_EXACT )
+	{
+		return { std::clamp( options.m_nExactWidth, 1, 65535 ), std::clamp( options.m_nExactHeight, 1, 65535 ) };
+	}
 	if ( !options.m_bKeepAspect || nWidth == nHeight )
 	{
 		return { TargetSize( nWidth, options.m_nResize, options.m_nMaxSize ), TargetSize( nHeight, options.m_nResize, options.m_nMaxSize ) };
@@ -401,6 +406,99 @@ BuildOptions_t OptionsOf( const CVtf &vtf )
 	options.m_nResize = ResizeMode_t::RESIZE_KEEP;
 	options.m_bAlphaFlags = true;
 	return options;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: What keeps a texture from working as a spray.
+//-----------------------------------------------------------------------------
+std::vector<std::string> SprayProblems( const CVtf &vtf, std::size_t nFileSize )
+{
+	const VtfInfo_t &info = vtf.m_Info;
+	std::vector<std::string> problems;
+	if ( nFileSize > SPRAY_MAX_BYTES )
+	{
+		problems.push_back( std::to_string( ( nFileSize + 1023 ) / 1024 ) + " KB, over the " + std::to_string( SPRAY_MAX_BYTES / 1024 ) + " KB a spray may be" );
+	}
+	if ( info.m_nWidth > SPRAY_MAX_SIZE || info.m_nHeight > SPRAY_MAX_SIZE )
+	{
+		problems.push_back( std::to_string( info.m_nWidth ) + "×" + std::to_string( info.m_nHeight ) + ", over " + std::to_string( SPRAY_MAX_SIZE ) + " on a side" );
+	}
+	if ( !IsPowerOfTwo( info.m_nWidth ) || !IsPowerOfTwo( info.m_nHeight ) )
+	{
+		problems.push_back( "sides that aren't powers of two" );
+	}
+	if ( info.m_nFaces > 1 || info.m_nDepth > 1 )
+	{
+		problems.push_back( info.m_nFaces > 1 ? "a cube map" : "a volume texture" );
+	}
+	static constexpr VtfFormat_t DECAL_FORMATS[] = { VtfFormat_t::DXT1, VtfFormat_t::DXT1_ONEBITALPHA, VtfFormat_t::DXT3, VtfFormat_t::DXT5, VtfFormat_t::BGR888, VtfFormat_t::BGRA8888,
+		VtfFormat_t::BGRX8888, VtfFormat_t::RGB888, VtfFormat_t::RGBA8888, VtfFormat_t::I8, VtfFormat_t::IA88 };
+	if ( std::ranges::find( DECAL_FORMATS, info.m_nFormat ) == std::end( DECAL_FORMATS ) )
+	{
+		problems.push_back( std::string{ FormatName( info.m_nFormat ) } + ", a format sprays aren't drawn in" );
+	}
+	return problems;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: The choices sprays are made with.
+//-----------------------------------------------------------------------------
+BuildOptions_t SprayOptions( bool bAlpha )
+{
+	BuildOptions_t options;
+	options.m_Write.m_nFormat = bAlpha ? VtfFormat_t::DXT5 : VtfFormat_t::DXT1;
+	options.m_Write.m_nVersionMinor = 2;
+	options.m_Write.m_bMipmaps = false;
+	options.m_Write.m_bLowRes = true;
+	options.m_Write.m_nFlags = vtf_flag::NOMIP | vtf_flag::NOLOD | vtf_flag::CLAMPS | vtf_flag::CLAMPT;
+	options.m_nResize = ResizeMode_t::RESIZE_NEAREST;
+	options.m_nMaxSize = SPRAY_MAX_SIZE;
+	options.m_bKeepAspect = true;
+	return options;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Pictures made into a spray that fits: smaller, then fewer frames.
+//-----------------------------------------------------------------------------
+std::vector<std::byte> BuildSpray( std::span<const SourceImage_t> sources, std::string *pError )
+{
+	if ( sources.empty() )
+	{
+		if ( pError )
+		{
+			*pError = "no pictures";
+		}
+		return {};
+	}
+	BuildOptions_t options = SprayOptions( HasClearTexels( sources ) );
+	for ( int nMax = SPRAY_MAX_SIZE; nMax >= 64; nMax /= 2 )
+	{
+		options.m_nMaxSize = nMax;
+		auto bytes = BuildVtf( sources, options, pError );
+		if ( bytes.empty() || bytes.size() <= SPRAY_MAX_BYTES )
+		{
+			return bytes;
+		}
+	}
+	// Still too big at 64: every second frame, every third...
+	for ( std::size_t nStep = 2; nStep <= sources.size(); nStep++ )
+	{
+		std::vector<SourceImage_t> kept;
+		for ( std::size_t i = 0; i < sources.size(); i += nStep )
+		{
+			kept.push_back( sources[ i ] );
+		}
+		auto bytes = BuildVtf( kept, options, pError );
+		if ( bytes.empty() || bytes.size() <= SPRAY_MAX_BYTES )
+		{
+			return bytes;
+		}
+	}
+	if ( pError )
+	{
+		*pError = "it can't be made small enough";
+	}
+	return {};
 }
 
 } // namespace xv::texture

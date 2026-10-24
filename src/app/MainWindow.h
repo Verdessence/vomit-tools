@@ -11,6 +11,7 @@
 
 #include <QMainWindow>
 
+#include "ChoiceBoxes.h"
 #include "ParticleEditor.h"
 #include "SoundIndex.h"
 #include "audio/Audio.h"
@@ -69,13 +70,15 @@ public:
 	CSkyEditor *OpenSkyFiles( const xv::sky::CSkyFiles &files );
 	// Opens a particle file from the mounted game ("particles/fire_01.pcf") in an editor tab.
 	CParticleEditor *OpenParticleFile( const QString &szGamePath );
-	// Opens a texture from the mounted game ("materials/x.vtf") in an editor tab.
-	CTextureEditor *OpenTextureFile( const QString &szGamePath );
-	// Makes a new texture from pictures on disk, after asking how (File > New Texture).
+	// Opens a texture from the mounted game ("materials/x.vtf") in an editor tab, with the
+	// material of the same name beside it unless bFindMaterial is false.
+	CTextureEditor *OpenTextureFile( const QString &szGamePath, bool bFindMaterial = true );
+	// Makes a new texture from pictures on disk, after asking how (File > Create VTF).
 	CTextureEditor *NewTextureFromFiles( const QStringList &files );
-	// Opens a material from the mounted game ("materials/x.vmt") in an editor tab.
+	// Opens a material from the mounted game ("materials/x.vmt"): in the tab of the texture it
+	// uses when that is found, else in a tab of its own.
 	CMaterialEditor *OpenMaterialFile( const QString &szGamePath );
-	// A new, unsaved material for a texture, after asking which shader and so on.
+	// A new, unsaved material for a texture, in its editor, after asking which shader and so on.
 	CMaterialEditor *MakeMaterialFor( CTextureEditor *pEditor );
 	// Shows the search over every particle system, with query typed in.
 	CParticleSearch *FindParticleSystem( const QString &szQuery = {} );
@@ -118,7 +121,18 @@ private:
 	bool ConfirmClose( CSkyEditor *pEditor );
 	bool ConfirmClose( CParticleEditor *pEditor );
 	bool ConfirmClose( CTextureEditor *pEditor );
-	CTextureEditor *AddTextureEditor( CTextureDocument *pDocument );
+	CTextureEditor *AddTextureEditor( CTextureDocument *pDocument, bool bFindMaterial = true );
+	// Puts a material in the tab of the texture it uses (opening that), else in a tab of its own.
+	CMaterialEditor *PlaceMaterial( CMaterialEditor *pMaterial );
+	// What a material editor offers: the game's surface properties and texture names.
+	void SetUpMaterial( CMaterialEditor *pMaterial );
+	// The textures a material in a texture's tab reads: that texture as edited, then beside the
+	// material's file (when it has one), then the game.
+	[[nodiscard]] xv::material::Reader_t ReaderFor( CTextureEditor *pTexture, const std::filesystem::path &material );
+	// Shows a material's editor, in its own tab or its texture's.
+	void ShowMaterialEditor( CMaterialEditor *pEditor );
+	// Puts a texture's material away, asking first about unsaved changes.
+	bool CloseMaterial( CTextureEditor *pEditor );
 	bool Save( CTextureEditor *pEditor );
 	bool SaveAs( CTextureEditor *pEditor );
 	bool WriteTexture( CTextureEditor *pEditor, const std::filesystem::path &target );
@@ -133,8 +147,11 @@ private:
 	bool SaveAs( CMaterialEditor *pEditor );
 	bool WriteMaterial( CMaterialEditor *pEditor, const std::filesystem::path &target );
 	bool ConfirmClose( CMaterialEditor *pEditor );
-	// The surface properties the mounted game knows ($surfaceprop values).
-	[[nodiscard]] QStringList SurfaceProps() const;
+	// The surface properties the mounted game knows ($surfaceprop values), with what each is
+	// based on.
+	[[nodiscard]] std::vector<Choice_t> SurfaceProps() const;
+	// The textures the game has, as materials name them (no materials/, no .vtf).
+	[[nodiscard]] QStringList TextureNames() const;
 	void NewParticleFile();
 	CParticleEditor *AddParticleEditor( CParticleDocument *pDocument );
 	bool Save( CParticleEditor *pEditor );

@@ -64,6 +64,7 @@ CPreferencesDialog::CPreferencesDialog( QWidget *pParent )
 	AddPage( tr( "Interface" ), BuildInterfacePage() );
 	AddPage( tr( "Graphics" ), BuildGraphicsPage() );
 	AddPage( tr( "Particles" ), BuildParticlesPage() );
+	AddPage( tr( "Materials" ), BuildMaterialsPage() );
 	m_pPages->setCurrentRow( 0 );
 
 	auto *pButtons = new QDialogButtonBox( QDialogButtonBox::Close );
@@ -190,6 +191,40 @@ QWidget *CPreferencesDialog::BuildParticlesPage()
 	connect( pAll, &QCheckBox::toggled, this, []( bool bOn ) { CPreferences::Instance().SetGridAnimatingAll( bOn ); } );
 	QVBoxLayout *pLayout = PageLayout( pPage );
 	pLayout->addWidget( pAll );
+	pLayout->addStretch();
+	return pPage;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: The material editor: a list of parameters or the text.
+//-----------------------------------------------------------------------------
+QWidget *CPreferencesDialog::BuildMaterialsPage()
+{
+	auto *pPage = new QWidget;
+	auto *pVisual = new QRadioButton( tr( "Edit materials as a list of parameters" ) );
+	pVisual->setObjectName( QStringLiteral( "preferencesMaterialVisual" ) );
+	auto *pText = new QRadioButton( tr( "Edit materials as text" ) );
+	pText->setObjectName( QStringLiteral( "preferencesMaterialText" ) );
+	( CPreferences::Instance().IsMaterialVisual() ? pVisual : pText )->setChecked( true );
+	connect( pVisual, &QRadioButton::toggled, this, []( bool bOn ) { CPreferences::Instance().SetMaterialVisual( bOn ); } );
+	connect( &CPreferences::Instance(), &CPreferences::MaterialEditingChanged, pPage, [ pVisual, pText ] {
+		( CPreferences::Instance().IsMaterialVisual() ? pVisual : pText )->setChecked( true );
+	} );
+	auto *pLive = new QCheckBox( tr( "Redraw the preview at each edit in the list" ) );
+	pLive->setObjectName( QStringLiteral( "preferencesMaterialLive" ) );
+	pLive->setChecked( CPreferences::Instance().IsMaterialLive() );
+	connect( pLive, &QCheckBox::toggled, this, []( bool bOn ) { CPreferences::Instance().SetMaterialLive( bOn ); } );
+	connect( &CPreferences::Instance(), &CPreferences::MaterialEditingChanged, pLive, [ pLive ] { pLive->setChecked( CPreferences::Instance().IsMaterialLive() ); } );
+	QVBoxLayout *pLayout = PageLayout( pPage );
+	pLayout->addWidget( pVisual );
+	pLayout->addWidget( pText );
+	pLayout->addWidget( Hint( tr( "The list gives each parameter a box that suits it and adds more from a right-click; the text "
+								  "is the file as it is, coloured. Either way the same file is edited, and the switch above the "
+								  "material changes it too." ) ) );
+	pLayout->addSpacing( 12 );
+	pLayout->addWidget( pLive );
+	pLayout->addWidget( Hint( tr( "Off: the preview waits for Refresh, for heavy materials. Typing in the text always redraws "
+								  "it after a pause." ) ) );
 	pLayout->addStretch();
 	return pPage;
 }

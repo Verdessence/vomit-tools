@@ -14,6 +14,8 @@ namespace
 constexpr auto GRID_ANIMATION_KEY = "particleGridAnimatesAll";
 constexpr auto GRAPHICS_KEY = "graphicsApi";
 constexpr auto SINGLE_WINDOW_KEY = "singleWindow";
+constexpr auto MATERIAL_VISUAL_KEY = "materialVisual";
+constexpr auto MATERIAL_LIVE_KEY = "materialLivePreview";
 
 } // namespace
 
@@ -32,7 +34,9 @@ CPreferences &CPreferences::Instance()
 CPreferences::CPreferences()
 	: m_bGridAnimatingAll( QSettings{}.value( GRID_ANIMATION_KEY, false ).toBool() ),
 	  m_nGraphicsApi( GraphicsApiFromKey( QSettings{}.value( GRAPHICS_KEY ).toString().toStdString() ).value_or( GraphicsApi_t::GRAPHICS_API_AUTO ) ),
-	  m_bSingleWindow( QSettings{}.value( SINGLE_WINDOW_KEY, true ).toBool() )
+	  m_bSingleWindow( QSettings{}.value( SINGLE_WINDOW_KEY, true ).toBool() ),
+	  m_bMaterialVisual( QSettings{}.value( MATERIAL_VISUAL_KEY, true ).toBool() ),
+	  m_bMaterialLive( QSettings{}.value( MATERIAL_LIVE_KEY, true ).toBool() )
 {
 }
 
@@ -66,4 +70,32 @@ void CPreferences::SetSingleWindow( bool bSingle )
 {
 	m_bSingleWindow = bSingle;
 	QSettings{}.setValue( SINGLE_WINDOW_KEY, bSingle );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+void CPreferences::SetMaterialVisual( bool bVisual )
+{
+	if ( bVisual == m_bMaterialVisual )
+	{
+		return;
+	}
+	m_bMaterialVisual = bVisual;
+	QSettings{}.setValue( MATERIAL_VISUAL_KEY, bVisual );
+	emit MaterialEditingChanged();
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+void CPreferences::SetMaterialLive( bool bLive )
+{
+	if ( bLive == m_bMaterialLive )
+	{
+		return;
+	}
+	m_bMaterialLive = bLive;
+	QSettings{}.setValue( MATERIAL_LIVE_KEY, bLive );
+	emit MaterialEditingChanged();
 }

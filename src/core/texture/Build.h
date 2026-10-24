@@ -27,6 +27,7 @@ enum class ResizeMode_t
 	RESIZE_UP,      // the next power of two up
 	RESIZE_DOWN,    // the next power of two down
 	RESIZE_MULTIPLE_OF_4, // the nearest multiple of 4 (what DXT needs), not a power of two
+	RESIZE_EXACT,         // m_nExactWidth × m_nExactHeight, whatever the pictures are
 };
 
 struct BuildOptions_t
@@ -35,6 +36,8 @@ struct BuildOptions_t
 	int m_nFaces = 1; // 6 for a cube map: rt lf bk ft up dn in each frame
 	ResizeMode_t m_nResize = ResizeMode_t::RESIZE_NEAREST;
 	int m_nMaxSize = 0;        // largest side after resizing; 0 for no limit
+	int m_nExactWidth = 256;   // the size for RESIZE_EXACT
+	int m_nExactHeight = 256;
 	bool m_bAlphaFlags = true; // set ONEBITALPHA / EIGHTBITALPHA from the pictures
 	bool m_bStripAlpha = false; // make every picture solid first
 	// A normal map made from the pictures taken as height (brighter is higher), with
@@ -89,5 +92,18 @@ struct SourceImage_t
 // The options a VTF was written with, as far as the file tells: format, flags (without the ones
 // BuildVtf sets itself), mipmaps, thumbnail, version, first frame, bump scale, resources.
 [[nodiscard]] BuildOptions_t OptionsOf( const CVtf &vtf );
+
+// Sprays (a player's decal): the largest file the game takes for one, and the largest side.
+constexpr std::size_t SPRAY_MAX_BYTES = 512 * 1024;
+constexpr int SPRAY_MAX_SIZE = 4096;
+// What keeps a texture from working as a spray: too big a file or picture, sides that aren't
+// powers of two, a cube map or volume, a format decals can't draw. Empty when it would work.
+[[nodiscard]] std::vector<std::string> SprayProblems( const CVtf &vtf, std::size_t nFileSize );
+// The choices sprays are made with: DXT5 with see-through parts, else DXT1; at most 4096 on a side
+// in powers of two, the shape kept; no mipmaps, no LOD, clamped; version 7.2.
+[[nodiscard]] BuildOptions_t SprayOptions( bool bAlpha );
+// Pictures (frames) made into a spray that fits: smaller, down to 64 on the longer side, then fewer
+// frames, until it is under SPRAY_MAX_BYTES. Empty, with the reason, when it can't be.
+[[nodiscard]] std::vector<std::byte> BuildSpray( std::span<const SourceImage_t> sources, std::string *pError = nullptr );
 
 } // namespace xv::texture

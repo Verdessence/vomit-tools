@@ -42,6 +42,8 @@ QVariantMap ToMap( const QString &szName, const BuildOptions_t &options )
 		{ QStringLiteral( "version" ), options.m_Write.m_nVersionMinor },
 		{ QStringLiteral( "resize" ), static_cast<int>( options.m_nResize ) },
 		{ QStringLiteral( "maxSize" ), options.m_nMaxSize },
+		{ QStringLiteral( "width" ), options.m_nExactWidth },
+		{ QStringLiteral( "height" ), options.m_nExactHeight },
 		{ QStringLiteral( "keepAspect" ), options.m_bKeepAspect },
 		{ QStringLiteral( "alphaFlags" ), options.m_bAlphaFlags },
 		{ QStringLiteral( "stripAlpha" ), options.m_bStripAlpha },
@@ -68,6 +70,8 @@ BuildOptions_t FromMap( const QVariantMap &map )
 	options.m_Write.m_nVersionMinor = map.value( QStringLiteral( "version" ), 2 ).toInt();
 	options.m_nResize = static_cast<ResizeMode_t>( map.value( QStringLiteral( "resize" ), static_cast<int>( ResizeMode_t::RESIZE_NEAREST ) ).toInt() );
 	options.m_nMaxSize = map.value( QStringLiteral( "maxSize" ) ).toInt();
+	options.m_nExactWidth = map.value( QStringLiteral( "width" ), 256 ).toInt();
+	options.m_nExactHeight = map.value( QStringLiteral( "height" ), 256 ).toInt();
 	options.m_bKeepAspect = map.value( QStringLiteral( "keepAspect" ) ).toBool();
 	options.m_bAlphaFlags = map.value( QStringLiteral( "alphaFlags" ), true ).toBool();
 	options.m_bStripAlpha = map.value( QStringLiteral( "stripAlpha" ) ).toBool();
@@ -107,6 +111,9 @@ std::vector<TexturePreset_t> Builtins()
 		make( Tr( "Sky face (HDR)" ), VtfFormat_t::RGBA16161616F, VtfFormat_t::VTF_FORMAT_NONE, 0, false, 2, ResizeMode_t::RESIZE_NEAREST ),
 		make( Tr( "Distance-field sign or icon ($distancealpha)" ), VtfFormat_t::DXT5, VtfFormat_t::VTF_FORMAT_NONE, 0, true, 2, ResizeMode_t::RESIZE_NEAREST ),
 	};
+	TexturePreset_t spray{ Tr( "Spray (under 512 KB)" ), SprayOptions( false ), true };
+	spray.m_Options.m_nAlphaFormat = VtfFormat_t::DXT5;
+	presets.push_back( spray );
 	presets[ 2 ].m_Options.m_bHeightToNormal = true;
 	presets[ 8 ].m_Options.m_bDistanceAlpha = true;
 	presets[ 8 ].m_Options.m_nMaxSize = 512;
@@ -171,4 +178,20 @@ QString LastTexturePreset()
 void SetLastTexturePreset( const QString &szName )
 {
 	QSettings{}.setValue( QString::fromLatin1( LAST_PRESET_KEY ), szName );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Whether two sets of choices are the same, as far as a preset keeps them.
+//-----------------------------------------------------------------------------
+bool SameTextureChoices( const BuildOptions_t &a, const BuildOptions_t &b )
+{
+	// The exact size only counts when it is used.
+	const auto kept = []( BuildOptions_t options ) {
+		if ( options.m_nResize != ResizeMode_t::RESIZE_EXACT )
+		{
+			options.m_nExactWidth = options.m_nExactHeight = 0;
+		}
+		return ToMap( {}, options );
+	};
+	return kept( a ) == kept( b );
 }

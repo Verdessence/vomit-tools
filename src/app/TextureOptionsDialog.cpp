@@ -31,6 +31,7 @@
 #include <QTreeWidget>
 #include <QVBoxLayout>
 
+#include "ChoiceBoxes.h"
 #include "InterfaceMode.h"
 #include "Language.h"
 #include "TexturePresets.h"
@@ -59,6 +60,9 @@ constexpr std::array<std::array<VtfFormat_t, 7>, 7> FORMAT_GROUPS{ {
 	{ VtfFormat_t::RGB888_BLUESCREEN, VtfFormat_t::BGR888_BLUESCREEN, VtfFormat_t::VTF_FORMAT_NONE, VtfFormat_t::VTF_FORMAT_NONE, VtfFormat_t::VTF_FORMAT_NONE, VtfFormat_t::VTF_FORMAT_NONE, VtfFormat_t::VTF_FORMAT_NONE },
 	{ VtfFormat_t::RGBA16161616F, VtfFormat_t::RGBA16161616, VtfFormat_t::R32F, VtfFormat_t::RGB323232F, VtfFormat_t::RGBA32323232F, VtfFormat_t::VTF_FORMAT_NONE, VtfFormat_t::VTF_FORMAT_NONE },
 } };
+constexpr std::array<const char *, 7> FORMAT_GROUP_NAMES{ QT_TRANSLATE_NOOP( "CTextureOptionsDialog", "Compressed" ), QT_TRANSLATE_NOOP( "CTextureOptionsDialog", "8 bits a channel" ),
+	QT_TRANSLATE_NOOP( "CTextureOptionsDialog", "Fewer bits a channel" ), QT_TRANSLATE_NOOP( "CTextureOptionsDialog", "Grey and alpha" ), QT_TRANSLATE_NOOP( "CTextureOptionsDialog", "Bump offsets (DuDv)" ),
+	QT_TRANSLATE_NOOP( "CTextureOptionsDialog", "Bluescreen" ), QT_TRANSLATE_NOOP( "CTextureOptionsDialog", "HDR and 16 bits" ) };
 
 // Flags people set by hand; the simple interface shows only the first ten unless others are set.
 // The last three are set from the pictures and the kind when a texture is made.
@@ -154,8 +158,8 @@ CTextureOptionsDialog::CTextureOptionsDialog( Mode_t nMode, std::vector<NamedSou
 	  m_Sources( std::move( sources ) ),
 	  m_Initial( initial )
 {
-	setWindowTitle( nMode == MODE_IMPORT ? tr( "Make Texture" ) : nMode == MODE_BATCH ? tr( "Settings for Each Picture" )
-																					  : tr( "Convert Texture" ) );
+	setWindowTitle( nMode == MODE_IMPORT ? tr( "Create VTF" ) : nMode == MODE_BATCH ? tr( "Settings for Each Picture" )
+																					: tr( "Convert Texture" ) );
 	const bool bSimple = CInterfaceMode::Instance().IsSimple();
 	const xv::particles::CNames &names = ParticleNames();
 
@@ -254,29 +258,32 @@ CTextureOptionsDialog::CTextureOptionsDialog( Mode_t nMode, std::vector<NamedSou
 		}
 	}
 
+	// Each format next to what it is for, under the group it belongs to.
 	const auto fillFormats = [ &names ]( QComboBox *pBox, bool bWithSame ) {
-		pBox->setMaxVisibleItems( 40 );
+		std::vector<Choice_t> choices;
 		if ( bWithSame )
 		{
-			pBox->addItem( tr( "the same" ), static_cast<int>( VtfFormat_t::VTF_FORMAT_NONE ) );
+			choices.push_back( { tr( "the same" ), tr( "As Format, see-through parts or not" ), static_cast<int>( VtfFormat_t::VTF_FORMAT_NONE ) } );
 		}
-		for ( const auto &group : FORMAT_GROUPS )
+		for ( std::size_t i = 0; i < FORMAT_GROUPS.size(); i++ )
 		{
-			if ( pBox->count() > 0 )
-			{
-				pBox->insertSeparator( pBox->count() );
-			}
-			for ( const VtfFormat_t nFormat : group )
+			std::vector<Choice_t> group;
+			for ( const VtfFormat_t nFormat : FORMAT_GROUPS[ i ] )
 			{
 				if ( nFormat == VtfFormat_t::VTF_FORMAT_NONE || ( bWithSame && !HasAlpha( nFormat ) ) )
 				{
 					continue;
 				}
 				const QString szName = Qs( FormatName( nFormat ) );
-				pBox->addItem( szName, static_cast<int>( nFormat ) );
-				pBox->setItemData( pBox->count() - 1, Qs( names.Texture( "format:" + szName.toStdString() ).m_szMeaning ), Qt::ToolTipRole );
+				group.push_back( { szName, Qs( names.Texture( "format:" + szName.toStdString() ).m_szMeaning ), static_cast<int>( nFormat ) } );
+			}
+			if ( !group.empty() )
+			{
+				choices.push_back( { tr( FORMAT_GROUP_NAMES[ i ] ), {}, {}, true } );
+				choices.insert( choices.end(), group.begin(), group.end() );
 			}
 		}
+		FillListBox( pBox, choices );
 	};
 	m_pFormat = new QComboBox;
 	m_pFormat->setObjectName( QStringLiteral( "textureFormat" ) );
@@ -306,7 +313,22 @@ CTextureOptionsDialog::CTextureOptionsDialog( Mode_t nMode, std::vector<NamedSou
 	m_pResize->addItem( tr( "Next power of two up" ), static_cast<int>( ResizeMode_t::RESIZE_UP ) );
 	m_pResize->addItem( tr( "Next power of two down" ), static_cast<int>( ResizeMode_t::RESIZE_DOWN ) );
 	m_pResize->addItem( tr( "Nearest multiple of 4" ), static_cast<int>( ResizeMode_t::RESIZE_MULTIPLE_OF_4 ) );
+	m_pResize->addItem( tr( "Exact size" ), static_cast<int>( ResizeMode_t::RESIZE_EXACT ) );
 	m_pResize->setToolTip( tr( "The game expects sides that are powers of two (256, 512, 1024…); DXT needs multiples of 4." ) );
+	m_pExactWidth = new QSpinBox;
+	m_pExactWidth->setObjectName( QStringLiteral( "textureExactWidth" ) );
+	m_pExactHeight = new QSpinBox;
+	m_pExactHeight->setObjectName( QStringLiteral( "textureExactHeight" ) );
+	for ( QSpinBox *pSide : { m_pExactWidth, m_pExactHeight } )
+	{
+		pSide->setRange( 1, 65535 );
+		pSide->setAccelerated( true );
+	}
+	m_pExactWidth->setToolTip( tr( "Width in texels" ) );
+	m_pExactHeight->setToolTip( tr( "Height in texels" ) );
+	m_pExactWidth->setSuffix( tr( " wide" ) );
+	m_pExactHeight->setSuffix( tr( " high" ) );
+	m_pExactBy = new QLabel( QStringLiteral( "×" ) );
 	m_pMaxSize = new QComboBox;
 	m_pMaxSize->addItem( tr( "no limit" ), 0 );
 	for ( int nSize = 8192; nSize >= 16; nSize /= 2 )
@@ -318,6 +340,9 @@ CTextureOptionsDialog::CTextureOptionsDialog( Mode_t nMode, std::vector<NamedSou
 	m_pSize = new QLabel;
 	auto *pSizeRow = new QHBoxLayout;
 	pSizeRow->addWidget( m_pResize );
+	pSizeRow->addWidget( m_pExactWidth );
+	pSizeRow->addWidget( m_pExactBy );
+	pSizeRow->addWidget( m_pExactHeight );
 	pSizeRow->addWidget( m_pMaxSize );
 	pSizeRow->addWidget( m_pKeepAspect );
 	pSizeRow->addWidget( m_pSize, 1 );
@@ -403,8 +428,8 @@ CTextureOptionsDialog::CTextureOptionsDialog( Mode_t nMode, std::vector<NamedSou
 	m_pNotes->setWordWrap( true );
 
 	auto *pButtons = new QDialogButtonBox( QDialogButtonBox::Ok | QDialogButtonBox::Cancel );
-	pButtons->button( QDialogButtonBox::Ok )->setText( nMode == MODE_IMPORT ? tr( "Make" ) : nMode == MODE_BATCH ? tr( "OK" )
-																												 : tr( "Convert" ) );
+	pButtons->button( QDialogButtonBox::Ok )->setText( nMode == MODE_IMPORT ? tr( "Create" ) : nMode == MODE_BATCH ? tr( "OK" )
+																												   : tr( "Convert" ) );
 	connect( pButtons, &QDialogButtonBox::accepted, this, [ this ] {
 		SetLastTexturePreset( m_pPreset->currentData().toString() );
 		accept();
@@ -418,6 +443,14 @@ CTextureOptionsDialog::CTextureOptionsDialog( Mode_t nMode, std::vector<NamedSou
 	pLayout->addWidget( pButtons );
 	resize( 780, sizeHint().height() );
 
+	// An exact size starts as the pictures' own.
+	if ( !m_Sources.empty() )
+	{
+		const SourceImage_t &first = m_Sources.front().m_Source;
+		const bool bLight = !first.m_Light.Empty();
+		m_pExactWidth->setValue( bLight ? first.m_Light.m_nWidth : first.m_Image.m_nWidth );
+		m_pExactHeight->setValue( bLight ? first.m_Light.m_nHeight : first.m_Image.m_nHeight );
+	}
 	ApplyOptions( initial );
 	FillPresets( {} );
 	connect( m_pPreset, &QComboBox::activated, this, [ this ] {
@@ -458,6 +491,10 @@ CTextureOptionsDialog::CTextureOptionsDialog( Mode_t nMode, std::vector<NamedSou
 	{
 		connect( pBox, &QComboBox::currentIndexChanged, this, &CTextureOptionsDialog::Update );
 	}
+	for ( QSpinBox *pSide : { m_pExactWidth, m_pExactHeight } )
+	{
+		connect( pSide, &QSpinBox::valueChanged, this, &CTextureOptionsDialog::Update );
+	}
 	if ( m_pKind )
 	{
 		connect( m_pKind, &QComboBox::currentIndexChanged, this, &CTextureOptionsDialog::Update );
@@ -489,13 +526,13 @@ CTextureOptionsDialog::CTextureOptionsDialog( Mode_t nMode, std::vector<NamedSou
 }
 
 //-----------------------------------------------------------------------------
-// Purpose: The preset list, with szCurrent picked (or "(none)").
+// Purpose: The preset list, with szCurrent picked (or "(custom)").
 //-----------------------------------------------------------------------------
 void CTextureOptionsDialog::FillPresets( const QString &szCurrent )
 {
 	const QSignalBlocker blocker{ m_pPreset };
 	m_pPreset->clear();
-	m_pPreset->addItem( tr( "(as below)" ), QString{} );
+	m_pPreset->addItem( tr( "(custom)" ), QString{} );
 	bool bUser = false;
 	for ( const TexturePreset_t &preset : TexturePresets() )
 	{
@@ -515,11 +552,17 @@ void CTextureOptionsDialog::FillPresets( const QString &szCurrent )
 //-----------------------------------------------------------------------------
 void CTextureOptionsDialog::ApplyOptions( const BuildOptions_t &options )
 {
+	m_bApplying = true;
 	m_pFormat->setCurrentIndex( std::max( 0, m_pFormat->findData( static_cast<int>( options.m_Write.m_nFormat ) ) ) );
 	m_pAlphaFormat->setCurrentIndex( std::max( 0, m_pAlphaFormat->findData( static_cast<int>( options.m_nAlphaFormat ) ) ) );
 	m_pVersion->setCurrentIndex( std::clamp( options.m_Write.m_nVersionMinor, 1, 5 ) - 1 );
 	m_pResize->setCurrentIndex( std::max( 0, m_pResize->findData( static_cast<int>( options.m_nResize ) ) ) );
 	m_pMaxSize->setCurrentIndex( std::max( 0, m_pMaxSize->findData( options.m_nMaxSize ) ) );
+	if ( options.m_nResize == ResizeMode_t::RESIZE_EXACT )
+	{
+		m_pExactWidth->setValue( options.m_nExactWidth );
+		m_pExactHeight->setValue( options.m_nExactHeight );
+	}
 	m_pKeepAspect->setChecked( options.m_bKeepAspect );
 	m_pMipmaps->setChecked( options.m_Write.m_bMipmaps );
 	m_pMipFilter->setCurrentIndex( std::max( 0, m_pMipFilter->findData( static_cast<int>( options.m_Write.m_nMipFilter ) ) ) );
@@ -540,6 +583,7 @@ void CTextureOptionsDialog::ApplyOptions( const BuildOptions_t &options )
 		pItem->setCheckState( 0, options.m_Write.m_nFlags & nBit ? Qt::Checked : Qt::Unchecked );
 	}
 	m_FlagsNotListed = options.m_Write.m_nFlags & ~AUTOMATIC_FLAGS;
+	m_bApplying = false;
 	Update();
 }
 
@@ -576,6 +620,8 @@ BuildOptions_t CTextureOptionsDialog::GetOptions() const
 	options.m_Write.m_nFirstFrame = m_pFirstFrame->value();
 	options.m_nResize = static_cast<ResizeMode_t>( m_pResize->currentData().toInt() );
 	options.m_nMaxSize = m_pMaxSize->currentData().toInt();
+	options.m_nExactWidth = m_pExactWidth->value();
+	options.m_nExactHeight = m_pExactHeight->value();
 	options.m_bKeepAspect = m_pKeepAspect->isChecked();
 	options.m_bAlphaFlags = m_pAlphaFlags->isChecked();
 	const Kind_t nKind = GetKind();
@@ -761,6 +807,12 @@ void CTextureOptionsDialog::Update()
 	m_pGreenUp->setEnabled( m_pHeightToNormal->isChecked() );
 	m_pDistanceSpread->setEnabled( m_pDistanceAlpha->isChecked() );
 	m_pMipFilter->setEnabled( m_pMipmaps->isChecked() );
+	const bool bExact = static_cast<ResizeMode_t>( m_pResize->currentData().toInt() ) == ResizeMode_t::RESIZE_EXACT;
+	m_pExactWidth->setVisible( bExact );
+	m_pExactBy->setVisible( bExact );
+	m_pExactHeight->setVisible( bExact );
+	m_pMaxSize->setVisible( !bExact );
+	m_pKeepAspect->setVisible( !bExact );
 	if ( m_pKind )
 	{
 		const bool bPanorama = GetKind() == KIND_PANORAMA;
@@ -769,6 +821,17 @@ void CTextureOptionsDialog::Update()
 		m_pPanoramaYaw->setVisible( bPanorama );
 	}
 	const BuildOptions_t options = GetOptions();
+	// Changing anything a preset sets makes the choices the user's own.
+	if ( !m_bApplying && m_pPreset->currentIndex() > 0 )
+	{
+		for ( const TexturePreset_t &preset : TexturePresets() )
+		{
+			if ( preset.m_szName == m_pPreset->currentData().toString() && !SameTextureChoices( preset.m_Options, options ) )
+			{
+				m_pPreset->setCurrentIndex( 0 );
+			}
+		}
+	}
 	if ( !m_Sources.empty() && GetKind() != KIND_PANORAMA )
 	{
 		const SourceImage_t &first = m_Sources.front().m_Source;
@@ -784,17 +847,12 @@ void CTextureOptionsDialog::Update()
 }
 
 //-----------------------------------------------------------------------------
-// Purpose: A list of the texture flags to tick, with what each does.
+// Purpose: The flags to offer.
 //-----------------------------------------------------------------------------
-QTreeWidget *MakeFlagList( std::uint32_t nFlags, bool bHeaderFlags )
+std::vector<ListedFlag_t> ListedFlags( std::uint32_t nFlags, bool bHeaderFlags )
 {
 	const bool bSimple = CInterfaceMode::Instance().IsSimple();
-	auto *pFlags = new QTreeWidget;
-	pFlags->setObjectName( QStringLiteral( "textureFlags" ) );
-	pFlags->setHeaderHidden( true );
-	pFlags->setRootIsDecorated( false );
-	pFlags->setColumnCount( 2 );
-	pFlags->header()->setSectionResizeMode( 0, QHeaderView::ResizeToContents );
+	std::vector<ListedFlag_t> listed;
 	for ( std::size_t i = 0; i < FLAGS.size(); i++ )
 	{
 		const auto &[ nBit, szName ] = FLAGS[ i ];
@@ -806,13 +864,32 @@ QTreeWidget *MakeFlagList( std::uint32_t nFlags, bool bHeaderFlags )
 		{
 			continue;
 		}
-		const xv::particles::PlainName_t plain = ParticleNames().Texture( "flag:" + std::string{ szName } );
-		auto *pItem = new QTreeWidgetItem( pFlags, { bSimple ? Qs( plain.m_szName ) : Qs( szName ), Qs( plain.m_szMeaning ) } );
-		pItem->setData( 0, Qt::UserRole, static_cast<qulonglong>( nBit ) );
-		pItem->setCheckState( 0, bSet ? Qt::Checked : Qt::Unchecked );
-		pItem->setToolTip( 0, bSimple ? Qs( szName ) : Qs( plain.m_szName ) );
+		listed.push_back( { nBit, szName, nBit == vtf_flag::ENVMAP } );
+	}
+	return listed;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: A list of the texture flags to tick, with what each does.
+//-----------------------------------------------------------------------------
+QTreeWidget *MakeFlagList( std::uint32_t nFlags, bool bHeaderFlags )
+{
+	const bool bSimple = CInterfaceMode::Instance().IsSimple();
+	auto *pFlags = new QTreeWidget;
+	pFlags->setObjectName( QStringLiteral( "textureFlags" ) );
+	pFlags->setHeaderHidden( true );
+	pFlags->setRootIsDecorated( false );
+	pFlags->setColumnCount( 2 );
+	pFlags->header()->setSectionResizeMode( 0, QHeaderView::ResizeToContents );
+	for ( const ListedFlag_t &flag : ListedFlags( nFlags, bHeaderFlags ) )
+	{
+		const xv::particles::PlainName_t plain = ParticleNames().Texture( "flag:" + std::string{ flag.m_szName } );
+		auto *pItem = new QTreeWidgetItem( pFlags, { bSimple ? Qs( plain.m_szName ) : Qs( flag.m_szName ), Qs( plain.m_szMeaning ) } );
+		pItem->setData( 0, Qt::UserRole, static_cast<qulonglong>( flag.m_nBit ) );
+		pItem->setCheckState( 0, nFlags & flag.m_nBit ? Qt::Checked : Qt::Unchecked );
+		pItem->setToolTip( 0, bSimple ? Qs( flag.m_szName ) : Qs( plain.m_szName ) );
 		pItem->setForeground( 1, pFlags->palette().color( QPalette::PlaceholderText ) );
-		if ( nBit == vtf_flag::ENVMAP )
+		if ( flag.m_bFixed )
 		{
 			pItem->setFlags( pItem->flags() & ~Qt::ItemIsEnabled ); // follows the faces
 		}

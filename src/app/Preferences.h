@@ -32,8 +32,16 @@ public:
 	[[nodiscard]] bool IsSingleWindow() const { return m_bSingleWindow; }
 	void SetSingleWindow( bool bSingle );
 
+	// Whether materials are edited as a list of parameters (else as their text).
+	[[nodiscard]] bool IsMaterialVisual() const { return m_bMaterialVisual; }
+	void SetMaterialVisual( bool bVisual );
+	// Whether the material preview redraws at each edit made in the list (the text's always does).
+	[[nodiscard]] bool IsMaterialLive() const { return m_bMaterialLive; }
+	void SetMaterialLive( bool bLive );
+
 signals:
 	void GridAnimationChanged( bool bAll );
+	void MaterialEditingChanged();
 
 private:
 	CPreferences();
@@ -41,4 +49,6 @@ private:
 	bool m_bGridAnimatingAll = false;
 	GraphicsApi_t m_nGraphicsApi = GraphicsApi_t::GRAPHICS_API_AUTO;
 	bool m_bSingleWindow = true;
+	bool m_bMaterialVisual = true;
+	bool m_bMaterialLive = true;
 };

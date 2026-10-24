@@ -5,6 +5,8 @@ add_library(vomit_tools_ui STATIC
         BatchConvertDialog.cpp
         BatchConvertDialog.h
         BuildInfo.h
+        ChoiceBoxes.cpp
+        ChoiceBoxes.h
         ${CMAKE_CURRENT_BINARY_DIR}/BuildInfo.cpp
         FileViews.cpp
         FileViews.h
@@ -28,6 +30,8 @@ add_library(vomit_tools_ui STATIC
         MakeMaterialDialog.h
         MaterialEditor.cpp
         MaterialEditor.h
+        MaterialForm.cpp
+        MaterialForm.h
         MaterialRenderer.cpp
         MaterialRenderer.h
         MaterialView.cpp
@@ -130,7 +134,7 @@ endif()
 qt_add_resources(vomit_tools_ui "vomit_tools_data"
         PREFIX "/data"
         BASE data
-        FILES data/lang_en.txt data/particle_inputs.txt)
+        FILES data/lang_en.txt data/material_parameters.txt data/particle_inputs.txt)
 target_link_libraries(vomit_tools_ui PUBLIC vomit_tools::core Qt6::Widgets Qt6::Network)
 vomit_tools_set_warnings(vomit_tools_ui)
 

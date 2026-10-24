@@ -19,7 +19,8 @@ command line (`vomit-tools <file|folder|gameinfo.txt>...`):
   the **Folder** tab.
 - **A file:** **File → Open File** opens a file. Soundscapes and soundscripts open in the sound
   editor, under any name (the file name or the entries decide), `.pcf` files in the particle
-  editor, `.vtf` files in the texture editor and `.vmt` files in the material editor; other files
+  editor, `.vtf` files in the texture editor and `.vmt` files in the texture editor of the texture
+  they use (or a material editor of their own when it isn't found); other files
   show in the preview, images included.
 - **Recent:** **File → Open Recent** lists recent games, folders and files.
 
@@ -34,6 +35,8 @@ graphics API, which waits for the next start.
 
 - **Interface:** the simple or regular interface (also under **View → Simple Interface**), and
   whether files opened from outside join the window already open (the default) or start another.
+- **Materials:** whether materials are edited as a list of parameters or as text, and whether the
+  preview redraws at each edit in the list.
 - **Graphics:** what the sky, material and particle previews and the particle grid draw with.
   **Automatic** tries Vulkan first, then the platform's usual API (Direct3D 11 on Windows, OpenGL
   on Linux). Vulkan, OpenGL, Direct3D 11/12 and **Software** (the CPU) can be picked directly. The
@@ -145,27 +148,37 @@ choosing **Show Material** shows that face's material.
 
 ## Texture editor
 
-`.vtf` files open in it; **File → New Texture from Pictures** makes one; a picture's preview offers
-**Make Texture…**. Everything is one undo step, and a new texture asks where to save.
+`.vtf` files open in it, with the material of the same name; **File → Create VTF from Pictures**
+makes one; a picture's preview offers **Create VTF…**. Everything is one undo step, and a new
+texture asks where to save.
 
 - **Viewing:** every mipmap (optionally blown up to full size), frame (played at a set rate), cube
   face (or all six unwrapped as a cross) and volume slice; R, G, B and A on their own; zoom, pan
-  and 3×3 tiling. Beside it: the header, flags, thumbnail and resources, the sprite sheet in full.
+  and 3×3 tiling. Beside it: the header, thumbnail and resources, the sprite sheet in full, and the
+  flags to tick.
 - **Import:** pictures as one image, animation frames (a GIF's or APNG's frames too), a cube map
   (faces named `…rt`, `…lf`… sort themselves), a cube map from a panorama/HDRI, or a volume.
   Every format but P8, versions 7.1–7.5, presets (diffuse, normal map, decal, particle, UI, sky
   faces, distance field, and your own), a separate format for pictures with alpha, Kaiser /
-  Mitchell / triangle / box mipmaps, power-of-two or multiple-of-4 sizes, normal maps from height,
+  Mitchell / triangle / box mipmaps, power-of-two, multiple-of-4 or exact sizes, normal maps from height,
   `$distancealpha`, and HDR pictures kept as light values.
-- **Convert** writes it again with other choices; **Properties** changes the version, flags,
+- **Convert** writes it again with other choices; **Properties** changes the version,
   bump scale, reflectivity, thumbnail and resources (KVD text, LOD, sheets) without touching the
   pictures.
 - **Sprite Sheet** packs frames into a particle sheet like mksheet, reading and writing `.mks`,
   and can cut an existing sheet back into its frames to change it.
 - **Export** saves the picture shown, or every frame, face and slice; **File → Convert a Folder of
   Textures** converts whole folders either way.
-- **Make VMT** writes a material for the texture and opens it in the **material editor**: the text
-  with line numbers and broken lines marked, beside a preview drawn as you type.
+- **Sprays:** the side panel says whether the game would take it as a spray, and why not; **Make
+  Spray** makes it fit (under 512 KB, at most 4096 on a side, no mipmaps; smaller, then fewer frames).
+- **Material:** **Texture | Material** at the end of the toolbar turns the side panel to the
+  texture's material, drawn in the same viewer, flat or on a ball, right-drag moving the light
+  (**As Material** does that on the texture's side too). Untick a parameter on the left to see the preview without it. **Create VMT** starts one (shader, normal map, alpha as solid, blended,
+  cut out or added, two-sided, reflections, glow, phong, surface property, keywords). Edit it as a
+  list (each value with a box that suits it; right-click or **Add Parameter…** for more, or a proxy)
+  or as coloured text (Preferences → Materials, or the switch above it). **Messages** below lists
+  mistakes, misspelt or unused parameters, missing textures and alpha the texture can't back up,
+  by line. The preview uses the texture as edited, saved or not; **Save** writes what changed.
 - Pictures: PNG, APNG, JPEG, TGA, BMP, PSD, GIF, HDR, PFM, QOI and PNM, plus whatever Qt's image
   plugins handle (WebP, JPEG XL, AVIF, EXR, TIFF…).
 

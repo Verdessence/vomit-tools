@@ -44,10 +44,13 @@ create:
   --version 7.N         1 to 5 (default 7.2; 7.3+ for sheets)
   --no-mips             no mipmaps
   --filter F            box, triangle, mitchell, kaiser (default kaiser)
-  --resize R            keep, nearest, up, down, 4 (default nearest power of two)
+  --resize R            keep, nearest, up, down, 4, or an exact size such as 300x200
+                        (default nearest power of two)
   --max-size N          largest side
   --keep-aspect         keep the shape when resizing
   --flag NAME           set a flag (CLAMPS, NORMAL, ...); repeatable
+  --spray               make a spray: under 512 KB, at most 4096 on a side, no mipmaps
+                        (smaller, then fewer frames, until it fits; other choices ignored)
   --no-thumbnail        no low-res copy
   --frames | --cube | --volume   all inputs make one texture, as frames, cube faces
                         (rt lf bk ft up dn) or volume slices
@@ -345,10 +348,23 @@ std::optional<BuildOptions_t> BuildOptionsFrom( const Arguments_t &arguments, bo
 	if ( const auto resize = arguments.Value( "--resize" ) )
 	{
 		const std::string szResize = Lower( *resize );
-		options.m_nResize = szResize == "keep" ? ResizeMode_t::RESIZE_KEEP : szResize == "up" ? ResizeMode_t::RESIZE_UP
-			: szResize == "down"                                                              ? ResizeMode_t::RESIZE_DOWN
-			: szResize == "4"                                                                 ? ResizeMode_t::RESIZE_MULTIPLE_OF_4
-																							  : ResizeMode_t::RESIZE_NEAREST;
+		if ( const auto nX = szResize.find( 'x' ); nX != std::string::npos )
+		{
+			options.m_nResize = ResizeMode_t::RESIZE_EXACT;
+			options.m_nExactWidth = std::atoi( szResize.substr( 0, nX ).c_str() );
+			options.m_nExactHeight = std::atoi( szResize.substr( nX + 1 ).c_str() );
+			if ( options.m_nExactWidth < 1 || options.m_nExactHeight < 1 || options.m_nExactWidth > 65535 || options.m_nExactHeight > 65535 )
+			{
+				return fail( "bad size " + *resize );
+			}
+		}
+		else
+		{
+			options.m_nResize = szResize == "keep" ? ResizeMode_t::RESIZE_KEEP : szResize == "up" ? ResizeMode_t::RESIZE_UP
+				: szResize == "down"                                                              ? ResizeMode_t::RESIZE_DOWN
+				: szResize == "4"                                                                 ? ResizeMode_t::RESIZE_MULTIPLE_OF_4
+																								  : ResizeMode_t::RESIZE_NEAREST;
+		}
 	}
 	if ( const auto size = arguments.Value( "--max-size" ) )
 	{
@@ -477,7 +493,8 @@ int Create( const Arguments_t &arguments )
 			options->m_Write.m_nDepth = static_cast<int>( sources.size() );
 		}
 		std::string szError;
-		if ( !WriteFile( target, BuildVtf( sources, *options, &szError ) ) )
+		const auto bytes = arguments.Has( "--spray" ) ? BuildSpray( sources, &szError ) : BuildVtf( sources, *options, &szError );
+		if ( !WriteFile( target, bytes ) )
 		{
 			std::fprintf( stderr, "%s: %s\n", target.string().c_str(), szError.empty() ? "can't write it" : szError.c_str() );
 			return false;
@@ -790,6 +807,12 @@ int Info( const Arguments_t &arguments )
 			szFlags += ( szFlags.empty() ? "" : " " ) + szFlag;
 		}
 		rows.push_back( { "flags", szFlags } );
+		std::string szSpray = "yes";
+		for ( const std::string &szProblem : SprayProblems( *vtf, data->size() ) )
+		{
+			szSpray = ( szSpray == "yes" ? "no: " : szSpray + "; " ) + szProblem;
+		}
+		rows.push_back( { "spray", szSpray } );
 		if ( bKv )
 		{
 			std::printf( "\"vtf\"\n{\n" );

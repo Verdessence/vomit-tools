@@ -7,11 +7,13 @@
 #include "TextureEditor.h"
 
 #include <algorithm>
+#include <functional>
 #include <cmath>
 #include <cstring>
 
 #include <QAction>
 #include <QBuffer>
+#include <QButtonGroup>
 #include <QImageReader>
 #include <QImageWriter>
 #include <QClipboard>
@@ -23,6 +25,9 @@
 #include <QInputDialog>
 #include <QMenu>
 #include <QMimeData>
+#include <QPushButton>
+#include <QStackedWidget>
+#include <QTabWidget>
 #include <QSaveFile>
 #include <QUrl>
 #include <QFile>
@@ -37,6 +42,7 @@
 #include <QPainter>
 #include <QSpinBox>
 #include <QSplitter>
+#include <QStyle>
 #include <QTimer>
 #include <QToolBar>
 #include <QToolButton>
@@ -45,6 +51,8 @@
 #include <QWheelEvent>
 
 #include "ImageFiles.h"
+#include "MaterialEditor.h"
+#include "MaterialView.h"
 #include "InterfaceMode.h"
 #include "Language.h"
 #include "TextureDocument.h"
@@ -148,9 +156,21 @@ protected:
 		update();
 		pEvent->accept();
 	}
-	void mousePressEvent( QMouseEvent *pEvent ) override { m_DragFrom = pEvent->position(); }
+	void mousePressEvent( QMouseEvent *pEvent ) override
+	{
+		m_DragFrom = pEvent->position();
+		if ( pEvent->button() == Qt::RightButton )
+		{
+			PointLight( pEvent->position() );
+		}
+	}
 	void mouseMoveEvent( QMouseEvent *pEvent ) override
 	{
+		if ( pEvent->buttons() & Qt::RightButton )
+		{
+			PointLight( pEvent->position() );
+			return;
+		}
 		if ( pEvent->buttons() & Qt::LeftButton )
 		{
 			m_Offset += pEvent->position() - m_DragFrom;
@@ -159,8 +179,36 @@ protected:
 		}
 	}
 	void mouseDoubleClickEvent( QMouseEvent * ) override { Fit(); }
+	void mouseReleaseEvent( QMouseEvent *pEvent ) override
+	{
+		if ( pEvent->button() == Qt::RightButton && m_pfnLightDone )
+		{
+			m_pfnLightDone();
+		}
+	}
+
+public:
+	// A right-drag points the light (for a material): towards the spot over the picture, as on a
+	// ball facing out of the screen. Then the drag's end.
+	std::function<void( xv::CVec3 )> m_pfnLight;
+	std::function<void()> m_pfnLightDone;
 
 private:
+	void PointLight( QPointF at )
+	{
+		if ( !m_pfnLight || m_Image.isNull() )
+		{
+			return;
+		}
+		const double flScale = GetScale();
+		const QSizeF tile = QSizeF( m_Image.size() ) * flScale;
+		const int nTiles = m_bTiled ? 3 : 1;
+		const QPointF origin = QPointF( width() - tile.width() * nTiles, height() - tile.height() * nTiles ) / 2.0 + m_Offset;
+		const float x = std::clamp( static_cast<float>( ( at.x() - origin.x() ) / std::max( 1.0, tile.width() * nTiles ) ) * 2.0f - 1.0f, -1.0f, 1.0f );
+		const float y = std::clamp( 1.0f - static_cast<float>( ( at.y() - origin.y() ) / std::max( 1.0, tile.height() * nTiles ) ) * 2.0f, -1.0f, 1.0f );
+		m_pfnLight( xv::Normalized( { x, y, std::sqrt( std::max( 0.08f, 1.0f - x * x - y * y ) ) } ) );
+	}
+
 	QImage m_Image;
 	double m_flZoom = 0.0; // 0: fit
 	QPointF m_Offset;
@@ -178,6 +226,9 @@ QString Qs( std::string_view szText )
 {
 	return QString::fromUtf8( szText.data(), static_cast<qsizetype>( szText.size() ) );
 }
+
+// The flag a row of the side panel ticks.
+constexpr int ROLE_FLAG = Qt::UserRole + 10;
 
 // Cube map faces in the order a VTF stores them.
 constexpr const char *FACE_NAMES[] = { "Right (rt)", "Left (lf)", "Back (bk)", "Front (ft)", "Up (up)", "Down (dn)", "Sphere map" };
@@ -346,7 +397,7 @@ CTextureEditor::CTextureEditor( CTextureDocument *pDocument, QWidget *pParent )
 	QAction *pConvert = pToolbar->addAction( tr( "Convert…" ), this, &CTextureEditor::Convert );
 	pConvert->setToolTip( tr( "Write it again in another format or version, with other flags or mipmaps" ) );
 	QAction *pProperties = pToolbar->addAction( tr( "Properties…" ), this, &CTextureEditor::EditProperties );
-	pProperties->setToolTip( tr( "Change the flags, version, bump scale, reflectivity, thumbnail or resources without touching the pictures" ) );
+	pProperties->setToolTip( tr( "Change the version, bump scale, reflectivity, thumbnail or resources without touching the pictures (the flags are ticked in the side panel)" ) );
 	auto *pExport = new QToolButton;
 	pExport->setText( tr( "Export" ) );
 	pExport->setPopupMode( QToolButton::InstantPopup );
@@ -392,9 +443,9 @@ CTextureEditor::CTextureEditor( CTextureDocument *pDocument, QWidget *pParent )
 	pExport->setMenu( pExportMenu );
 	pExport->setToolTip( tr( "Save pictures out of the texture, or copy the one shown" ) );
 	pToolbar->addWidget( pExport );
-	QAction *pMakeVmt = pToolbar->addAction( tr( "Make VMT…" ), this, &CTextureEditor::MakeMaterialRequested );
-	pMakeVmt->setToolTip( tr( "Write a material that uses this texture, next to it" ) );
 	QAction *pSheet = pToolbar->addAction( tr( "Sprite Sheet…" ), this, &CTextureEditor::EditSheet );
+	QAction *pSpray = pToolbar->addAction( tr( "Make Spray" ), this, &CTextureEditor::MakeSpray );
+	pSpray->setToolTip( tr( "Make it again so the game takes it as a spray: under 512 KB, at most 4096 on a side, no mipmaps (smaller, then fewer frames, until it fits)" ) );
 	pSheet->setToolTip( tr( "Pack pictures into a particle sprite sheet, or change this texture's sheet (mksheet's job)" ) );
 	pToolbar->addSeparator();
 
@@ -409,7 +460,7 @@ CTextureEditor::CTextureEditor( CTextureDocument *pDocument, QWidget *pParent )
 	m_pSlice = new QSpinBox;
 	m_pSlice->setPrefix( tr( "Slice " ) );
 	m_pSlice->setToolTip( tr( "Depth slice of a volume texture" ) );
-	pToolbar->addWidget( m_pMip );
+	m_pMipAction = pToolbar->addWidget( m_pMip );
 	m_pFrameAction = pToolbar->addWidget( m_pFrame );
 	m_pPlay = pToolbar->addAction( tr( "▶" ) );
 	m_pPlay->setCheckable( true );
@@ -449,15 +500,59 @@ CTextureEditor::CTextureEditor( CTextureDocument *pDocument, QWidget *pParent )
 	QAction *pFit = pToolbar->addAction( tr( "Fit" ) );
 	QAction *pActual = pToolbar->addAction( tr( "1:1" ) );
 	pActual->setToolTip( tr( "One texel to one screen pixel. The wheel zooms, dragging moves it, a double-click fits it again" ) );
+	pToolbar->addSeparator();
+	m_pAsMaterial = pToolbar->addAction( tr( "As Material" ) );
+	m_pAsMaterial->setObjectName( QStringLiteral( "textureAsMaterial" ) );
+	m_pAsMaterial->setCheckable( true );
+	m_pAsMaterial->setToolTip( tr( "Draw it as its material does: lit, tinted, see-through as the material says" ) );
+	m_pShape = new QComboBox;
+	m_pShape->setObjectName( QStringLiteral( "textureMaterialShape" ) );
+	m_pShape->addItems( { tr( "Flat" ), tr( "Ball" ) } );
+	m_pShape->setToolTip( tr( "Show the material on the texture's own shape or on a ball. Right-drag moves the light" ) );
+	m_pShapeAction = pToolbar->addWidget( m_pShape );
+	m_pShapeAction->setVisible( false );
+	m_pBackdrop = new QComboBox;
+	m_pBackdrop->addItems( { tr( "Checkers" ), tr( "Dark" ), tr( "Light" ) } );
+	m_pBackdrop->setToolTip( tr( "What shows through translucent, added and cut-out parts" ) );
+	m_pBackdropAction = pToolbar->addWidget( m_pBackdrop );
+	m_pBackdropAction->setVisible( false );
+	m_pAsMaterial->setEnabled( false ); // until there is a material
+
+	// The side panel's switch, at the end of the same row, never folded away with the rest.
+	auto *pSideBar = new QToolBar;
+	pSideBar->setToolButtonStyle( Qt::ToolButtonTextOnly );
+	m_pTextureSide = new QToolButton;
+	m_pTextureSide->setObjectName( QStringLiteral( "textureSideTexture" ) );
+	m_pTextureSide->setText( tr( "Texture" ) );
+	m_pMaterialSide = new QToolButton;
+	m_pMaterialSide->setObjectName( QStringLiteral( "textureSideMaterial" ) );
+	m_pMaterialSide->setText( tr( "Material" ) );
+	auto *pSides = new QButtonGroup( this );
+	for ( QToolButton *pButton : { m_pTextureSide, m_pMaterialSide } )
+	{
+		pButton->setCheckable( true );
+		pButton->setAutoRaise( true );
+		pSides->addButton( pButton );
+		pSideBar->addWidget( pButton );
+	}
+	auto *pBars = new QHBoxLayout;
+	pBars->setContentsMargins( 0, 0, 0, 0 );
+	pBars->setSpacing( 0 );
+	pBars->addWidget( pToolbar, 1 );
+	pBars->addWidget( pSideBar );
+	m_pTextureSide->setChecked( true );
+
+	// Only for the texture itself, not for its material.
+	m_ViewActions = { m_pMipAction, m_pFrameAction, m_pRateAction, m_pFaceAction, m_pSliceAction, m_pCross, m_pFullSize };
 
 	m_pCanvas = new CTextureCanvas;
 	m_pStatus = new QLabel;
 	m_pStatus->setObjectName( QStringLiteral( "textureStatus" ) );
-	auto *pLeft = new QWidget;
-	auto *pLeftLayout = new QVBoxLayout( pLeft );
-	pLeftLayout->setContentsMargins( 0, 0, 0, 0 );
-	pLeftLayout->addWidget( m_pCanvas, 1 );
-	pLeftLayout->addWidget( m_pStatus );
+	m_pPreviewPage = new QWidget( this );
+	m_pPreviewPage->setObjectName( QStringLiteral( "textureMaterialPreview" ) );
+	auto *pPreviewLayout = new QVBoxLayout( m_pPreviewPage );
+	pPreviewLayout->setContentsMargins( 0, 0, 0, 0 );
+	m_pPreviewPage->hide();
 
 	m_pInfo = new QTreeWidget;
 	m_pInfo->setObjectName( QStringLiteral( "textureInfo" ) );
@@ -466,17 +561,119 @@ CTextureEditor::CTextureEditor( CTextureDocument *pDocument, QWidget *pParent )
 	m_pInfo->header()->setSectionResizeMode( 0, QHeaderView::ResizeToContents );
 	m_pInfo->setIconSize( QSize( 32, 32 ) );
 
+	// The material: an offer to make one, or its editor under a bar with its name.
+	auto *pOffer = new QWidget;
+	auto *pOfferLayout = new QVBoxLayout( pOffer );
+	auto *pOfferText = new QLabel( tr( "No material goes with this texture yet. A material (.vmt) is what the game draws: it names "
+									   "the texture and says how it is drawn, see-through or solid, lit or not, what it is made of." ) );
+	pOfferText->setWordWrap( true );
+	auto *pCreate = new QPushButton( tr( "Create VMT…" ) );
+	pCreate->setObjectName( QStringLiteral( "textureCreateVmt" ) );
+	pCreate->setToolTip( tr( "Write a material that uses this texture, to save next to it" ) );
+	connect( pCreate, &QPushButton::clicked, this, &CTextureEditor::MakeMaterialRequested );
+	pOfferLayout->addWidget( pOfferText );
+	pOfferLayout->addWidget( pCreate, 0, Qt::AlignLeft );
+	pOfferLayout->addStretch();
+	m_pMaterialName = new QLabel;
+	m_pMaterialName->setObjectName( QStringLiteral( "textureMaterialName" ) );
+	m_pMaterialName->setTextInteractionFlags( Qt::TextSelectableByMouse );
+	auto *pMaterialMenu = new QToolButton;
+	pMaterialMenu->setText( tr( "Material" ) );
+	pMaterialMenu->setPopupMode( QToolButton::InstantPopup );
+	pMaterialMenu->setAutoRaise( true );
+	auto *pMenu = new QMenu( pMaterialMenu );
+	pMenu->addAction( tr( "Save Material As…" ), this, &CTextureEditor::SaveMaterialAsRequested );
+	pMenu->addAction( tr( "Create a New VMT…" ), this, &CTextureEditor::MakeMaterialRequested );
+	pMenu->addSeparator();
+	pMenu->addAction( tr( "Close Material" ), this, &CTextureEditor::CloseMaterialRequested );
+	pMaterialMenu->setMenu( pMenu );
+	auto *pMaterialBar = new QHBoxLayout;
+	pMaterialBar->setContentsMargins( 0, 0, 0, 0 );
+	pMaterialBar->addWidget( m_pMaterialName, 1 );
+	pMaterialBar->addWidget( pMaterialMenu );
+	m_pMaterialHolder = new QWidget;
+	auto *pHolderLayout = new QVBoxLayout( m_pMaterialHolder );
+	pHolderLayout->setContentsMargins( 0, 0, 0, 0 );
+	pHolderLayout->addLayout( pMaterialBar );
+	m_pMaterialPage = new QStackedWidget;
+	m_pMaterialPage->addWidget( pOffer );
+	m_pMaterialPage->addWidget( m_pMaterialHolder );
+
+	m_pSide = new QStackedWidget;
+	m_pSide->setObjectName( QStringLiteral( "textureSide" ) );
+	m_pSide->addWidget( m_pInfo );
+	m_pSide->addWidget( m_pMaterialPage );
+
 	auto *pSplitter = new QSplitter;
-	pSplitter->addWidget( pLeft );
-	pSplitter->addWidget( m_pInfo );
+	pSplitter->addWidget( m_pCanvas );
+	pSplitter->addWidget( m_pSide );
 	pSplitter->setStretchFactor( 0, 3 );
-	pSplitter->setSizes( { 760, 340 } );
+	pSplitter->setStretchFactor( 1, 2 );
+	pSplitter->setSizes( { 700, 440 } );
+	// The status goes under both, so the viewer and the side panel end level.
+	auto *pTop = new QWidget;
+	auto *pTopLayout = new QVBoxLayout( pTop );
+	pTopLayout->setContentsMargins( 0, 0, 0, 0 );
+	pTopLayout->addWidget( pSplitter, 1 );
+	pTopLayout->addWidget( m_pStatus );
+
+	// Below: what the material's checks found.
+	m_pMessagesHost = new QWidget;
+	auto *pMessagesLayout = new QVBoxLayout( m_pMessagesHost );
+	pMessagesLayout->setContentsMargins( 0, 0, 0, 0 );
+	m_pMessagesHost->hide();
+	auto *pOuter = new QSplitter( Qt::Vertical );
+	pOuter->addWidget( pTop );
+	pOuter->addWidget( m_pMessagesHost );
+	pOuter->setStretchFactor( 0, 1 );
+	pOuter->setSizes( { 620, 130 } );
 
 	auto *pLayout = new QVBoxLayout( this );
 	pLayout->setContentsMargins( 0, 0, 0, 0 );
 	pLayout->setSpacing( 0 );
-	pLayout->addWidget( pToolbar );
-	pLayout->addWidget( pSplitter, 1 );
+	pLayout->addLayout( pBars );
+	pLayout->addWidget( pOuter, 1 );
+
+	// Turning to the material draws it, turning back the texture; the switch can change that.
+	connect( m_pTextureSide, &QToolButton::clicked, this, &CTextureEditor::ShowTexture );
+	connect( m_pMaterialSide, &QToolButton::clicked, this, &CTextureEditor::ShowMaterial );
+	connect( m_pAsMaterial, &QAction::toggled, this, [ this ] {
+		const bool bMaterial = IsShowingAsMaterial();
+		for ( QAction *pAction : m_ViewActions )
+		{
+			pAction->setEnabled( !bMaterial );
+		}
+		m_pBackdropAction->setVisible( bMaterial );
+		m_pShapeAction->setVisible( bMaterial );
+		FillSelectors();
+		UpdateView();
+	} );
+	connect( m_pBackdrop, &QComboBox::currentIndexChanged, this, &CTextureEditor::UpdateView );
+	connect( m_pShape, &QComboBox::currentIndexChanged, this, &CTextureEditor::UpdateView );
+	// The light follows a right-drag, drawn smaller while it moves.
+	m_pCanvas->m_pfnLight = [ this ]( xv::CVec3 vecLight ) {
+		if ( IsShowingAsMaterial() )
+		{
+			m_vecLight = vecLight;
+			m_bLightMoving = true;
+			UpdateView();
+		}
+	};
+	m_pCanvas->m_pfnLightDone = [ this ] {
+		m_bLightMoving = false;
+		UpdateView();
+	};
+	// A tick in the flags is an edit, after the click is done with the list.
+	connect( m_pInfo, &QTreeWidget::itemChanged, this, [ this ]( QTreeWidgetItem *pItem, int nColumn ) {
+		const QVariant bit = pItem->data( 0, ROLE_FLAG );
+		if ( m_bFilling || nColumn != 0 || !bit.isValid() )
+		{
+			return;
+		}
+		const bool bOn = pItem->checkState( 0 ) == Qt::Checked;
+		QTimer::singleShot( 0, this, [ this, nBit = static_cast<std::uint32_t>( bit.toULongLong() ), bOn ] { SetFlag( nBit, bOn ); } );
+	} );
+	connect( m_pDocument, &CTextureDocument::ModifiedChanged, this, &CTextureEditor::ModifiedChanged );
 
 	m_pPlayTimer = new QTimer( this );
 	m_pPlayTimer->setInterval( 100 );
@@ -484,7 +681,16 @@ CTextureEditor::CTextureEditor( CTextureDocument *pDocument, QWidget *pParent )
 	connect( m_pCross, &QAction::toggled, this, &CTextureEditor::UpdateView );
 	connect( m_pFullSize, &QAction::toggled, this, &CTextureEditor::UpdateView );
 	setAcceptDrops( true );
-	connect( m_pPlayTimer, &QTimer::timeout, this, [ this ] { m_pFrame->setValue( m_pFrame->value() % m_pFrame->maximum() + 1 ); } );
+	connect( m_pPlayTimer, &QTimer::timeout, this, [ this ] {
+		// The material's proxies run on; the texture's frames go round.
+		if ( IsShowingAsMaterial() )
+		{
+			m_flMaterialTime += static_cast<float>( m_pPlayTimer->interval() ) / 1000.0f;
+			UpdateView();
+			return;
+		}
+		m_pFrame->setValue( m_pFrame->value() % m_pFrame->maximum() + 1 );
+	} );
 	connect( m_pPlay, &QAction::toggled, this, [ this ]( bool bOn ) { bOn ? m_pPlayTimer->start() : m_pPlayTimer->stop(); } );
 	connect( pTile, &QAction::toggled, this, [ this ]( bool bOn ) { m_pCanvas->SetTiled( bOn ); } );
 	connect( pFit, &QAction::triggered, this, [ this ] { m_pCanvas->Fit(); } );
@@ -512,6 +718,11 @@ void CTextureEditor::Refresh()
 	FillSelectors();
 	FillInfo();
 	UpdateView();
+	// The material draws the texture as it is now.
+	if ( m_pMaterial )
+	{
+		m_pMaterial->UpdatePreview();
+	}
 }
 
 //-----------------------------------------------------------------------------
@@ -532,10 +743,12 @@ void CTextureEditor::FillSelectors()
 	m_pFrame->setRange( 1, info.m_nFrames );
 	m_pFrame->setSuffix( tr( " of %1" ).arg( info.m_nFrames ) );
 	m_pFrameAction->setVisible( info.m_nFrames > 1 );
-	m_pPlay->setVisible( info.m_nFrames > 1 );
+	// Play runs the frames, or the material's proxies while it is drawn.
+	const bool bAnimatedMaterial = IsShowingAsMaterial() && m_pMaterial->GetPreview() && m_pMaterial->GetPreview()->IsAnimated();
+	m_pPlay->setVisible( info.m_nFrames > 1 || bAnimatedMaterial );
 	m_pRateAction->setVisible( info.m_nFrames > 1 );
 	m_pCross->setVisible( info.m_nFaces >= 6 );
-	if ( info.m_nFrames <= 1 )
+	if ( info.m_nFrames <= 1 && !bAnimatedMaterial )
 	{
 		m_pPlay->setChecked( false );
 	}
@@ -562,6 +775,7 @@ void CTextureEditor::FillInfo()
 	const VtfInfo_t &info = vtf.m_Info;
 	const bool bSimple = CInterfaceMode::Instance().IsSimple();
 	const xv::particles::CNames &names = ParticleNames();
+	m_bFilling = true;
 	m_pInfo->clear();
 	const auto group = [ this ]( const QString &szTitle ) {
 		auto *pGroup = new QTreeWidgetItem( m_pInfo, { szTitle } );
@@ -576,6 +790,7 @@ void CTextureEditor::FillInfo()
 		auto *pItem = new QTreeWidgetItem( pParent, { szName, szValue } );
 		pItem->setToolTip( 0, szTip );
 		pItem->setToolTip( 1, szTip );
+		pItem->setTextAlignment( 1, Qt::AlignRight | Qt::AlignVCenter );
 		return pItem;
 	};
 
@@ -605,21 +820,6 @@ void CTextureEditor::FillInfo()
 		row( pImage, tr( "Bump scale" ), QString::number( static_cast<double>( info.m_flBumpScale ) ) );
 	}
 
-	QTreeWidgetItem *pFlags = group( tr( "Flags" ) );
-	if ( info.m_nFlags == 0 )
-	{
-		row( pFlags, tr( "none" ), {} );
-	}
-	for ( const std::string &szFlag : FlagNames( info.m_nFlags ) )
-	{
-		const xv::particles::PlainName_t plain = names.Texture( "flag:" + szFlag );
-		row( pFlags, bSimple ? Qs( plain.m_szName ) : Qs( szFlag ), {}, ( bSimple ? Qs( szFlag ) : Qs( plain.m_szName ) ) + u'\n' + Qs( plain.m_szMeaning ) )->setFirstColumnSpanned( true );
-	}
-	if ( !bSimple )
-	{
-		row( pFlags, tr( "Value" ), QStringLiteral( "0x%1" ).arg( info.m_nFlags, 8, 16, QLatin1Char( '0' ) ) );
-	}
-
 	QTreeWidgetItem *pFile = group( tr( "File" ) );
 	row( pFile, tr( "Version" ), QStringLiteral( "%1.%2" ).arg( info.m_nVersionMajor ).arg( info.m_nVersionMinor ) );
 	row( pFile, tr( "Size on disk" ), QLocale{}.formattedDataSize( static_cast<qint64>( vtf.m_Data.size() ) ) );
@@ -631,6 +831,16 @@ void CTextureEditor::FillInfo()
 	{
 		pThumb->setIcon( 1, QIcon( QPixmap::fromImage( ToQImage( *thumb ).scaled( 32, 32, Qt::KeepAspectRatio, Qt::FastTransformation ) ) ) );
 	}
+	// Whether the game takes it as a spray, and if not, why.
+	QStringList sprayProblems;
+	for ( const std::string &szProblem : SprayProblems( vtf, vtf.m_Data.size() ) )
+	{
+		sprayProblems << Qs( szProblem );
+	}
+	auto *pSpray = row( pFile, tr( "Spray" ), sprayProblems.isEmpty() ? tr( "works as one" ) : tr( "won't work as one" ),
+		sprayProblems.isEmpty() ? tr( "Under %1 KB, at most %2 on a side, in a format decals take" ).arg( SPRAY_MAX_BYTES / 1024 ).arg( SPRAY_MAX_SIZE )
+								: tr( "As a spray it is:\n· %1\nMake Spray makes it fit." ).arg( sprayProblems.join( QStringLiteral( "\n· " ) ) ) );
+	pSpray->setIcon( 1, style()->standardIcon( sprayProblems.isEmpty() ? QStyle::SP_DialogApplyButton : QStyle::SP_MessageBoxWarning ) );
 
 	if ( !vtf.m_Resources.empty() )
 	{
@@ -689,6 +899,26 @@ void CTextureEditor::FillInfo()
 			}
 		}
 	}
+
+	// Ticked here; each tick is an edit.
+	QTreeWidgetItem *pFlags = group( tr( "Flags" ) );
+	for ( const ListedFlag_t &flag : ListedFlags( info.m_nFlags, true ) )
+	{
+		const xv::particles::PlainName_t plain = names.Texture( "flag:" + std::string{ flag.m_szName } );
+		QTreeWidgetItem *pFlag = row( pFlags, bSimple ? Qs( plain.m_szName ) : Qs( flag.m_szName ), {}, ( bSimple ? Qs( flag.m_szName ) : Qs( plain.m_szName ) ) + u'\n' + Qs( plain.m_szMeaning ) );
+		pFlag->setFirstColumnSpanned( true );
+		pFlag->setData( 0, ROLE_FLAG, static_cast<qulonglong>( flag.m_nBit ) );
+		pFlag->setCheckState( 0, info.m_nFlags & flag.m_nBit ? Qt::Checked : Qt::Unchecked );
+		if ( flag.m_bFixed )
+		{
+			pFlag->setFlags( pFlag->flags() & ~Qt::ItemIsEnabled ); // follows the faces
+		}
+	}
+	if ( !bSimple )
+	{
+		row( pFlags, tr( "Value" ), QStringLiteral( "0x%1" ).arg( info.m_nFlags, 8, 16, QLatin1Char( '0' ) ) );
+	}
+	m_bFilling = false;
 }
 
 //-----------------------------------------------------------------------------
@@ -702,6 +932,35 @@ void CTextureEditor::UpdateView()
 	}
 	const CVtf &vtf = m_pDocument->GetVtf();
 	const VtfInfo_t &info = vtf.m_Info;
+	bool on[ 4 ];
+	for ( int c = 0; c < 4; c++ )
+	{
+		on[ c ] = m_pChannels[ c ]->isChecked();
+	}
+	if ( IsShowingAsMaterial() )
+	{
+		// Flat: drawn square at the texture's longer side, then given its shape. A ball is square.
+		// Drawn smaller while playing or while the light moves, shown at the same size.
+		const bool bBall = m_pShape->currentIndex() == 1;
+		const int nFull = std::clamp( bBall ? 512 : std::max( info.m_nWidth, info.m_nHeight ), 64, bBall ? 512 : 1024 );
+		const int nSide = m_pPlayTimer->isActive() || m_bLightMoving ? std::min( nFull, 256 ) : nFull;
+		const CMaterialView *pPreview = m_pMaterial->GetPreview();
+		CImage drawn = pPreview ? pPreview->RenderPicture( nSide, bBall ? xv::material::Shape_t::SHAPE_SPHERE : xv::material::Shape_t::SHAPE_FLAT, static_cast<xv::material::Backdrop_t>( m_pBackdrop->currentIndex() ), m_flMaterialTime, m_vecLight ) : CImage{};
+		if ( drawn.Empty() )
+		{
+			m_Shown = {};
+			m_pCanvas->SetImage( {} );
+			m_pStatus->setText( tr( "The material can't be drawn; its Messages say why." ) );
+			return;
+		}
+		ApplyChannels( drawn, on );
+		const double flLonger = bBall ? 1.0 : std::max( info.m_nWidth, info.m_nHeight );
+		const QSize size = bBall ? QSize( nFull, nFull ) : QSize( std::max( 1, qRound( nFull * info.m_nWidth / flLonger ) ), std::max( 1, qRound( nFull * info.m_nHeight / flLonger ) ) );
+		m_Shown = ToQImage( drawn ).scaled( size, Qt::IgnoreAspectRatio, Qt::SmoothTransformation );
+		m_pCanvas->SetImage( m_Shown );
+		m_pStatus->setText( tr( "As %1 draws it (%2); right-drag moves the light" ).arg( m_pMaterial->GetFileName(), pPreview->GetMaterial() ? Qs( pPreview->GetMaterial()->m_szShader ) : QString{} ) );
+		return;
+	}
 	const int nMip = std::max( 0, m_pMip->currentIndex() );
 	const int nWidth = std::max( 1, info.m_nWidth >> nMip );
 	const int nHeight = std::max( 1, info.m_nHeight >> nMip );
@@ -716,11 +975,6 @@ void CTextureEditor::UpdateView()
 		return;
 	}
 
-	bool on[ 4 ];
-	for ( int c = 0; c < 4; c++ )
-	{
-		on[ c ] = m_pChannels[ c ]->isChecked();
-	}
 	CImage shown = *image;
 	if ( m_pCross->isChecked() && info.m_nFaces >= 6 )
 	{
@@ -894,6 +1148,187 @@ bool CTextureEditor::EditProperties()
 		return false;
 	}
 	return m_pDocument->Replace( std::move( bytes ), tr( "Change properties" ) );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Turns a flag on or off; one undo step.
+//-----------------------------------------------------------------------------
+bool CTextureEditor::SetFlag( std::uint32_t nBit, bool bOn )
+{
+	VtfHeaderEdit_t edit = HeaderOf( m_pDocument->GetVtf() );
+	const std::uint32_t nFlags = bOn ? edit.m_nFlags | nBit : edit.m_nFlags & ~nBit;
+	if ( nFlags == edit.m_nFlags )
+	{
+		return false;
+	}
+	edit.m_nFlags = nFlags;
+	auto bytes = RewriteVtf( m_pDocument->GetVtf(), edit );
+	if ( bytes.empty() || bytes == m_pDocument->GetBytes() )
+	{
+		FillInfo(); // the tick goes back
+		return false;
+	}
+	std::string szName = "?";
+	for ( const ListedFlag_t &flag : ListedFlags( ~0u, true ) )
+	{
+		if ( flag.m_nBit == nBit )
+		{
+			szName = ParticleNames().Texture( "flag:" + std::string{ flag.m_szName } ).m_szName;
+		}
+	}
+	return m_pDocument->Replace( std::move( bytes ), bOn ? tr( "Turn on %1" ).arg( Qs( szName ) ) : tr( "Turn off %1" ).arg( Qs( szName ) ) );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Makes it again as a spray that fits; one undo step.
+//-----------------------------------------------------------------------------
+bool CTextureEditor::MakeSpray()
+{
+	const CVtf &vtf = m_pDocument->GetVtf();
+	if ( vtf.m_Info.m_nFaces > 1 || vtf.m_Info.m_nDepth > 1 || vtf.m_Info.m_nFormat == VtfFormat_t::P8 )
+	{
+		QMessageBox::information( this, tr( "Make Spray" ), tr( "A spray is a picture or an animation; a cube map, a volume texture or a P8 texture can't be one." ) );
+		return false;
+	}
+	std::string szError;
+	auto bytes = BuildSpray( SourcesOf( vtf ), &szError );
+	if ( bytes.empty() )
+	{
+		QMessageBox::warning( this, tr( "Make Spray" ), tr( "Couldn't make it a spray: %1." ).arg( QString::fromStdString( szError ) ) );
+		return false;
+	}
+	const int nFramesBefore = vtf.m_Info.m_nFrames;
+	if ( !m_pDocument->Replace( std::move( bytes ), tr( "Make spray" ) ) )
+	{
+		return false;
+	}
+	const VtfInfo_t &info = m_pDocument->GetVtf().m_Info;
+	QString szMade = tr( "Now a spray: %1×%2 %3, %4" ).arg( info.m_nWidth ).arg( info.m_nHeight ).arg( Qs( FormatName( info.m_nFormat ) ) ).arg( QLocale{}.formattedDataSize( static_cast<qint64>( m_pDocument->GetBytes().size() ) ) );
+	if ( info.m_nFrames < nFramesBefore )
+	{
+		szMade += tr( ", %1 of its %2 frames kept to fit" ).arg( info.m_nFrames ).arg( nFramesBefore );
+	}
+	m_pStatus->setText( szMade );
+	return true;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: The material that goes with the texture; the editor takes it.
+//-----------------------------------------------------------------------------
+void CTextureEditor::SetMaterial( CMaterialEditor *pMaterial )
+{
+	if ( pMaterial == m_pMaterial )
+	{
+		return;
+	}
+	if ( m_pMaterial )
+	{
+		// Its preview and Messages were placed here, outside it.
+		m_pMaterial->GetPreviewHost()->hide();
+		m_pMaterial->GetMessages()->hide();
+		m_pMaterial->GetPreviewHost()->deleteLater();
+		m_pMaterial->GetMessages()->deleteLater();
+		m_pMaterial->hide();
+		m_pMaterial->deleteLater();
+	}
+	m_pMaterial = pMaterial;
+	if ( m_pMaterial )
+	{
+		m_pMaterialHolder->layout()->addWidget( m_pMaterial );
+		m_pPreviewPage->layout()->addWidget( m_pMaterial->GetPreviewHost() );
+		m_pMessagesHost->layout()->addWidget( m_pMaterial->GetMessages() );
+		m_pMaterial->GetPreviewHost()->show();
+		m_pMaterial->GetMessages()->show();
+		m_pMaterial->show();
+		connect( m_pMaterial, &CMaterialEditor::ModifiedChanged, this, [ this ] {
+			UpdateMaterialTab();
+			emit ModifiedChanged();
+		} );
+		// Drawn in the viewer, so it follows each new preview.
+		connect( m_pMaterial, &CMaterialEditor::PreviewUpdated, this, [ this ] {
+			if ( IsShowingAsMaterial() )
+			{
+				FillSelectors();
+				UpdateView();
+			}
+		} );
+	}
+	m_pMaterialPage->setCurrentIndex( m_pMaterial ? 1 : 0 );
+	m_pMessagesHost->setVisible( m_pMaterial != nullptr );
+	m_pAsMaterial->setEnabled( m_pMaterial != nullptr );
+	SetShowAsMaterial( m_pMaterial && IsShowingMaterial() );
+	FillSelectors();
+	UpdateView();
+	UpdateMaterialTab();
+	emit ModifiedChanged();
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: The Material tab's title and the material's name, with whether it is saved.
+//-----------------------------------------------------------------------------
+void CTextureEditor::UpdateMaterialTab()
+{
+	const bool bModified = m_pMaterial && m_pMaterial->IsModified();
+	m_pMaterialSide->setText( bModified ? tr( "Material*" ) : tr( "Material" ) );
+	if ( !m_pMaterial )
+	{
+		m_pMaterialName->clear();
+		return;
+	}
+	m_pMaterialName->setText( m_pMaterial->IsNew() ? tr( "<b>%1</b> · not saved yet" ).arg( m_pMaterial->GetFileName().toHtmlEscaped() ) : QStringLiteral( "<b>%1</b>" ).arg( m_pMaterial->GetFileName().toHtmlEscaped() ) );
+	m_pMaterialName->setToolTip( m_pMaterial->GetDiskPath().empty() ? m_pMaterial->GetGamePath() : QString::fromStdString( m_pMaterial->GetDiskPath().string() ) );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+void CTextureEditor::ShowMaterial()
+{
+	m_pSide->setCurrentIndex( 1 );
+	m_pMaterialSide->setChecked( true );
+	SetShowAsMaterial( m_pMaterial != nullptr );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+void CTextureEditor::ShowTexture()
+{
+	m_pSide->setCurrentIndex( 0 );
+	m_pTextureSide->setChecked( true );
+	SetShowAsMaterial( false );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: The viewer draws the material (when there is one) or the texture itself.
+//-----------------------------------------------------------------------------
+void CTextureEditor::SetShowAsMaterial( bool bOn )
+{
+	m_pAsMaterial->setChecked( bOn && m_pMaterial );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+bool CTextureEditor::IsShowingAsMaterial() const
+{
+	return m_pMaterial && m_pAsMaterial->isChecked();
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+bool CTextureEditor::IsShowingMaterial() const
+{
+	return m_pSide->currentIndex() == 1;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Whether the texture or its material has changes not saved.
+//-----------------------------------------------------------------------------
+bool CTextureEditor::IsModified() const
+{
+	return m_pDocument->IsModified() || ( m_pMaterial && m_pMaterial->IsModified() );
 }
 
 //-----------------------------------------------------------------------------

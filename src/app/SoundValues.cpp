@@ -22,6 +22,7 @@
 #include <QTimer>
 #include <QTreeView>
 
+#include "ChoiceBoxes.h"
 #include "SoundDocument.h"
 #include "Language.h"
 #include "SoundIndex.h"
@@ -71,12 +72,6 @@ QStringList RangeParts( const QString &szText )
 	}
 	return parts;
 }
-
-struct Choice_t
-{
-	QString m_szValue;
-	QString m_szMeaning;
-};
 
 //-----------------------------------------------------------------------------
 // Purpose:
@@ -151,43 +146,7 @@ std::vector<Choice_t> ChoicesFor( ValueKind_t nKind )
 //-----------------------------------------------------------------------------
 QComboBox *MakeChoiceCombo( const std::vector<Choice_t> &choices, QWidget *pParent )
 {
-	auto *pCombo = new QComboBox( pParent );
-	pCombo->setEditable( true );
-	pCombo->setInsertPolicy( QComboBox::NoInsert );
-
-	auto *pModel = new QStandardItemModel( 0, 2, pCombo );
-	for ( const Choice_t &choice : choices )
-	{
-		auto *pMeaning = new QStandardItem( choice.m_szMeaning );
-		pMeaning->setEnabled( false );
-		pModel->appendRow( { new QStandardItem( choice.m_szValue ), pMeaning } );
-	}
-	auto *pView = new QTreeView;
-	pView->setHeaderHidden( true );
-	pView->setRootIsDecorated( false );
-	pView->setUniformRowHeights( true );
-	pView->setAllColumnsShowFocus( true );
-	pCombo->setModel( pModel );
-	pCombo->setView( pView );
-	pCombo->setModelColumn( 0 );
-	pView->header()->setSectionResizeMode( QHeaderView::ResizeToContents );
-	pView->setMinimumWidth( 460 );
-
-	// Typing searches the choices like a search box, in a list that also says what each means.
-	QCompleter *pCompleter = pCombo->completer();
-	pCompleter->setCompletionMode( QCompleter::PopupCompletion );
-	pCompleter->setFilterMode( Qt::MatchContains );
-	pCompleter->setCaseSensitivity( Qt::CaseInsensitive );
-	pCompleter->setMaxVisibleItems( 14 );
-	auto *pPopup = new QTreeView;
-	pPopup->setHeaderHidden( true );
-	pPopup->setRootIsDecorated( false );
-	pPopup->setUniformRowHeights( true );
-	pPopup->setAllColumnsShowFocus( true );
-	pPopup->setMinimumWidth( 460 );
-	pCompleter->setPopup( pPopup );
-	pPopup->header()->setSectionResizeMode( QHeaderView::ResizeToContents );
-	return pCombo;
+	return MakeSearchBox( choices, pParent );
 }
 
 //-----------------------------------------------------------------------------

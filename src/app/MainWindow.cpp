@@ -35,6 +35,7 @@
 #include <QSlider>
 #include <QSortFilterProxyModel>
 #include <QSplitter>
+#include <QPointer>
 #include <QSysInfo>
 #include <QStandardPaths>
 #include <QStatusBar>
@@ -73,6 +74,7 @@
 #include "TextureEditor.h"
 #include "VfsModel.h"
 #include "dmx/Dmx.h"
+#include "material/Parameters.h"
 #include "particles/Particles.h"
 #include "sky/Sky.h"
 #include "sound/SoundLint.h"
@@ -421,7 +423,7 @@ void CMainWindow::BuildMenus( QAction *pSearchPathsToggle )
 	pFile->addAction( tr( "New Sound&script File…" ), this, [ this ] { NewSoundFile( FileKind_t::FILE_KIND_SOUNDSCRIPT ); } );
 	pFile->addAction( tr( "New S&kybox" ), this, [ this ] { NewSky(); } );
 	pFile->addAction( tr( "New &Particle File…" ), this, &CMainWindow::NewParticleFile );
-	pFile->addAction( tr( "New &Texture from Pictures…" ), this, &CMainWindow::ChooseNewTexture );
+	pFile->addAction( tr( "Create &VTF from Pictures…" ), this, &CMainWindow::ChooseNewTexture );
 	pFile->addAction( tr( "Con&vert a Folder of Textures…" ), this, &CMainWindow::ChooseBatchConvert );
 	auto *pSkies = pFile->addMenu( tr( "Open Sk&y from Game" ) );
 	connect( pSkies, &QMenu::aboutToShow, this, [ this, pSkies ] { FillSkyMenu( pSkies ); } );
@@ -1105,7 +1107,7 @@ void CMainWindow::PreviewDiskFile( const QString &szPath )
 	}
 	else if ( IsImageFile( szPath ) )
 	{
-		pView = WithEditButton( pView, tr( "This is a picture." ), tr( "Make Texture…" ), [ this, szPath ] { NewTextureFromFiles( { szPath } ); } );
+		pView = WithEditButton( pView, tr( "This is a picture." ), tr( "Create VTF…" ), [ this, szPath ] { NewTextureFromFiles( { szPath } ); } );
 	}
 	SetPreview( pView );
 	m_pTabs->setCurrentWidget( m_pPreviewHost );
@@ -1147,7 +1149,7 @@ void CMainWindow::OpenDiskFile( const QString &szPath )
 	}
 	if ( CMaterialEditor *pEditor = MaterialEditorFor( {}, file ) )
 	{
-		m_pTabs->setCurrentWidget( pEditor );
+		ShowMaterialEditor( pEditor );
 		return;
 	}
 	const auto data = ReadDiskFile( szPath );
@@ -1192,7 +1194,7 @@ void CMainWindow::OpenDiskFile( const QString &szPath )
 		const xv::material::Reader_t pfnRead = [ this, file ]( std::string_view szGamePath ) { return xv::material::DiskReader( file, m_Game ? m_pFileSystem.get() : nullptr )( szGamePath ); };
 		auto *pEditor = new CMaterialEditor( GamePathForDisk( file ), QString::fromUtf8( *data ), pfnRead );
 		pEditor->SetDiskPath( file );
-		AddMaterialEditor( pEditor );
+		PlaceMaterial( pEditor );
 		return;
 	}
 	PreviewDiskFile( szPath );
@@ -2431,8 +2433,7 @@ void CMainWindow::UpdateTitle()
 	}
 	else if ( CTextureEditor *pTexture = GetCurrentTexture() )
 	{
-		const CTextureDocument *pDocument = pTexture->GetDocument();
-		szTitle.prepend( ( pDocument->IsModified() ? QStringLiteral( "*" ) : QString{} ) + pDocument->GetFileName() + QStringLiteral( " — " ) );
+		szTitle.prepend( ( pTexture->IsModified() ? QStringLiteral( "*" ) : QString{} ) + pTexture->GetDocument()->GetFileName() + QStringLiteral( " — " ) );
 	}
 	else if ( CMaterialEditor *pMaterial = GetCurrentMaterial() )
 	{
@@ -2491,7 +2492,7 @@ CTextureEditor *CMainWindow::TextureEditorForDisk( const fs::path &file ) const
 //-----------------------------------------------------------------------------
 // Purpose: Opens a texture from the mounted game ("materials/x.vtf") in an editor tab.
 //-----------------------------------------------------------------------------
-CTextureEditor *CMainWindow::OpenTextureFile( const QString &szGamePath )
+CTextureEditor *CMainWindow::OpenTextureFile( const QString &szGamePath, bool bFindMaterial )
 {
 	const std::string szPath = xv::vfs::NormalizePath( szGamePath.toStdString() );
 	fs::path disk;
@@ -2513,13 +2514,13 @@ CTextureEditor *CMainWindow::OpenTextureFile( const QString &szGamePath )
 		return nullptr;
 	}
 	pDocument->SetDiskPath( disk );
-	return AddTextureEditor( pDocument );
+	return AddTextureEditor( pDocument, bFindMaterial );
 }
 
 //-----------------------------------------------------------------------------
 // Purpose:
 //-----------------------------------------------------------------------------
-CTextureEditor *CMainWindow::AddTextureEditor( CTextureDocument *pDocument )
+CTextureEditor *CMainWindow::AddTextureEditor( CTextureDocument *pDocument, bool bFindMaterial )
 {
 	auto *pEditor = new CTextureEditor( pDocument );
 	pDocument->setParent( pEditor );
@@ -2528,15 +2529,255 @@ CTextureEditor *CMainWindow::AddTextureEditor( CTextureDocument *pDocument )
 	const auto updateTab = [ this, pEditor ] {
 		const int i = m_pTabs->indexOf( pEditor );
 		const CTextureDocument *pDoc = pEditor->GetDocument();
-		m_pTabs->setTabText( i, ( pDoc->IsModified() ? QStringLiteral( "*" ) : QString{} ) + pDoc->GetFileName() );
-		m_pTabs->setTabToolTip( i, pDoc->GetDiskPath().empty() ? pDoc->GetGamePath() : ToQString( pDoc->GetDiskPath() ) );
+		m_pTabs->setTabText( i, ( pEditor->IsModified() ? QStringLiteral( "*" ) : QString{} ) + pDoc->GetFileName() );
+		QString szTip = pDoc->GetDiskPath().empty() ? pDoc->GetGamePath() : ToQString( pDoc->GetDiskPath() );
+		if ( const CMaterialEditor *pMaterial = pEditor->GetMaterial() )
+		{
+			szTip += u'\n' + ( pMaterial->GetDiskPath().empty() ? pMaterial->GetGamePath() : ToQString( pMaterial->GetDiskPath() ) );
+		}
+		m_pTabs->setTabToolTip( i, szTip );
 		UpdateTitle();
 	};
-	connect( pDocument, &CTextureDocument::ModifiedChanged, this, updateTab );
+	connect( pEditor, &CTextureEditor::ModifiedChanged, this, updateTab );
 	connect( pEditor, &CTextureEditor::MakeMaterialRequested, this, [ this, pEditor ] { MakeMaterialFor( pEditor ); } );
+	connect( pEditor, &CTextureEditor::SaveMaterialAsRequested, this, [ this, pEditor ] {
+		if ( CMaterialEditor *pMaterial = pEditor->GetMaterial() )
+		{
+			SaveAs( pMaterial );
+		}
+	} );
+	connect( pEditor, &CTextureEditor::CloseMaterialRequested, this, [ this, pEditor ] { CloseMaterial( pEditor ); } );
+	// The material of the same name beside it goes with it.
+	if ( bFindMaterial )
+	{
+		fs::path disk = pDocument->GetDiskPath();
+		QString szGamePath = pDocument->GetGamePath();
+		szGamePath.chop( QFileInfo{ szGamePath }.suffix().size() );
+		szGamePath += QStringLiteral( "vmt" );
+		std::optional<QString> text;
+		if ( !disk.empty() )
+		{
+			disk.replace_extension( ".vmt" );
+			disk = xv::vfs::FindCaseInsensitive( disk );
+			std::error_code ec;
+			if ( fs::is_regular_file( disk, ec ) )
+			{
+				if ( const auto data = ReadDiskFile( ToQString( disk ) ) )
+				{
+					text = QString::fromUtf8( *data );
+					szGamePath = GamePathForDisk( disk );
+				}
+			}
+		}
+		else if ( const auto game = m_pFileSystem->ReadText( xv::vfs::NormalizePath( szGamePath.toStdString() ) ) )
+		{
+			text = QString::fromStdString( *game );
+			if ( const xv::vfs::CMount *pMount = m_pFileSystem->Resolve( xv::vfs::NormalizePath( szGamePath.toStdString() ) ) )
+			{
+				disk = pMount->DiskPath( xv::vfs::NormalizePath( szGamePath.toStdString() ) ).value_or( fs::path{} );
+			}
+		}
+		if ( text )
+		{
+			auto *pMaterial = new CMaterialEditor( szGamePath, *text, ReaderFor( pEditor, disk ) );
+			pMaterial->SetDiskPath( disk );
+			SetUpMaterial( pMaterial );
+			pEditor->SetMaterial( pMaterial );
+		}
+	}
 	updateTab();
 	m_pTabs->setCurrentWidget( pEditor );
 	return pEditor;
+}
+
+namespace
+{
+
+//-----------------------------------------------------------------------------
+// Purpose: The game path a texture has under materials/ ("materials/brick/wall.vtf"): from where
+//          it is on disk, else its game path; empty when it isn't under a materials folder.
+//-----------------------------------------------------------------------------
+std::string MaterialsPathOf( const CTextureDocument *pDocument )
+{
+	for ( const fs::path &file : { pDocument->GetDiskPath(), pDocument->GetSuggestedPath() } )
+	{
+		for ( fs::path dir = file.parent_path(); !file.empty() && !dir.empty() && dir != dir.parent_path(); dir = dir.parent_path() )
+		{
+			if ( QString::fromStdU16String( dir.filename().u16string() ).compare( u"materials", Qt::CaseInsensitive ) == 0 )
+			{
+				return xv::vfs::NormalizePath( "materials/" + xv::vfs::ToUtf8( file.lexically_relative( dir ) ) );
+			}
+		}
+	}
+	const std::string szGame = xv::vfs::NormalizePath( pDocument->GetGamePath().toStdString() );
+	return szGame.starts_with( "materials/" ) ? szGame : std::string{};
+}
+
+} // namespace
+
+//-----------------------------------------------------------------------------
+// Purpose: The textures a material in a texture's tab reads: that texture as edited first.
+//-----------------------------------------------------------------------------
+xv::material::Reader_t CMainWindow::ReaderFor( CTextureEditor *pTexture, const fs::path &material )
+{
+	const QPointer<CTextureDocument> pDocument = pTexture ? pTexture->GetDocument() : nullptr;
+	return [ this, pDocument, material ]( std::string_view szName ) -> std::optional<std::vector<std::byte>> {
+		if ( pDocument )
+		{
+			const std::string szOwn = MaterialsPathOf( pDocument );
+			if ( !szOwn.empty() && xv::vfs::NormalizePath( szName ) == szOwn )
+			{
+				return pDocument->GetBytes();
+			}
+		}
+		return material.empty() ? m_pFileSystem->Read( szName ) : xv::material::DiskReader( material, m_Game ? m_pFileSystem.get() : nullptr )( szName );
+	};
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: What a material editor offers: the game's surface properties and texture names.
+//-----------------------------------------------------------------------------
+void CMainWindow::SetUpMaterial( CMaterialEditor *pMaterial )
+{
+	pMaterial->SetSurfaceProps( SurfaceProps() );
+	pMaterial->SetTextureNames( [ this ] { return TextureNames(); } );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Puts a material in the tab of the texture it uses (opening that), else in a tab of
+//          its own.
+//-----------------------------------------------------------------------------
+CMaterialEditor *CMainWindow::PlaceMaterial( CMaterialEditor *pMaterial )
+{
+	SetUpMaterial( pMaterial );
+	// The texture it is drawn with: its base texture, else its normal map.
+	const auto parsed = xv::kv1::Parse( pMaterial->GetText().toStdString() );
+	const auto root = std::ranges::find_if( parsed.m_Document.m_Roots, &xv::kv1::CNode::IsBlock );
+	std::string szTexture;
+	for ( const char *pszKey : { "$basetexture", "$bumpmap", "$normalmap" } )
+	{
+		const xv::kv1::CNode *pNode = root == parsed.m_Document.m_Roots.end() ? nullptr : root->Find( pszKey );
+		if ( szTexture.empty() && pNode && pNode->IsPair() && xv::material::TextureKind( pNode->GetValue() ) == xv::material::TextureKind_t::TEXTURE_KIND_FILE )
+		{
+			szTexture = xv::material::TexturePath( pNode->GetValue() );
+		}
+	}
+	CTextureEditor *pTexture = nullptr;
+	if ( !szTexture.empty() )
+	{
+		// Beside the material's own materials folder first, then in the game.
+		fs::path disk;
+		for ( fs::path dir = pMaterial->GetDiskPath().parent_path(); !pMaterial->GetDiskPath().empty() && !dir.empty() && dir != dir.parent_path(); dir = dir.parent_path() )
+		{
+			if ( QString::fromStdU16String( dir.filename().u16string() ).compare( u"materials", Qt::CaseInsensitive ) == 0 )
+			{
+				std::error_code ec;
+				const fs::path candidate = xv::vfs::FindCaseInsensitive( dir.parent_path() / xv::vfs::FromUtf8( szTexture ) );
+				if ( fs::is_regular_file( candidate, ec ) )
+				{
+					disk = candidate;
+				}
+				break;
+			}
+		}
+		if ( !disk.empty() )
+		{
+			pTexture = TextureEditorForDisk( disk );
+			if ( !pTexture )
+			{
+				if ( const auto data = ReadDiskFile( ToQString( disk ) ) )
+				{
+					auto *pDocument = new CTextureDocument( GamePathForDisk( disk ), std::vector<std::byte>( AsBytes( *data ).begin(), AsBytes( *data ).end() ) );
+					if ( pDocument->IsValid() )
+					{
+						pDocument->SetDiskPath( disk );
+						pTexture = AddTextureEditor( pDocument, false );
+					}
+					else
+					{
+						delete pDocument;
+					}
+				}
+			}
+		}
+		else if ( m_pFileSystem->Resolve( szTexture ) )
+		{
+			pTexture = OpenTextureFile( QString::fromStdString( szTexture ), false );
+		}
+	}
+	// With the texture, unless it already has another material with changes.
+	if ( pTexture )
+	{
+		CMaterialEditor *pHad = pTexture->GetMaterial();
+		std::error_code ec;
+		const bool bSame = pHad && ( !pHad->GetDiskPath().empty() && !pMaterial->GetDiskPath().empty() ? fs::equivalent( pHad->GetDiskPath(), pMaterial->GetDiskPath(), ec ) : xv::vfs::NormalizePath( pHad->GetGamePath().toStdString() ) == xv::vfs::NormalizePath( pMaterial->GetGamePath().toStdString() ) );
+		if ( bSame )
+		{
+			delete pMaterial;
+			ShowMaterialEditor( pHad );
+			return pHad;
+		}
+		if ( !pHad || !pHad->IsModified() )
+		{
+			pMaterial->SetReader( ReaderFor( pTexture, pMaterial->GetDiskPath() ) );
+			pTexture->SetMaterial( pMaterial );
+			ShowMaterialEditor( pMaterial );
+			return pMaterial;
+		}
+	}
+	return AddMaterialEditor( pMaterial );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Shows a material's editor, in its own tab or its texture's.
+//-----------------------------------------------------------------------------
+void CMainWindow::ShowMaterialEditor( CMaterialEditor *pEditor )
+{
+	for ( int i = 0; i < m_pTabs->count(); i++ )
+	{
+		if ( m_pTabs->widget( i ) == pEditor )
+		{
+			m_pTabs->setCurrentIndex( i );
+			return;
+		}
+		if ( auto *pTexture = qobject_cast<CTextureEditor *>( m_pTabs->widget( i ) ); pTexture && pTexture->GetMaterial() == pEditor )
+		{
+			m_pTabs->setCurrentIndex( i );
+			pTexture->ShowMaterial();
+			return;
+		}
+	}
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Puts a texture's material away, asking first about unsaved changes.
+//-----------------------------------------------------------------------------
+bool CMainWindow::CloseMaterial( CTextureEditor *pEditor )
+{
+	CMaterialEditor *pMaterial = pEditor->GetMaterial();
+	if ( !pMaterial || !ConfirmClose( pMaterial ) )
+	{
+		return false;
+	}
+	pEditor->SetMaterial( nullptr );
+	pEditor->ShowTexture();
+	return true;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: The textures the game has, as materials name them.
+//-----------------------------------------------------------------------------
+QStringList CMainWindow::TextureNames() const
+{
+	QStringList names;
+	for ( const auto &[ szPath, pMount ] : m_pFileSystem->Files() )
+	{
+		if ( szPath.starts_with( "materials/" ) && szPath.ends_with( ".vtf" ) )
+		{
+			names << QString::fromStdString( szPath.substr( 10, szPath.size() - 14 ) );
+		}
+	}
+	return names;
 }
 
 //-----------------------------------------------------------------------------
@@ -2545,7 +2786,7 @@ CTextureEditor *CMainWindow::AddTextureEditor( CTextureDocument *pDocument )
 void CMainWindow::ChooseNewTexture()
 {
 	const QString szStart = m_pFolders->GetFolder().isEmpty() && m_Game ? ToQString( m_Game->m_GameDir ) : m_pFolders->GetFolder();
-	const QStringList files = QFileDialog::getOpenFileNames( this, tr( "New Texture from Pictures" ), szStart,
+	const QStringList files = QFileDialog::getOpenFileNames( this, tr( "Create VTF from Pictures" ), szStart,
 		PictureFilter( true ) );
 	if ( !files.isEmpty() )
 	{
@@ -2614,17 +2855,40 @@ bool CMainWindow::WriteTexture( CTextureEditor *pEditor, const fs::path &target 
 bool CMainWindow::Save( CTextureEditor *pEditor )
 {
 	CTextureDocument *pDocument = pEditor->GetDocument();
-	// A new texture always asks where it goes.
-	if ( pDocument->IsNew() || ( pDocument->GetDiskPath().empty() && !m_Game ) )
+	CMaterialEditor *pMaterial = pEditor->GetMaterial();
+	const bool bMaterial = pMaterial && pMaterial->IsModified();
+	// The texture, when it has changes or nothing else does; then its material.
+	if ( pDocument->IsModified() || !bMaterial )
 	{
-		return SaveAs( pEditor );
+		// A new texture always asks where it goes.
+		if ( pDocument->IsNew() || ( pDocument->GetDiskPath().empty() && !m_Game ) )
+		{
+			if ( !SaveAs( pEditor ) )
+			{
+				return false;
+			}
+		}
+		else
+		{
+			const fs::path target = pDocument->GetDiskPath().empty() ? WriteTarget( pDocument->GetGamePath() ) : pDocument->GetDiskPath();
+			if ( !WriteTexture( pEditor, target ) )
+			{
+				return false;
+			}
+			Remount();
+		}
 	}
-	const fs::path target = pDocument->GetDiskPath().empty() ? WriteTarget( pDocument->GetGamePath() ) : pDocument->GetDiskPath();
-	if ( !WriteTexture( pEditor, target ) )
+	if ( bMaterial )
 	{
-		return false;
+		// A new material starts beside where the texture went.
+		if ( pMaterial->IsNew() && !pDocument->GetDiskPath().empty() )
+		{
+			fs::path beside = pDocument->GetDiskPath();
+			beside.replace_extension( ".vmt" );
+			pMaterial->SetSuggestedPath( beside );
+		}
+		return Save( pMaterial );
 	}
-	Remount();
 	return true;
 }
 
@@ -2652,13 +2916,22 @@ bool CMainWindow::SaveAs( CTextureEditor *pEditor )
 //-----------------------------------------------------------------------------
 bool CMainWindow::ConfirmClose( CTextureEditor *pEditor )
 {
-	if ( !pEditor->GetDocument()->IsModified() )
+	if ( !pEditor->IsModified() )
 	{
 		return true;
 	}
 	m_pTabs->setCurrentWidget( pEditor );
+	QStringList names;
+	if ( pEditor->GetDocument()->IsModified() )
+	{
+		names << pEditor->GetDocument()->GetFileName();
+	}
+	if ( pEditor->GetMaterial() && pEditor->GetMaterial()->IsModified() )
+	{
+		names << pEditor->GetMaterial()->GetFileName();
+	}
 	const auto nAnswer = QMessageBox::question( this, tr( "Unsaved changes" ),
-		tr( "Save changes to %1?" ).arg( pEditor->GetDocument()->GetFileName() ),
+		tr( "Save changes to %1?" ).arg( names.join( tr( " and " ) ) ),
 		QMessageBox::Save | QMessageBox::Discard | QMessageBox::Cancel, QMessageBox::Save );
 	if ( nAnswer == QMessageBox::Save )
 	{
@@ -2744,6 +3017,10 @@ CMaterialEditor *CMainWindow::MaterialEditorFor( const QString &szGamePath, cons
 	for ( int i = 0; i < m_pTabs->count(); i++ )
 	{
 		auto *pEditor = qobject_cast<CMaterialEditor *>( m_pTabs->widget( i ) );
+		if ( auto *pTexture = qobject_cast<CTextureEditor *>( m_pTabs->widget( i ) ) )
+		{
+			pEditor = pTexture->GetMaterial();
+		}
 		if ( !pEditor )
 		{
 			continue;
@@ -2771,7 +3048,7 @@ CMaterialEditor *CMainWindow::OpenMaterialFile( const QString &szGamePath )
 	}
 	if ( CMaterialEditor *pEditor = MaterialEditorFor( szGamePath, disk ) )
 	{
-		m_pTabs->setCurrentWidget( pEditor );
+		ShowMaterialEditor( pEditor );
 		return pEditor;
 	}
 	const auto text = m_pFileSystem->ReadText( szPath );
@@ -2782,7 +3059,7 @@ CMaterialEditor *CMainWindow::OpenMaterialFile( const QString &szGamePath )
 	}
 	auto *pEditor = new CMaterialEditor( QString::fromStdString( szPath ), QString::fromStdString( *text ), [ this ]( std::string_view szName ) { return m_pFileSystem->Read( szName ); } );
 	pEditor->SetDiskPath( disk );
-	return AddMaterialEditor( pEditor );
+	return PlaceMaterial( pEditor );
 }
 
 //-----------------------------------------------------------------------------
@@ -2807,17 +3084,17 @@ CMaterialEditor *CMainWindow::AddMaterialEditor( CMaterialEditor *pEditor )
 // Purpose: The surface properties the mounted game knows ($surfaceprop values), from the files
 //          its surface properties manifest lists.
 //-----------------------------------------------------------------------------
-QStringList CMainWindow::SurfaceProps() const
+std::vector<Choice_t> CMainWindow::SurfaceProps() const
 {
-	QStringList names;
+	std::vector<Choice_t> surfaces;
 	if ( !m_Game )
 	{
-		return names;
+		return surfaces;
 	}
 	const auto manifest = m_pFileSystem->ReadText( "scripts/surfaceproperties_manifest.txt" );
 	if ( !manifest )
 	{
-		return names;
+		return surfaces;
 	}
 	for ( const xv::kv1::CNode &root : xv::kv1::Parse( *manifest ).m_Document.m_Roots )
 	{
@@ -2830,16 +3107,22 @@ QStringList CMainWindow::SurfaceProps() const
 			const auto file = m_pFileSystem->ReadText( xv::vfs::NormalizePath( entry.GetValue() ) );
 			for ( const xv::kv1::CNode &surface : file ? xv::kv1::Parse( *file ).m_Document.m_Roots : std::vector<xv::kv1::CNode>{} )
 			{
-				if ( surface.IsBlock() )
+				if ( !surface.IsBlock() )
 				{
-					names << QString::fromStdString( surface.GetKey() );
+					continue;
+				}
+				const QString szName = QString::fromStdString( surface.GetKey() );
+				const xv::kv1::CNode *pBase = surface.Find( "base" );
+				const QString szMeaning = pBase && pBase->IsPair() ? tr( "like %1" ).arg( QString::fromStdString( pBase->GetValue() ) ) : QString{};
+				if ( std::ranges::none_of( surfaces, [ &szName ]( const Choice_t &choice ) { return choice.m_szValue.compare( szName, Qt::CaseInsensitive ) == 0; } ) )
+				{
+					surfaces.push_back( { szName, szMeaning } );
 				}
 			}
 		}
 	}
-	names.removeDuplicates();
-	names.sort( Qt::CaseInsensitive );
-	return names;
+	std::ranges::sort( surfaces, []( const Choice_t &a, const Choice_t &b ) { return a.m_szValue.compare( b.m_szValue, Qt::CaseInsensitive ) < 0; } );
+	return surfaces;
 }
 
 //-----------------------------------------------------------------------------
@@ -2847,10 +3130,16 @@ QStringList CMainWindow::SurfaceProps() const
 //-----------------------------------------------------------------------------
 CMaterialEditor *CMainWindow::MakeMaterialFor( CTextureEditor *pTexture )
 {
+	// The one it has goes, after asking about its changes.
+	if ( CMaterialEditor *pHad = pTexture->GetMaterial(); pHad && !ConfirmClose( pHad ) )
+	{
+		return nullptr;
+	}
 	const CTextureDocument *pDocument = pTexture->GetDocument();
 	const auto &info = pDocument->GetVtf().m_Info;
 	const bool bAlpha = ( info.m_nFlags & ( xv::texture::vtf_flag::ONEBITALPHA | xv::texture::vtf_flag::EIGHTBITALPHA ) ) != 0;
-	CMakeMaterialDialog dialog( pDocument->GetGamePath(), bAlpha, ( info.m_nFlags & xv::texture::vtf_flag::NORMAL ) != 0, SurfaceProps(), this );
+	const std::string szUnderMaterials = MaterialsPathOf( pDocument );
+	CMakeMaterialDialog dialog( szUnderMaterials.empty() ? pDocument->GetGamePath() : QString::fromStdString( szUnderMaterials ), bAlpha, ( info.m_nFlags & xv::texture::vtf_flag::NORMAL ) != 0, SurfaceProps(), this );
 	if ( dialog.exec() != QDialog::Accepted )
 	{
 		return nullptr;
@@ -2861,11 +3150,13 @@ CMaterialEditor *CMainWindow::MakeMaterialFor( CTextureEditor *pTexture )
 	const fs::path texture = !pDocument->GetDiskPath().empty() ? pDocument->GetDiskPath() : pDocument->GetSuggestedPath();
 	fs::path beside = texture;
 	beside.replace_extension( ".vmt" );
-	const xv::material::Reader_t pfnRead = [ this, beside ]( std::string_view szName ) { return xv::material::DiskReader( beside, m_Game ? m_pFileSystem.get() : nullptr )( szName ); };
-	auto *pEditor = new CMaterialEditor( szGamePath, dialog.GetText(), texture.empty() ? xv::material::Reader_t{ [ this ]( std::string_view szName ) { return m_pFileSystem->Read( szName ); } } : pfnRead );
+	auto *pEditor = new CMaterialEditor( szGamePath, dialog.GetText(), ReaderFor( pTexture, texture.empty() ? fs::path{} : beside ) );
 	pEditor->SetSuggestedPath( texture.empty() ? fs::path{} : beside );
 	pEditor->MarkUnsaved();
-	return AddMaterialEditor( pEditor );
+	SetUpMaterial( pEditor );
+	pTexture->SetMaterial( pEditor );
+	pTexture->ShowMaterial();
+	return pEditor;
 }
 
 //-----------------------------------------------------------------------------
@@ -2932,7 +3223,7 @@ bool CMainWindow::ConfirmClose( CMaterialEditor *pEditor )
 	{
 		return true;
 	}
-	m_pTabs->setCurrentWidget( pEditor );
+	ShowMaterialEditor( pEditor );
 	const auto nAnswer = QMessageBox::question( this, tr( "Unsaved changes" ), tr( "Save changes to %1?" ).arg( pEditor->GetFileName() ),
 		QMessageBox::Save | QMessageBox::Discard | QMessageBox::Cancel, QMessageBox::Save );
 	if ( nAnswer == QMessageBox::Save )

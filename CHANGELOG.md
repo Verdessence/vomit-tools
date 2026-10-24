@@ -1,40 +1,38 @@
 # Changelog
 
-## Unreleased
+## 0.6.0 — The VTF (2026-10-24)
 
 ### Texture editor (new)
-- `.vtf` files open in their own tab, with undo. View every mipmap, frame (played at a set rate),
-  cube face (or the six unwrapped as a cross) and volume slice, each channel on its own, zoomed,
-  panned and tiled, beside the header, flags, thumbnail and resources.
-- **Import** pictures as an image, animation frames (GIF and APNG frames too), a cube map, a cube
-  map from a panorama/HDRI or a volume texture, in every format but P8 and VTF 7.1–7.5. Presets,
-  a separate format for pictures with alpha, Kaiser/Mitchell/triangle/box mipmaps, power-of-two
-  and multiple-of-4 sizes, normal maps from height (mipmaps renormalised), `$distancealpha`, strip
-  alpha, HDR pictures as light values.
-- **Convert**, **Properties** (version, flags, bump scale, reflectivity, thumbnail, KVD/LOD/sheet
-  resources, without recompressing), **Export** (one picture or all), **Copy Image**, drag and drop.
-- **Sprite Sheet**: mksheet in a window, with `.mks` in and out, and existing sheets cut back into
-  frames.
-- **File → Convert a Folder of Textures** and **File → New Texture from Pictures**.
-- New textures and materials always ask where to save (with the game's folders in the side list).
+- `.vtf` files open in their own tab, with undo: every mipmap, frame, cube face (or a cross) and
+  volume slice, channels on their own, zoom, pan and tiling; header, resources and flags beside it.
+- **Import** pictures as an image, frames (GIF/APNG too), a cube map (also from a panorama) or a
+  volume, in every format but P8, VTF 7.1–7.5. Presets, mipmap filters, exact or power-of-two
+  sizes, normal maps from height, `$distancealpha`, HDR.
+- **Convert**, **Properties**, **Export**, **Copy Image**, drag and drop, **Sprite Sheet** (mksheet
+  with `.mks`), **File → Create VTF from Pictures** and **Convert a Folder of Textures**.
+- **Sprays:** the side panel says whether it works as one (512 KB, 4096 a side); **Make Spray**
+  makes it fit.
+- New textures and materials ask where to save.
 
 ### Material editor (new)
-- `.vmt` files open as text, with line numbers and broken lines marked, beside a preview redrawn as
-  you type. **Make VMT** in the texture editor starts one.
+- A material opens in its texture's tab, drawn in the same viewer (flat or on a ball, right-drag
+  for the light), with **Messages** below for mistakes, misspellings and missing textures.
+- **Visual** (parameters with fitting inputs, add from a dialog, tick to hide from the preview) or
+  **Raw** (highlighted text), picked in Preferences → Materials.
+- **Create VMT** with shader, alpha mode, normal map, reflections, phong and `$surfaceprop`.
 
 ### vomit-tools-cli (new)
-- `create`, `edit`, `extract`, `info` (`--kv` for KeyValues) and `thumbnail`, with `--watch`.
-- VTF thumbnails in GNOME Files, Thunar, Nemo and Caja, and in Dolphin through a KDE plugin.
+- `create` (with `--spray`), `edit`, `extract`, `info` and `thumbnail`, with `--watch`.
+- VTF thumbnails in GNOME Files, Thunar, Nemo, Caja and Dolphin.
 
 ### Sound editor
-- **Simple interface:** keys and blocks by tidy names, values as number boxes with units,
-  from…to ranges, named lists and tick boxes.
-- One click opens a value with every choice listed, filtered as you type, and a pick goes in.
-- Short cards no longer leave space above and below their rows.
+- **Simple interface:** tidy names, number boxes with units, ranges, lists and tick boxes.
+- One click opens a value's choices, filtered as you type.
+- Short cards no longer have extra space above and below.
 
 ### Other
-- Files opened while the app is running join its window (Preferences → Interface).
-- A RGBA16161616 texture is shown as linear light, as the float formats are.
+- Files opened while the app runs join its window (Preferences → Interface).
+- RGBA16161616 textures show as linear light.
 
 ## 0.5.0 — The Vulkan (2026-10-24)
 

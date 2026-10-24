@@ -1,8 +1,9 @@
 //===========================================================================//
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
-// Purpose: A texture's header changed without touching its pictures: version, flags, first
-//          frame, bump scale, reflectivity, the thumbnail and the extra resources.
+// Purpose: A texture's header changed without touching its pictures: version, first frame, bump
+//          scale, reflectivity, the thumbnail and the extra resources. (The flags are ticked in
+//          the texture editor's side panel.)
 //
 //===========================================================================//
 #pragma once
@@ -28,7 +29,6 @@ public:
 
 	// For tests.
 	[[nodiscard]] QComboBox *GetVersionBox() const { return m_pVersion; }
-	[[nodiscard]] QTreeWidget *GetFlagList() const { return m_pFlags; }
 
 private:
 	void FillResources();
@@ -38,7 +38,6 @@ private:
 	const xv::texture::CVtf &m_Vtf;
 	xv::texture::VtfHeaderEdit_t m_Initial;
 	QComboBox *m_pVersion = nullptr;
-	QTreeWidget *m_pFlags = nullptr;
 	QSpinBox *m_pFirstFrame = nullptr;
 	QDoubleSpinBox *m_pBumpScale = nullptr;
 	QDoubleSpinBox *m_pReflectivity[ 3 ] = {};

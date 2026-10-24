@@ -340,6 +340,7 @@ CMaterialView::CMaterialView( const QString &szPath, const QString &szSource, st
 	m_pTextureList->setGridSize( { 150, 150 } );
 	m_pTextureList->setMovement( QListView::Static );
 	auto *pTabs = new QTabWidget;
+	m_pTabs = pTabs;
 	pTabs->setObjectName( QStringLiteral( "materialTabs" ) );
 	pTabs->addTab( m_pParameters, tr( "Parameters" ) );
 	pTabs->addTab( m_pTextureList, tr( "Textures" ) );
@@ -428,6 +429,54 @@ CMaterialView::CMaterialView( const QString &szPath, const QString &szSource, st
 }
 
 CMaterialView::~CMaterialView() = default;
+
+//-----------------------------------------------------------------------------
+// Purpose: The material on a flat square or a ball, as at a time for its proxies.
+//-----------------------------------------------------------------------------
+xv::texture::CImage CMaterialView::RenderPicture( int nSize, material::Shape_t nShape, material::Backdrop_t nBackdrop, float flTime, xv::CVec3 vecLight ) const
+{
+	if ( !m_Material || !m_pProxies )
+	{
+		return {};
+	}
+	const material::CMaterial now = m_pProxies->At( flTime, [ this ]( std::string_view szParameter ) { return m_Textures.FrameCount( szParameter ); } );
+	material::PreviewOptions_t options;
+	options.m_nSize = nSize;
+	options.m_nShape = nShape;
+	options.m_vecLight = vecLight;
+	options.m_nBackdrop = nBackdrop;
+	return material::RenderPreview( now, m_Textures, options );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: A small picture of the texture a parameter names.
+//-----------------------------------------------------------------------------
+QIcon CMaterialView::TextureIcon( std::string_view szParameter, int nSize, QString *pDescription ) const
+{
+	const material::Texture_t *pTexture = m_Material ? m_Textures.Find( szParameter ) : nullptr;
+	if ( !pTexture )
+	{
+		return {};
+	}
+	if ( pDescription )
+	{
+		*pDescription = DescribeTexture( *pTexture );
+	}
+	if ( pTexture->m_Frames.empty() || pTexture->m_Frames.front().Empty() )
+	{
+		return {};
+	}
+	return QIcon( Thumbnail( *pTexture, nSize ) );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Only the preview and its controls.
+//-----------------------------------------------------------------------------
+void CMaterialView::SetPreviewOnly( bool bOnly )
+{
+	m_pTabs->setVisible( !bOnly );
+	m_pSummary->setVisible( !bOnly );
+}
 
 //-----------------------------------------------------------------------------
 // Purpose: Draws on the graphics card, at the full size of the square, or in software.
