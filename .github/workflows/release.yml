@@ -129,6 +129,10 @@ jobs:
           title="$(git tag -l --format='%(contents:subject)' "${tag}")"
           echo "title=${title:-$tag}" >> "$GITHUB_OUTPUT"
           awk -v v="${version}" '/^## / { if (found) exit; if (index($0, "## " v " ") == 1) { found = 1; next } } found' CHANGELOG.md > release-notes.md
+          if ! grep -q '[^[:space:]]' release-notes.md; then
+            echo "::error::No changelog entries found for ${tag}"
+            exit 1
+          fi
         id: notes
 
       - uses: softprops/action-gh-release@v2

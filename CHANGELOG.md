@@ -1,6 +1,65 @@
 # Changelog
 
-## Unreleased
+## 0.5.0 — The Vulkan (2026-10-24)
+
+### Preferences
+- **Edit → Preferences** (Ctrl+,) is where the app's settings go from now on, a page each:
+  **Interface** (the simple or regular interface, still under View too), **Graphics** and
+  **Particles**. Changes take effect at once, except the graphics API, which waits for the next
+  start.
+- Graphics APIs are inline choices, avoiding a Wayland crash when reopening the backend picker
+  with Kvantum and affected KWindowSystem versions.
+
+### Graphics: Vulkan
+- **Every preview draws on the graphics card:** the sky view, the material preview, the particle
+  preview and the particle grid's pictures, through Qt's RHI. **Automatic** (the default) uses Vulkan
+  where it works, then the platform's usual API (Direct3D 11 on Windows, OpenGL on Linux), then the
+  CPU. Preferences → Graphics can pick Vulkan, OpenGL, Direct3D 11 or 12, or Software, and says what
+  is in use; so do Help → About's build details.
+- **The same pictures as before:** each shader does what its software renderer does, step by step,
+  and the tests compare the two. All 10,267 CS:S and HL2 materials match.
+- The material preview draws at the full size of the view, not at most 512 pixels, and stays sharp
+  while its proxies play.
+- The particle preview's **GPU** checkbox is gone: Preferences decides for every view. A view whose
+  graphics card fails draws in software.
+
+### Particle editor: layout and grid
+- **Layout:** the preview and the properties sit in the middle; the selected system's lists move to
+  the right.
+- **The grid plays:** the selected system's picture plays in the grid. Preferences → Particles →
+  **Animate every system in the grid** makes every one in view play. On the graphics card they are
+  all drawn in one pass.
+
+### Particles: the game's own settings
+- **Every built-in function, with the game's settings.** The particle editor now knows the 95
+  functions the game builds in and every setting each one reads: its type and the value the game
+  uses when a file leaves it out. They come from the data tables in the Source SDK 2013's particle
+  library (not its code), and CS:S's client has every one of them.
+  - The properties panel lists all of a function's settings in the game's order. Those the file
+    leaves out show in italics at the game's default; changing one adds it to the file. Settings
+    the game doesn't read sit under **Not read by the game**.
+  - The system's properties work the same way. A new system starts with exactly the game's
+    settings: the material is `vgui/white`, and there's no `bounding_box_control_point`, which the
+    game doesn't read.
+  - New operators get every setting at the game's default, as Valve's editor writes them. Bold
+    marks a setting changed from the game's default instead of from the value the game's files use
+    most, and **Reset to the Game's Default** goes back to it.
+  - The **Add** menu lists every built-in function, including ones no file uses yet.
+  - Settings that pick a particle field ("output field") list only the fields of the kind they
+    take: one number or three.
+  - A new system's starter operators keep a few values of their own (lifetime 1–2 s, radius 4–8, a
+    small sphere with some speed). At the game's defaults their particles would live no time at all.
+- **The preview reads defaults as the game does.** A setting the file leaves out runs at the game's
+  default: Radius Random without its radii makes particles of radius 1, not 0, and Pull towards
+  control point without its force doesn't pull. The bounds box no longer follows
+  `bounding_box_control_point`.
+- **Older names come from the game's own list** of 54 (`alpha_fade`, `Random Cull`,
+  `Initial Velocity Noise`…). `Inherit Velocity` is one of them: the game runs it as Velocity
+  Inherit from Control Point. `movement_basic`, `basic_rotation` and
+  `position_lock_to_controlpoint` were only on our list; the game doesn't take them, so they no
+  longer run.
+- **Checks:** a setting a built-in function doesn't read is noted, a setting of another type than
+  the game reads is a warning, and so is a function that isn't built in and that no game file uses.
 
 ### Particle preview
 - **Control points go into the file.** Dragging any point but CP0 writes it into the system's **Set
@@ -32,11 +91,11 @@
   render_screen_velocity_rotate; and, from the VDC articles, Clamp Scalar, Cull when crossing
   sphere, Lerp Initial Scalar/Vector, Lifespan Minimum Radius/Velocity Decay, Lifespan Maintain
   Count Decay, Normalize Vector, Remap Speed To Scalar, Ramp Scalar Linear Simple, Stop Effect after
-  Duration, Inherit Attribute / Initial Value From Parent Particle, Scalar Random, Vector Random,
-  Inherit Velocity and Remap Particle Count to Scalar.
+  Duration, Inherit Attribute / Initial Value From Parent Particle, Scalar Random, Vector Random
+  and Remap Particle Count to Scalar.
 - **Older names:** files that use an early editor's names (`basic_movement`, `lifespan_decay`,
   `position_within_sphere`, …) or another case (`Lifetime From Sequence`) run too; setting names
-  match without regard to case.
+  match without regard to case. (The list is now the game's own; see above.)
 - **Checked against the VDC articles:** a particle's rotation speed now turns it only with Rotation
   Basic; Oscillate counts its frequency over the life or per second as "proportional" says, and its
   start and end as "start/end proportional" says; Movement Lock to Control Point lets go between its

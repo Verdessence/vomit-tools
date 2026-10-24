@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.25)
 
 project(vomit-tools
-        VERSION 0.4.0
+        VERSION 0.5.0
         DESCRIPTION "Soundscape, skybox and particle editors for Source engine games"
         LANGUAGES C CXX)
 
