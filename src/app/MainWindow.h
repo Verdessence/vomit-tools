@@ -23,6 +23,7 @@
 class CFolderBrowser;
 class CParticleDocument;
 class CParticleSearch;
+class CPreferencesDialog;
 class QLabel;
 class QMenu;
 class QSortFilterProxyModel;
@@ -67,6 +68,8 @@ public:
 	CParticleEditor *OpenParticleFile( const QString &szGamePath );
 	// Shows the search over every particle system, with query typed in.
 	CParticleSearch *FindParticleSystem( const QString &szQuery = {} );
+	// Edit > Preferences: one window, raised again when it is already open.
+	CPreferencesDialog *ShowPreferences();
 	// Closes a tab, asking first about unsaved changes. Returns false when the user keeps it.
 	bool CloseTab( int nIndex );
 	// Lists a particle file in a map's manifest (maps/<map>_particles.txt), written to the write
@@ -158,4 +161,5 @@ private:
 	std::optional<std::vector<xv::vfs::SteamGame_t>> m_SteamGames;
 	std::optional<ParticleGame_t> m_ParticleGame;
 	CParticleSearch *m_pParticleSearch = nullptr;
+	CPreferencesDialog *m_pPreferences = nullptr;
 };

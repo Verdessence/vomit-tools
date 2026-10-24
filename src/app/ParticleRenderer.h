@@ -1,13 +1,14 @@
 //===========================================================================//
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
-// Purpose: The particle preview drawn on the graphics card, through Qt's RHI (Vulkan, Metal,
-//          Direct3D or OpenGL, whichever the platform has). It draws the same quads as the
-//          software renderer (particles::layout), so the two look alike; the GPU just does it
-//          faster and at full size.
+// Purpose: Particles drawn on the graphics card. It draws the same quads as the software renderer
+//          (particles::Layout), so the two look alike; the GPU just does it faster and at full
+//          size. One pass can hold several pictures side by side (the grid's thumbnails).
 //
 //===========================================================================//
 #pragma once
+
+#ifdef VOMIT_TOOLS_GPU
 
 #include <array>
 #include <functional>
@@ -15,38 +16,42 @@
 #include <memory>
 #include <vector>
 
-#include <QRhiWidget>
+#include <QRect>
+#include <QSize>
 
+#include "GpuView.h"
 #include "particles/Render.h"
 
-class QRhi;
 class QRhiBuffer;
 class QRhiGraphicsPipeline;
 class QRhiResourceUpdateBatch;
 class QRhiSampler;
 class QRhiShaderResourceBindings;
-class QRhiTexture;
 
-class CParticleGpuView : public QRhiWidget
+// One picture: grid and particle quads and a model's triangles, in pixels from the top-left of
+// m_Rect, its place in the target. The model is drawn first; what it hides isn't drawn over it.
+struct ParticlePicture_t
 {
-	Q_OBJECT
+	QRect m_Rect;
+	std::vector<xv::particles::ScreenQuad_t> m_Quads;
+	std::vector<xv::particles::ScreenMesh_t> m_Meshes;
+};
 
+class CParticleRenderer : public IGpuRenderer
+{
 public:
-	// Fills quads (grid first, then particles) and a model's triangles for a picture of width x
-	// height device pixels. The model is drawn first; what it hides isn't drawn over it.
-	using Source_t = std::function<void( int nWidth, int nHeight, std::vector<xv::particles::ScreenQuad_t> &quads, std::vector<xv::particles::ScreenMesh_t> &meshes,
-		std::array<float, 3> &vecBackground )>;
+	// Fills the pictures for a target of a size (device pixels), and the colour behind them.
+	using Source_t = std::function<void( QSize size, std::vector<ParticlePicture_t> &pictures, std::array<float, 3> &vecBackground )>;
 
-	explicit CParticleGpuView( Source_t pfnSource, QWidget *pParent = nullptr );
-	~CParticleGpuView() override;
+	explicit CParticleRenderer( Source_t pfnSource );
+	~CParticleRenderer() override;
 
 	// Sprites were reloaded: textures made from the old ones must go.
 	void ForgetTextures();
 
-protected:
-	void initialize( QRhiCommandBuffer *pCommands ) override;
-	void render( QRhiCommandBuffer *pCommands ) override;
-	void releaseResources() override;
+	void Initialize( QRhi *pRhi, QRhiRenderTarget *pTarget ) override;
+	void Render( QRhiCommandBuffer *pCommands, QRhiRenderTarget *pTarget ) override;
+	void Release() override;
 
 private:
 	struct Texture_t
@@ -62,7 +67,7 @@ private:
 		PIPELINE_ADDED,
 		PIPELINE_SOLID // the model: opaque, and nearest wins
 	};
-	std::unique_ptr<QRhiGraphicsPipeline> MakePipeline( Pipeline_t nKind );
+	std::unique_ptr<QRhiGraphicsPipeline> MakePipeline( Pipeline_t nKind, QRhiRenderTarget *pTarget );
 
 	Source_t m_pfnSource;
 	QRhi *m_pRhi = nullptr;
@@ -79,6 +84,7 @@ private:
 	std::map<const xv::particles::Sprite_t *, Texture_t> m_Textures;
 	std::map<const xv::particles::Sprite_t *, Texture_t> m_ModelTextures;
 	Texture_t m_ModelWhite; // for a model mesh without a texture
-	quint32 m_nVertexCapacity = 0; // in quads
 	quint32 m_nIndexCapacity = 0;
 };
+
+#endif

@@ -16,7 +16,14 @@
 #include <QMouseEvent>
 #include <QPainter>
 #include <QPainterPath>
+#include <QTimer>
 #include <QWheelEvent>
+
+#include "Graphics.h"
+#ifdef VOMIT_TOOLS_GPU
+#include "GpuView.h"
+#include "SkyRenderer.h"
+#endif
 
 using xv::sky::Face_t;
 
@@ -51,6 +58,30 @@ void OutlinedText( QPainter &painter, QPointF centre, const QString &szText, con
 
 } // namespace
 
+// The labels and the setang line over the graphics card's view, which can't be painted on.
+class CSkyOverlay : public QWidget
+{
+public:
+	explicit CSkyOverlay( CSkyView *pView )
+		: QWidget( pView ),
+		  m_pView( pView )
+	{
+		setAttribute( Qt::WA_TransparentForMouseEvents );
+		setAttribute( Qt::WA_NoSystemBackground );
+		setAttribute( Qt::WA_TranslucentBackground );
+	}
+
+protected:
+	void paintEvent( QPaintEvent * ) override
+	{
+		QPainter painter( this );
+		m_pView->PaintOverlay( painter );
+	}
+
+private:
+	CSkyView *m_pView;
+};
+
 //-----------------------------------------------------------------------------
 // Purpose:
 //-----------------------------------------------------------------------------
@@ -61,6 +92,62 @@ CSkyView::CSkyView( QWidget *pParent )
 	setFocusPolicy( Qt::StrongFocus );
 	setCursor( Qt::OpenHandCursor );
 	setToolTip( tr( "Drag to look around, scroll to zoom, double-click to look east (yaw 0) again" ) );
+	SetUseGpu( CGraphics::Instance().IsGpu() );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Draws on the graphics card (with an overlay for the labels), or in software.
+//-----------------------------------------------------------------------------
+void CSkyView::SetUseGpu( bool bOn )
+{
+	delete m_pGpu;
+	delete m_pOverlay;
+	m_pGpu = nullptr;
+	m_pOverlay = nullptr;
+#ifdef VOMIT_TOOLS_GPU
+	if ( bOn )
+	{
+		auto *pView = new CGpuView( std::make_unique<CSkyRenderer>( [ this ] { return CSkyRenderer::Frame_t{ m_pCube, m_nGeneration, m_Angles, m_flFov, m_bEdges }; } ), this );
+		pView->setObjectName( QStringLiteral( "skyGpuView" ) );
+		pView->setAttribute( Qt::WA_TransparentForMouseEvents );
+		pView->setGeometry( rect() );
+		// If the graphics card can't be used after all, draw in software.
+		connect( pView, &QRhiWidget::renderFailed, this, [ this ] { QTimer::singleShot( 0, this, [ this ] { SetUseGpu( false ); } ); } );
+		m_pGpu = pView;
+		m_pOverlay = new CSkyOverlay( this );
+		m_pOverlay->setGeometry( rect() );
+		m_pGpu->show();
+		m_pOverlay->show();
+		m_pOverlay->raise();
+	}
+#else
+	Q_UNUSED( bOn );
+#endif
+	Redraw();
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+void CSkyView::Redraw()
+{
+	if ( m_pGpu )
+	{
+		m_pGpu->update();
+		m_pOverlay->update();
+	}
+	else
+	{
+		update();
+	}
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+bool CSkyView::HasFaces() const
+{
+	return m_pCube && !std::ranges::all_of( m_pCube->m_Faces, &xv::texture::CImage::Empty );
 }
 
 //-----------------------------------------------------------------------------
@@ -69,7 +156,8 @@ CSkyView::CSkyView( QWidget *pParent )
 void CSkyView::SetCube( const xv::sky::CCube *pCube )
 {
 	m_pCube = pCube;
-	update();
+	m_nGeneration++;
+	Redraw();
 }
 
 //-----------------------------------------------------------------------------
@@ -77,7 +165,8 @@ void CSkyView::SetCube( const xv::sky::CCube *pCube )
 //-----------------------------------------------------------------------------
 void CSkyView::Refresh()
 {
-	update();
+	m_nGeneration++;
+	Redraw();
 }
 
 //-----------------------------------------------------------------------------
@@ -86,7 +175,7 @@ void CSkyView::Refresh()
 void CSkyView::SetAngles( xv::sky::Angles_t angles )
 {
 	m_Angles = { std::clamp( angles.m_flPitch, -89.0f, 89.0f ), WrapYaw( angles.m_flYaw ) };
-	update();
+	Redraw();
 	emit ViewChanged();
 }
 
@@ -96,7 +185,7 @@ void CSkyView::SetAngles( xv::sky::Angles_t angles )
 void CSkyView::SetFov( float flFov )
 {
 	m_flFov = std::clamp( flFov, MIN_FOV, MAX_FOV );
-	update();
+	Redraw();
 	emit ViewChanged();
 }
 
@@ -106,7 +195,7 @@ void CSkyView::SetFov( float flFov )
 void CSkyView::SetShowLabels( bool bShow )
 {
 	m_bLabels = bShow;
-	update();
+	Redraw();
 }
 
 //-----------------------------------------------------------------------------
@@ -115,7 +204,7 @@ void CSkyView::SetShowLabels( bool bShow )
 void CSkyView::SetShowEdges( bool bShow )
 {
 	m_bEdges = bShow;
-	update();
+	Redraw();
 }
 
 //-----------------------------------------------------------------------------
@@ -139,19 +228,48 @@ void CSkyView::Look( float flYawDelta, float flPitchDelta )
 //-----------------------------------------------------------------------------
 void CSkyView::paintEvent( QPaintEvent * )
 {
+	if ( m_pGpu )
+	{
+		return; // the graphics card's view and the overlay over it cover this
+	}
 	QPainter painter( this );
 	painter.fillRect( rect(), QColor( 24, 24, 28 ) );
-	if ( !m_pCube || std::ranges::all_of( m_pCube->m_Faces, &xv::texture::CImage::Empty ) )
+	if ( HasFaces() )
+	{
+		const xv::sky::CView view{ m_Angles, m_flFov, width(), height() };
+		xv::sky::Render( *m_pCube, view, m_Frame, m_bEdges );
+		const QImage image( m_Frame.m_Pixels.data(), m_Frame.m_nWidth, m_Frame.m_nHeight, m_Frame.m_nWidth * 4, QImage::Format_RGBA8888 );
+		painter.drawImage( 0, 0, image );
+	}
+	PaintOverlay( painter );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+void CSkyView::resizeEvent( QResizeEvent * )
+{
+	for ( QWidget *pChild : { m_pGpu, m_pOverlay } )
+	{
+		if ( pChild )
+		{
+			pChild->setGeometry( rect() );
+		}
+	}
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: The face labels and the setang line, over the sky.
+//-----------------------------------------------------------------------------
+void CSkyView::PaintOverlay( QPainter &painter )
+{
+	if ( !HasFaces() )
 	{
 		painter.setPen( palette().color( QPalette::PlaceholderText ) );
 		painter.drawText( rect(), Qt::AlignCenter, tr( "Add face images to see the sky here." ) );
 		return;
 	}
 	const xv::sky::CView view{ m_Angles, m_flFov, width(), height() };
-	xv::sky::Render( *m_pCube, view, m_Frame, m_bEdges );
-	const QImage image( m_Frame.m_Pixels.data(), m_Frame.m_nWidth, m_Frame.m_nHeight, m_Frame.m_nWidth * 4, QImage::Format_RGBA8888 );
-	painter.drawImage( 0, 0, image );
-
 	painter.setRenderHint( QPainter::Antialiasing );
 	if ( m_bLabels )
 	{

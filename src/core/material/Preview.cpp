@@ -22,21 +22,6 @@ namespace xv::material
 namespace
 {
 
-using Rgba_t = std::array<float, 4>;
-
-enum class Look_t
-{
-	LOOK_LIT,
-	LOOK_UNLIT,
-	LOOK_SPRITE,
-	LOOK_MODULATE,
-	LOOK_SKY,
-	LOOK_WINDOW, // WindowImposter: a cube map seen through the surface
-	LOOK_REFRACT,
-	LOOK_WATER,
-	LOOK_SCREEN, // screen-space effects, which have no surface of their own
-};
-
 //-----------------------------------------------------------------------------
 // Purpose: How a shader draws, as far as the preview goes; nullopt for shaders it doesn't know.
 //-----------------------------------------------------------------------------
@@ -150,72 +135,6 @@ int Wrap( int n, int nSize, bool bClamp )
 {
 	return bClamp ? std::clamp( n, 0, nSize - 1 ) : ( ( n % nSize ) + nSize ) % nSize;
 }
-
-// Reads one texture of the material at texture coordinates: its frame, transform and wrapping.
-struct Sampler_t
-{
-	const texture::CImage *m_pImage = nullptr;
-	const texture::CFloatImage *m_pLight = nullptr;
-	sky::CUvTransform m_Transform;
-	float m_flScaleU = 1.0f;
-	float m_flScaleV = 1.0f;
-	bool m_bClampS = false;
-	bool m_bClampT = false;
-	bool m_bPoint = false;
-
-	[[nodiscard]] bool IsValid() const { return m_pImage && !m_pImage->Empty(); }
-
-	//-----------------------------------------------------------------------------
-	// Purpose: 0-1 per channel, as stored.
-	//-----------------------------------------------------------------------------
-	[[nodiscard]] Rgba_t At( float u, float v ) const
-	{
-		const texture::CImage &image = *m_pImage;
-		u *= m_flScaleU;
-		v *= m_flScaleV;
-		const float tu = m_Transform.m_flA * u + m_Transform.m_flB * v + m_Transform.m_flTx;
-		const float tv = m_Transform.m_flC * u + m_Transform.m_flD * v + m_Transform.m_flTy;
-		const float x = tu * static_cast<float>( image.m_nWidth ) - 0.5f;
-		const float y = tv * static_cast<float>( image.m_nHeight ) - 0.5f;
-		if ( m_bPoint )
-		{
-			const std::uint8_t *p = image.Pixel( Wrap( static_cast<int>( std::floor( x + 0.5f ) ), image.m_nWidth, m_bClampS ), Wrap( static_cast<int>( std::floor( y + 0.5f ) ), image.m_nHeight, m_bClampT ) );
-			return { p[ 0 ] / 255.0f, p[ 1 ] / 255.0f, p[ 2 ] / 255.0f, p[ 3 ] / 255.0f };
-		}
-		const int x0 = static_cast<int>( std::floor( x ) );
-		const int y0 = static_cast<int>( std::floor( y ) );
-		const float fx = x - static_cast<float>( x0 );
-		const float fy = y - static_cast<float>( y0 );
-		const int xa = Wrap( x0, image.m_nWidth, m_bClampS );
-		const int xb = Wrap( x0 + 1, image.m_nWidth, m_bClampS );
-		const int ya = Wrap( y0, image.m_nHeight, m_bClampT );
-		const int yb = Wrap( y0 + 1, image.m_nHeight, m_bClampT );
-		const std::uint8_t *p00 = image.Pixel( xa, ya );
-		const std::uint8_t *p10 = image.Pixel( xb, ya );
-		const std::uint8_t *p01 = image.Pixel( xa, yb );
-		const std::uint8_t *p11 = image.Pixel( xb, yb );
-		Rgba_t out{};
-		for ( int c = 0; c < 4; c++ )
-		{
-			const float top = p00[ c ] + ( p10[ c ] - p00[ c ] ) * fx;
-			const float bottom = p01[ c ] + ( p11[ c ] - p01[ c ] ) * fx;
-			out[ static_cast<std::size_t>( c ) ] = ( top + ( bottom - top ) * fy ) / 255.0f;
-		}
-		return out;
-	}
-
-	//-----------------------------------------------------------------------------
-	// Purpose: An HDR texture's light values, nearest texel.
-	//-----------------------------------------------------------------------------
-	[[nodiscard]] CVec3 LightAt( float u, float v ) const
-	{
-		const texture::CFloatImage &light = *m_pLight;
-		const float tu = m_Transform.m_flA * u + m_Transform.m_flB * v + m_Transform.m_flTx;
-		const float tv = m_Transform.m_flC * u + m_Transform.m_flD * v + m_Transform.m_flTy;
-		const float *p = light.Pixel( Wrap( static_cast<int>( std::floor( tu * static_cast<float>( light.m_nWidth ) ) ), light.m_nWidth, m_bClampS ), Wrap( static_cast<int>( std::floor( tv * static_cast<float>( light.m_nHeight ) ) ), light.m_nHeight, m_bClampT ) );
-		return { p[ 0 ], p[ 1 ], p[ 2 ] };
-	}
-};
 
 //-----------------------------------------------------------------------------
 // Purpose: The sampler for a texture parameter: the frame its frame variable picks, and the first
@@ -397,63 +316,10 @@ const std::array<CVec3, 3> BUMP_BASIS = { CVec3{ 0.81649658f, 0.0f, 0.57735027f 
 // Where the preview is seen from, in front of the square, so reflections and highlights move across it.
 const CVec3 EYE{ 0.0f, 0.0f, 3.0f };
 
-// Everything about a material the shading needs, read once per picture.
-struct Shading_t
-{
-	Look_t m_nLook = Look_t::LOOK_LIT;
-	std::string m_szKind;
-	Sampler_t m_Base;
-	Sampler_t m_Base2;
-	Sampler_t m_Detail;
-	Sampler_t m_Bump;
-	Sampler_t m_EnvMask;
-	Sampler_t m_SelfIllumMask;
-	Sampler_t m_PhongExponent;
-	Sampler_t m_RefractTint;
-	Sampler_t m_Hdr;
-	bool m_bHdrCompressed = false;
-	float m_flHdrScale = 1.0f;
-	const Texture_t *m_pEnvMap = nullptr;
-	bool m_bEnvMap = false;
-	CVec3 m_vecColor{ 1, 1, 1 };
-	CVec3 m_vecColor2{ 1, 1, 1 };
-	float m_flAlpha = 1.0f;
-	bool m_bTranslucent = false;
-	bool m_bAdditive = false;
-	bool m_bAlphaTest = false;
-	float m_flAlphaReference = 0.7f;
-	bool m_bSsBump = false;
-	bool m_bHalfLambert = false;
-	bool m_bSelfIllum = false;
-	CVec3 m_vecSelfIllumTint{ 1, 1, 1 };
-	bool m_bBaseAlphaEnvMask = false;
-	bool m_bNormalAlphaEnvMask = false;
-	CVec3 m_vecEnvTint{ 1, 1, 1 };
-	float m_flEnvContrast = 0.0f;
-	CVec3 m_vecEnvSaturation{ 1, 1, 1 };
-	int m_nDetailMode = 0;
-	float m_flDetailFactor = 1.0f;
-	CVec3 m_vecDetailTint{ 1, 1, 1 };
-	bool m_bPhong = false;
-	float m_flPhongExponent = 5.0f;
-	float m_flPhongBoost = 1.0f;
-	CVec3 m_vecPhongFresnel{ 0.05f, 0.5f, 1.0f };
-	CVec3 m_vecPhongTint{ 1, 1, 1 };
-	bool m_bBaseAlphaPhongMask = false;
-	bool m_bBlendTint = false;
-	float m_flTintReplace = 0.0f;
-	float m_flOverbright = 1.0f;
-	float m_flAddSelf = 0.0f;
-	bool m_bMod2x = false;
-	float m_flRefractAmount = 0.0f;
-	CVec3 m_vecRefractTint{ 1, 1, 1 };
-	CVec3 m_vecFog{ 0.2f, 0.25f, 0.25f };
-	bool m_bTwoTextures = false;    // UnlitTwoTexture: the second multiplies the first
-	bool m_bBlendTextures = false;  // WorldVertexTransition: the second fades in across the square
-};
+} // namespace
 
 //-----------------------------------------------------------------------------
-// Purpose:
+// Purpose: Everything about a material the preview's shading needs.
 //-----------------------------------------------------------------------------
 Shading_t ReadShading( const CMaterial &material, const CTextureSet &textures, const PreviewOptions_t &options )
 {
@@ -542,6 +408,9 @@ Shading_t ReadShading( const CMaterial &material, const CTextureSet &textures, c
 	}
 	return s;
 }
+
+namespace
+{
 
 //-----------------------------------------------------------------------------
 // Purpose: The detail texture combined with the base before lighting, as $detailblendmode says.
@@ -816,6 +685,57 @@ Fragment_t Shade( const Shading_t &s, const Surface_t &surface, const PreviewOpt
 }
 
 } // namespace
+
+//-----------------------------------------------------------------------------
+// Purpose: 0-1 per channel, as stored.
+//-----------------------------------------------------------------------------
+Rgba_t Sampler_t::At( float u, float v ) const
+{
+	const texture::CImage &image = *m_pImage;
+	u *= m_flScaleU;
+	v *= m_flScaleV;
+	const float tu = m_Transform.m_flA * u + m_Transform.m_flB * v + m_Transform.m_flTx;
+	const float tv = m_Transform.m_flC * u + m_Transform.m_flD * v + m_Transform.m_flTy;
+	const float x = tu * static_cast<float>( image.m_nWidth ) - 0.5f;
+	const float y = tv * static_cast<float>( image.m_nHeight ) - 0.5f;
+	if ( m_bPoint )
+	{
+		const std::uint8_t *p = image.Pixel( Wrap( static_cast<int>( std::floor( x + 0.5f ) ), image.m_nWidth, m_bClampS ), Wrap( static_cast<int>( std::floor( y + 0.5f ) ), image.m_nHeight, m_bClampT ) );
+		return { p[ 0 ] / 255.0f, p[ 1 ] / 255.0f, p[ 2 ] / 255.0f, p[ 3 ] / 255.0f };
+	}
+	const int x0 = static_cast<int>( std::floor( x ) );
+	const int y0 = static_cast<int>( std::floor( y ) );
+	const float fx = x - static_cast<float>( x0 );
+	const float fy = y - static_cast<float>( y0 );
+	const int xa = Wrap( x0, image.m_nWidth, m_bClampS );
+	const int xb = Wrap( x0 + 1, image.m_nWidth, m_bClampS );
+	const int ya = Wrap( y0, image.m_nHeight, m_bClampT );
+	const int yb = Wrap( y0 + 1, image.m_nHeight, m_bClampT );
+	const std::uint8_t *p00 = image.Pixel( xa, ya );
+	const std::uint8_t *p10 = image.Pixel( xb, ya );
+	const std::uint8_t *p01 = image.Pixel( xa, yb );
+	const std::uint8_t *p11 = image.Pixel( xb, yb );
+	Rgba_t out{};
+	for ( int c = 0; c < 4; c++ )
+	{
+		const float top = p00[ c ] + ( p10[ c ] - p00[ c ] ) * fx;
+		const float bottom = p01[ c ] + ( p11[ c ] - p01[ c ] ) * fx;
+		out[ static_cast<std::size_t>( c ) ] = ( top + ( bottom - top ) * fy ) / 255.0f;
+	}
+	return out;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: An HDR texture's light values, nearest texel.
+//-----------------------------------------------------------------------------
+CVec3 Sampler_t::LightAt( float u, float v ) const
+{
+	const texture::CFloatImage &light = *m_pLight;
+	const float tu = m_Transform.m_flA * u + m_Transform.m_flB * v + m_Transform.m_flTx;
+	const float tv = m_Transform.m_flC * u + m_Transform.m_flD * v + m_Transform.m_flTy;
+	const float *p = light.Pixel( Wrap( static_cast<int>( std::floor( tu * static_cast<float>( light.m_nWidth ) ) ), light.m_nWidth, m_bClampS ), Wrap( static_cast<int>( std::floor( tv * static_cast<float>( light.m_nHeight ) ) ), light.m_nHeight, m_bClampT ) );
+	return { p[ 0 ], p[ 1 ], p[ 2 ] };
+}
 
 //-----------------------------------------------------------------------------
 // Purpose: Reads every texture the material names.

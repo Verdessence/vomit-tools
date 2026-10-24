@@ -7,6 +7,7 @@
 #include "ParticleEditor.h"
 
 #include <algorithm>
+#include <cctype>
 #include <climits>
 #include <functional>
 #include <memory>
@@ -53,6 +54,8 @@
 #include "MenuPicker.h"
 #include "ParticlePreview.h"
 #include "QtPaths.h"
+#include "Preferences.h"
+#include "particles/Builtin.h"
 #include "particles/Names.h"
 #include "particles/Simulation.h"
 #include "util/Numbers.h"
@@ -273,23 +276,41 @@ constexpr std::array<std::string_view, 7> STACK_ORDER{
 };
 
 //-----------------------------------------------------------------------------
-// Purpose: What a new system starts with when the game has these functions: particles that appear,
-//          drift
-//          and fade.
+// Purpose: An attribute by name, ignoring case as the game does.
 //-----------------------------------------------------------------------------
-const std::vector<std::pair<Category_t, std::string_view>> &StarterOperators()
+const Attribute_t *FindNoCase( const CElement &element, std::string_view szName )
 {
-	static const std::vector<std::pair<Category_t, std::string_view>> starter{
-		{ Category_t::CATEGORY_EMITTERS, "emit_continuously" },
-		{ Category_t::CATEGORY_INITIALIZERS, "Position Within Sphere Random" },
-		{ Category_t::CATEGORY_INITIALIZERS, "Lifetime Random" },
-		{ Category_t::CATEGORY_INITIALIZERS, "Radius Random" },
-		{ Category_t::CATEGORY_INITIALIZERS, "Color Random" },
-		{ Category_t::CATEGORY_INITIALIZERS, "Alpha Random" },
-		{ Category_t::CATEGORY_OPERATORS, "Movement Basic" },
-		{ Category_t::CATEGORY_OPERATORS, "Lifespan Decay" },
-		{ Category_t::CATEGORY_OPERATORS, "Alpha Fade Out Random" },
-		{ Category_t::CATEGORY_RENDERERS, "render_animated_sprites" },
+	const auto it = std::ranges::find_if( element.m_Attributes, [ szName ]( const Attribute_t &attribute ) {
+		return std::ranges::equal( attribute.m_szName, szName, []( unsigned char a, unsigned char b ) { return std::tolower( a ) == std::tolower( b ); } );
+	} );
+	return it == element.m_Attributes.end() ? nullptr : &*it;
+}
+
+// One of a new system's operators, with the settings it changes from the game's defaults.
+struct Starter_t
+{
+	Category_t m_nCategory;
+	std::string_view m_szFunction;
+	std::vector<std::pair<std::string_view, float>> m_Values;
+};
+
+//-----------------------------------------------------------------------------
+// Purpose: What a new system starts with: particles that appear, drift and fade. At the game's
+//          defaults they would live no time at all, all in one spot, so a few settings differ.
+//-----------------------------------------------------------------------------
+const std::vector<Starter_t> &StarterOperators()
+{
+	static const std::vector<Starter_t> starter{
+		{ Category_t::CATEGORY_EMITTERS, "emit_continuously", {} },
+		{ Category_t::CATEGORY_INITIALIZERS, "Position Within Sphere Random", { { "distance_max", 8.0f }, { "speed_min", 16.0f }, { "speed_max", 32.0f } } },
+		{ Category_t::CATEGORY_INITIALIZERS, "Lifetime Random", { { "lifetime_min", 1.0f }, { "lifetime_max", 2.0f } } },
+		{ Category_t::CATEGORY_INITIALIZERS, "Radius Random", { { "radius_min", 4.0f }, { "radius_max", 8.0f } } },
+		{ Category_t::CATEGORY_INITIALIZERS, "Color Random", {} },
+		{ Category_t::CATEGORY_INITIALIZERS, "Alpha Random", {} },
+		{ Category_t::CATEGORY_OPERATORS, "Movement Basic", {} },
+		{ Category_t::CATEGORY_OPERATORS, "Lifespan Decay", {} },
+		{ Category_t::CATEGORY_OPERATORS, "Alpha Fade Out Random", {} },
+		{ Category_t::CATEGORY_RENDERERS, "render_animated_sprites", {} },
 	};
 	return starter;
 }
@@ -308,7 +329,7 @@ const std::vector<PropertyGroup_t> &SystemGroups()
 {
 	static const std::vector<PropertyGroup_t> groups{
 		{ QT_TRANSLATE_NOOP( "ParticleEditor", "Particles" ), { "max_particles", "initial_particles", "material", "color", "radius", "rotation", "rotation_speed", "sequence_number", "sequence_number 1" } },
-		{ QT_TRANSLATE_NOOP( "ParticleEditor", "Bounds and culling" ), { "bounding_box_min", "bounding_box_max", "bounding_box_control_point", "cull_radius", "cull_cost", "cull_control_point", "cull_replacement_definition", "maximum draw distance", "control point to disable rendering if it is the camera" } },
+		{ QT_TRANSLATE_NOOP( "ParticleEditor", "Bounds and culling" ), { "bounding_box_min", "bounding_box_max", "cull_radius", "cull_cost", "cull_control_point", "cull_replacement_definition", "maximum draw distance", "control point to disable rendering if it is the camera" } },
 		{ QT_TRANSLATE_NOOP( "ParticleEditor", "Simulation" ), { "maximum time step", "maximum sim tick rate", "minimum sim tick rate", "minimum rendered frames", "time to sleep when not drawn", "Sort particles", "batch particle systems", "view model effect", "group id", "preventNameBasedLookup" } },
 	};
 	return groups;
@@ -513,6 +534,9 @@ CParticleEditor::CParticleEditor( CParticleDocument *pDocument, QWidget *pParent
 	m_pThumbnailTimer = new QTimer( this );
 	m_pThumbnailTimer->setInterval( 0 );
 	connect( m_pThumbnailTimer, &QTimer::timeout, this, &CParticleEditor::DrawThumbnails );
+	m_pGridAnimation = new QTimer( this );
+	m_pGridAnimation->setInterval( 33 );
+	connect( m_pGridAnimation, &QTimer::timeout, this, [ this ] { AnimateGrid( std::min( 0.1f, static_cast<float>( m_GridClock.restart() ) / 1000.0f ) ); } );
 
 	m_pGridToggle = new QToolButton;
 	m_pGridToggle->setObjectName( QStringLiteral( "particleGridToggle" ) );
@@ -577,11 +601,11 @@ CParticleEditor::CParticleEditor( CParticleDocument *pDocument, QWidget *pParent
 	pStackBar->addStretch();
 	pStackBar->addWidget( pUp );
 	pStackBar->addWidget( pDown );
-	auto *pMiddle = new QWidget;
-	auto *pMiddleLayout = new QVBoxLayout( pMiddle );
-	pMiddleLayout->setContentsMargins( 0, 6, 0, 6 );
-	pMiddleLayout->addWidget( m_pStack );
-	pMiddleLayout->addLayout( pStackBar );
+	auto *pStackPanel = new QWidget;
+	auto *pStackLayout = new QVBoxLayout( pStackPanel );
+	pStackLayout->setContentsMargins( 0, 6, 6, 6 );
+	pStackLayout->addWidget( m_pStack );
+	pStackLayout->addLayout( pStackBar );
 
 	// The selected item's properties
 	m_pPropertiesTitle = new QLabel;
@@ -656,20 +680,23 @@ CParticleEditor::CParticleEditor( CParticleDocument *pDocument, QWidget *pParent
 					}
 				} );
 		} );
-	auto *pRight = new QSplitter( Qt::Vertical );
-	pRight->setContentsMargins( 0, 6, 6, 6 );
-	pRight->addWidget( m_pPreview );
-	pRight->addWidget( pPropertyPanel );
-	pRight->setStretchFactor( 0, 5 );
-	pRight->setStretchFactor( 1, 4 );
+	auto *pCentre = new QSplitter( Qt::Vertical );
+	pCentre->setContentsMargins( 0, 6, 0, 6 );
+	pCentre->addWidget( m_pPreview );
+	pCentre->addWidget( pPropertyPanel );
+	pCentre->setStretchFactor( 0, 5 );
+	pCentre->setStretchFactor( 1, 4 );
 
+	// The systems, then what is being looked at and edited in the middle, then the selected
+	// system's lists.
 	auto *pColumns = new QSplitter;
+	pColumns->setObjectName( QStringLiteral( "particleColumns" ) );
 	pColumns->addWidget( pLeft );
-	pColumns->addWidget( pMiddle );
-	pColumns->addWidget( pRight );
+	pColumns->addWidget( pCentre );
+	pColumns->addWidget( pStackPanel );
 	pColumns->setStretchFactor( 0, 3 );
-	pColumns->setStretchFactor( 1, 3 );
-	pColumns->setStretchFactor( 2, 5 );
+	pColumns->setStretchFactor( 1, 5 );
+	pColumns->setStretchFactor( 2, 3 );
 
 	m_pIssueList = new QListWidget;
 	m_pIssueList->setObjectName( QStringLiteral( "particleIssues" ) );
@@ -1167,6 +1194,46 @@ const particles::AttributeInfo_t *CParticleEditor::DefaultFor( std::int32_t nEle
 		const particles::CFunctionInfo *pFunction = category ? m_Schema.Function( *category, particles::FunctionName( target ) ) : nullptr;
 		return pFunction ? pFunction->Attribute( szAttribute ) : nullptr;
 	}
+	if ( target.m_szType == particles::CHILD_TYPE )
+	{
+		static const std::vector<particles::AttributeInfo_t> child = [] {
+			std::vector<particles::AttributeInfo_t> out;
+			for ( const particles::BuiltinSetting_t &setting : particles::ChildSettings() )
+			{
+				out.push_back( { std::string{ setting.m_szName }, setting.m_nType, setting.Default() } );
+			}
+			return out;
+		}();
+		const auto it = std::ranges::find( child, szAttribute, &particles::AttributeInfo_t::m_szName );
+		return it == child.end() ? nullptr : &*it;
+	}
+	return nullptr;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: The game's own entry for a setting of a system, built-in function or child link;
+//          nullptr for others.
+//-----------------------------------------------------------------------------
+const particles::BuiltinSetting_t *CParticleEditor::BuiltinSettingFor( std::int32_t nElement, std::string_view szAttribute ) const
+{
+	const CElement &target = m_pDocument->GetDocument().m_Elements[ static_cast<std::size_t>( nElement ) ];
+	if ( target.m_szType == particles::SYSTEM_TYPE )
+	{
+		return particles::SystemSetting( szAttribute );
+	}
+	if ( target.m_szType == particles::OPERATOR_TYPE )
+	{
+		const auto position = PositionOf( nElement );
+		const auto category = position ? particles::CategoryOf( position->m_szList.toStdString() ) : std::nullopt;
+		const particles::BuiltinFunction_t *pFunction = category ? particles::FindBuiltin( *category, particles::FunctionName( target ) ) : nullptr;
+		return pFunction ? pFunction->Setting( szAttribute ) : nullptr;
+	}
+	if ( target.m_szType == particles::CHILD_TYPE )
+	{
+		const auto settings = particles::ChildSettings();
+		const auto it = std::ranges::find( settings, szAttribute, &particles::BuiltinSetting_t::m_szName );
+		return it == settings.end() ? nullptr : &*it;
+	}
 	return nullptr;
 }
 
@@ -1209,8 +1276,17 @@ void CParticleEditor::RebuildProperties()
 
 	// The function the shown settings belong to, for their plain names; empty for a system.
 	const std::string szOwner = element.m_szType == particles::OPERATOR_TYPE ? std::string{ particles::FunctionName( element ) } : std::string{};
+	const std::optional<Category_t> ownerCategory = [ & ]() -> std::optional<Category_t> {
+		const auto position = element.m_szType == particles::OPERATOR_TYPE ? PositionOf( nTarget ) : std::nullopt;
+		return position ? particles::CategoryOf( position->m_szList.toStdString() ) : std::nullopt;
+	}();
+	const particles::CFunctionInfo *pOwnerInfo = ownerCategory ? m_Schema.Function( *ownerCategory, szOwner ) : nullptr;
+	// Systems, child links and built-in functions have the game's own settings and defaults;
+	// other functions only what the game's files use.
+	const bool bGameSettings = element.m_szType != particles::OPERATOR_TYPE || ( pOwnerInfo && pOwnerInfo->m_bBuiltin );
 	const bool bSimple = IsSimple();
-	const auto addRow = [ & ]( QTreeWidgetItem *pParent, const Attribute_t &attribute ) -> QTreeWidgetItem * {
+	// bInFile is false for a setting the file leaves out, shown at the game's default.
+	const auto addRow = [ & ]( QTreeWidgetItem *pParent, const Attribute_t &attribute, bool bInFile = true ) -> QTreeWidgetItem * {
 		const particles::AttributeInfo_t *pFallback = DefaultFor( nTarget, attribute.m_szName );
 		const bool bChanged = pFallback && pFallback->m_nType == attribute.m_nType && !xv::dmx::SameValue( pFallback->m_Value, attribute.m_Value );
 		// The simple interface leaves advanced settings out while they have their usual value.
@@ -1228,11 +1304,23 @@ void CParticleEditor::RebuildProperties()
 		}
 		if ( pFallback && pFallback->m_nType == attribute.m_nType )
 		{
-			szTip += u'\n' + tr( "Most used in the game's files: %1" ).arg( Qs( xv::dmx::ValueText( pFallback->m_Value ) ) );
+			const QString szDefault = Qs( xv::dmx::ValueText( pFallback->m_Value ) );
+			szTip += u'\n' + ( bGameSettings ? tr( "The game's default: %1" ).arg( szDefault ) : tr( "Most used in the game's files: %1" ).arg( szDefault ) );
 			if ( bChanged )
 			{
-				pItem->setFont( 0, bold ); // changed from the usual value
+				pItem->setFont( 0, bold ); // changed from the default
 			}
+		}
+		else if ( bGameSettings && !pFallback )
+		{
+			szTip += u'\n' + tr( "Not a setting the game reads here, so it does nothing" );
+		}
+		if ( !bInFile )
+		{
+			szTip += u'\n' + tr( "Not in the file: the game uses its default. Changing it adds it." );
+			QFont italic = m_pProperties->font();
+			italic.setItalic( true );
+			pItem->setFont( 0, italic );
 		}
 		pItem->setToolTip( 0, szTip );
 		m_pProperties->setItemWidget( pItem, 1, ValueEditor( nTarget, attribute ) );
@@ -1268,12 +1356,22 @@ void CParticleEditor::RebuildProperties()
 			QTreeWidgetItem *pParent = nullptr;
 			for ( std::string_view szAttributeName : group.m_Names )
 			{
-				if ( const Attribute_t *pAttribute = element.Find( szAttributeName ) )
+				const Attribute_t *pAttribute = FindNoCase( element, szAttributeName );
+				const particles::AttributeInfo_t *pDefault = pAttribute ? nullptr : DefaultFor( nTarget, std::string{ szAttributeName } );
+				if ( !pAttribute && !pDefault )
 				{
-					pParent = pParent ? pParent : addGroup( tr( group.m_pszTitle ), true );
-					addRow( pParent, *pAttribute );
-					shown.insert( pAttribute->m_szName );
+					continue;
 				}
+				pParent = pParent ? pParent : addGroup( tr( group.m_pszTitle ), true );
+				if ( pAttribute )
+				{
+					addRow( pParent, *pAttribute );
+				}
+				else
+				{
+					addRow( pParent, { pDefault->m_szName, pDefault->m_nType, pDefault->m_Value }, false );
+				}
+				shown.insert( pAttribute ? pAttribute->m_szName : std::string{ szAttributeName } );
 			}
 			if ( pParent && pParent->childCount() == 0 )
 			{
@@ -1287,7 +1385,7 @@ void CParticleEditor::RebuildProperties()
 			{
 				continue;
 			}
-			pOther = pOther ? pOther : addGroup( tr( "Other" ), true );
+			pOther = pOther ? pOther : addGroup( tr( "Not read by the game" ), true ); // the groups hold every game setting
 			addRow( pOther, attribute );
 		}
 	}
@@ -1296,7 +1394,7 @@ void CParticleEditor::RebuildProperties()
 		const auto position = PositionOf( nTarget );
 		const auto category = position ? particles::CategoryOf( position->m_szList.toStdString() ) : std::nullopt;
 		const QString szFunction = Qs( particles::FunctionName( element ) );
-		const particles::CFunctionInfo *pInfo = category ? m_Schema.Function( *category, particles::FunctionName( element ) ) : nullptr;
+		const particles::CFunctionInfo *pInfo = pOwnerInfo;
 		const int nUses = pInfo && m_Game.m_pSchema ? [ & ] {
 			const auto *pKnown = m_Game.m_pSchema->Function( *category, particles::FunctionName( element ) );
 			return pKnown ? pKnown->m_nUses : 0;
@@ -1312,10 +1410,35 @@ void CParticleEditor::RebuildProperties()
 					nUses > 0 ? tr( " · used %n time(s) in the game's files", nullptr, nUses ) : QString{} ) );
 		auto *pSettings = addGroup( tr( "Settings" ), true );
 		auto *pFade = addGroup( tr( "When it runs (every operator has these)" ), false );
+		QTreeWidgetItem *pUnread = nullptr;
+		if ( pInfo && pInfo->m_bBuiltin )
+		{
+			for ( const particles::AttributeInfo_t &setting : pInfo->m_Attributes )
+			{
+				QTreeWidgetItem *pParent = particles::IsCommonOperatorAttribute( setting.m_szName ) ? pFade : pSettings;
+				if ( const Attribute_t *pAttribute = FindNoCase( element, setting.m_szName ) )
+				{
+					addRow( pParent, *pAttribute );
+				}
+				else
+				{
+					addRow( pParent, { setting.m_szName, setting.m_nType, setting.m_Value }, false );
+				}
+			}
+		}
 		for ( const Attribute_t &attribute : element.m_Attributes )
 		{
 			if ( attribute.m_szName == particles::FUNCTION_NAME )
 			{
+				continue;
+			}
+			if ( pInfo && pInfo->m_bBuiltin )
+			{
+				if ( !pInfo->Attribute( attribute.m_szName ) )
+				{
+					pUnread = pUnread ? pUnread : addGroup( tr( "Not read by the game" ), true );
+					addRow( pUnread, attribute );
+				}
 				continue;
 			}
 			addRow( particles::IsCommonOperatorAttribute( attribute.m_szName ) ? pFade : pSettings, attribute );
@@ -1335,6 +1458,13 @@ void CParticleEditor::RebuildProperties()
 		for ( const Attribute_t &attribute : element.m_Attributes )
 		{
 			addRow( m_pProperties->invisibleRootItem(), attribute );
+		}
+		for ( const particles::BuiltinSetting_t &setting : particles::ChildSettings() )
+		{
+			if ( !FindNoCase( element, setting.m_szName ) )
+			{
+				addRow( m_pProperties->invisibleRootItem(), { std::string{ setting.m_szName }, setting.m_nType, setting.Default() }, false );
+			}
 		}
 	}
 	else
@@ -1490,7 +1620,13 @@ QWidget *CParticleEditor::ValueEditor( std::int32_t nElement, const Attribute_t 
 	const AttrType_t nType = attribute.m_nType;
 	const xv::dmx::Value_t current = attribute.m_Value;
 	const auto commit = [ this, nElement, szName ]( xv::dmx::Value_t value ) { SetValue( nElement, szName, value ); };
-	if ( IsSimple() && !particles::IsFieldSetting( attribute.m_szName ) )
+	// A particle field by number. The game's settings say which kind of field they take; others
+	// go by name.
+	const particles::BuiltinSetting_t *pBuiltin = BuiltinSettingFor( nElement, attribute.m_szName );
+	const particles::SettingHint_t nHint = pBuiltin ? pBuiltin->m_nHint : particles::SettingHint_t::SETTING_HINT_NONE;
+	const bool bField = pBuiltin ? nHint == particles::SettingHint_t::SETTING_HINT_SCALAR_FIELD || nHint == particles::SettingHint_t::SETTING_HINT_VECTOR_FIELD
+								 : particles::IsFieldSetting( attribute.m_szName );
+	if ( IsSimple() && !bField )
 	{
 		if ( QWidget *pEasier = SimpleValueEditor( nElement, attribute ) )
 		{
@@ -1502,13 +1638,18 @@ QWidget *CParticleEditor::ValueEditor( std::int32_t nElement, const Attribute_t 
 	{
 		case AttrType_t::ATTR_TYPE_INT:
 		{
-			if ( particles::IsFieldSetting( attribute.m_szName ) )
+			if ( bField )
 			{
-				// A particle field by number: listed by name.
+				// Listed by name.
 				auto *pCombo = new QComboBox;
 				const int nCurrent = std::get<std::int32_t>( current );
 				for ( int nField = 0; nField < particles::FIELD_COUNT; nField++ )
 				{
+					if ( ( nHint == particles::SettingHint_t::SETTING_HINT_SCALAR_FIELD && particles::IsVectorField( nField ) ) ||
+						( nHint == particles::SettingHint_t::SETTING_HINT_VECTOR_FIELD && !particles::IsVectorField( nField ) ) )
+					{
+						continue;
+					}
 					const QString szField = Qs( ParticleNames().FieldName( nField ) );
 					pCombo->addItem( IsSimple() ? szField : QStringLiteral( "%1 · %2" ).arg( nField ).arg( szField ), nField );
 				}
@@ -1709,7 +1850,9 @@ void CParticleEditor::FillAddMenu()
 		for ( const particles::CFunctionInfo *pFunction : m_Schema.Functions( nCategory ) )
 		{
 			const auto *pKnown = m_Game.m_pSchema ? m_Game.m_pSchema->Function( nCategory, pFunction->m_szName ) : nullptr;
-			QString szTip = pKnown ? tr( "Used %n time(s) in the game's files", nullptr, pKnown->m_nUses ) : tr( "Only used in this file" );
+			QString szTip = pKnown && pKnown->m_nUses > 0 ? tr( "Used %n time(s) in the game's files", nullptr, pKnown->m_nUses )
+				: pFunction->m_bBuiltin                   ? tr( "Built into the game" )
+														  : tr( "Only used in this file" );
 			if ( !particles::IsSimulated( nCategory, pFunction->m_szName ) )
 			{
 				szTip += u'\n' + tr( "Not in the preview yet" );
@@ -1769,7 +1912,8 @@ void CParticleEditor::ShowPropertyMenu( const QPoint &pos )
 	const Attribute_t *pCurrent = element.Find( szAttribute.toStdString() );
 	const particles::AttributeInfo_t *pFallback = DefaultFor( nTarget, szAttribute.toStdString() );
 	QMenu menu;
-	QAction *pReset = menu.addAction( tr( "Reset to the Game's Usual Value" ), this, [ this, nTarget, szAttribute, value = pFallback ? pFallback->m_Value : xv::dmx::Value_t{} ] {
+	const bool bGameDefault = BuiltinSettingFor( nTarget, szAttribute.toStdString() ) != nullptr;
+	QAction *pReset = menu.addAction( bGameDefault ? tr( "Reset to the Game's Default" ) : tr( "Reset to the Game's Usual Value" ), this, [ this, nTarget, szAttribute, value = pFallback ? pFallback->m_Value : xv::dmx::Value_t{} ] {
 		SetValue( nTarget, szAttribute, value );
 	} );
 	pReset->setEnabled( pCurrent && pFallback && pFallback->m_nType == pCurrent->m_nType && !xv::dmx::SameValue( pFallback->m_Value, pCurrent->m_Value ) );
@@ -1851,11 +1995,62 @@ void CParticleEditor::SetGridView( bool bGrid )
 	if ( bGrid )
 	{
 		RebuildGrid();
+		m_GridClock.start();
+		m_pGridAnimation->start();
 	}
 	else
 	{
 		m_pThumbnailTimer->stop();
+		m_pGridAnimation->stop();
+		m_PlayingInGrid.clear();
 	}
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: The grid's moving pictures: the selected system's, or every one in view.
+//-----------------------------------------------------------------------------
+void CParticleEditor::AnimateGrid( float flSeconds )
+{
+	const bool bAll = CPreferences::Instance().IsGridAnimatingAll();
+	const QRect view = m_pGrid->viewport()->rect();
+	const Document_t &doc = m_pDocument->GetDocument();
+	std::vector<QListWidgetItem *> items;
+	std::vector<std::string> names;
+	for ( int i = 0; i < m_pGrid->count(); i++ )
+	{
+		QListWidgetItem *pItem = m_pGrid->item( i );
+		const std::int32_t nSystem = pItem->data( ROLE_SYSTEM_ROLE ).toInt();
+		if ( ( !bAll && nSystem != m_nSystem ) || nSystem < 0 || static_cast<std::size_t>( nSystem ) >= doc.m_Elements.size() || !view.intersects( m_pGrid->visualItemRect( pItem ) ) )
+		{
+			continue;
+		}
+		items.push_back( pItem );
+		names.push_back( doc.m_Elements[ static_cast<std::size_t>( nSystem ) ].m_szName );
+	}
+	const std::vector<QImage> frames = m_pPreview->PlayThumbnails( names, THUMBNAIL_SIZE, flSeconds );
+	std::set<std::int32_t> playing;
+	const QSignalBlocker blocker{ m_pGrid };
+	for ( std::size_t i = 0; i < items.size(); i++ )
+	{
+		if ( !frames[ i ].isNull() )
+		{
+			items[ i ]->setIcon( QIcon{ QPixmap::fromImage( frames[ i ] ) } );
+			playing.insert( items[ i ]->data( ROLE_SYSTEM_ROLE ).toInt() );
+		}
+	}
+	// Those that stopped show their still picture again.
+	for ( int i = 0; i < m_pGrid->count(); i++ )
+	{
+		const std::int32_t nSystem = m_pGrid->item( i )->data( ROLE_SYSTEM_ROLE ).toInt();
+		if ( m_PlayingInGrid.contains( nSystem ) && !playing.contains( nSystem ) )
+		{
+			if ( const auto it = m_Thumbnails.find( nSystem ); it != m_Thumbnails.end() )
+			{
+				m_pGrid->item( i )->setIcon( it->second );
+			}
+		}
+	}
+	m_PlayingInGrid = std::move( playing );
 }
 
 //-----------------------------------------------------------------------------
@@ -1943,7 +2138,7 @@ void CParticleEditor::DrawThumbnails()
 		m_Thumbnails[ nSystem ] = QIcon{ QPixmap::fromImage( image ) };
 		for ( int i = 0; i < m_pGrid->count(); i++ )
 		{
-			if ( m_pGrid->item( i )->data( ROLE_SYSTEM_ROLE ).toInt() == nSystem )
+			if ( m_pGrid->item( i )->data( ROLE_SYSTEM_ROLE ).toInt() == nSystem && !m_PlayingInGrid.contains( nSystem ) )
 			{
 				const QSignalBlocker blocker{ m_pGrid };
 				m_pGrid->item( i )->setIcon( m_Thumbnails[ nSystem ] );
@@ -1988,11 +2183,15 @@ std::int32_t CParticleEditor::NewSystem( const QString &szName )
 	std::int32_t nAdded = -1;
 	m_pDocument->Edit( tr( "New system" ), [ & ]( Document_t &doc ) {
 		nAdded = particles::AddSystem( doc, particles::UniqueSystemName( doc, szBase.toStdString() ), m_Schema );
-		for ( const auto &[ category, function ] : StarterOperators() )
+		for ( const Starter_t &starter : StarterOperators() )
 		{
-			if ( const particles::CFunctionInfo *pInfo = m_Schema.Function( category, function ) )
+			if ( const particles::CFunctionInfo *pInfo = m_Schema.Function( starter.m_nCategory, starter.m_szFunction ) )
 			{
-				particles::AddOperator( doc, nAdded, category, *pInfo );
+				const std::int32_t nOperator = particles::AddOperator( doc, nAdded, starter.m_nCategory, *pInfo );
+				for ( const auto &[ szName, flValue ] : starter.m_Values )
+				{
+					particles::SetAttribute( doc.m_Elements[ static_cast<std::size_t>( nOperator ) ], szName, AttrType_t::ATTR_TYPE_FLOAT, flValue );
+				}
 			}
 		}
 	} );
@@ -2114,11 +2313,22 @@ void CParticleEditor::MoveSelected( int nDelta )
 //-----------------------------------------------------------------------------
 bool CParticleEditor::SetValue( std::int32_t nElement, const QString &szAttribute, const xv::dmx::Value_t &value )
 {
-	return m_pDocument->Edit( tr( "Set %1" ).arg( szAttribute ), [ nElement, szName = szAttribute.toStdString(), &value ]( Document_t &doc ) {
-		CElement& target = doc.m_Elements[static_cast<std::size_t>(nElement)];
-		if (Attribute_t* pExisting = target.Find(szName)) {
-			pExisting->m_Value = value;
-		} }, QStringLiteral( "value:%1:%2" ).arg( nElement ).arg( szAttribute ) );
+	// A setting the file leaves out is added, with the type the game reads.
+	const particles::AttributeInfo_t *pDefault = DefaultFor( nElement, szAttribute.toStdString() );
+	const AttrType_t nType = pDefault ? pDefault->m_nType : AttrType_t::ATTR_TYPE_UNKNOWN;
+	return m_pDocument->Edit(
+		tr( "Set %1" ).arg( szAttribute ), [ nElement, szName = szAttribute.toStdString(), &value, nType ]( Document_t &doc ) {
+			CElement &target = doc.m_Elements[ static_cast<std::size_t>( nElement ) ];
+			if ( Attribute_t *pExisting = target.Find( szName ) )
+			{
+				pExisting->m_Value = value;
+			}
+			else if ( nType != AttrType_t::ATTR_TYPE_UNKNOWN )
+			{
+				particles::SetAttribute( target, szName, nType, value );
+			}
+		},
+		QStringLiteral( "value:%1:%2" ).arg( nElement ).arg( szAttribute ) );
 }
 
 //-----------------------------------------------------------------------------

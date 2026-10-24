@@ -44,7 +44,8 @@ public:
 	// nullopt when the text has no shader block.
 	[[nodiscard]] const std::optional<xv::material::CMaterial> &GetMaterial() const { return m_Material; }
 	[[nodiscard]] const xv::material::CTextureSet &GetTextures() const { return m_Textures; }
-	[[nodiscard]] const QImage &GetPreview() const { return m_Preview; }
+	// The preview as drawn now (read back from the graphics card when it draws it).
+	[[nodiscard]] QImage GetPreview() const;
 	// Draws the preview again now, as at a time (seconds) for the proxies.
 	void RenderAt( float flTime );
 
@@ -54,6 +55,8 @@ signals:
 
 private:
 	void Render();
+	// Draws on the graphics card, or in software.
+	void SetUseGpu( bool bOn );
 	void FillParameters();
 	void FillTextures();
 	void UpdateNotes();
@@ -62,7 +65,8 @@ private:
 	std::optional<xv::material::CMaterial> m_Material;
 	xv::material::CTextureSet m_Textures;
 	std::unique_ptr<xv::material::CProxies> m_pProxies;
-	QImage m_Preview;
+	std::optional<xv::material::CMaterial> m_Now; // with the proxies' results at m_flTime
+	QImage m_Preview;                             // drawn in software
 	float m_flTime = 0.0f;
 	xv::CVec3 m_vecLight{ -0.45f, 0.55f, 0.7f };
 	QElapsedTimer m_Clock;

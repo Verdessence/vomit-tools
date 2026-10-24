@@ -8,8 +8,10 @@
 
 #include "MenuPicker.h"
 
-#ifdef VOMIT_TOOLS_GPU_PREVIEW
-#include "ParticleGpuView.h"
+#include "Graphics.h"
+#ifdef VOMIT_TOOLS_GPU
+#include "GpuView.h"
+#include "ParticleRenderer.h"
 #endif
 
 #include <algorithm>
@@ -21,14 +23,12 @@
 
 #include <QCheckBox>
 #include <QComboBox>
-#include <QGuiApplication>
 #include <QWidgetAction>
 #include <QFormLayout>
 #include <QDoubleSpinBox>
 #include <QMessageBox>
 #include <QMenu>
 #include <QFileInfo>
-#include <QSettings>
 #include <QSlider>
 #include <QHBoxLayout>
 #include <QLabel>
@@ -51,7 +51,6 @@ constexpr float LOOP_PAUSE = 0.6f;    // seconds of nothing before a finished sy
 constexpr float HANDLE_RADIUS = 9.0f; // how close (pixels) a click must be to grab a control point
 constexpr int TIMELINE_START = 5000;  // milliseconds the timeline spans at first; it grows to fit
 constexpr int TIMELINE_MOST = 120000;
-constexpr auto GPU_KEY = "particlePreviewGpu";
 
 // Where each control point starts: 0 at the origin, 1 above it (where effects usually aim), the
 // rest spread around.
@@ -366,21 +365,6 @@ CParticlePreview::CParticlePreview( QWidget *pParent )
 	pFrame->setText( tr( "Frame" ) );
 	pFrame->setToolTip( tr( "Fit the view to the effect (or double-click it)" ) );
 	connect( pFrame, &QToolButton::clicked, this, &CParticlePreview::FrameView );
-	m_pGpuBox = new QCheckBox( tr( "GPU" ) );
-	m_pGpuBox->setObjectName( QStringLiteral( "particleGpu" ) );
-	m_pGpuBox->setToolTip( tr( "Draw on the graphics card (faster, full size). Off: draw in software" ) );
-#ifdef VOMIT_TOOLS_GPU_PREVIEW
-	// The offscreen and minimal platforms (tests, headless runs) have no GPU to draw with.
-	const QString szPlatform = QGuiApplication::platformName();
-	const bool bGpuPossible = szPlatform != u"offscreen" && szPlatform != u"minimal";
-#else
-	const bool gpuPossible = false;
-#endif
-	m_pGpuBox->setVisible( bGpuPossible );
-	connect( m_pGpuBox, &QCheckBox::toggled, this, [ this ]( bool bOn ) {
-		SetUseGpu( bOn );
-		QSettings{}.setValue( GPU_KEY, bOn );
-	} );
 	m_pModelButton = new QToolButton;
 	m_pModelButton->setObjectName( QStringLiteral( "particleModel" ) );
 	m_pModelButton->setText( tr( "Model" ) );
@@ -418,7 +402,6 @@ CParticlePreview::CParticlePreview( QWidget *pParent )
 	pBar->addWidget( m_pLoop );
 	pBar->addWidget( m_pGrid );
 	pBar->addWidget( m_pBounds );
-	pBar->addWidget( m_pGpuBox );
 	pBar->addStretch();
 	pBar->addWidget( m_pModelButton );
 	pBar->addWidget( pFrame );
@@ -437,10 +420,7 @@ CParticlePreview::CParticlePreview( QWidget *pParent )
 	m_pTimer->start( 16 );
 	m_Clock.start();
 	UpdateInfo();
-	if ( bGpuPossible && QSettings{}.value( GPU_KEY, true ).toBool() )
-	{
-		m_pGpuBox->setChecked( true );
-	}
+	SetUseGpu( CGraphics::Instance().IsGpu() );
 }
 
 //-----------------------------------------------------------------------------
@@ -448,18 +428,14 @@ CParticlePreview::CParticlePreview( QWidget *pParent )
 //-----------------------------------------------------------------------------
 void CParticlePreview::SetUseGpu( bool bOn )
 {
-	{
-		const QSignalBlocker blocker{ m_pGpuBox };
-		m_pGpuBox->setChecked( bOn );
-	}
 	delete m_pGpu;
 	delete m_pOverlay;
 	m_pGpu = nullptr;
 	m_pOverlay = nullptr;
-#ifdef VOMIT_TOOLS_GPU_PREVIEW
+#ifdef VOMIT_TOOLS_GPU
 	if ( bOn )
 	{
-		auto *pView = new CParticleGpuView( [ this ]( int nWidth, int nHeight, std::vector<particles::ScreenQuad_t> &quads, std::vector<particles::ScreenMesh_t> &meshes, std::array<float, 3> & ) {
+		auto pRenderer = std::make_unique<CParticleRenderer>( [ this ]( QSize size, std::vector<ParticlePicture_t> &pictures, std::array<float, 3> & ) {
 			if ( !m_pSimulation )
 			{
 				return;
@@ -469,27 +445,24 @@ void CParticlePreview::SetUseGpu( bool bOn )
 				FrameView();
 			}
 			particles::CCamera camera = m_Camera;
-			camera.m_nWidth = nWidth;
-			camera.m_nHeight = nHeight;
+			camera.m_nWidth = size.width();
+			camera.m_nHeight = size.height();
+			ParticlePicture_t &picture = pictures.emplace_back();
+			picture.m_Rect = { { 0, 0 }, size };
 			if ( m_pGrid->isChecked() )
 			{
-				quads = particles::GridQuads( camera );
+				picture.m_Quads = particles::GridQuads( camera );
 			}
 			const auto drawn = particles::Layout( *m_pSimulation, camera, [ this ]( std::size_t i ) { return Sprite( i ); } );
-			quads.insert( quads.end(), drawn.begin(), drawn.end() );
-			meshes = particles::LayoutModel( *m_pSimulation, camera, [ this ]( std::size_t i ) { return ModelSprite( i ); } );
-		},
-			m_pCanvas );
+			picture.m_Quads.insert( picture.m_Quads.end(), drawn.begin(), drawn.end() );
+			picture.m_Meshes = particles::LayoutModel( *m_pSimulation, camera, [ this ]( std::size_t i ) { return ModelSprite( i ); } );
+		} );
+		auto *pView = new CGpuView( std::move( pRenderer ), m_pCanvas );
+		pView->setObjectName( QStringLiteral( "particleGpuView" ) );
 		pView->setAttribute( Qt::WA_TransparentForMouseEvents );
 		pView->setGeometry( m_pCanvas->rect() );
-		// If the GPU can't be used after all, draw in software.
-		connect( pView, &QRhiWidget::renderFailed, this, [ this ] {
-			QTimer::singleShot( 0, this, [ this ] {
-				SetUseGpu( false );
-				m_pGpuBox->setEnabled( false );
-				m_pGpuBox->setToolTip( tr( "The graphics card couldn't be used; drawing in software" ) );
-			} );
-		} );
+		// If the graphics card can't be used after all, draw in software.
+		connect( pView, &QRhiWidget::renderFailed, this, [ this ] { QTimer::singleShot( 0, this, [ this ] { SetUseGpu( false ); } ); } );
 		m_pGpu = pView;
 		m_pOverlay = new CParticleOverlay( this, m_pCanvas );
 		m_pOverlay->setGeometry( m_pCanvas->rect() );
@@ -497,8 +470,28 @@ void CParticlePreview::SetUseGpu( bool bOn )
 		m_pOverlay->show();
 		m_pOverlay->raise();
 	}
+#else
+	Q_UNUSED( bOn );
 #endif
 	Redraw();
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Sprites were reloaded: the graphics card's copies of the old ones must go.
+//-----------------------------------------------------------------------------
+void CParticlePreview::ForgetGpuTextures()
+{
+#ifdef VOMIT_TOOLS_GPU
+	if ( auto *pView = qobject_cast<CGpuView *>( m_pGpu ) )
+	{
+		static_cast<CParticleRenderer &>( pView->GetRenderer() ).ForgetTextures();
+		pView->update();
+	}
+	if ( m_pThumbnailGpu )
+	{
+		static_cast<CParticleRenderer &>( m_pThumbnailGpu->GetRenderer() ).ForgetTextures();
+	}
+#endif
 }
 
 //-----------------------------------------------------------------------------
@@ -529,12 +522,8 @@ CParticlePreview::~CParticlePreview() = default;
 void CParticlePreview::SetReader( particles::FileReader_t pfnReader )
 {
 	m_pfnReader = std::move( pfnReader );
-#ifdef VOMIT_TOOLS_GPU_PREVIEW
-	if ( auto *pView = qobject_cast<CParticleGpuView *>( m_pGpu ) )
-	{
-		pView->ForgetTextures();
-	}
-#endif
+	ForgetGpuTextures();
+	m_PlayingThumbnails.clear();
 	m_SpriteCache.clear();
 	m_ModelSprites.clear();
 	m_Sprites.assign( m_pLibrary ? m_pLibrary->m_Definitions.size() : 0, nullptr );
@@ -549,6 +538,7 @@ void CParticlePreview::SetReader( particles::FileReader_t pfnReader )
 void CParticlePreview::SetDocument( const xv::dmx::Document_t &document )
 {
 	m_pLibrary = std::make_shared<const particles::CLibrary>( particles::Compile( document ) );
+	m_PlayingThumbnails.clear(); // they start over with the new systems
 	if ( m_Drag.m_bEnded )
 	{
 		m_Drag = {}; // the file places the point now
@@ -949,17 +939,8 @@ QImage CParticlePreview::Thumbnail( const std::string &szName, int nSize )
 	{
 		return {};
 	}
-	particles::CSimulation simulation{ m_pLibrary, *index };
-	simulation.SetSequenceFrames( [ this ]( std::size_t nDefinition, int nSequence ) {
-		const particles::Sprite_t *pDrawn = this->Sprite( nDefinition );
-		const auto *pFound = pDrawn ? pDrawn->m_Sheet.Sequence( nSequence ) : nullptr;
-		return pFound ? static_cast<int>( pFound->m_Frames.size() ) : 0;
-	} );
-	for ( int i = 0; i < particles::CSimulation::CONTROL_POINTS; i++ )
-	{
-		simulation.SetControlPoint( i, m_ControlPoints[ static_cast<std::size_t>( i ) ] );
-	}
-	simulation.Restart();
+	const std::unique_ptr<particles::CSimulation> pSimulation = NewThumbnailSimulation( *index );
+	particles::CSimulation &simulation = *pSimulation;
 	// Long enough for most effects to show, short enough to catch quick bursts.
 	simulation.Advance( 0.5f );
 	for ( int i = 0; i < 8 && simulation.GetParticleCount() == 0; i++ )
@@ -969,9 +950,131 @@ QImage CParticlePreview::Thumbnail( const std::string &szName, int nSize )
 	particles::CCamera camera = particles::Framed( simulation, {}, 1.0f );
 	camera.m_nWidth = nSize;
 	camera.m_nHeight = nSize;
-	xv::texture::CImage out;
-	particles::Render( simulation, camera, [ this ]( std::size_t i ) { return Sprite( i ); }, out, { .m_bGrid = false, .m_pfnModelSprites = {} } );
-	return QImage( out.m_Pixels.data(), out.m_nWidth, out.m_nHeight, out.m_nWidth * 4, QImage::Format_RGBA8888 ).copy();
+	return DrawThumbnails( { { &simulation, camera } }, nSize ).front();
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: A simulation of a system for a thumbnail, from the start, with the view's control
+//          points.
+//-----------------------------------------------------------------------------
+std::unique_ptr<particles::CSimulation> CParticlePreview::NewThumbnailSimulation( std::size_t nDefinition )
+{
+	auto pSimulation = std::make_unique<particles::CSimulation>( m_pLibrary, nDefinition );
+	pSimulation->SetSequenceFrames( [ this ]( std::size_t nSystem, int nSequence ) {
+		const particles::Sprite_t *pDrawn = this->Sprite( nSystem );
+		const auto *pFound = pDrawn ? pDrawn->m_Sheet.Sequence( nSequence ) : nullptr;
+		return pFound ? static_cast<int>( pFound->m_Frames.size() ) : 0;
+	} );
+	for ( int i = 0; i < particles::CSimulation::CONTROL_POINTS; i++ )
+	{
+		pSimulation->SetControlPoint( i, m_ControlPoints[ static_cast<std::size_t>( i ) ] );
+	}
+	pSimulation->Restart();
+	return pSimulation;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: The grid's moving pictures: every system named advanced and drawn.
+//-----------------------------------------------------------------------------
+std::vector<QImage> CParticlePreview::PlayThumbnails( const std::vector<std::string> &systems, int nSize, float flSeconds )
+{
+	std::erase_if( m_PlayingThumbnails, [ &systems ]( const auto &entry ) { return std::ranges::find( systems, entry.first ) == systems.end(); } );
+	std::vector<PlayingThumbnail_t *> playing;
+	for ( const std::string &szName : systems )
+	{
+		auto it = m_PlayingThumbnails.find( szName );
+		if ( it == m_PlayingThumbnails.end() )
+		{
+			const auto index = m_pLibrary ? m_pLibrary->Find( szName ) : std::nullopt;
+			if ( !index )
+			{
+				playing.push_back( nullptr );
+				continue;
+			}
+			PlayingThumbnail_t started;
+			started.m_pSimulation = NewThumbnailSimulation( *index );
+			// Framed on what it shows as it plays, not where it starts.
+			started.m_Camera = particles::Framed( *started.m_pSimulation, {}, 1.5f );
+			it = m_PlayingThumbnails.emplace( szName, std::move( started ) ).first;
+		}
+		PlayingThumbnail_t &thumbnail = it->second;
+		thumbnail.m_pSimulation->Advance( flSeconds );
+		if ( thumbnail.m_pSimulation->GetFinished() )
+		{
+			thumbnail.m_flIdle += flSeconds;
+			if ( thumbnail.m_flIdle >= LOOP_PAUSE )
+			{
+				thumbnail.m_pSimulation->Restart();
+				thumbnail.m_flIdle = 0.0f;
+			}
+		}
+		thumbnail.m_Camera.m_nWidth = nSize;
+		thumbnail.m_Camera.m_nHeight = nSize;
+		playing.push_back( &thumbnail );
+	}
+
+	std::vector<std::pair<const particles::CSimulation *, particles::CCamera>> shots;
+	for ( PlayingThumbnail_t *pPlaying : playing )
+	{
+		shots.emplace_back( pPlaying ? pPlaying->m_pSimulation.get() : nullptr, pPlaying ? pPlaying->m_Camera : particles::CCamera{} );
+	}
+	return DrawThumbnails( shots, nSize );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Square pictures of simulations as their cameras see them (a null simulation gives a
+//          null picture): side by side in one pass on the graphics card, cut apart, or one by one
+//          in software.
+//-----------------------------------------------------------------------------
+std::vector<QImage> CParticlePreview::DrawThumbnails( const std::vector<std::pair<const particles::CSimulation *, particles::CCamera>> &shots, int nSize )
+{
+	std::vector<QImage> images( shots.size() );
+#ifdef VOMIT_TOOLS_GPU
+	if ( CGraphics::Instance().IsGpu() )
+	{
+		const int nColumns = std::max( 1, static_cast<int>( std::ceil( std::sqrt( static_cast<double>( shots.size() ) ) ) ) );
+		const int nRows = std::max( 1, ( static_cast<int>( shots.size() ) + nColumns - 1 ) / nColumns );
+		const auto place = [ nColumns, nSize ]( std::size_t i ) { return QRect( static_cast<int>( i ) % nColumns * nSize, static_cast<int>( i ) / nColumns * nSize, nSize, nSize ); };
+		std::vector<ParticlePicture_t> pictures;
+		for ( std::size_t i = 0; i < shots.size(); i++ )
+		{
+			if ( shots[ i ].first )
+			{
+				pictures.push_back( { place( i ), particles::Layout( *shots[ i ].first, shots[ i ].second, [ this ]( std::size_t n ) { return Sprite( n ); } ), {} } );
+			}
+		}
+		if ( !m_pThumbnailGpu )
+		{
+			m_pThumbnailGpu = COffscreenGpu::Create( std::make_unique<CParticleRenderer>( [ this ]( QSize, std::vector<ParticlePicture_t> &drawn, std::array<float, 3> & ) {
+				drawn = std::move( m_ThumbnailPictures );
+				m_ThumbnailPictures.clear();
+			} ) );
+		}
+		m_ThumbnailPictures = std::move( pictures );
+		const QImage sheet = m_pThumbnailGpu->Render( { nColumns * nSize, nRows * nSize } );
+		if ( !sheet.isNull() )
+		{
+			for ( std::size_t i = 0; i < shots.size(); i++ )
+			{
+				if ( shots[ i ].first )
+				{
+					images[ i ] = sheet.copy( place( i ) );
+				}
+			}
+			return images;
+		}
+	}
+#endif
+	for ( std::size_t i = 0; i < shots.size(); i++ )
+	{
+		if ( shots[ i ].first )
+		{
+			xv::texture::CImage out;
+			particles::Render( *shots[ i ].first, shots[ i ].second, [ this ]( std::size_t n ) { return Sprite( n ); }, out, { .m_bGrid = false, .m_pfnModelSprites = {} } );
+			images[ i ] = QImage( out.m_Pixels.data(), out.m_nWidth, out.m_nHeight, out.m_nWidth * 4, QImage::Format_RGBA8888 ).copy();
+		}
+	}
+	return images;
 }
 
 //-----------------------------------------------------------------------------
@@ -1119,7 +1222,7 @@ void CParticlePreview::PaintBounds( QPainter &painter, const particles::CCamera 
 	};
 	ForEachInstance( m_pSimulation->GetRoot(), [ & ]( const particles::CSimulation::Instance_t &instance ) {
 		const particles::CDefinition &definition = *instance.m_pDefinition;
-		const CVec3 vecOrigin = m_pSimulation->ControlPoint( definition.m_nBoundsControlPoint );
+		const CVec3 vecOrigin = m_pSimulation->ControlPoint( 0 );
 		box( vecOrigin + definition.m_vecBoundsMin, vecOrigin + definition.m_vecBoundsMax, QPen( QColor( 255, 220, 90, 170 ), 1.0 ) );
 		if ( instance.m_Particles.empty() )
 		{
@@ -1378,12 +1481,7 @@ bool CParticlePreview::SetModel( const QString &szPath, int nControlPoint, QStri
 	m_nModelPoint = std::clamp( nControlPoint, 0, particles::CSimulation::CONTROL_POINTS - 1 );
 	m_Attached.clear();
 	m_ModelSprites.clear();
-#ifdef VOMIT_TOOLS_GPU_PREVIEW
-	if ( auto *pView = qobject_cast<CParticleGpuView *>( m_pGpu ) )
-	{
-		pView->ForgetTextures();
-	}
-#endif
+	ForgetGpuTextures();
 	m_pModelButton->setText( m_pModel ? tr( "Model: %1" ).arg( QFileInfo{ m_szModelPath }.completeBaseName() ) : tr( "Model" ) );
 	Rebuild( false );
 	return true;

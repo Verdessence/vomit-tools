@@ -12,14 +12,17 @@
 #include <map>
 #include <memory>
 #include <optional>
+#include <set>
 #include <string>
 #include <string_view>
 #include <vector>
 
+#include <QElapsedTimer>
 #include <QIcon>
 #include <QStringList>
 #include <QWidget>
 
+#include "particles/Builtin.h"
 #include "particles/Particles.h"
 #include "particles/Render.h"
 
@@ -83,6 +86,9 @@ public:
 	bool SetValue( std::int32_t nElement, const QString &szAttribute, const xv::dmx::Value_t &value );
 	void CopySystems();
 	void PasteSystems();
+	// The grid's moving pictures, a step of seconds on: the selected system's, or every system in
+	// view when Preferences says so. A timer does this while the grid shows.
+	void AnimateGrid( float flSeconds );
 
 signals:
 	void AddToManifestRequested( CParticleDocument *pDocument );
@@ -118,6 +124,7 @@ private:
 	void DrawThumbnails();
 	[[nodiscard]] std::vector<std::int32_t> GetSelectedSystems() const;
 	[[nodiscard]] const xv::particles::AttributeInfo_t *DefaultFor( std::int32_t nElement, const std::string &szAttribute ) const;
+	[[nodiscard]] const xv::particles::BuiltinSetting_t *BuiltinSettingFor( std::int32_t nElement, std::string_view szAttribute ) const;
 	[[nodiscard]] QWidget *ValueEditor( std::int32_t nElement, const xv::dmx::Attribute_t &attribute );
 	// The simple interface's easier editor for a value, or nullptr to use the regular one.
 	[[nodiscard]] QWidget *SimpleValueEditor( std::int32_t nElement, const xv::dmx::Attribute_t &attribute );
@@ -134,6 +141,9 @@ private:
 	QTimer *m_pThumbnailTimer = nullptr;
 	std::map<std::int32_t, QIcon> m_Thumbnails;   // by system element
 	std::vector<std::int32_t> m_ThumbnailQueue;   // systems whose picture is missing or out of date
+	QTimer *m_pGridAnimation = nullptr;
+	QElapsedTimer m_GridClock;
+	std::set<std::int32_t> m_PlayingInGrid; // systems whose picture is moving
 	QTreeWidget *m_pStack = nullptr;
 	QTreeWidget *m_pProperties = nullptr;
 	QLabel *m_pPropertiesTitle = nullptr;

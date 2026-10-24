@@ -7,6 +7,7 @@
 #include <QSettings>
 
 #include "AboutDialog.h"
+#include "Graphics.h"
 #include "MainWindow.h"
 
 //-----------------------------------------------------------------------------
@@ -30,6 +31,8 @@ int main( int nArgc, char *argv[] )
 	parser.addOption( edit );
 	parser.process( app );
 
+	// What the previews draw with, settled before any of them is made.
+	static_cast<void>( CGraphics::Instance() );
 	CMainWindow window;
 	window.show();
 

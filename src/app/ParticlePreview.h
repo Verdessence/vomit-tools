@@ -27,6 +27,8 @@
 #include "particles/Render.h"
 #include "particles/Simulation.h"
 
+class COffscreenGpu;
+struct ParticlePicture_t;
 class QCheckBox;
 class QComboBox;
 class QLabel;
@@ -130,6 +132,11 @@ public:
 	[[nodiscard]] QImage Frame();
 	// A small square picture of a system of the current file, a moment after it starts, framed.
 	[[nodiscard]] QImage Thumbnail( const std::string &szName, int nSize );
+	// The grid's moving pictures. Each system named plays in a simulation of its own, starting over
+	// a moment after it ends; a call advances them all by seconds and draws each into a square
+	// picture nSize pixels across (on the graphics card when there is one, all in one pass). A
+	// system left out of a call stops.
+	[[nodiscard]] std::vector<QImage> PlayThumbnails( const std::vector<std::string> &systems, int nSize, float flSeconds );
 	[[nodiscard]] const xv::particles::CSimulation *GetSimulation() const { return m_pSimulation.get(); }
 	[[nodiscard]] const xv::particles::CCamera &GetCamera() const { return m_Camera; }
 	// Functions in the shown systems that the preview leaves out, and materials it couldn't load.
@@ -176,6 +183,13 @@ private:
 	void PaintOverlays( QPainter &painter );
 	// Draws on the graphics card, or in software.
 	void SetUseGpu( bool bOn );
+	// Sprites were reloaded: the graphics card's copies of the old ones must go.
+	void ForgetGpuTextures();
+	// A simulation of a system for a thumbnail, from the start, with the view's control points.
+	[[nodiscard]] std::unique_ptr<xv::particles::CSimulation> NewThumbnailSimulation( std::size_t nDefinition );
+	// Square pictures of simulations as their cameras see them: side by side in one pass on the
+	// graphics card, or one by one in software.
+	[[nodiscard]] std::vector<QImage> DrawThumbnails( const std::vector<std::pair<const xv::particles::CSimulation *, xv::particles::CCamera>> &shots, int nSize );
 	// Asks for the picture to be drawn again.
 	void Redraw();
 	void PaintBounds( QPainter &painter, const xv::particles::CCamera &camera );
@@ -212,6 +226,17 @@ private:
 	Angles_t m_TurnBefore{};
 	std::map<std::size_t, std::shared_ptr<const xv::particles::Sprite_t>> m_ModelSprites; // by material
 	std::int32_t m_nSelectedElement = -1;
+	struct PlayingThumbnail_t
+	{
+		std::unique_ptr<xv::particles::CSimulation> m_pSimulation;
+		xv::particles::CCamera m_Camera;
+		float m_flIdle = 0.0f; // seconds since it finished
+	};
+	std::map<std::string, PlayingThumbnail_t> m_PlayingThumbnails; // by system name
+#ifdef VOMIT_TOOLS_GPU
+	std::unique_ptr<COffscreenGpu> m_pThumbnailGpu;     // made on first use
+	std::vector<ParticlePicture_t> m_ThumbnailPictures; // what its next pass draws
+#endif
 	xv::particles::CCamera m_Camera;
 	bool m_bCameraSet = false;
 	QImage m_Image;
@@ -227,7 +252,6 @@ private:
 	QCheckBox *m_pLoop = nullptr;
 	QCheckBox *m_pGrid = nullptr;
 	QCheckBox *m_pBounds = nullptr;
-	QCheckBox *m_pGpuBox = nullptr;
 	QWidget *m_pGpu = nullptr;     // the GPU view, when drawing on the graphics card
 	QWidget *m_pOverlay = nullptr; // what is painted over it
 	QLabel *m_pInfo = nullptr;

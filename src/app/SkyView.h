@@ -38,6 +38,7 @@ signals:
 
 protected:
 	void paintEvent( QPaintEvent *pEvent ) override;
+	void resizeEvent( QResizeEvent *pEvent ) override;
 	void mousePressEvent( QMouseEvent *pEvent ) override;
 	void mouseMoveEvent( QMouseEvent *pEvent ) override;
 	void mouseDoubleClickEvent( QMouseEvent *pEvent ) override;
@@ -46,9 +47,20 @@ protected:
 	void contextMenuEvent( QContextMenuEvent *pEvent ) override;
 
 private:
+	friend class CSkyOverlay;
+
 	void Look( float flYawDelta, float flPitchDelta );
+	// Draws on the graphics card (with an overlay for the labels), or in software.
+	void SetUseGpu( bool bOn );
+	void Redraw();
+	[[nodiscard]] bool HasFaces() const;
+	// The face labels and the setang line, over the sky.
+	void PaintOverlay( QPainter &painter );
 
 	const xv::sky::CCube *m_pCube = nullptr;
+	int m_nGeneration = 0; // counts changes to the cube, so the graphics card's copy follows
+	QWidget *m_pGpu = nullptr;
+	QWidget *m_pOverlay = nullptr;
 	xv::sky::Angles_t m_Angles;
 	float m_flFov = 90.0f;
 	bool m_bLabels = true;

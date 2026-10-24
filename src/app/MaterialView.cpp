@@ -29,10 +29,16 @@
 #include <QVBoxLayout>
 
 #include "FileViews.h"
+#include "Graphics.h"
 #include "ImageFiles.h"
 #include "InterfaceMode.h"
 #include "Language.h"
 #include "texture/Vtf.h"
+
+#ifdef VOMIT_TOOLS_GPU
+#include "GpuView.h"
+#include "MaterialRenderer.h"
+#endif
 
 namespace material = xv::material;
 
@@ -125,6 +131,7 @@ public:
 	std::function<void( xv::CVec3 )> m_pfnLight;
 	std::function<void()> m_pfnResized;
 	QImage m_Image;
+	QWidget *m_pGpu = nullptr; // the graphics card's view, over the whole canvas
 
 	//-----------------------------------------------------------------------------
 	// Purpose: The square the image is drawn in.
@@ -133,6 +140,17 @@ public:
 	{
 		const int nSide = std::min( width(), height() );
 		return { ( width() - nSide ) / 2, ( height() - nSide ) / 2, nSide, nSide };
+	}
+
+	//-----------------------------------------------------------------------------
+	// Purpose: The square in device pixels, as the graphics card draws it.
+	//-----------------------------------------------------------------------------
+	[[nodiscard]] QRect DeviceSquare() const
+	{
+		const QRect square = Square();
+		const qreal flRatio = devicePixelRatioF();
+		return { static_cast<int>( std::lround( square.x() * flRatio ) ), static_cast<int>( std::lround( square.y() * flRatio ) ), static_cast<int>( std::lround( square.width() * flRatio ) ),
+			static_cast<int>( std::lround( square.height() * flRatio ) ) };
 	}
 
 	//-----------------------------------------------------------------------------
@@ -149,6 +167,10 @@ protected:
 	//-----------------------------------------------------------------------------
 	void paintEvent( QPaintEvent * ) override
 	{
+		if ( m_pGpu )
+		{
+			return; // the graphics card's view covers the canvas
+		}
 		QPainter painter( this );
 		painter.setRenderHint( QPainter::SmoothPixmapTransform );
 		if ( !m_Image.isNull() )
@@ -192,6 +214,10 @@ protected:
 	//-----------------------------------------------------------------------------
 	void resizeEvent( QResizeEvent * ) override
 	{
+		if ( m_pGpu )
+		{
+			m_pGpu->setGeometry( rect() );
+		}
 		if ( m_pfnResized )
 		{
 			m_pfnResized();
@@ -397,10 +423,68 @@ CMaterialView::CMaterialView( const QString &szPath, const QString &szSource, st
 		m_Clock.start();
 		m_pTimer->start();
 	}
+	SetUseGpu( CGraphics::Instance().IsGpu() );
 	Render();
 }
 
 CMaterialView::~CMaterialView() = default;
+
+//-----------------------------------------------------------------------------
+// Purpose: Draws on the graphics card, at the full size of the square, or in software.
+//-----------------------------------------------------------------------------
+void CMaterialView::SetUseGpu( bool bOn )
+{
+	delete m_pCanvas->m_pGpu;
+	m_pCanvas->m_pGpu = nullptr;
+#ifdef VOMIT_TOOLS_GPU
+	if ( bOn )
+	{
+		auto *pView = new CGpuView( std::make_unique<CMaterialRenderer>( [ this ] {
+			CMaterialRenderer::Frame_t frame;
+			if ( m_Now )
+			{
+				const QRect square = m_pCanvas->DeviceSquare();
+				frame.m_pMaterial = &*m_Now;
+				frame.m_pTextures = &m_Textures;
+				frame.m_Options = Options();
+				frame.m_Options.m_nSize = std::max( 1, square.width() );
+				frame.m_Corner = square.topLeft();
+			}
+			frame.m_Background = palette().color( QPalette::Window );
+			return frame;
+		} ),
+			m_pCanvas );
+		pView->setObjectName( QStringLiteral( "materialGpuView" ) );
+		pView->setAttribute( Qt::WA_TransparentForMouseEvents );
+		pView->setGeometry( m_pCanvas->rect() );
+		// If the graphics card can't be used after all, draw in software.
+		connect( pView, &QRhiWidget::renderFailed, this, [ this ] {
+			QTimer::singleShot( 0, this, [ this ] {
+				SetUseGpu( false );
+				Render();
+			} );
+		} );
+		m_pCanvas->m_pGpu = pView;
+		pView->show();
+	}
+#else
+	Q_UNUSED( bOn );
+#endif
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: The preview as drawn now.
+//-----------------------------------------------------------------------------
+QImage CMaterialView::GetPreview() const
+{
+#ifdef VOMIT_TOOLS_GPU
+	if ( auto *pView = qobject_cast<QRhiWidget *>( m_pCanvas->m_pGpu ) )
+	{
+		return pView->grabFramebuffer().copy( m_pCanvas->DeviceSquare() );
+	}
+#endif
+	return m_Preview;
+}
 
 //-----------------------------------------------------------------------------
 // Purpose:
@@ -437,10 +521,17 @@ void CMaterialView::Render()
 	{
 		return;
 	}
-	const material::CMaterial now = m_pProxies->At( m_flTime, [ this ]( std::string_view szParameter ) { return m_Textures.FrameCount( szParameter ); } );
-	m_Preview = ToQImage( material::RenderPreview( now, m_Textures, Options() ) );
-	m_pCanvas->m_Image = m_Preview;
-	m_pCanvas->update();
+	m_Now = m_pProxies->At( m_flTime, [ this ]( std::string_view szParameter ) { return m_Textures.FrameCount( szParameter ); } );
+	if ( m_pCanvas->m_pGpu )
+	{
+		m_pCanvas->m_pGpu->update();
+	}
+	else
+	{
+		m_Preview = ToQImage( material::RenderPreview( *m_Now, m_Textures, Options() ) );
+		m_pCanvas->m_Image = m_Preview;
+		m_pCanvas->update();
+	}
 	m_pExposureLabel->setText( tr( "%1 stops" ).arg( static_cast<double>( m_pExposure->value() ) / 10.0, 0, 'f', 1 ) );
 }
 

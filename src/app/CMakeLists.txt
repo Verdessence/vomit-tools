@@ -8,6 +8,10 @@ add_library(vomit_tools_ui STATIC
         FileViews.h
         FolderBrowser.cpp
         FolderBrowser.h
+        GpuView.cpp
+        GpuView.h
+        Graphics.cpp
+        Graphics.h
         ImageFiles.cpp
         ImageFiles.h
         InterfaceMode.cpp
@@ -18,6 +22,8 @@ add_library(vomit_tools_ui STATIC
         KvCard.h
         MainWindow.cpp
         MainWindow.h
+        MaterialRenderer.cpp
+        MaterialRenderer.h
         MaterialView.cpp
         MaterialView.h
         MenuPicker.cpp
@@ -28,13 +34,21 @@ add_library(vomit_tools_ui STATIC
         ParticleEditor.h
         ParticlePreview.cpp
         ParticlePreview.h
+        ParticleRenderer.cpp
+        ParticleRenderer.h
         ParticleSearch.cpp
         ParticleSearch.h
+        Preferences.cpp
+        Preferences.h
+        PreferencesDialog.cpp
+        PreferencesDialog.h
         QtPaths.h
         SkyDocument.cpp
         SkyDocument.h
         SkyEditor.cpp
         SkyEditor.h
+        SkyRenderer.cpp
+        SkyRenderer.h
         SkyTestPattern.cpp
         SkyTestPattern.h
         SkyView.cpp
@@ -65,19 +79,18 @@ add_custom_target(vomit_tools_build_info
         VERBATIM)
 add_dependencies(vomit_tools_ui vomit_tools_build_info)
 
-# The particle preview draws on the GPU where Qt has QRhiWidget (6.7+) and the shader tools to build
-# its shaders; otherwise it draws in software only.
+# The previews draw on the graphics card (Vulkan first, through Qt's RHI) where Qt has QRhiWidget
+# (6.7+) and the shader tools to build their shaders; otherwise they draw in software only.
 if(Qt6_VERSION VERSION_GREATER_EQUAL 6.7 AND TARGET Qt6::ShaderTools AND TARGET Qt6::GuiPrivate)
-    target_sources(vomit_tools_ui PRIVATE ParticleGpuView.cpp ParticleGpuView.h)
-    qt_add_shaders(vomit_tools_ui "vomit_tools_particle_shaders"
+    qt_add_shaders(vomit_tools_ui "vomit_tools_shaders"
             PREFIX "/shaders"
             BASE shaders
-            FILES shaders/particle.vert shaders/particle.frag)
+            FILES shaders/particle.vert shaders/particle.frag shaders/fullscreen.vert shaders/sky.frag shaders/material.frag)
     target_link_libraries(vomit_tools_ui PRIVATE Qt6::GuiPrivate)
-    target_compile_definitions(vomit_tools_ui PRIVATE VOMIT_TOOLS_GPU_PREVIEW)
-    message(STATUS "vomit-tools: particle preview on the GPU")
+    target_compile_definitions(vomit_tools_ui PUBLIC VOMIT_TOOLS_GPU)
+    message(STATUS "vomit-tools: previews on the graphics card")
 else()
-    message(STATUS "vomit-tools: particle preview in software only (needs Qt 6.7+ with ShaderTools for the GPU)")
+    message(STATUS "vomit-tools: previews in software only (needs Qt 6.7+ with ShaderTools for the graphics card)")
 endif()
 # Text and input kinds the editors read at run time (data/), built in.
 qt_add_resources(vomit_tools_ui "vomit_tools_data"

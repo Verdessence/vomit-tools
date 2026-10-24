@@ -17,6 +17,7 @@
 #include <QVBoxLayout>
 
 #include "BuildInfo.h"
+#include "Graphics.h"
 
 namespace
 {
@@ -118,7 +119,8 @@ QString CAboutDialog::VersionText()
 }
 
 //-----------------------------------------------------------------------------
-// Purpose: The version plus Qt, OS and compiler, for pasting into a bug report.
+// Purpose: The version plus Qt, OS, compiler and what the previews draw with, for pasting into a
+//          bug report.
 //-----------------------------------------------------------------------------
 QString CAboutDialog::BuildDetails()
 {
@@ -127,6 +129,6 @@ QString CAboutDialog::BuildDetails()
 	{
 		szQt += QStringLiteral( " (built with " QT_VERSION_STR ")" );
 	}
-	return QStringLiteral( "vomit-tools %1\n%2\n%3 %4\n%5" )
-		.arg( VersionText(), szQt, QSysInfo::prettyProductName(), QSysInfo::currentCpuArchitecture(), CompilerName() );
+	return QStringLiteral( "vomit-tools %1\n%2\n%3 %4\n%5\n%6" )
+		.arg( VersionText(), szQt, QSysInfo::prettyProductName(), QSysInfo::currentCpuArchitecture(), CompilerName(), CGraphics::Instance().GetDescription() );
 }

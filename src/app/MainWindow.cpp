@@ -57,6 +57,7 @@
 #include "MenuPicker.h"
 #include "ParticleDocument.h"
 #include "ParticleSearch.h"
+#include "PreferencesDialog.h"
 #include "QtPaths.h"
 #include "SkyDocument.h"
 #include "SkyEditor.h"
@@ -461,6 +462,12 @@ void CMainWindow::BuildMenus( QAction *pSearchPathsToggle )
 	pEdit->addAction( pRedo );
 	pEdit->addSeparator();
 	pEdit->addAction( tr( "&Find Particle System…" ), QKeySequence{ Qt::CTRL | Qt::SHIFT | Qt::Key_F }, this, [ this ] { FindParticleSystem(); } );
+	pEdit->addSeparator();
+	// The platform's shortcut where it has one (macOS), Ctrl+, elsewhere.
+	const QKeySequence preferencesKey = QKeySequence::keyBindings( QKeySequence::Preferences ).isEmpty() ? QKeySequence{ Qt::CTRL | Qt::Key_Comma } : QKeySequence{ QKeySequence::Preferences };
+	QAction *pPreferences = pEdit->addAction( tr( "&Preferences…" ), preferencesKey, this, &CMainWindow::ShowPreferences );
+	pPreferences->setObjectName( QStringLiteral( "preferencesAction" ) );
+	pPreferences->setMenuRole( QAction::PreferencesRole );
 
 	auto *pGame = menuBar()->addMenu( tr( "&Game" ) );
 	pGame->addAction( tr( "&Reload Files" ), QKeySequence::Refresh, this, &CMainWindow::Remount );
@@ -1621,6 +1628,21 @@ const ParticleGame_t &CMainWindow::ParticleGame()
 	}
 	m_ParticleGame = std::move( game );
 	return *m_ParticleGame;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Edit > Preferences: one window, raised again when it is already open.
+//-----------------------------------------------------------------------------
+CPreferencesDialog *CMainWindow::ShowPreferences()
+{
+	if ( !m_pPreferences )
+	{
+		m_pPreferences = new CPreferencesDialog( this );
+	}
+	m_pPreferences->show();
+	m_pPreferences->raise();
+	m_pPreferences->activateWindow();
+	return m_pPreferences;
 }
 
 //-----------------------------------------------------------------------------

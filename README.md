@@ -24,6 +24,19 @@ A game isn't required. When a file or folder belongs to one (a `gameinfo.txt` si
 it), that game is mounted automatically, for sound lookups, linting and manifests. Without a game,
 sounds are looked for beside the file: for `mymod/scripts/soundscapes_x.txt`, under `mymod/sound/`.
 
+## Preferences
+
+**Edit → Preferences** (Ctrl+,) holds the app's settings. Changes take effect at once, except the
+graphics API, which waits for the next start.
+
+- **Interface:** the simple or regular interface (also under **View → Simple Interface**).
+- **Graphics:** what the sky, material and particle previews and the particle grid draw with.
+  **Automatic** tries Vulkan first, then the platform's usual API (Direct3D 11 on Windows, OpenGL
+  on Linux). Vulkan, OpenGL, Direct3D 11/12 and **Software** (the CPU) can be picked directly. The
+  page says what is in use (**Help → About** says it too). If the graphics card fails, the previews
+  draw in software.
+- **Particles:** whether every system in the grid plays, or only the selected one.
+
 ## Sound editor
 
 - **Cards:** each entry shows as a card, with its name on a tab and its keys in a grid. Sub-blocks
@@ -86,7 +99,7 @@ To hear a soundscape in game: restart the game, load a map, then `sv_cheats 1` a
   below it, and going right from rt: ft, lf, bk.
 - **Preview:** the sky from inside, the way a player sees it, in a square view. Drag to look around, scroll to zoom. The
   angles are Source's: the readout (`setang -20 30 0`) typed into the console (with `sv_cheats 1`)
-  looks the same way in game.
+  looks the same way in game. It draws on the graphics card (see **Preferences**).
 - **Checks:**
   - missing faces
   - faces the game can't use (not square, or sides that aren't a power of two)
@@ -111,7 +124,8 @@ Picking a `.vmt` in the **Game** or **Folder** tab shows the material as the gam
 beside its parameters, its textures and its text. Right-clicking a face in the skybox creator and
 choosing **Show Material** shows that face's material.
 
-- **Preview:** a flat square or a ball, lit by a light you drag. It shows:
+- **Preview:** a flat square or a ball, lit by a light you drag, drawn on the graphics card at the
+  full size of the view (see **Preferences**). It shows:
   - textures, tints and blending (translucent, additive, alpha-tested)
   - detail textures in every blend mode but 10 (the detail as a second bump map)
   - bump maps, including self-shadowing ones
@@ -130,8 +144,9 @@ choosing **Show Material** shows that face's material.
 - **Opening:** double-click a `.pcf` in the **Game** or **Folder** tab, open one from **File → Open
   File**, or start one with **File → New Particle File**.
 - **Systems:** the file's systems are listed on the left, with child systems under the systems that
-  spawn them, or (**Grid**) as pictures of each effect. **New System** starts one with a basic set of operators (it emits, moves, fades and
-  draws). **Duplicate**, **Delete** and renaming (double-click or F2) are there too. Renaming also
+  spawn them, or (**Grid**) as pictures of each effect. The selected system's picture plays;
+  **Preferences** can make every system in view play. **New System** starts one with a basic set of
+  operators (it emits, moves, fades and draws). **Duplicate**, **Delete** and renaming (double-click or F2) are there too. Renaming also
   updates the child links and `cull_replacement_definition` values that name the system.
 - **Operators:** the middle column shows the selected system's renderers, operators, initializers,
   emitters, child systems, forces and constraints, each list in the order it runs. **Add** offers
@@ -158,20 +173,25 @@ choosing **Show Material** shows that face's material.
     put on its attachments. The model is drawn, hides what's behind it, and stays in its reference
     pose.
   - Play/pause, restart, speeds from 0.1× to 2×, looping, a ground grid, and a timeline to drag
-    to any moment. It draws on the graphics
-    card where Qt can (**GPU**), in software otherwise.
+    to any moment. It draws on the graphics card (see **Preferences**).
   - Edits show at once, without starting the effect over.
   - It's an approximation worked out from what each operator's name and settings say, not the
     game's code. Operators it doesn't run yet are greyed out in the list and named under the
     preview. Collisions hit only the floor under the grid, and refraction isn't drawn.
-- **Simple interface** (View → Simple Interface): tidy names ("Max Particles", "Animated Sprites"),
+- **Simple interface** (View → Simple Interface, or **Preferences**): tidy names ("Max Particles", "Animated Sprites"),
   number boxes with units, named choices and X/Y/Z boxes, and advanced settings tucked away until
   changed. Off, the files' own keys and fields show. The file is edited the same either way. The
   text is in `src/app/data/lang_en.txt`.
-- **Properties:** the right column edits the selected system, operator or child link. Numbers, vectors,
-  colours (with a picker), on/off values, materials (completed from the game's materials) and child
-  systems each get a fitting field. Names in bold differ from the value the game's files use most,
-  and right-clicking one resets it.
+- **Layout:** the systems on the left; the preview and the properties of what is selected in the
+  middle; the selected system's emitters, initializers, operators, renderers, forces, constraints
+  and child systems on the right.
+- **Properties:** the panel under the preview edits the selected system, operator or child link.
+  Every setting the game reads is listed, in the game's order; those the file leaves out show in
+  italics at the game's default, and changing one adds it to the file. Numbers, vectors, colours
+  (with a picker), on/off values, materials (completed from the game's materials), particle fields
+  (only the kind the setting takes) and child systems each get a fitting field. Names in bold
+  differ from the game's default, and right-clicking one resets it. Settings the game doesn't read
+  are listed apart.
 - **Search:** **Edit → Find Particle System** (Ctrl+Shift+F, or **Search All Files**) looks through
   every particle file the game has, by system name, material, operator or child system, and opens
   the one picked.
@@ -184,7 +204,8 @@ choosing **Show Material** shows that face's material.
   - names another of the game's files also defines
   - materials the game doesn't have
   - cull replacements that don't exist
-  - operators none of the game's files use, or used as the wrong kind
+  - functions the game doesn't build in and none of its files use, or used as the wrong kind
+  - settings a function doesn't read, or of a type it doesn't read them as
   - files the manifest doesn't list
 - **Saving** keeps everything the editor doesn't show: an unedited file is written back byte for
   byte. Files from a VPK are saved to the write folder, like soundscapes. **Save As** can also convert
@@ -192,13 +213,16 @@ choosing **Show Material** shows that face's material.
 - **Manifest:** **Add to Manifest** lists the file in `particles/particles_manifest.txt`.
 - **Undo** works for every change.
 
-The editor learns operators and their usual values from the mounted game's own particle files,
-so open a game (or a file inside one) to get the full **Add** menu.
+The **Add** menu lists every function the game builds in, with every setting at the game's
+default. They come from the data tables in the Source SDK 2013's particle library, which CS:S's
+client shares. Functions from other games' files (TF2's, or later editors') are learned from the
+mounted game's own particle files.
 
 ## Building
 
 You need CMake 3.25+, a C++20 compiler and Qt 6.5+ (Core, Widgets, Test). With Qt 6.7+ and its
-Shader Tools module, the particle preview can also draw on the GPU.
+Shader Tools module, the previews can also draw on the graphics card, through Qt's RHI (Vulkan,
+OpenGL, Direct3D or Metal); otherwise they draw in software.
 [sourcepp](https://github.com/craftablescience/sourcepp), [miniaudio](https://miniaud.io) and
 [stb](https://github.com/nothings/stb) are fetched at configure time; to build offline, point
 `FETCHCONTENT_SOURCE_DIR_SOURCEPP`, `FETCHCONTENT_SOURCE_DIR_MINIAUDIO` and `FETCHCONTENT_SOURCE_DIR_STB`
@@ -254,8 +278,9 @@ The code follows the naming and layout conventions of Valve's Source SDK (the st
 | `src/core/texture` | VTF 7.0–7.5 reading and 7.1/7.2 writing, DXT and other formats; image loading on [stb](https://github.com/nothings/stb) |
 | `src/core/sky` | Sky faces and their orientation, preview rendering, seam checks, export, loading the game's skies |
 | `src/core/material` | Materials (VMT): parameters after patches and fallbacks, proxies, and the preview's drawing |
-| `src/core/particles` | Particle systems in PCF files: reading, editing, copy and paste, operator defaults from the game's files, checks, manifest; the preview's simulation and drawing |
-| `src/app` | Qt app: game and folder browsers, sound editor (cards, value pickers, playback), skybox creator, material view, particle editor, document tabs |
+| `src/core/particles` | Particle systems in PCF files: reading, editing, copy and paste, the game's built-in functions and their defaults, checks, manifest; the preview's simulation and drawing |
+| `src/app` | Qt app: game and folder browsers, sound editor (cards, value pickers, playback), skybox creator, material view, particle editor, document tabs, preferences |
+| `src/app/shaders` | The previews' shaders for the graphics card (sky, material, particles), each matching its software renderer in `src/core` |
 
 ## License
 
