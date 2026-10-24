@@ -13,7 +13,9 @@
 #include <set>
 #include <unordered_map>
 #include <unordered_set>
+#include <utility>
 
+#include "particles/Builtin.h"
 #include "vfs/Vfs.h"
 
 namespace xv::particles
@@ -53,6 +55,22 @@ std::string Lower( std::string_view szText )
 	std::string szOut{ szText };
 	std::ranges::transform( szOut, szOut.begin(), []( unsigned char c ) { return static_cast<char>( std::tolower( c ) ); } );
 	return szOut;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: ASCII only, as the names are.
+//-----------------------------------------------------------------------------
+bool EqualNoCase( std::string_view a, std::string_view b )
+{
+	return std::ranges::equal( a, b, []( unsigned char x, unsigned char y ) { return std::tolower( x ) == std::tolower( y ); } );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Matches a function by category and name, ignoring case as the game does.
+//-----------------------------------------------------------------------------
+auto SameFunction( Category_t nCategory, std::string_view szName )
+{
+	return [ nCategory, szName ]( const CFunctionInfo &f ) { return f.m_nCategory == nCategory && EqualNoCase( f.m_szName, szName ); };
 }
 
 //-----------------------------------------------------------------------------
@@ -264,53 +282,35 @@ dmx::Value_t ZeroValue( AttrType_t nType )
 	}
 }
 
-// The material a new system starts with; every Source game has it.
-constexpr std::string_view NEW_SYSTEM_MATERIAL = "vgui/white.vmt";
+//-----------------------------------------------------------------------------
+// Purpose: A built-in function as the schema holds it: every setting at the game's default.
+//-----------------------------------------------------------------------------
+CFunctionInfo BuiltinInfo( const BuiltinFunction_t &function )
+{
+	CFunctionInfo info{ function.m_nCategory, std::string{ function.m_szName }, {}, 0, true };
+	for ( const BuiltinSetting_t *pSetting : function.Settings() )
+	{
+		info.m_Attributes.push_back( { std::string{ pSetting->m_szName }, pSetting->m_nType, pSetting->Default() } );
+	}
+	return info;
+}
 
 //-----------------------------------------------------------------------------
-// Purpose: System properties for a new system when no game files are at hand: the values CS:S's
-//          and HL2's
-//          files use most.
+// Purpose: A new system's properties: the game's settings at their defaults, then its lists.
 //-----------------------------------------------------------------------------
-std::vector<AttributeInfo_t> BasicSystemAttributes()
+std::vector<AttributeInfo_t> SystemAttributes()
 {
-	return {
-		{ "max_particles", AttrType_t::ATTR_TYPE_INT, std::int32_t{ 1000 } },
-		{ "initial_particles", AttrType_t::ATTR_TYPE_INT, std::int32_t{ 0 } },
-		{ "material", AttrType_t::ATTR_TYPE_STRING, std::string{ NEW_SYSTEM_MATERIAL } },
-		{ "bounding_box_min", AttrType_t::ATTR_TYPE_VECTOR3, dmx::Vec3_t{ -10, -10, -10 } },
-		{ "bounding_box_max", AttrType_t::ATTR_TYPE_VECTOR3, dmx::Vec3_t{ 10, 10, 10 } },
-		{ "cull_radius", AttrType_t::ATTR_TYPE_FLOAT, 0.0f },
-		{ "cull_cost", AttrType_t::ATTR_TYPE_FLOAT, 1.0f },
-		{ "cull_control_point", AttrType_t::ATTR_TYPE_INT, std::int32_t{ 0 } },
-		{ "cull_replacement_definition", AttrType_t::ATTR_TYPE_STRING, std::string{} },
-		{ "radius", AttrType_t::ATTR_TYPE_FLOAT, 5.0f },
-		{ "color", AttrType_t::ATTR_TYPE_COLOR, dmx::CColor{ 255, 255, 255, 255 } },
-		{ "rotation", AttrType_t::ATTR_TYPE_FLOAT, 0.0f },
-		{ "rotation_speed", AttrType_t::ATTR_TYPE_FLOAT, 0.0f },
-		{ "sequence_number", AttrType_t::ATTR_TYPE_INT, std::int32_t{ 0 } },
-		{ "sequence_number 1", AttrType_t::ATTR_TYPE_INT, std::int32_t{ 0 } },
-		{ "group id", AttrType_t::ATTR_TYPE_INT, std::int32_t{ 0 } },
-		{ "maximum time step", AttrType_t::ATTR_TYPE_FLOAT, 0.1f },
-		{ "maximum sim tick rate", AttrType_t::ATTR_TYPE_FLOAT, 0.0f },
-		{ "minimum sim tick rate", AttrType_t::ATTR_TYPE_FLOAT, 0.0f },
-		{ "minimum rendered frames", AttrType_t::ATTR_TYPE_INT, std::int32_t{ 0 } },
-		{ "control point to disable rendering if it is the camera", AttrType_t::ATTR_TYPE_INT, std::int32_t{ -1 } },
-		{ "maximum draw distance", AttrType_t::ATTR_TYPE_FLOAT, 100000.0f },
-		{ "time to sleep when not drawn", AttrType_t::ATTR_TYPE_FLOAT, 8.0f },
-		{ "Sort particles", AttrType_t::ATTR_TYPE_BOOL, true },
-		{ "batch particle systems", AttrType_t::ATTR_TYPE_BOOL, false },
-		{ "view model effect", AttrType_t::ATTR_TYPE_BOOL, false },
-		{ "bounding_box_control_point", AttrType_t::ATTR_TYPE_INT, std::int32_t{ 0 } },
-		{ "preventNameBasedLookup", AttrType_t::ATTR_TYPE_BOOL, false },
-		{ "children", AttrType_t::ATTR_TYPE_ELEMENT_ARRAY, std::vector<CElementRef>{} },
-		{ "emitters", AttrType_t::ATTR_TYPE_ELEMENT_ARRAY, std::vector<CElementRef>{} },
-		{ "initializers", AttrType_t::ATTR_TYPE_ELEMENT_ARRAY, std::vector<CElementRef>{} },
-		{ "operators", AttrType_t::ATTR_TYPE_ELEMENT_ARRAY, std::vector<CElementRef>{} },
-		{ "renderers", AttrType_t::ATTR_TYPE_ELEMENT_ARRAY, std::vector<CElementRef>{} },
-		{ "forces", AttrType_t::ATTR_TYPE_ELEMENT_ARRAY, std::vector<CElementRef>{} },
-		{ "constraints", AttrType_t::ATTR_TYPE_ELEMENT_ARRAY, std::vector<CElementRef>{} },
-	};
+	std::vector<AttributeInfo_t> out;
+	for ( const BuiltinSetting_t &setting : SystemSettings() )
+	{
+		out.push_back( { std::string{ setting.m_szName }, setting.m_nType, setting.Default() } );
+	}
+	out.push_back( { std::string{ CHILDREN }, AttrType_t::ATTR_TYPE_ELEMENT_ARRAY, std::vector<CElementRef>{} } );
+	for ( std::string_view szList : CATEGORY_ATTRIBUTES )
+	{
+		out.push_back( { std::string{ szList }, AttrType_t::ATTR_TYPE_ELEMENT_ARRAY, std::vector<CElementRef>{} } );
+	}
+	return out;
 }
 
 } // namespace
@@ -477,7 +477,7 @@ std::vector<ChildLink_t> Children( const Document_t &document, std::int32_t nSys
 //-----------------------------------------------------------------------------
 const AttributeInfo_t *CFunctionInfo::Attribute( std::string_view szAttributeName ) const
 {
-	const auto it = std::ranges::find( m_Attributes, szAttributeName, &AttributeInfo_t::m_szName );
+	const auto it = std::ranges::find_if( m_Attributes, [ szAttributeName ]( const AttributeInfo_t &attribute ) { return EqualNoCase( attribute.m_szName, szAttributeName ); } );
 	return it == m_Attributes.end() ? nullptr : &*it;
 }
 
@@ -543,7 +543,6 @@ void CSchema::Add( const Document_t &document )
 	for ( std::int32_t nIndex : Systems( document ) )
 	{
 		const CElement &system = At( document, nIndex );
-		Count( m_SystemTallies, system );
 		for ( Category_t nCategory : CATEGORIES )
 		{
 			for ( std::int32_t nOp : References( system, AttributeName( nCategory ) ) )
@@ -565,16 +564,48 @@ void CSchema::Add( const Document_t &document )
 }
 
 //-----------------------------------------------------------------------------
-// Purpose:
+// Purpose: Starts with the built-in functions and the system's settings.
+//-----------------------------------------------------------------------------
+CSchema::CSchema()
+{
+	Finish();
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: The built-in functions keep the game's settings and defaults; the files only count
+//          their uses. Functions the game doesn't build in take what the files use most.
 //-----------------------------------------------------------------------------
 void CSchema::Finish()
 {
 	m_Functions.clear();
+	for ( const BuiltinFunction_t &function : BuiltinFunctions() )
+	{
+		m_Functions.push_back( BuiltinInfo( function ) );
+	}
 	for ( const auto &[ key, collected ] : m_Collected )
 	{
+		if ( const BuiltinFunction_t *pBuiltin = FindBuiltin( collected.m_nCategory, collected.m_szName ) )
+		{
+			Find( collected.m_nCategory, pBuiltin->m_szName )->m_nUses += collected.m_nUses;
+			continue;
+		}
+		CFunctionInfo *pSame = Find( collected.m_nCategory, collected.m_szName ); // the same name in another case
+		if ( pSame )
+		{
+			pSame->m_nUses += collected.m_nUses;
+			continue;
+		}
 		m_Functions.push_back( { collected.m_nCategory, collected.m_szName, MostCommon( collected.m_Attributes ), collected.m_nUses } );
 	}
-	m_System = MostCommon( m_SystemTallies );
+	m_System = SystemAttributes();
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+CFunctionInfo *CSchema::Find( Category_t nCategory, std::string_view szName )
+{
+	return const_cast<CFunctionInfo *>( std::as_const( *this ).Function( nCategory, szName ) );
 }
 
 //-----------------------------------------------------------------------------
@@ -590,7 +621,11 @@ void CSchema::AddSystemFile( std::string_view szSystemName, std::string_view szF
 //-----------------------------------------------------------------------------
 const CFunctionInfo *CSchema::Function( Category_t nCategory, std::string_view szName ) const
 {
-	const auto it = std::ranges::find_if( m_Functions, [ & ]( const CFunctionInfo &f ) { return f.m_nCategory == nCategory && f.m_szName == szName; } );
+	auto it = std::ranges::find_if( m_Functions, SameFunction( nCategory, szName ) );
+	if ( it == m_Functions.end() )
+	{
+		it = std::ranges::find_if( m_Functions, SameFunction( nCategory, CurrentName( szName ) ) );
+	}
 	return it == m_Functions.end() ? nullptr : &*it;
 }
 
@@ -632,7 +667,7 @@ std::vector<Category_t> CSchema::CategoriesOf( std::string_view szName ) const
 //-----------------------------------------------------------------------------
 const AttributeInfo_t *CSchema::SystemAttribute( std::string_view szName ) const
 {
-	const auto it = std::ranges::find( m_System, szName, &AttributeInfo_t::m_szName );
+	const auto it = std::ranges::find_if( m_System, [ szName ]( const AttributeInfo_t &attribute ) { return EqualNoCase( attribute.m_szName, szName ); } );
 	return it == m_System.end() ? nullptr : &*it;
 }
 
@@ -713,26 +748,16 @@ void SetAttribute( CElement &element, std::string_view szName, AttrType_t nType,
 }
 
 //-----------------------------------------------------------------------------
-// Purpose: A new system at the end of the root's list, with the schema's properties (or a basic
-//          set when
-//          the schema is empty).
+// Purpose: A new system at the end of the root's list, with the system's settings at the game's
+//          defaults.
 //-----------------------------------------------------------------------------
 std::int32_t AddSystem( Document_t &document, std::string_view szName, const CSchema &schema )
 {
 	CElement system{ std::string{ SYSTEM_TYPE }, std::string{ szName }, NewGuid(), {} };
-	const std::vector<AttributeInfo_t> attributes = schema.GetSystemAttributes().empty() ? BasicSystemAttributes() : schema.GetSystemAttributes();
-	for ( const AttributeInfo_t &attribute : attributes )
+	for ( const AttributeInfo_t &attribute : schema.GetSystemAttributes() )
 	{
 		system.m_Attributes.push_back( { attribute.m_szName, attribute.m_nType, attribute.m_Value } );
 	}
-	// The most used material is some effect's own texture.
-	SetAttribute( system, "material", AttrType_t::ATTR_TYPE_STRING, std::string{ NEW_SYSTEM_MATERIAL } );
-	// Every system has its lists, even when the schema's files had none of one.
-	for ( std::string_view szList : CATEGORY_ATTRIBUTES )
-	{
-		EnsureRefList( system, szList );
-	}
-	EnsureRefList( system, CHILDREN );
 	const std::int32_t nIndex = Append( document, std::move( system ) );
 	EnsureRefList( document.m_Elements.front(), DEFINITIONS ).push_back( { nIndex, {} } );
 	return nIndex;
@@ -874,29 +899,12 @@ std::int32_t PlaceControlPoint( Document_t &document, std::int32_t nSystem, int 
 		{
 			return -1;
 		}
-		CFunctionInfo function;
-		if ( const CFunctionInfo *pKnown = schema.Function( Category_t::CATEGORY_OPERATORS, SET_CONTROL_POINTS ) )
+		const CFunctionInfo *pFunction = schema.Function( Category_t::CATEGORY_OPERATORS, SET_CONTROL_POINTS );
+		if ( !pFunction )
 		{
-			function = *pKnown;
+			return -1;
 		}
-		else
-		{
-			// Without the game's files: the settings Valve's editor writes for it.
-			function.m_szName = SET_CONTROL_POINTS;
-			for ( std::string_view szCommon : COMMON_OPERATOR_ATTRIBUTES )
-			{
-				function.m_Attributes.push_back( { std::string{ szCommon }, AttrType_t::ATTR_TYPE_FLOAT, 0.0f } );
-			}
-			for ( std::size_t i = 0; i < CONTROL_POINT_SLOTS.size(); i++ )
-			{
-				function.m_Attributes.push_back( { slotName( i, "Number" ), AttrType_t::ATTR_TYPE_INT, std::int32_t{ 0 } } );
-				function.m_Attributes.push_back( { slotName( i, "Parent" ), AttrType_t::ATTR_TYPE_INT, std::int32_t{ 0 } } );
-				function.m_Attributes.push_back( { slotName( i, "Location" ), AttrType_t::ATTR_TYPE_VECTOR3, dmx::Vec3_t{} } );
-			}
-			function.m_Attributes.push_back( { "Set positions in world space", AttrType_t::ATTR_TYPE_BOOL, false } );
-			function.m_Attributes.push_back( { "Control Point to offset positions from", AttrType_t::ATTR_TYPE_INT, std::int32_t{ 0 } } );
-		}
-		nOperator = AddOperator( document, nSystem, Category_t::CATEGORY_OPERATORS, function, 0 );
+		nOperator = AddOperator( document, nSystem, Category_t::CATEGORY_OPERATORS, *pFunction, 0 );
 		CElement &op = At( document, nOperator );
 		for ( std::size_t i = 0; i < CONTROL_POINT_SLOTS.size(); i++ )
 		{
@@ -917,10 +925,14 @@ std::int32_t PlaceControlPoint( Document_t &document, std::int32_t nSystem, int 
 	{
 		SetAttribute( op, slotName( static_cast<std::size_t>( nSlot ), "Number" ), AttrType_t::ATTR_TYPE_INT, std::int32_t{ nIndex } );
 	}
+	const BuiltinFunction_t *pBuiltin = FindBuiltin( Category_t::CATEGORY_OPERATORS, SET_CONTROL_POINTS );
 	for ( std::size_t i = 0; i < CONTROL_POINT_SLOTS.size(); i++ )
 	{
-		const Attribute_t *pNumber = op.Find( slotName( i, "Number" ) );
-		const auto *pValue = pNumber ? std::get_if<std::int32_t>( &pNumber->m_Value ) : nullptr;
+		// A slot the file leaves out places the game's default point.
+		const std::string szNumber = slotName( i, "Number" );
+		const Attribute_t *pNumber = op.Find( szNumber );
+		const dmx::Value_t number = pNumber ? pNumber->m_Value : pBuiltin->Setting( szNumber )->Default();
+		const auto *pValue = std::get_if<std::int32_t>( &number );
 		if ( pValue && *pValue == nIndex )
 		{
 			SetAttribute( op, slotName( i, "Location" ), AttrType_t::ATTR_TYPE_VECTOR3, vecLocation );
@@ -1394,7 +1406,7 @@ std::vector<Issue_t> Lint( const Document_t &document, const LintContext_t &cont
 					report( Issue_t::Severity_t::SEVERITY_ERROR, std::format( "{} has an operator without a functionName.", szName ), nIndex, nOp );
 					continue;
 				}
-				if ( !bHaveGame )
+				if ( !context.m_pGame )
 				{
 					continue;
 				}
@@ -1402,22 +1414,36 @@ std::vector<Issue_t> Lint( const Document_t &document, const LintContext_t &cont
 				if ( !pKnown )
 				{
 					const auto elsewhere = context.m_pGame->CategoriesOf( szFunction );
-					if ( elsewhere.empty() )
+					if ( !elsewhere.empty() )
 					{
-						report( Issue_t::Severity_t::SEVERITY_WARNING, std::format( "{}: none of the game's particle files use \"{}\"; it may not exist in this game.", szName, szFunction ), nIndex, nOp );
+						report( Issue_t::Severity_t::SEVERITY_WARNING, std::format( "{}: \"{}\" is one of the {}, not the {}.", szName, szFunction, AttributeName( elsewhere.front() ), AttributeName( nCategory ) ), nIndex, nOp );
+					}
+					else if ( bHaveGame )
+					{
+						report( Issue_t::Severity_t::SEVERITY_WARNING, std::format( "{}: \"{}\" isn't built into the game and none of its particle files use it, so the game may not have it.", szName, szFunction ), nIndex, nOp );
 					}
 					else
 					{
-						report( Issue_t::Severity_t::SEVERITY_WARNING, std::format( "{}: \"{}\" is one of the {}, not the {}.", szName, szFunction, AttributeName( elsewhere.front() ), AttributeName( nCategory ) ), nIndex, nOp );
+						report( Issue_t::Severity_t::SEVERITY_WARNING, std::format( "{}: \"{}\" isn't built into the game, so the game may not have it.", szName, szFunction ), nIndex, nOp );
 					}
 					continue;
 				}
 				for ( const Attribute_t &attribute : element.m_Attributes )
 				{
 					const AttributeInfo_t *pExpected = pKnown->Attribute( attribute.m_szName );
-					if ( pExpected && pExpected->m_nType != attribute.m_nType )
+					if ( !pExpected )
 					{
-						report( Issue_t::Severity_t::SEVERITY_WARNING, std::format( "{}: \"{}\" {} is a {} here but a {} in the game's files.", szName, szFunction, attribute.m_szName, dmx::TypeName( attribute.m_nType ), dmx::TypeName( pExpected->m_nType ) ), nIndex, nOp );
+						if ( pKnown->m_bBuiltin && attribute.m_szName != FUNCTION_NAME )
+						{
+							report( Issue_t::Severity_t::SEVERITY_INFO, std::format( "{}: \"{}\" doesn't read {}, so it does nothing.", szName, szFunction, attribute.m_szName ), nIndex, nOp );
+						}
+					}
+					else if ( pExpected->m_nType != attribute.m_nType )
+					{
+						report( Issue_t::Severity_t::SEVERITY_WARNING,
+							pKnown->m_bBuiltin ? std::format( "{}: \"{}\" {} is a {} here, but the game reads a {}.", szName, szFunction, attribute.m_szName, dmx::TypeName( attribute.m_nType ), dmx::TypeName( pExpected->m_nType ) )
+											   : std::format( "{}: \"{}\" {} is a {} here but a {} in the game's files.", szName, szFunction, attribute.m_szName, dmx::TypeName( attribute.m_nType ), dmx::TypeName( pExpected->m_nType ) ),
+							nIndex, nOp );
 					}
 				}
 			}

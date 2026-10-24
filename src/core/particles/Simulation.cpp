@@ -13,6 +13,8 @@
 #include <numbers>
 #include <set>
 
+#include "particles/Builtin.h"
+
 namespace xv::particles
 {
 
@@ -258,48 +260,6 @@ std::string Lower( std::string_view szText )
 }
 
 //-----------------------------------------------------------------------------
-// Purpose: Older names files still use, from early versions of Valve's editor (the VDC articles
-//          name some of them, "movement_basic", "lifespan_decay" and "alpha_fade"). Their settings
-//          are the current functions' settings.
-//-----------------------------------------------------------------------------
-const std::map<std::pair<Category_t, std::string>, std::string_view> &OlderNames()
-{
-	static const std::map<std::pair<Category_t, std::string>, std::string_view> names{
-		{ { Category_t::CATEGORY_OPERATORS, "basic_movement" }, "Movement Basic" },
-		{ { Category_t::CATEGORY_OPERATORS, "movement_basic" }, "Movement Basic" },
-		{ { Category_t::CATEGORY_OPERATORS, "lifespan_decay" }, "Lifespan Decay" },
-		{ { Category_t::CATEGORY_OPERATORS, "alpha_fade" }, "Alpha Fade and Decay" },
-		{ { Category_t::CATEGORY_OPERATORS, "alpha_fade_in_random" }, "Alpha Fade In Random" },
-		{ { Category_t::CATEGORY_OPERATORS, "alpha_fade_out_random" }, "Alpha Fade Out Random" },
-		{ { Category_t::CATEGORY_OPERATORS, "color_fade" }, "Color Fade" },
-		{ { Category_t::CATEGORY_OPERATORS, "radius_scale" }, "Radius Scale" },
-		{ { Category_t::CATEGORY_OPERATORS, "rotation_spin" }, "Rotation Spin Roll" },
-		{ { Category_t::CATEGORY_OPERATORS, "rotation_spin yaw" }, "Rotation Spin Yaw" },
-		{ { Category_t::CATEGORY_OPERATORS, "basic_rotation" }, "Rotation Basic" },
-		{ { Category_t::CATEGORY_OPERATORS, "oscillate_scalar" }, "Oscillate Scalar" },
-		{ { Category_t::CATEGORY_OPERATORS, "oscillate_vector" }, "Oscillate Vector" },
-		{ { Category_t::CATEGORY_OPERATORS, "postion_lock_to_controlpoint" }, "Movement Lock to Control Point" },
-		{ { Category_t::CATEGORY_OPERATORS, "position_lock_to_controlpoint" }, "Movement Lock to Control Point" },
-		{ { Category_t::CATEGORY_OPERATORS, "noise" }, "Noise Scalar" },
-		{ { Category_t::CATEGORY_OPERATORS, "vector noise" }, "Noise Vector" },
-		{ { Category_t::CATEGORY_OPERATORS, "controlpoint_light" }, "Color Light from Control Point" },
-		{ { Category_t::CATEGORY_INITIALIZERS, "alpha_random" }, "Alpha Random" },
-		{ { Category_t::CATEGORY_INITIALIZERS, "color_random" }, "Color Random" },
-		{ { Category_t::CATEGORY_INITIALIZERS, "lifetime_random" }, "Lifetime Random" },
-		{ { Category_t::CATEGORY_INITIALIZERS, "position_offset_random" }, "Position Modify Offset Random" },
-		{ { Category_t::CATEGORY_INITIALIZERS, "position_within_box" }, "Position Within Box Random" },
-		{ { Category_t::CATEGORY_INITIALIZERS, "position_within_sphere" }, "Position Within Sphere Random" },
-		{ { Category_t::CATEGORY_INITIALIZERS, "radius_random" }, "Radius Random" },
-		{ { Category_t::CATEGORY_INITIALIZERS, "random yaw" }, "Rotation Yaw Random" },
-		{ { Category_t::CATEGORY_INITIALIZERS, "rotation_random" }, "Rotation Random" },
-		{ { Category_t::CATEGORY_INITIALIZERS, "sequence_random" }, "Sequence Random" },
-		{ { Category_t::CATEGORY_INITIALIZERS, "trail_length_random" }, "Trail Length Random" },
-		{ { Category_t::CATEGORY_INITIALIZERS, "initial velocity noise" }, "Velocity Noise" },
-	};
-	return names;
-}
-
-//-----------------------------------------------------------------------------
 // Purpose: The functions the preview runs, by category.
 //-----------------------------------------------------------------------------
 const std::set<std::pair<Category_t, std::string_view>> &SimulatedFunctions()
@@ -345,7 +305,6 @@ const std::set<std::pair<Category_t, std::string_view>> &SimulatedFunctions()
 		{ Category_t::CATEGORY_INITIALIZERS, "Lifetime from Time to Impact" },
 		{ Category_t::CATEGORY_INITIALIZERS, "Scalar Random" },
 		{ Category_t::CATEGORY_INITIALIZERS, "Vector Random" },
-		{ Category_t::CATEGORY_INITIALIZERS, "Inherit Velocity" },
 		{ Category_t::CATEGORY_INITIALIZERS, "Remap Particle Count to Scalar" },
 		{ Category_t::CATEGORY_INITIALIZERS, "Inherit Initial Value From Parent Particle" },
 		{ Category_t::CATEGORY_OPERATORS, "Lifespan Decay" },
@@ -592,14 +551,11 @@ std::string_view CurrentFunctionName( Category_t nCategory, std::string_view szF
 		{
 			names.emplace( std::pair{ nCategory, Lower( szName ) }, szName );
 		}
-		for ( const auto &[ key, szName ] : OlderNames() )
-		{
-			names.emplace( key, szName );
-		}
 		return names;
 	}();
-	const auto found = byLowerName.find( { nCategory, Lower( szFunction ) } );
-	return found == byLowerName.end() ? szFunction : found->second;
+	const std::string_view szCurrent = CurrentName( szFunction );
+	const auto found = byLowerName.find( { nCategory, Lower( szCurrent ) } );
+	return found == byLowerName.end() ? szCurrent : found->second;
 }
 
 //-----------------------------------------------------------------------------
@@ -729,10 +685,6 @@ CLibrary Compile( const dmx::Document_t &document )
 			const auto &b = std::get<dmx::Vec3_t>( *v );
 			definition.m_vecBoundsMax = { b[ 0 ], b[ 1 ], b[ 2 ] };
 		}
-		if ( const auto *v = get( "bounding_box_control_point" ); v && std::holds_alternative<std::int32_t>( *v ) )
-		{
-			definition.m_nBoundsControlPoint = std::get<std::int32_t>( *v );
-		}
 		if ( const auto *v = get( "Sort particles" ); v && std::holds_alternative<bool>( *v ) )
 		{
 			definition.m_bSort = std::get<bool>( *v );
@@ -754,6 +706,14 @@ CLibrary Compile( const dmx::Document_t &document )
 				for ( const dmx::Attribute_t &attribute : opElement.m_Attributes )
 				{
 					compiled.m_Values.emplace( attribute.m_szName, attribute.m_Value );
+				}
+				// What the file leaves out, the game reads at its default.
+				if ( const BuiltinFunction_t *pBuiltin = FindBuiltin( nCategory, compiled.m_szFunction ) )
+				{
+					for ( const BuiltinSetting_t *pSetting : pBuiltin->Settings() )
+					{
+						compiled.m_Values.emplace( pSetting->m_szName, pSetting->Default() );
+					}
 				}
 				compiled.m_flStartFadeIn = compiled.Number( "operator start fadein" );
 				compiled.m_flEndFadeIn = compiled.Number( "operator end fadein" );
@@ -1524,10 +1484,10 @@ void CSimulation::Initialize( Instance_t &instance, Particle_t &p, const CCompil
 		const CVec3 vecValue = randomVector( op.Vector( "min" ), op.Vector( "max" ), 1 );
 		SetVectorField( p, nField, nField == FIELD_POSITION ? p.m_vecPosition + vecValue : vecValue, true );
 	}
-	else if ( f == "Inherit Velocity" || f == "Velocity Inherit from Control Point" )
+	else if ( f == "Velocity Inherit from Control Point" )
 	{
 		// Some of how fast the control point is moving (when it is dragged).
-		const int nPoint = op.Integer( "control point number", op.Integer( "control_point_number" ) );
+		const int nPoint = op.Integer( "control point number" );
 		p.m_vecVelocity += ( Point( nPoint ) - PreviousPoint( nPoint ) ) * ( op.Number( "velocity scale", 1.0f ) / STEP );
 	}
 	else if ( f == "Remap Particle Count to Scalar" )

@@ -11,6 +11,8 @@ add_library(vomit_tools_core STATIC
         material/Preview.h
         model/Model.cpp
         model/Model.h
+        particles/Builtin.cpp
+        particles/Builtin.h
         particles/Names.cpp
         particles/Names.h
         particles/Particles.cpp

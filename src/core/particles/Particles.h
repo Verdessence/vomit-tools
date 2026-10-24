@@ -79,9 +79,10 @@ struct ChildLink_t
 };
 [[nodiscard]] std::vector<ChildLink_t> Children( const dmx::Document_t &document, std::int32_t nSystem );
 
-// What the game's own files use: every operator function with its attributes, and the system
-// properties. A value is the one used most often, which stands in for the default (Valve's editor
-// writes every attribute, defaults included).
+// The functions a system can use, with their attributes, and the system properties. The game's
+// built-in functions (Builtin.h) have every setting the game reads, with the game's defaults.
+// Other functions come from the files: their values are the ones used most often, which stand in
+// for defaults (Valve's editor writes every attribute, defaults included).
 struct AttributeInfo_t
 {
 	std::string m_szName;
@@ -92,21 +93,27 @@ struct CFunctionInfo
 {
 	Category_t m_nCategory = Category_t::CATEGORY_OPERATORS;
 	std::string m_szName;
-	std::vector<AttributeInfo_t> m_Attributes; // in the order the files have them
+	std::vector<AttributeInfo_t> m_Attributes; // the game's order for a built-in, else the files'
 	int m_nUses = 0;
+	bool m_bBuiltin = false;
 
+	// Ignoring case, as the game does.
 	[[nodiscard]] const AttributeInfo_t *Attribute( std::string_view szAttributeName ) const;
 };
 
 class CSchema
 {
 public:
+	// Starts with the built-in functions and the system's settings.
+	CSchema();
+
 	// Collects one file. Call finish() once every file is in.
 	void Add( const dmx::Document_t &document );
 	void Finish();
 
-	[[nodiscard]] bool Empty() const { return m_Functions.empty(); }
+	[[nodiscard]] bool Empty() const { return m_nFiles == 0; }
 	[[nodiscard]] int GetFileCount() const { return m_nFiles; }
+	// A function by name, ignoring case as the game does, older names included.
 	[[nodiscard]] const CFunctionInfo *Function( Category_t nCategory, std::string_view szName ) const;
 	// A category's functions, most used first.
 	[[nodiscard]] std::vector<const CFunctionInfo *> Functions( Category_t nCategory ) const;
@@ -134,9 +141,9 @@ private:
 	};
 	static std::vector<AttributeInfo_t> MostCommon( const std::map<std::string, Tally_t> &tallies );
 	static void Count( std::map<std::string, Tally_t> &tallies, const dmx::CElement &element );
+	[[nodiscard]] CFunctionInfo *Find( Category_t nCategory, std::string_view szName );
 
 	std::map<std::pair<Category_t, std::string>, Collected_t> m_Collected;
-	std::map<std::string, Tally_t> m_SystemTallies;
 	std::vector<CFunctionInfo> m_Functions;
 	std::vector<AttributeInfo_t> m_System;
 	std::map<std::string, std::string> m_SystemFiles;
@@ -150,8 +157,7 @@ private:
 [[nodiscard]] std::string UniqueSystemName( const dmx::Document_t &document, std::string_view szBase );
 // An empty particle file: a root with an empty system list, binary encoding 2, format pcf 1.
 [[nodiscard]] dmx::Document_t EmptyFile();
-// A new system at the end of the root's list, with the schema's properties (or a basic set when
-// the schema is empty).
+// A new system at the end of the root's list, with the system's settings at the game's defaults.
 std::int32_t AddSystem( dmx::Document_t &document, std::string_view szName, const CSchema &schema );
 // A copy of a system with its own copies of operators and child links (child systems are shared).
 std::int32_t DuplicateSystem( dmx::Document_t &document, std::int32_t nSystem, std::string_view szName );
@@ -160,7 +166,8 @@ void RemoveSystem( dmx::Document_t &document, std::int32_t nSystem );
 // Renames a system and everything naming it in this file: child links and
 // cull_replacement_definition.
 void RenameSystem( dmx::Document_t &document, std::int32_t nSystem, std::string_view szName );
-// Adds an operator with the function's attributes at position (the end when nullopt).
+// Adds an operator with the function's attributes at position (the end when nullopt): for a
+// built-in, every setting at the game's default, as Valve's editor writes it.
 std::int32_t AddOperator( dmx::Document_t &document, std::int32_t nSystem, Category_t nCategory, const CFunctionInfo &function,
 	std::optional<std::size_t> position = std::nullopt );
 // "Set Control Point Positions" places up to four control points, one per slot: "<slot> Control

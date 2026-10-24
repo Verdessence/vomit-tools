@@ -41,6 +41,8 @@ struct CCompiledOperator
 	Category_t m_nCategory = Category_t::CATEGORY_OPERATORS;
 	std::string m_szFunction; // its current name, whatever name or case the file uses
 	std::int32_t m_nElement = -1; // in the document it came from
+	// A built-in function has every setting it reads here: those the file leaves out hold the
+	// game's defaults, as the game reads them. The fallbacks below only matter for other functions.
 	std::map<std::string, dmx::Value_t, CLessNoCase> m_Values;
 	bool m_bSimulated = false;
 	// The window of system time the operator works in (all zero: always).
@@ -73,7 +75,6 @@ struct CDefinition
 	std::string m_szMaterial;
 	CVec3 m_vecBoundsMin{ -10, -10, -10 };
 	CVec3 m_vecBoundsMax{ 10, 10, 10 };
-	int m_nBoundsControlPoint = 0; // the box is around this control point
 	bool m_bSort = true;
 	std::vector<CCompiledOperator> operators; // every category, each in its own order
 	struct Child_t
@@ -98,8 +99,8 @@ struct CLibrary
 
 // Every function the preview runs, by category and current name.
 [[nodiscard]] std::vector<std::pair<Category_t, std::string_view>> PreviewedFunctions();
-// A function's current name: files may spell it in another case, or by the older name an early
-// editor gave it ("basic_movement" for Movement Basic). Unknown names come back as they are.
+// A function's current name: files may spell it in another case, or by an older name the game
+// still takes ("basic_movement" for Movement Basic). Unknown names come back as they are.
 [[nodiscard]] std::string_view CurrentFunctionName( Category_t nCategory, std::string_view szFunction );
 // Whether the preview runs this function (by any of its names). Others are left out (and shown as
 // such).
