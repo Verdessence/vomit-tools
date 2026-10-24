@@ -114,18 +114,6 @@ struct VtfResource_t
 };
 inline constexpr std::array<std::uint8_t, 3> SHEET_RESOURCE{ 0x10, 0, 0 }; // sprite sheet sequences
 
-// Light values as an HDR texture holds them: linear, not clamped, red, green, blue and alpha per
-// pixel, rows from the top.
-struct CFloatImage
-{
-	int m_nWidth = 0;
-	int m_nHeight = 0;
-	std::vector<float> m_Pixels; // width * height * 4
-
-	[[nodiscard]] bool Empty() const { return m_nWidth <= 0 || m_nHeight <= 0; }
-	[[nodiscard]] const float *Pixel( int x, int y ) const { return m_Pixels.data() + ( static_cast<std::size_t>( y ) * static_cast<std::size_t>( m_nWidth ) + static_cast<std::size_t>( x ) ) * 4; }
-};
-
 struct CVtf
 {
 	VtfInfo_t m_Info;
@@ -135,6 +123,8 @@ struct CVtf
 
 	// The data of a resource; empty if the file has none with that tag, or it is cut off.
 	[[nodiscard]] std::span<const std::byte> Resource( std::array<std::uint8_t, 3> tag ) const;
+	// The thumbnail's bytes (in m_Info.m_nLowResFormat); empty when there is none.
+	[[nodiscard]] std::span<const std::byte> LowRes() const;
 
 	// The bytes of one image: mip 0 is full size. Empty if out of range.
 	[[nodiscard]] std::span<const std::byte> Image( int nMip = 0, int nFrame = 0, int nFace = 0, int nSlice = 0 ) const;
@@ -153,20 +143,105 @@ struct CVtf
 [[nodiscard]] std::optional<CFloatImage> DecodeFloat( VtfFormat_t nFormat, int nWidth, int nHeight, std::span<const std::byte> data, std::string *pError = nullptr );
 // The formats whose values can go above 1.
 [[nodiscard]] bool IsFloatFormat( VtfFormat_t nFormat );
-// RGBA8 to raw image data. Writes DXT1, DXT5, BGR888, RGB888, BGRA8888, RGBA8888 and BGRX8888.
+// RGBA8 to raw image data, in every format but P8. Float formats take the pixels as sRGB.
 [[nodiscard]] std::vector<std::byte> EncodeImage( const CImage &image, VtfFormat_t nFormat );
+// Light values to raw image data: the float formats keep values above 1; the others are clamped
+// and go through 8 bits.
+[[nodiscard]] std::vector<std::byte> EncodeFloat( const CFloatImage &image, VtfFormat_t nFormat );
 [[nodiscard]] bool CanEncode( VtfFormat_t nFormat );
+// Whether a format keeps an alpha channel (DXT1_ONEBITALPHA and the bluescreen formats keep one
+// bit).
+[[nodiscard]] bool HasAlpha( VtfFormat_t nFormat );
+
+// sRGB 8-bit to light values and back; alpha stays straight.
+[[nodiscard]] CFloatImage ToFloat( const CImage &image );
+[[nodiscard]] CImage ToEightBit( const CFloatImage &image );
+// The next mipmap level of light values: each pixel the average of up to four.
+[[nodiscard]] CFloatImage HalfSize( const CFloatImage &image );
+
+// The alpha flags Valve's tools set: ONEBITALPHA when every pixel is clear or solid and some are
+// clear, EIGHTBITALPHA when some are in between, none when all are solid.
+[[nodiscard]] std::uint32_t AlphaFlags( std::span<const CImage> images );
+
+// A 7.3+ resource carried into a written file as it is: one with data (a sprite sheet, KVD text)
+// or, with NO_DATA, a value of its own (CRC, LOD settings).
+struct VtfExtraResource_t
+{
+	std::array<std::uint8_t, 3> m_Tag{};
+	std::uint8_t m_nFlags = 0;
+	std::uint32_t m_nValue = 0;
+	std::vector<std::byte> m_Data{};
+};
+inline constexpr std::array<std::uint8_t, 3> LOW_RES_RESOURCE{ 0x01, 0, 0 };
+inline constexpr std::array<std::uint8_t, 3> IMAGE_RESOURCE{ 0x30, 0, 0 };
+
+// The resources of a file other than its two images, to carry into a rewrite.
+[[nodiscard]] std::vector<VtfExtraResource_t> ExtraResources( const CVtf &vtf );
+
+// How each mipmap is made from the one above.
+enum class MipFilter_t
+{
+	MIP_FILTER_BOX,      // each texel the average of four: soft, never rings
+	MIP_FILTER_TRIANGLE, // a little wider than box
+	MIP_FILTER_MITCHELL, // sharper, little ringing
+	MIP_FILTER_KAISER,   // sharpest (a windowed sinc, as NVIDIA's tools use); can ring at hard edges
+};
+
+// The next mipmap level of light values with a filter. Edges wrap (as the texture repeats) on a
+// side where bWrap says so, else the edge texels carry on.
+[[nodiscard]] CFloatImage HalfSize( const CFloatImage &image, MipFilter_t nFilter, bool bWrapX, bool bWrapY );
 
 struct VtfWriteOptions_t
 {
-	VtfFormat_t m_nFormat = VtfFormat_t::DXT1; // see encodeImage
+	VtfFormat_t m_nFormat = VtfFormat_t::DXT1; // see EncodeImage
 	std::uint32_t m_nFlags = 0;
 	bool m_bMipmaps = true;  // every level down to 1x1; otherwise only the image itself
 	bool m_bLowRes = true;   // the small DXT1 copy (16x16 at most) that tools show as a thumbnail
-	int m_nVersionMinor = 2; // 7.1 or 7.2
+	int m_nVersionMinor = 2; // 7.1 to 7.5; 7.3 on have a resource list
+	int m_nFirstFrame = 0;
+	float m_flBumpScale = 1.0f;
+	std::vector<VtfExtraResource_t> m_Resources{}; // 7.3+ only; left out of older versions
+	int m_nDepth = 1;         // slices of a volume texture (7.2+): each face's pictures, in order
+	bool m_bNormalMap = false; // mipmaps average directions and make them one long again
+	MipFilter_t m_nMipFilter = MipFilter_t::MIP_FILTER_BOX; // wraps unless CLAMPS / CLAMPT
 };
 
 // The image's width and height don't have to be powers of two, but the game expects them to be.
 [[nodiscard]] std::vector<std::byte> WriteVtf( const CImage &image, const VtfWriteOptions_t &options );
+// Several images, all the same size: frame after frame, each with nFaces faces (6 for a cube map,
+// stored rt lf bk ft up dn). A cube map gets ENVMAP, and before 7.5 the seventh (sphere map) face
+// those versions have, left black. Empty if the images don't fit together.
+[[nodiscard]] std::vector<std::byte> WriteVtf( std::span<const CImage> images, int nFaces, const VtfWriteOptions_t &options );
+// The same from light values, for the float formats (HDR).
+[[nodiscard]] std::vector<std::byte> WriteVtf( std::span<const CFloatImage> images, int nFaces, const VtfWriteOptions_t &options );
+
+// What becomes of the thumbnail when the header is rewritten.
+enum class LowResEdit_t
+{
+	LOW_RES_EDIT_KEEP,
+	LOW_RES_EDIT_REMOVE,
+	LOW_RES_EDIT_MAKE, // made again (DXT1) from the full-size image
+};
+
+// Changes to a VTF that leave its pictures as they are: RewriteVtf copies the image data rather
+// than encoding it again.
+struct VtfHeaderEdit_t
+{
+	int m_nVersionMinor = 2;
+	std::uint32_t m_nFlags = 0; // ENVMAP follows the file whatever this says
+	int m_nFirstFrame = 0;
+	float m_flBumpScale = 1.0f;
+	std::array<float, 3> m_vecReflectivity{};
+	LowResEdit_t m_nLowRes = LowResEdit_t::LOW_RES_EDIT_KEEP;
+	std::vector<VtfExtraResource_t> m_Resources{}; // 7.3+ only
+};
+// What a header edit starts from: the file as it is.
+[[nodiscard]] VtfHeaderEdit_t HeaderOf( const CVtf &vtf );
+// The file again with another header (version, flags, first frame, bump scale, reflectivity,
+// thumbnail, resources). A cube map gains or loses the sphere map face as the version needs.
+// Empty when it can't be (a volume texture below 7.2).
+[[nodiscard]] std::vector<std::byte> RewriteVtf( const CVtf &vtf, const VtfHeaderEdit_t &edit );
+// The average colour of the first frame in linear light, as the header keeps it.
+[[nodiscard]] std::array<float, 3> Reflectivity( const CVtf &vtf );
 
 } // namespace xv::texture

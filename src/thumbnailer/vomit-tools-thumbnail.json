@@ -1,0 +1,7 @@
+{
+    "CacheThumbnail": true,
+    "KPlugin": {
+        "MimeTypes": [ "image/x-vtf" ],
+        "Name": "Valve textures (vomit-tools)"
+    }
+}

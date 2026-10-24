@@ -1,5 +1,41 @@
 # Changelog
 
+## Unreleased
+
+### Texture editor (new)
+- `.vtf` files open in their own tab, with undo. View every mipmap, frame (played at a set rate),
+  cube face (or the six unwrapped as a cross) and volume slice, each channel on its own, zoomed,
+  panned and tiled, beside the header, flags, thumbnail and resources.
+- **Import** pictures as an image, animation frames (GIF and APNG frames too), a cube map, a cube
+  map from a panorama/HDRI or a volume texture, in every format but P8 and VTF 7.1–7.5. Presets,
+  a separate format for pictures with alpha, Kaiser/Mitchell/triangle/box mipmaps, power-of-two
+  and multiple-of-4 sizes, normal maps from height (mipmaps renormalised), `$distancealpha`, strip
+  alpha, HDR pictures as light values.
+- **Convert**, **Properties** (version, flags, bump scale, reflectivity, thumbnail, KVD/LOD/sheet
+  resources, without recompressing), **Export** (one picture or all), **Copy Image**, drag and drop.
+- **Sprite Sheet**: mksheet in a window, with `.mks` in and out, and existing sheets cut back into
+  frames.
+- **File → Convert a Folder of Textures** and **File → New Texture from Pictures**.
+- New textures and materials always ask where to save (with the game's folders in the side list).
+
+### Material editor (new)
+- `.vmt` files open as text, with line numbers and broken lines marked, beside a preview redrawn as
+  you type. **Make VMT** in the texture editor starts one.
+
+### vomit-tools-cli (new)
+- `create`, `edit`, `extract`, `info` (`--kv` for KeyValues) and `thumbnail`, with `--watch`.
+- VTF thumbnails in GNOME Files, Thunar, Nemo and Caja, and in Dolphin through a KDE plugin.
+
+### Sound editor
+- **Simple interface:** keys and blocks by tidy names, values as number boxes with units,
+  from…to ranges, named lists and tick boxes.
+- One click opens a value with every choice listed, filtered as you type, and a pick goes in.
+- Short cards no longer leave space above and below their rows.
+
+### Other
+- Files opened while the app is running join its window (Preferences → Interface).
+- A RGBA16161616 texture is shown as linear light, as the float formats are.
+
 ## 0.5.0 — The Vulkan (2026-10-24)
 
 ### Preferences

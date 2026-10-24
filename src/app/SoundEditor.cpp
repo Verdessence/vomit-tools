@@ -23,6 +23,7 @@
 #include <QToolBar>
 #include <QVBoxLayout>
 
+#include "InterfaceMode.h"
 #include "KvCard.h"
 #include "SoundDocument.h"
 #include "SoundIndex.h"
@@ -202,6 +203,7 @@ CSoundEditor::CSoundEditor( CSoundDocument *pDocument, const CSoundIndex &index,
 		JumpTo( VariantToPath( pItem->data( Qt::UserRole ) ) );
 	} );
 	connect( m_pDocument, &CSoundDocument::Changed, this, &CSoundEditor::ScheduleRefresh );
+	connect( &CInterfaceMode::Instance(), &CInterfaceMode::Changed, this, &CSoundEditor::ShowEntry );
 
 	// Open on the first entry.
 	for ( std::size_t i = 0; i < m_pDocument->GetDocument().m_Roots.size(); i++ )
@@ -367,6 +369,8 @@ void CSoundEditor::ShowEntry()
 {
 	const int nScroll = m_pScroll->verticalScrollBar()->value();
 	const bool bSameEntry = m_pCard && m_Current && m_pCard->GetPath() == NodePath_t{ *m_Current };
+	// A value box being stepped through keeps the keyboard across the rebuild.
+	const auto focused = bSameEntry ? m_pCard->GetFocusedValue() : std::nullopt;
 
 	auto *pHost = new QWidget;
 	auto *pLayout = new QVBoxLayout( pHost );
@@ -391,7 +395,13 @@ void CSoundEditor::ShowEntry()
 
 	if ( bSameEntry )
 	{
-		QTimer::singleShot( 0, this, [ this, nScroll ] { m_pScroll->verticalScrollBar()->setValue( nScroll ); } );
+		QTimer::singleShot( 0, this, [ this, nScroll, focused ] {
+			m_pScroll->verticalScrollBar()->setValue( nScroll );
+			if ( focused && m_pCard )
+			{
+				m_pCard->FocusValue( focused->first, focused->second );
+			}
+		} );
 	}
 	if ( m_PendingEdit && m_pCard )
 	{

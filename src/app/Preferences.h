@@ -27,6 +27,11 @@ public:
 	[[nodiscard]] GraphicsApi_t GetGraphicsApi() const { return m_nGraphicsApi; }
 	void SetGraphicsApi( GraphicsApi_t nApi );
 
+	// Whether files opened from outside (a file manager, the command line) join the window
+	// already open rather than starting another.
+	[[nodiscard]] bool IsSingleWindow() const { return m_bSingleWindow; }
+	void SetSingleWindow( bool bSingle );
+
 signals:
 	void GridAnimationChanged( bool bAll );
 
@@ -35,4 +40,5 @@ private:
 
 	bool m_bGridAnimatingAll = false;
 	GraphicsApi_t m_nGraphicsApi = GraphicsApi_t::GRAPHICS_API_AUTO;
+	bool m_bSingleWindow = true;
 };

@@ -215,6 +215,27 @@ PlainName_t CNames::Shader( std::string_view szShader ) const
 //-----------------------------------------------------------------------------
 // Purpose:
 //-----------------------------------------------------------------------------
+std::string CNames::Sound( std::string_view szKey ) const
+{
+	const std::string *pName = Token( "snd:" + std::string{ szKey } );
+	return pName ? *pName : TidyName( szKey );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: A texture flag, format or resource ("flag:CLAMPS" is "Clamp S"), and what it does.
+//-----------------------------------------------------------------------------
+PlainName_t CNames::Texture( std::string_view szKey ) const
+{
+	const std::string szToken = "vtf:" + std::string{ szKey };
+	const std::string *pName = Token( szToken );
+	const std::string *pTip = Token( szToken + "#tip" );
+	const std::size_t nColon = szKey.rfind( ':' );
+	return { pName ? *pName : std::string{ szKey.substr( nColon == std::string_view::npos ? 0 : nColon + 1 ) }, pTip ? *pTip : std::string{} };
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
 const std::vector<NamedValue_t> &CNames::Choices( std::string_view szAttribute ) const
 {
 	static const std::vector<NamedValue_t> none;

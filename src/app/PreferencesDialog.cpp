@@ -116,6 +116,14 @@ QWidget *CPreferencesDialog::BuildInterfacePage()
 	pLayout->addWidget( Hint( tr( "Plain names with a line on what each setting does, easier ways to type values, and advanced "
 								  "settings tucked away while they have their usual value. Off: the files' own names and every "
 								  "setting. Either way the files are edited the same. View → Simple Interface switches it too." ) ) );
+	auto *pSingle = new QCheckBox( tr( "Open files in the window already open" ) );
+	pSingle->setObjectName( QStringLiteral( "preferencesSingleWindow" ) );
+	pSingle->setChecked( CPreferences::Instance().IsSingleWindow() );
+	connect( pSingle, &QCheckBox::toggled, this, []( bool bOn ) { CPreferences::Instance().SetSingleWindow( bOn ); } );
+	pLayout->addSpacing( 12 );
+	pLayout->addWidget( pSingle );
+	pLayout->addWidget( Hint( tr( "Files opened from a file manager or the command line become tabs in the running window "
+								  "instead of starting another. Takes effect from the next start." ) ) );
 	pLayout->addStretch();
 	return pPage;
 }
@@ -158,7 +166,7 @@ QWidget *CPreferencesDialog::BuildGraphicsPage()
 	} );
 	auto *pForm = new QFormLayout;
 	pForm->setContentsMargins( 0, 0, 0, 0 );
-	pForm->addRow( tr( "Draw previews with" ), pApis );
+	pForm->addRow( tr( "Graphics Backend" ), pApis );
 	QVBoxLayout *pLayout = PageLayout( pPage );
 	pLayout->addLayout( pForm );
 	pLayout->addWidget( Hint( tr( "The sky, material and particle previews and the particle grid draw on the graphics card "
@@ -176,14 +184,12 @@ QWidget *CPreferencesDialog::BuildGraphicsPage()
 QWidget *CPreferencesDialog::BuildParticlesPage()
 {
 	auto *pPage = new QWidget;
-	auto *pAll = new QCheckBox( tr( "Animate every system in the grid" ) );
+	auto *pAll = new QCheckBox( tr( "Animate every system in the grid preview" ) );
 	pAll->setObjectName( QStringLiteral( "preferencesGridAnimation" ) );
 	pAll->setChecked( CPreferences::Instance().IsGridAnimatingAll() );
 	connect( pAll, &QCheckBox::toggled, this, []( bool bOn ) { CPreferences::Instance().SetGridAnimatingAll( bOn ); } );
 	QVBoxLayout *pLayout = PageLayout( pPage );
 	pLayout->addWidget( pAll );
-	pLayout->addWidget( Hint( tr( "Off: the selected system plays in the grid and the others show a still picture. On: every "
-								  "system in view plays, which takes more of the computer." ) ) );
 	pLayout->addStretch();
 	return pPage;
 }

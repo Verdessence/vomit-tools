@@ -1045,7 +1045,7 @@ bool IsCubeMap( const texture::CVtf &vtf )
 }
 
 //-----------------------------------------------------------------------------
-// Purpose: One face of a cube map, turned into the way a sky face is drawn.
+// Purpose: How a cube map's faces are stored.
 //
 //          The faces are stored in the order rt lf bk ft up dn (the names Valve's tools give the
 //          six images a cube map is built from). How each is turned was found from the files: the
@@ -1055,23 +1055,93 @@ bool IsCubeMap( const texture::CVtf &vtf )
 //          user's WindowImposter sky stands upright all round. Quarter turns are clockwise, the
 //          mirror (left to right) comes after the turn, as texture::Oriented does them.
 //-----------------------------------------------------------------------------
-std::optional<CImage> CubeMapFace( const texture::CVtf &vtf, Face_t nFace, std::string *pError )
+namespace
 {
-	struct Stored_t
+
+// Where each sky face is stored in a cube map, and how far it is turned there (it is mirrored
+// too), as the note above says.
+struct Stored_t
+{
+	int m_nIndex;
+	int m_nQuarterTurns;
+};
+constexpr std::array<Stored_t, 6> STORED{ {
+	{ 0, 1 }, // rt
+	{ 2, 2 }, // bk
+	{ 1, 3 }, // lf
+	{ 3, 0 }, // ft
+	{ 4, 1 }, // up
+	{ 5, 1 }, // dn
+} };
+
+} // namespace
+
+//-----------------------------------------------------------------------------
+// Purpose: A cube map's faces from an equirectangular panorama, as the VTF stores them.
+//-----------------------------------------------------------------------------
+std::vector<texture::CFloatImage> CubeMapFromPanorama( const texture::CFloatImage &panorama, int nSize, float flYaw )
+{
+	std::vector<texture::CFloatImage> stored( 6 );
+	if ( panorama.Empty() || nSize <= 0 )
 	{
-		int m_nIndex;
-		int m_nQuarterTurns;
+		return {};
+	}
+	const float flTurn = flYaw * std::numbers::pi_v<float> / 180.0f;
+	// Bilinear, wrapping round the sides.
+	const auto sample = [ &panorama ]( float u, float v, float *pOut ) {
+		const float x = u * static_cast<float>( panorama.m_nWidth ) - 0.5f;
+		const float y = std::clamp( v * static_cast<float>( panorama.m_nHeight ) - 0.5f, 0.0f, static_cast<float>( panorama.m_nHeight - 1 ) );
+		const int x0 = static_cast<int>( std::floor( x ) );
+		const int y0 = static_cast<int>( std::floor( y ) );
+		const float fx = x - static_cast<float>( x0 );
+		const float fy = y - static_cast<float>( y0 );
+		const auto at = [ &panorama ]( int px, int py ) {
+			px = ( ( px % panorama.m_nWidth ) + panorama.m_nWidth ) % panorama.m_nWidth;
+			py = std::clamp( py, 0, panorama.m_nHeight - 1 );
+			return panorama.Pixel( px, py );
+		};
+		for ( int c = 0; c < 4; c++ )
+		{
+			const float flTop = at( x0, y0 )[ c ] * ( 1 - fx ) + at( x0 + 1, y0 )[ c ] * fx;
+			const float flBottom = at( x0, y0 + 1 )[ c ] * ( 1 - fx ) + at( x0 + 1, y0 + 1 )[ c ] * fx;
+			pOut[ c ] = flTop * ( 1 - fy ) + flBottom * fy;
+		}
 	};
-	static constexpr std::array<Stored_t, 6> STORED{ {
-		{ 0, 1 }, // rt
-		{ 2, 2 }, // bk
-		{ 1, 3 }, // lf
-		{ 3, 0 }, // ft
-		{ 4, 1 }, // up
-		{ 5, 1 }, // dn
-	} };
+	for ( const Face_t nFace : FACES )
+	{
+		// The face as the sky sees it, then turned and mirrored back to how the VTF stores it.
+		const FaceBasis_t &basis = Basis( nFace );
+		texture::CFloatImage face;
+		face.m_nWidth = nSize;
+		face.m_nHeight = nSize;
+		face.m_Pixels.resize( static_cast<std::size_t>( nSize ) * static_cast<std::size_t>( nSize ) * 4 );
+		for ( int y = 0; y < nSize; y++ )
+		{
+			for ( int x = 0; x < nSize; x++ )
+			{
+				const float u = ( static_cast<float>( x ) + 0.5f ) / static_cast<float>( nSize ) * 2.0f - 1.0f;
+				const float v = 1.0f - ( static_cast<float>( y ) + 0.5f ) / static_cast<float>( nSize ) * 2.0f;
+				const CVec3 vecDirection = basis.m_vecNormal + basis.m_vecRight * u + basis.m_vecUp * v;
+				const float flAround = std::atan2( vecDirection.m_flY, vecDirection.m_flX ) + flTurn;
+				const float flUp = std::atan2( vecDirection.m_flZ, std::sqrt( vecDirection.m_flX * vecDirection.m_flX + vecDirection.m_flY * vecDirection.m_flY ) );
+				float flU = 0.5f - flAround / ( 2.0f * std::numbers::pi_v<float> );
+				flU -= std::floor( flU );
+				sample( flU, 0.5f - flUp / std::numbers::pi_v<float>, face.m_Pixels.data() + ( static_cast<std::size_t>( y ) * static_cast<std::size_t>( nSize ) + static_cast<std::size_t>( x ) ) * 4 );
+			}
+		}
+		const Stored_t &where = STORED[ IndexOf( nFace ) ];
+		stored[ static_cast<std::size_t>( where.m_nIndex ) ] = texture::Oriented( texture::Oriented( face, 0, true ), 4 - where.m_nQuarterTurns, false );
+	}
+	return stored;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: One face of a cube map as a sky face image.
+//-----------------------------------------------------------------------------
+std::optional<CImage> CubeMapFace( const texture::CVtf &vtf, Face_t nFace, std::string *pError, int nMip, int nFrame )
+{
 	const Stored_t &stored = STORED[ IndexOf( nFace ) ];
-	auto image = vtf.Decode( 0, 0, stored.m_nIndex, pError );
+	auto image = vtf.Decode( nMip, nFrame, stored.m_nIndex, pError );
 	if ( !image )
 	{
 		return std::nullopt;

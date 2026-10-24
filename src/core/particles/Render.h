@@ -19,33 +19,15 @@
 
 #include "particles/Simulation.h"
 #include "texture/Image.h"
+#include "texture/Sheet.h"
 #include "util/Vec3.h"
 
 namespace xv::particles
 {
 
-// The sequences of a sprite sheet (the VTF's sheet resource): which part of the texture each frame
-// of an animation shows.
-struct CSheet
-{
-	struct Frame_t
-	{
-		float m_flDuration = 0.0f;
-		std::array<float, 4> m_Rect{ 0, 0, 1, 1 }; // left, top, right, bottom, 0-1
-	};
-	struct Sequence_t
-	{
-		int m_nNumber = 0;
-		bool m_bClamp = false; // holds the last frame instead of looping
-		float m_flTotalTime = 0.0f;
-		std::vector<Frame_t> m_Frames;
-	};
-	std::vector<Sequence_t> m_Sequences;
-
-	[[nodiscard]] const Sequence_t *Sequence( int nNumber ) const;
-};
-// Input is untrusted; nullopt if the data doesn't add up.
-[[nodiscard]] std::optional<CSheet> ReadSheet( std::span<const std::byte> data );
+// Sprite sheets live with textures (texture/Sheet.h); the preview reads them from there.
+using texture::CSheet;
+using texture::ReadSheet;
 
 // A material as the preview draws it.
 struct Sprite_t

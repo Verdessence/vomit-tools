@@ -469,67 +469,6 @@ float GridSpacing( const CCamera &camera )
 }
 
 //-----------------------------------------------------------------------------
-// Purpose:
-//-----------------------------------------------------------------------------
-const CSheet::Sequence_t *CSheet::Sequence( int nNumber ) const
-{
-	const auto it = std::ranges::find( m_Sequences, nNumber, &Sequence_t::m_nNumber );
-	return it == m_Sequences.end() ? nullptr : &*it;
-}
-
-//-----------------------------------------------------------------------------
-// Purpose: Input is untrusted; nullopt if the data doesn't add up.
-//-----------------------------------------------------------------------------
-std::optional<CSheet> ReadSheet( std::span<const std::byte> data )
-{
-	if ( data.size() < 8 )
-	{
-		return std::nullopt;
-	}
-	const auto nVersion = ReadAt<std::int32_t>( data, 0 );
-	const auto nCount = ReadAt<std::int32_t>( data, 4 );
-	if ( nVersion < 0 || nVersion > 1 || nCount < 0 || nCount > 4096 )
-	{
-		return std::nullopt;
-	}
-	// Version 1 stores four texture rects per frame (for blending sequences); the first is the image.
-	const std::size_t nSamples = nVersion == 0 ? 1 : 4;
-	CSheet sheet;
-	std::size_t nAt = 8;
-	for ( int i = 0; i < nCount; i++ )
-	{
-		if ( data.size() - nAt < 16 )
-		{
-			return std::nullopt;
-		}
-		CSheet::Sequence_t sequence;
-		sequence.m_nNumber = ReadAt<std::int32_t>( data, nAt );
-		sequence.m_bClamp = ReadAt<std::uint32_t>( data, nAt + 4 ) != 0;
-		const auto nFrames = ReadAt<std::int32_t>( data, nAt + 8 );
-		sequence.m_flTotalTime = ReadAt<float>( data, nAt + 12 );
-		nAt += 16;
-		const std::size_t nFrameSize = 4 + 16 * nSamples;
-		if ( nFrames < 0 || static_cast<std::size_t>( nFrames ) > ( data.size() - nAt ) / nFrameSize )
-		{
-			return std::nullopt;
-		}
-		for ( int f = 0; f < nFrames; f++ )
-		{
-			CSheet::Frame_t frame;
-			frame.m_flDuration = ReadAt<float>( data, nAt );
-			for ( std::size_t c = 0; c < 4; c++ )
-			{
-				frame.m_Rect[ c ] = ReadAt<float>( data, nAt + 4 + c * 4 );
-			}
-			sequence.m_Frames.push_back( frame );
-			nAt += nFrameSize;
-		}
-		sheet.m_Sequences.push_back( std::move( sequence ) );
-	}
-	return sheet;
-}
-
-//-----------------------------------------------------------------------------
 // Purpose: The soft dot drawn for missing textures.
 //-----------------------------------------------------------------------------
 Sprite_t FallbackSprite()

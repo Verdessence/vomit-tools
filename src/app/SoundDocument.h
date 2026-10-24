@@ -68,7 +68,8 @@ private:
 	friend class CRemoveEntryCommand;
 
 	// Applies edit to a copy of top-level entry rootIndex and pushes the swap as one undo step.
-	void EditEntry( std::size_t nRootIndex, const QString &szDescription, const std::function<bool( xv::kv1::CNode &entry )> &pfnEdit );
+	// Edits with the same non-empty merge key in a row become one undo step.
+	void EditEntry( std::size_t nRootIndex, const QString &szDescription, const std::function<bool( xv::kv1::CNode &entry )> &pfnEdit, const QString &szMergeKey = {} );
 
 	QString m_szGamePath;
 	xv::sound::FileKind_t m_nKind;

@@ -4,11 +4,14 @@
 //===========================================================================//
 #include <QApplication>
 #include <QCommandLineParser>
+#include <QFileInfo>
 #include <QSettings>
 
 #include "AboutDialog.h"
 #include "Graphics.h"
 #include "MainWindow.h"
+#include "Preferences.h"
+#include "SingleInstance.h"
 
 //-----------------------------------------------------------------------------
 // Purpose:
@@ -31,10 +34,32 @@ int main( int nArgc, char *argv[] )
 	parser.addOption( edit );
 	parser.process( app );
 
+	// Files go to the window already open, when there is one.
+	CSingleInstance instance;
+	const bool bSingle = CPreferences::Instance().IsSingleWindow();
+	QStringList absolute;
+	for ( const QString &szPath : parser.positionalArguments() )
+	{
+		absolute << QFileInfo{ szPath }.absoluteFilePath();
+	}
+	if ( bSingle && parser.values( edit ).isEmpty() && instance.SendToRunning( absolute ) )
+	{
+		return 0;
+	}
+
 	// What the previews draw with, settled before any of them is made.
 	static_cast<void>( CGraphics::Instance() );
 	CMainWindow window;
 	window.show();
+	if ( bSingle )
+	{
+		instance.Listen( [ &window ]( const QStringList &paths ) {
+			window.OpenPaths( paths );
+			window.setWindowState( ( window.windowState() & ~Qt::WindowMinimized ) | Qt::WindowActive );
+			window.raise();
+			window.activateWindow();
+		} );
+	}
 
 	const QStringList paths = parser.positionalArguments();
 	if ( paths.isEmpty() )

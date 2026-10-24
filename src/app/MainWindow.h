@@ -36,6 +36,9 @@ class CSkyEditor;
 class CSoundDocument;
 class CSoundEditor;
 class CSoundPlayer;
+class CMaterialEditor;
+class CTextureDocument;
+class CTextureEditor;
 class CVfsModel;
 
 class CMainWindow : public QMainWindow
@@ -66,6 +69,14 @@ public:
 	CSkyEditor *OpenSkyFiles( const xv::sky::CSkyFiles &files );
 	// Opens a particle file from the mounted game ("particles/fire_01.pcf") in an editor tab.
 	CParticleEditor *OpenParticleFile( const QString &szGamePath );
+	// Opens a texture from the mounted game ("materials/x.vtf") in an editor tab.
+	CTextureEditor *OpenTextureFile( const QString &szGamePath );
+	// Makes a new texture from pictures on disk, after asking how (File > New Texture).
+	CTextureEditor *NewTextureFromFiles( const QStringList &files );
+	// Opens a material from the mounted game ("materials/x.vmt") in an editor tab.
+	CMaterialEditor *OpenMaterialFile( const QString &szGamePath );
+	// A new, unsaved material for a texture, after asking which shader and so on.
+	CMaterialEditor *MakeMaterialFor( CTextureEditor *pEditor );
 	// Shows the search over every particle system, with query typed in.
 	CParticleSearch *FindParticleSystem( const QString &szQuery = {} );
 	// Edit > Preferences: one window, raised again when it is already open.
@@ -106,6 +117,24 @@ private:
 	bool ConfirmClose( CSoundEditor *pEditor );
 	bool ConfirmClose( CSkyEditor *pEditor );
 	bool ConfirmClose( CParticleEditor *pEditor );
+	bool ConfirmClose( CTextureEditor *pEditor );
+	CTextureEditor *AddTextureEditor( CTextureDocument *pDocument );
+	bool Save( CTextureEditor *pEditor );
+	bool SaveAs( CTextureEditor *pEditor );
+	bool WriteTexture( CTextureEditor *pEditor, const std::filesystem::path &target );
+	// The Save As window, starting at start, with the game's write and materials folders, the
+	// open folder and extra (the pictures' folder...) in its side list. Empty when cancelled;
+	// pFilter in: the type picked first, out: the type picked.
+	[[nodiscard]] QString AskSavePath( const std::filesystem::path &start, const QString &szFilters, QString *pFilter = nullptr, const std::filesystem::path &extra = {} );
+	void ChooseNewTexture();
+	void ChooseBatchConvert();
+	CMaterialEditor *AddMaterialEditor( CMaterialEditor *pEditor );
+	bool Save( CMaterialEditor *pEditor );
+	bool SaveAs( CMaterialEditor *pEditor );
+	bool WriteMaterial( CMaterialEditor *pEditor, const std::filesystem::path &target );
+	bool ConfirmClose( CMaterialEditor *pEditor );
+	// The surface properties the mounted game knows ($surfaceprop values).
+	[[nodiscard]] QStringList SurfaceProps() const;
 	void NewParticleFile();
 	CParticleEditor *AddParticleEditor( CParticleDocument *pDocument );
 	bool Save( CParticleEditor *pEditor );
@@ -135,6 +164,11 @@ private:
 	[[nodiscard]] CSoundEditor *GetCurrentEditor() const;
 	[[nodiscard]] CSkyEditor *GetCurrentSky() const;
 	[[nodiscard]] CParticleEditor *GetCurrentParticles() const;
+	[[nodiscard]] CTextureEditor *GetCurrentTexture() const;
+	[[nodiscard]] CMaterialEditor *GetCurrentMaterial() const;
+	[[nodiscard]] CMaterialEditor *MaterialEditorFor( const QString &szGamePath, const std::filesystem::path &disk ) const;
+	[[nodiscard]] CTextureEditor *TextureEditorFor( const QString &szGamePath ) const;
+	[[nodiscard]] CTextureEditor *TextureEditorForDisk( const std::filesystem::path &file ) const;
 	[[nodiscard]] CParticleEditor *ParticleEditorFor( const QString &szGamePath ) const;
 	[[nodiscard]] CParticleEditor *ParticleEditorForDisk( const std::filesystem::path &file ) const;
 	[[nodiscard]] CSoundEditor *EditorFor( const QString &szGamePath ) const;

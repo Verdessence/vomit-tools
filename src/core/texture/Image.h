@@ -32,16 +32,56 @@ struct CImage
 	[[nodiscard]] bool operator==( const CImage & ) const = default;
 };
 
+// Light values as an HDR texture holds them: linear, not clamped, red, green, blue and alpha per
+// pixel, rows from the top.
+struct CFloatImage
+{
+	int m_nWidth = 0;
+	int m_nHeight = 0;
+	std::vector<float> m_Pixels; // width * height * 4
+
+	[[nodiscard]] bool Empty() const { return m_nWidth <= 0 || m_nHeight <= 0; }
+	[[nodiscard]] const float *Pixel( int x, int y ) const { return m_Pixels.data() + ( static_cast<std::size_t>( y ) * static_cast<std::size_t>( m_nWidth ) + static_cast<std::size_t>( x ) ) * 4; }
+};
+
 // The extensions loadImage reads ("png", "tga", ...), lowercase and without the dot.
 [[nodiscard]] bool IsImageExtension( std::string_view szExtension );
 
-// PNG, JPEG, TGA, BMP, PSD (composited), GIF (first frame), PNM, and Radiance HDR (gamma-mapped to
-// 8 bits), recognised by content. Input is untrusted.
+// PNG, JPEG, TGA, BMP, PSD (composited), GIF (first frame), PNM, QOI, and Radiance HDR and PFM
+// (gamma-mapped to 8 bits), recognised by content. Input is untrusted.
 [[nodiscard]] std::optional<CImage> LoadImage( std::span<const std::byte> data, std::string *pError = nullptr );
+// Every frame of an animated GIF or PNG (APNG); other files, their one picture. Input is
+// untrusted.
+[[nodiscard]] std::vector<CImage> LoadImageFrames( std::span<const std::byte> data, std::string *pError = nullptr );
+
+// File types pictures can be saved as.
+enum class ImageFileType_t
+{
+	IMAGE_FILE_TYPE_PNG,
+	IMAGE_FILE_TYPE_TGA,
+	IMAGE_FILE_TYPE_BMP,
+	IMAGE_FILE_TYPE_JPG,
+	IMAGE_FILE_TYPE_HDR, // Radiance HDR: light values, from SaveFloatImage
+	IMAGE_FILE_TYPE_QOI,
+	IMAGE_FILE_TYPE_PFM, // Portable Float Map: light values, from SaveFloatImage
+};
+// The type for a file name's extension ("png", "TGA"...); PNG for anything else.
+[[nodiscard]] ImageFileType_t ImageFileTypeFor( std::string_view szExtension );
+// A picture as the bytes of an image file (JPEG at quality 95; HDR goes through light values).
+// Empty if it can't be written.
+[[nodiscard]] std::vector<std::byte> SaveImage( const CImage &image, ImageFileType_t nType );
+// Light values as a Radiance HDR (or PFM) file, keeping values above 1.
+[[nodiscard]] std::vector<std::byte> SaveFloatImage( const CFloatImage &image, ImageFileType_t nType = ImageFileType_t::IMAGE_FILE_TYPE_HDR );
+
+// A Radiance HDR or PFM file as its light values; nullopt for other files (read those with
+// LoadImage).
+[[nodiscard]] std::optional<CFloatImage> LoadFloatImage( std::span<const std::byte> data );
 
 // Resampled in linear light (the pixels are taken as sRGB), with a Mitchell filter when shrinking
 // and Catmull-Rom when enlarging.
 [[nodiscard]] CImage Resize( const CImage &image, int nWidth, int nHeight );
+// Light values resampled the same way.
+[[nodiscard]] CFloatImage Resize( const CFloatImage &image, int nWidth, int nHeight );
 
 // The next mipmap level: half the size (at least 1x1), each pixel the average of up to four, in
 // linear light.
@@ -49,6 +89,7 @@ struct CImage
 
 // Turned clockwise by quarterTurns (0-3), then mirrored left to right if mirror is set.
 [[nodiscard]] CImage Oriented( const CImage &image, int nQuarterTurns, bool bMirror );
+[[nodiscard]] CFloatImage Oriented( const CFloatImage &image, int nQuarterTurns, bool bMirror );
 
 struct COrientation
 {

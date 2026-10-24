@@ -2,6 +2,8 @@
 add_library(vomit_tools_ui STATIC
         AboutDialog.cpp
         AboutDialog.h
+        BatchConvertDialog.cpp
+        BatchConvertDialog.h
         BuildInfo.h
         ${CMAKE_CURRENT_BINARY_DIR}/BuildInfo.cpp
         FileViews.cpp
@@ -22,6 +24,10 @@ add_library(vomit_tools_ui STATIC
         KvCard.h
         MainWindow.cpp
         MainWindow.h
+        MakeMaterialDialog.cpp
+        MakeMaterialDialog.h
+        MaterialEditor.cpp
+        MaterialEditor.h
         MaterialRenderer.cpp
         MaterialRenderer.h
         MaterialView.cpp
@@ -43,6 +49,8 @@ add_library(vomit_tools_ui STATIC
         PreferencesDialog.cpp
         PreferencesDialog.h
         QtPaths.h
+        SingleInstance.cpp
+        SingleInstance.h
         SkyDocument.cpp
         SkyDocument.h
         SkyEditor.cpp
@@ -53,6 +61,8 @@ add_library(vomit_tools_ui STATIC
         SkyTestPattern.h
         SkyView.cpp
         SkyView.h
+        SheetDialog.cpp
+        SheetDialog.h
         SoundDocument.cpp
         SoundDocument.h
         SoundEditor.cpp
@@ -63,6 +73,17 @@ add_library(vomit_tools_ui STATIC
         SoundPlayer.h
         SoundValues.cpp
         SoundValues.h
+        SpinBoxes.h
+        TextureDocument.cpp
+        TextureDocument.h
+        TextureEditor.cpp
+        TextureEditor.h
+        TextureOptionsDialog.cpp
+        TextureOptionsDialog.h
+        TexturePropertiesDialog.cpp
+        TexturePropertiesDialog.h
+        TexturePresets.cpp
+        TexturePresets.h
         VfsModel.cpp
         VfsModel.h)
 target_include_directories(vomit_tools_ui PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
@@ -110,7 +131,7 @@ qt_add_resources(vomit_tools_ui "vomit_tools_data"
         PREFIX "/data"
         BASE data
         FILES data/lang_en.txt data/particle_inputs.txt)
-target_link_libraries(vomit_tools_ui PUBLIC vomit_tools::core Qt6::Widgets)
+target_link_libraries(vomit_tools_ui PUBLIC vomit_tools::core Qt6::Widgets Qt6::Network)
 vomit_tools_set_warnings(vomit_tools_ui)
 
 qt_add_executable(vomit-tools

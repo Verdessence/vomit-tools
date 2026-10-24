@@ -13,6 +13,7 @@ namespace
 
 constexpr auto GRID_ANIMATION_KEY = "particleGridAnimatesAll";
 constexpr auto GRAPHICS_KEY = "graphicsApi";
+constexpr auto SINGLE_WINDOW_KEY = "singleWindow";
 
 } // namespace
 
@@ -30,7 +31,8 @@ CPreferences &CPreferences::Instance()
 //-----------------------------------------------------------------------------
 CPreferences::CPreferences()
 	: m_bGridAnimatingAll( QSettings{}.value( GRID_ANIMATION_KEY, false ).toBool() ),
-	  m_nGraphicsApi( GraphicsApiFromKey( QSettings{}.value( GRAPHICS_KEY ).toString().toStdString() ).value_or( GraphicsApi_t::GRAPHICS_API_AUTO ) )
+	  m_nGraphicsApi( GraphicsApiFromKey( QSettings{}.value( GRAPHICS_KEY ).toString().toStdString() ).value_or( GraphicsApi_t::GRAPHICS_API_AUTO ) ),
+	  m_bSingleWindow( QSettings{}.value( SINGLE_WINDOW_KEY, true ).toBool() )
 {
 }
 
@@ -55,4 +57,13 @@ void CPreferences::SetGraphicsApi( GraphicsApi_t nApi )
 {
 	m_nGraphicsApi = nApi;
 	QSettings{}.setValue( GRAPHICS_KEY, QString::fromLatin1( GraphicsApiKey( nApi ) ) );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+void CPreferences::SetSingleWindow( bool bSingle )
+{
+	m_bSingleWindow = bSingle;
+	QSettings{}.setValue( SINGLE_WINDOW_KEY, bSingle );
 }

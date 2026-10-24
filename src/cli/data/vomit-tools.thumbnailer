@@ -1,0 +1,4 @@
+[Thumbnailer Entry]
+TryExec=vomit-tools-cli
+Exec=vomit-tools-cli thumbnail %i %o %s
+MimeType=image/x-vtf;

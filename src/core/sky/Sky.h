@@ -193,8 +193,13 @@ struct OutputFile_t
 // in the order rt lf bk ft up dn, each turned and mirrored from how a sky face is drawn. Sky.cpp
 // says how this was established.
 [[nodiscard]] bool IsCubeMap( const texture::CVtf &vtf );
-// One face of a cube map as a sky face image (the largest mip), or nullopt with error set.
-[[nodiscard]] std::optional<texture::CImage> CubeMapFace( const texture::CVtf &vtf, Face_t nFace, std::string *pError = nullptr );
+// The six faces of a cube map, in the order a VTF stores them (rt lf bk ft up dn) and turned the
+// way it stores them, from an equirectangular panorama (an HDRI): its middle looks along +X (yaw 0),
+// yaw grows to the left, its top row is straight up. flYaw turns it (degrees, to the left).
+[[nodiscard]] std::vector<texture::CFloatImage> CubeMapFromPanorama( const texture::CFloatImage &panorama, int nSize, float flYaw = 0.0f );
+// One face of a cube map as a sky face image (the largest mip unless nMip says), or nullopt with
+// error set.
+[[nodiscard]] std::optional<texture::CImage> CubeMapFace( const texture::CVtf &vtf, Face_t nFace, std::string *pError = nullptr, int nMip = 0, int nFrame = 0 );
 
 // Reading skies from a game
 // The sky names the game has materials for (every skybox/<name>rt.vmt), sorted.

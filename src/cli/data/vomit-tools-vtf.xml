@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+<mime-info xmlns="http://www.freedesktop.org/standards/shared-mime-info">
+    <mime-type type="image/x-vtf">
+        <comment>Valve texture</comment>
+        <glob pattern="*.vtf"/>
+        <magic priority="50">
+            <match type="string" value="VTF\0" offset="0"/>
+        </magic>
+    </mime-type>
+</mime-info>

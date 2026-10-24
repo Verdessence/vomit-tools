@@ -2,7 +2,7 @@ include(FetchContent)
 
 # Qt is only needed by the app and the tests; the core library is plain C++.
 if(VOMIT_TOOLS_BUILD_APP OR VOMIT_TOOLS_BUILD_TESTS)
-    find_package(Qt6 6.5 REQUIRED COMPONENTS Core Widgets Test)
+    find_package(Qt6 6.5 REQUIRED COMPONENTS Core Widgets Network Test)
     find_package(Qt6 QUIET OPTIONAL_COMPONENTS ShaderTools GuiPrivate)
     qt_standard_project_setup()
 endif()

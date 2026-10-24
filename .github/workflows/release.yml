@@ -61,6 +61,7 @@ jobs:
 
           ./linuxdeploy-x86_64.AppImage --appdir AppDir \
             --executable build/src/app/vomit-tools \
+            --executable build/src/cli/vomit-tools-cli \
             --desktop-file vomit-tools.desktop \
             --icon-file vomit-tools.svg \
             --plugin qt --output appimage

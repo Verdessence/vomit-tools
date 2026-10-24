@@ -63,6 +63,10 @@ public:
 	[[nodiscard]] PlainName_t MaterialParameter( std::string_view szKey ) const;
 	// A material shader's name ("Lightmapped Generic"), and what it is for.
 	[[nodiscard]] PlainName_t Shader( std::string_view szShader ) const;
+	// A sound file's key, block or channel by its own name ("Play Looping" for playlooping).
+	[[nodiscard]] std::string Sound( std::string_view szKey ) const;
+	// A texture flag, format or resource ("flag:CLAMPS" is "Clamp S"), and what it does.
+	[[nodiscard]] PlainName_t Texture( std::string_view szKey ) const;
 	// The named values of a setting (or material parameter) that picks from a few, in the file's
 	// order; empty for others.
 	[[nodiscard]] const std::vector<NamedValue_t> &Choices( std::string_view szAttribute ) const;

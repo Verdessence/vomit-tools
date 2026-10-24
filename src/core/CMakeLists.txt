@@ -33,8 +33,12 @@ add_library(vomit_tools_core STATIC
         sound/SoundSchema.h
         sound/Wav.cpp
         sound/Wav.h
+        texture/Build.cpp
+        texture/Build.h
         texture/Image.cpp
         texture/Image.h
+        texture/Sheet.cpp
+        texture/Sheet.h
         texture/Vtf.cpp
         texture/Vtf.h
         util/Numbers.h

@@ -11,15 +11,21 @@
 #include <optional>
 #include <vector>
 
+#include <QCheckBox>
 #include <QComboBox>
 #include <QCompleter>
+#include <QHBoxLayout>
 #include <QHeaderView>
+#include <QLabel>
 #include <QLineEdit>
 #include <QStandardItemModel>
+#include <QTimer>
 #include <QTreeView>
 
 #include "SoundDocument.h"
+#include "Language.h"
 #include "SoundIndex.h"
+#include "SpinBoxes.h"
 #include "sound/SoundConstants.h"
 
 using namespace xv::sound;
@@ -167,9 +173,20 @@ QComboBox *MakeChoiceCombo( const std::vector<Choice_t> &choices, QWidget *pPare
 	pView->header()->setSectionResizeMode( QHeaderView::ResizeToContents );
 	pView->setMinimumWidth( 460 );
 
-	pCombo->completer()->setCompletionMode( QCompleter::PopupCompletion );
-	pCombo->completer()->setFilterMode( Qt::MatchContains );
-	pCombo->completer()->setCaseSensitivity( Qt::CaseInsensitive );
+	// Typing searches the choices like a search box, in a list that also says what each means.
+	QCompleter *pCompleter = pCombo->completer();
+	pCompleter->setCompletionMode( QCompleter::PopupCompletion );
+	pCompleter->setFilterMode( Qt::MatchContains );
+	pCompleter->setCaseSensitivity( Qt::CaseInsensitive );
+	pCompleter->setMaxVisibleItems( 14 );
+	auto *pPopup = new QTreeView;
+	pPopup->setHeaderHidden( true );
+	pPopup->setRootIsDecorated( false );
+	pPopup->setUniformRowHeights( true );
+	pPopup->setAllColumnsShowFocus( true );
+	pPopup->setMinimumWidth( 460 );
+	pCompleter->setPopup( pPopup );
+	pPopup->header()->setSectionResizeMode( QHeaderView::ResizeToContents );
 	return pCombo;
 }
 
@@ -179,6 +196,171 @@ QComboBox *MakeChoiceCombo( const std::vector<Choice_t> &choices, QWidget *pPare
 QString BetweenText( const QString &szLow, const QString &szHigh )
 {
 	return QObject::tr( "random from %1 to %2" ).arg( szLow, szHigh );
+}
+
+// How the simple interface takes a number for a key.
+struct NumberInput_t
+{
+	double m_flMin;
+	double m_flMax;
+	double m_flStep;
+	int m_nDecimals;
+	const char *m_pszSuffix;
+};
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+NumberInput_t NumberInputFor( ValueKind_t nKind, const QString &szKey )
+{
+	if ( nKind == ValueKind_t::VALUE_KIND_SOUND_LEVEL )
+	{
+		return { 0.0, 180.0, 5.0, 0, " dB" };
+	}
+	if ( nKind == ValueKind_t::VALUE_KIND_ATTENUATION )
+	{
+		return { 0.0, 4.0, 0.05, 4, "" };
+	}
+	const QString szLower = szKey.toLower();
+	if ( szLower == u"volume" || szLower == u"dsp_volume" )
+	{
+		return { 0.0, 1.0, 0.05, 4, "" };
+	}
+	if ( szLower == u"pitch" )
+	{
+		return { 0.0, 255.0, 5.0, 2, "%" };
+	}
+	if ( szLower == u"time" )
+	{
+		return { 0.0, 3600.0, 1.0, 2, " s" };
+	}
+	if ( szLower == u"delay_msec" )
+	{
+		return { 0.0, 60000.0, 10.0, 0, " ms" };
+	}
+	return { -1e9, 1e9, 1.0, 4, "" };
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: One number of a value (one end of a range), named constants read as their numbers.
+//-----------------------------------------------------------------------------
+std::optional<double> PartNumber( ValueKind_t nKind, const QString &szPart )
+{
+	const std::string szUtf8 = szPart.toStdString();
+	const Constant_t *pConstant = nullptr;
+	switch ( nKind )
+	{
+		case ValueKind_t::VALUE_KIND_SOUND_LEVEL: return ParseSoundLevel( szUtf8 );
+		case ValueKind_t::VALUE_KIND_VOLUME: pConstant = FindConstant( Volumes(), szUtf8 ); break;
+		case ValueKind_t::VALUE_KIND_PITCH: pConstant = FindConstant( Pitches(), szUtf8 ); break;
+		case ValueKind_t::VALUE_KIND_ATTENUATION: pConstant = FindConstant( Attenuations(), szUtf8 ); break;
+		default: break;
+	}
+	return pConstant ? std::optional{ pConstant->m_flValue } : ToNumber( szPart );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: A number as the file gets it; sound levels in the stock files' SNDLVL_<n>dB form.
+//-----------------------------------------------------------------------------
+QString PartText( ValueKind_t nKind, double flValue )
+{
+	if ( nKind == ValueKind_t::VALUE_KIND_SOUND_LEVEL )
+	{
+		const long nDecibels = std::lround( flValue );
+		return nDecibels == 0 ? QStringLiteral( "SNDLVL_NONE" ) : QStringLiteral( "SNDLVL_%1dB" ).arg( nDecibels );
+	}
+	return QString::number( flValue, 'g', 6 );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: A number box, or a "from … to" pair for keys that take a random range.
+//-----------------------------------------------------------------------------
+QWidget *NumberEditor( ValueKind_t nKind, const QString &szKey, const QString &szValue, const std::function<void( const QString & )> &pfnCommit )
+{
+	// Keys that are ranges by nature get a pair; a soundscript's volume, pitch or level only when
+	// the file already has one there.
+	const bool bCanRange = nKind == ValueKind_t::VALUE_KIND_NUMBER_RANGE || nKind == ValueKind_t::VALUE_KIND_VOLUME || nKind == ValueKind_t::VALUE_KIND_PITCH ||
+		nKind == ValueKind_t::VALUE_KIND_SOUND_LEVEL;
+	const QStringList parts = RangeParts( szValue.trimmed() );
+	if ( parts.size() > ( bCanRange ? 2 : 1 ) )
+	{
+		return nullptr;
+	}
+	const bool bRange = nKind == ValueKind_t::VALUE_KIND_NUMBER_RANGE || parts.size() == 2;
+	std::vector<double> values;
+	for ( const QString &szPart : parts )
+	{
+		const auto value = PartNumber( nKind, szPart );
+		if ( !value )
+		{
+			return nullptr;
+		}
+		values.push_back( *value );
+	}
+
+	const NumberInput_t input = NumberInputFor( nKind, szKey );
+	const auto makeSpin = [ & ]( double flValue ) {
+		auto *pSpin = new CFloatSpin;
+		pSpin->setDecimals( input.m_nDecimals );
+		pSpin->setRange( std::min( input.m_flMin, flValue ), std::max( input.m_flMax, flValue ) );
+		pSpin->setSingleStep( input.m_flStep );
+		pSpin->setSuffix( QString::fromLatin1( input.m_pszSuffix ) );
+		if ( nKind == ValueKind_t::VALUE_KIND_SOUND_LEVEL )
+		{
+			pSpin->setSpecialValueText( QObject::tr( "None" ) );
+		}
+		pSpin->setValue( flValue );
+		return pSpin;
+	};
+	if ( !bRange )
+	{
+		CFloatSpin *pSpin = makeSpin( values.front() );
+		QObject::connect( pSpin, &QDoubleSpinBox::valueChanged, pSpin, [ pfnCommit, nKind ]( double flValue ) { pfnCommit( PartText( nKind, flValue ) ); } );
+		return pSpin;
+	}
+
+	auto *pBox = new QWidget;
+	auto *pLayout = new QHBoxLayout( pBox );
+	pLayout->setContentsMargins( 0, 0, 0, 0 );
+	pLayout->setSpacing( 4 );
+	CFloatSpin *pLow = makeSpin( values.front() );
+	CFloatSpin *pHigh = makeSpin( values.back() );
+	pLayout->addWidget( pLow );
+	auto *pTo = new QLabel( QObject::tr( "to" ) );
+	pTo->setSizePolicy( QSizePolicy::Fixed, QSizePolicy::Preferred );
+	pLayout->addWidget( pTo );
+	pLayout->addWidget( pHigh );
+	pBox->setToolTip( QObject::tr( "Picked at random between the two each time. The same number twice is a fixed value." ) );
+	const auto commit = [ pfnCommit, nKind, pLow, pHigh ] {
+		const double flLow = pLow->value();
+		const double flHigh = pHigh->value();
+		pfnCommit( flLow == flHigh ? PartText( nKind, flLow ) : PartText( nKind, flLow ) + u',' + PartText( nKind, flHigh ) );
+	};
+	QObject::connect( pLow, &QDoubleSpinBox::valueChanged, pBox, commit );
+	QObject::connect( pHigh, &QDoubleSpinBox::valueChanged, pBox, commit );
+	return pBox;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: A list of named values (m_szValue as the file has it, m_szMeaning shown); a value the
+//          list doesn't have is added as it is.
+//-----------------------------------------------------------------------------
+QComboBox *ListEditor( const std::vector<Choice_t> &choices, const QString &szValue, const std::function<void( const QString & )> &pfnCommit )
+{
+	auto *pCombo = new QComboBox;
+	for ( const Choice_t &choice : choices )
+	{
+		pCombo->addItem( choice.m_szMeaning, choice.m_szValue );
+	}
+	int nIndex = pCombo->findData( szValue.trimmed(), Qt::UserRole, Qt::MatchFixedString );
+	if ( nIndex < 0 )
+	{
+		pCombo->addItem( szValue, szValue );
+		nIndex = pCombo->count() - 1;
+	}
+	pCombo->setCurrentIndex( nIndex );
+	QObject::connect( pCombo, &QComboBox::activated, pCombo, [ pCombo, pfnCommit ]( int nPicked ) { pfnCommit( pCombo->itemData( nPicked ).toString() ); } );
+	return pCombo;
 }
 
 } // namespace
@@ -315,6 +497,119 @@ QString DescribeValue( ValueKind_t nKind, const QString &szValue )
 }
 
 //-----------------------------------------------------------------------------
+// Purpose: The simple interface's easier way in for a value; nullptr where it has none.
+//-----------------------------------------------------------------------------
+QWidget *SimpleValueEditor( ValueKind_t nKind, const QString &szKey, const QString &szValue, std::function<void( const QString & )> pfnCommit )
+{
+	const QString szText = szValue.trimmed();
+	switch ( nKind )
+	{
+		case ValueKind_t::VALUE_KIND_NUMBER:
+		case ValueKind_t::VALUE_KIND_NUMBER_RANGE:
+		case ValueKind_t::VALUE_KIND_VOLUME:
+		case ValueKind_t::VALUE_KIND_PITCH:
+		case ValueKind_t::VALUE_KIND_SOUND_LEVEL:
+		case ValueKind_t::VALUE_KIND_ATTENUATION:
+			return NumberEditor( nKind, szKey, szText, pfnCommit );
+		case ValueKind_t::VALUE_KIND_CHANNEL:
+		{
+			std::vector<Choice_t> choices;
+			QString szCurrent = szText;
+			const auto number = ToNumber( szText );
+			for ( const Constant_t &channel : Channels() )
+			{
+				choices.push_back( { Qs( channel.m_szName ), Qs( ParticleNames().Sound( channel.m_szName ) ) } );
+				if ( number && channel.m_flValue == *number )
+				{
+					szCurrent = Qs( channel.m_szName );
+				}
+			}
+			QComboBox *pCombo = ListEditor( choices, szCurrent, pfnCommit );
+			for ( std::size_t i = 0; i < Channels().size(); i++ )
+			{
+				pCombo->setItemData( static_cast<int>( i ), Qs( Channels()[ i ].m_szNote ), Qt::ToolTipRole );
+			}
+			return pCombo;
+		}
+		case ValueKind_t::VALUE_KIND_DSP_PRESET:
+		{
+			std::vector<Choice_t> choices;
+			for ( const Constant_t &preset : DspPresets() )
+			{
+				choices.push_back( { QString::number( static_cast<int>( preset.m_flValue ) ), Qs( preset.m_szName ) } );
+			}
+			return ListEditor( choices, szText, pfnCommit );
+		}
+		case ValueKind_t::VALUE_KIND_POSITION:
+		case ValueKind_t::VALUE_KIND_RANDOM_POSITION:
+		{
+			std::vector<Choice_t> choices;
+			for ( int i = 0; i < 8; i++ )
+			{
+				choices.push_back( { QString::number( i ), QObject::tr( "Position %1" ).arg( i ) } );
+			}
+			if ( nKind == ValueKind_t::VALUE_KIND_RANDOM_POSITION )
+			{
+				choices.push_back( { QStringLiteral( "random" ), QObject::tr( "Random" ) } );
+			}
+			return ListEditor( choices, szText, pfnCommit );
+		}
+		case ValueKind_t::VALUE_KIND_BOOL:
+		{
+			if ( szText != u"0" && szText != u"1" )
+			{
+				return nullptr;
+			}
+			auto *pBox = new QCheckBox;
+			pBox->setChecked( szText == u"1" );
+			QObject::connect( pBox, &QCheckBox::toggled, pBox, [ pfnCommit ]( bool bOn ) { pfnCommit( bOn ? QStringLiteral( "1" ) : QStringLiteral( "0" ) ); } );
+			return pBox;
+		}
+		case ValueKind_t::VALUE_KIND_ORIGIN:
+		{
+			const QStringList parts = szText.split( u' ', Qt::SkipEmptyParts );
+			std::vector<double> values;
+			for ( const QString &szPart : parts )
+			{
+				if ( const auto value = ToNumber( szPart ) )
+				{
+					values.push_back( *value );
+				}
+			}
+			if ( parts.size() != 3 || values.size() != 3 )
+			{
+				return nullptr;
+			}
+			auto *pBox = new QWidget;
+			auto *pLayout = new QHBoxLayout( pBox );
+			pLayout->setContentsMargins( 0, 0, 0, 0 );
+			pLayout->setSpacing( 2 );
+			std::vector<CFloatSpin *> boxes;
+			for ( std::size_t i = 0; i < 3; i++ )
+			{
+				auto *pSpin = new CFloatSpin;
+				pSpin->setDecimals( 2 );
+				pSpin->setRange( std::min( -65536.0, values[ i ] ), std::max( 65536.0, values[ i ] ) );
+				pSpin->setSingleStep( 8.0 );
+				pSpin->setPrefix( QStringLiteral( "XYZ" ).mid( static_cast<int>( i ), 1 ) + u' ' );
+				pSpin->setValue( values[ i ] );
+				pLayout->addWidget( pSpin );
+				boxes.push_back( pSpin );
+			}
+			for ( CFloatSpin *pSpin : boxes )
+			{
+				QObject::connect( pSpin, &QDoubleSpinBox::valueChanged, pBox, [ pfnCommit, boxes ] {
+					pfnCommit( QStringLiteral( "%1 %2 %3" ).arg( PartText( ValueKind_t::VALUE_KIND_NUMBER, boxes[ 0 ]->value() ), PartText( ValueKind_t::VALUE_KIND_NUMBER, boxes[ 1 ]->value() ), PartText( ValueKind_t::VALUE_KIND_NUMBER, boxes[ 2 ]->value() ) ) );
+				} );
+			}
+			return pBox;
+		}
+		default:
+			return nullptr;
+	}
+}
+
+//-----------------------------------------------------------------------------
 // Purpose:
 //-----------------------------------------------------------------------------
 CSoundValueDelegate::CSoundValueDelegate( const BlockDef_t *pBlock, const CSoundIndex &index, const CSoundDocument &document, QObject *pParent )
@@ -340,7 +635,56 @@ ValueKind_t CSoundValueDelegate::KindOf( const BlockDef_t *pBlock, const QString
 //-----------------------------------------------------------------------------
 // Purpose:
 //-----------------------------------------------------------------------------
+QString CSoundValueDelegate::KeyOf( const QModelIndex &index )
+{
+	const QModelIndex key = index.siblingAtColumn( COLUMN_KEY_COLUMN );
+	const QVariant name = key.data( Qt::UserRole );
+	return name.isValid() ? name.toString() : key.data().toString();
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
 QWidget *CSoundValueDelegate::createEditor( QWidget *pParent, const QStyleOptionViewItem &, const QModelIndex &index ) const
+{
+	QWidget *pEditor = MakeEditor( pParent, index );
+	// Picking from a list is the edit: it goes in and the editor closes, with no Enter needed. It
+	// waits a turn: the combo also says "activated" when it loses focus (to its own dropdown, or
+	// to a click elsewhere that the view handles itself), and those must not close it.
+	auto *pSelf = const_cast<CSoundValueDelegate *>( this );
+	auto *pCombo = qobject_cast<QComboBox *>( pEditor );
+	const auto finish = [ pSelf, pEditor, pCombo ] {
+		QTimer::singleShot( 0, pEditor, [ pSelf, pEditor, pCombo ] {
+			if ( !pEditor->isVisible() || ( pCombo && pCombo->view()->isVisible() ) )
+			{
+				return;
+			}
+			emit pSelf->commitData( pEditor );
+			emit pSelf->closeEditor( pEditor );
+		} );
+	};
+	if ( pCombo )
+	{
+		connect( pCombo, &QComboBox::activated, pCombo, finish );
+		connect( pCombo->completer(), qOverload<const QString &>( &QCompleter::activated ), pCombo, [ pCombo, finish ]( const QString &szText ) {
+			pCombo->setEditText( szText );
+			finish();
+		} );
+	}
+	else if ( auto *pEdit = qobject_cast<QLineEdit *>( pEditor ); pEdit && pEdit->completer() )
+	{
+		connect( pEdit->completer(), qOverload<const QString &>( &QCompleter::activated ), pEdit, [ pEdit, finish ]( const QString &szText ) {
+			pEdit->setText( szText );
+			finish();
+		} );
+	}
+	return pEditor;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+QWidget *CSoundValueDelegate::MakeEditor( QWidget *pParent, const QModelIndex &index ) const
 {
 	if ( index.column() == COLUMN_KEY_COLUMN )
 	{
@@ -359,7 +703,7 @@ QWidget *CSoundValueDelegate::createEditor( QWidget *pParent, const QStyleOption
 		return nullptr;
 	}
 
-	const ValueKind_t nKind = KindOf( m_pBlock, index.siblingAtColumn( COLUMN_KEY_COLUMN ).data().toString() );
+	const ValueKind_t nKind = KindOf( m_pBlock, KeyOf( index ) );
 	if ( nKind == ValueKind_t::VALUE_KIND_WAVE )
 	{
 		auto *pEdit = new QLineEdit( pParent );
@@ -397,6 +741,16 @@ void CSoundValueDelegate::setEditorData( QWidget *pEditor, const QModelIndex &in
 	{
 		pCombo->setCurrentIndex( -1 );
 		pCombo->setEditText( szText );
+		// Every choice drops down at once; typing (over the selected value) narrows them.
+		QTimer::singleShot( 0, pCombo, [ pCombo ] {
+			if ( !pCombo->isVisible() || pCombo->count() == 0 )
+			{
+				return;
+			}
+			pCombo->lineEdit()->selectAll();
+			pCombo->completer()->setCompletionPrefix( {} );
+			pCombo->completer()->complete();
+		} );
 	}
 	else if ( auto *pEdit = qobject_cast<QLineEdit *>( pEditor ) )
 	{

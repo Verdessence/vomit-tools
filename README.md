@@ -1,9 +1,11 @@
 # vomit-tools
 
-Soundscape, skybox and particle editors for Source engine games, as one Qt 6 app for Linux and Windows.
+Soundscape, skybox, particle, texture and material editors for Source engine games, as one Qt 6
+app for Linux and Windows, plus a command-line texture tool.
 
 **Status:** the soundscape and soundscript editor works, with sound previews; the skybox creator
-makes skies from six images; and the particle editor edits PCF files, with a live preview.
+makes skies from six images; the particle editor edits PCF files, with a live preview; and the
+texture editor makes, converts and inspects VTFs, with a VMT editor beside it.
 
 ## Opening things
 
@@ -16,8 +18,9 @@ command line (`vomit-tools <file|folder|gameinfo.txt>...`):
 - **A folder:** **File → Open Folder** opens a mod folder, a `custom/` folder or anything else in
   the **Folder** tab.
 - **A file:** **File → Open File** opens a file. Soundscapes and soundscripts open in the sound
-  editor, under any name (the file name or the entries decide), and `.pcf` files in the particle
-  editor; other files show in the preview, VTFs and images included.
+  editor, under any name (the file name or the entries decide), `.pcf` files in the particle
+  editor, `.vtf` files in the texture editor and `.vmt` files in the material editor; other files
+  show in the preview, images included.
 - **Recent:** **File → Open Recent** lists recent games, folders and files.
 
 A game isn't required. When a file or folder belongs to one (a `gameinfo.txt` sits in it or above
@@ -29,7 +32,8 @@ sounds are looked for beside the file: for `mymod/scripts/soundscapes_x.txt`, un
 **Edit → Preferences** (Ctrl+,) holds the app's settings. Changes take effect at once, except the
 graphics API, which waits for the next start.
 
-- **Interface:** the simple or regular interface (also under **View → Simple Interface**).
+- **Interface:** the simple or regular interface (also under **View → Simple Interface**), and
+  whether files opened from outside join the window already open (the default) or start another.
 - **Graphics:** what the sky, material and particle previews and the particle grid draw with.
   **Automatic** tries Vulkan first, then the platform's usual API (Direct3D 11 on Windows, OpenGL
   on Linux). Vulkan, OpenGL, Direct3D 11/12 and **Software** (the CPU) can be picked directly. The
@@ -139,6 +143,37 @@ choosing **Show Material** shows that face's material.
 - **Parameters:** what the material ends up with on a DirectX 9 PC. A patch's include is followed,
   and fallback and conditional blocks are applied. The simple interface names the parameters.
 
+## Texture editor
+
+`.vtf` files open in it; **File → New Texture from Pictures** makes one; a picture's preview offers
+**Make Texture…**. Everything is one undo step, and a new texture asks where to save.
+
+- **Viewing:** every mipmap (optionally blown up to full size), frame (played at a set rate), cube
+  face (or all six unwrapped as a cross) and volume slice; R, G, B and A on their own; zoom, pan
+  and 3×3 tiling. Beside it: the header, flags, thumbnail and resources, the sprite sheet in full.
+- **Import:** pictures as one image, animation frames (a GIF's or APNG's frames too), a cube map
+  (faces named `…rt`, `…lf`… sort themselves), a cube map from a panorama/HDRI, or a volume.
+  Every format but P8, versions 7.1–7.5, presets (diffuse, normal map, decal, particle, UI, sky
+  faces, distance field, and your own), a separate format for pictures with alpha, Kaiser /
+  Mitchell / triangle / box mipmaps, power-of-two or multiple-of-4 sizes, normal maps from height,
+  `$distancealpha`, and HDR pictures kept as light values.
+- **Convert** writes it again with other choices; **Properties** changes the version, flags,
+  bump scale, reflectivity, thumbnail and resources (KVD text, LOD, sheets) without touching the
+  pictures.
+- **Sprite Sheet** packs frames into a particle sheet like mksheet, reading and writing `.mks`,
+  and can cut an existing sheet back into its frames to change it.
+- **Export** saves the picture shown, or every frame, face and slice; **File → Convert a Folder of
+  Textures** converts whole folders either way.
+- **Make VMT** writes a material for the texture and opens it in the **material editor**: the text
+  with line numbers and broken lines marked, beside a preview drawn as you type.
+- Pictures: PNG, APNG, JPEG, TGA, BMP, PSD, GIF, HDR, PFM, QOI and PNM, plus whatever Qt's image
+  plugins handle (WebP, JPEG XL, AVIF, EXR, TIFF…).
+
+`vomit-tools-cli` does the same from the command line (`create`, `edit`, `extract`, `info`,
+`thumbnail`, with `--watch` to rebuild when the pictures change); `vomit-tools-cli --help` lists the
+options. On Linux it also provides VTF thumbnails for GNOME Files, Thunar, Nemo and Caja, and a
+plugin draws them in Dolphin when KDE Frameworks 6 is found at build time.
+
 ## Particle editor
 
 - **Opening:** double-click a `.pcf` in the **Game** or **Folder** tab, open one from **File → Open
@@ -220,7 +255,7 @@ mounted game's own particle files.
 
 ## Building
 
-You need CMake 3.25+, a C++20 compiler and Qt 6.5+ (Core, Widgets, Test). With Qt 6.7+ and its
+You need CMake 3.25+, a C++20 compiler and Qt 6.5+ (Core, Widgets, Network, Test). With Qt 6.7+ and its
 Shader Tools module, the previews can also draw on the graphics card, through Qt's RHI (Vulkan,
 OpenGL, Direct3D or Metal); otherwise they draw in software.
 [sourcepp](https://github.com/craftablescience/sourcepp), [miniaudio](https://miniaud.io) and
@@ -277,11 +312,13 @@ The code follows the naming and layout conventions of Valve's Source SDK (the st
 | `src/core/vfs` | gameinfo.txt search paths, VPK and folder mounts, Steam library detection |
 | `src/core/sound` | Sound constants, soundscape/soundscript schema, linter, WAV loop points, playback planning |
 | `src/core/audio` | Decoding (WAV PCM/ADPCM, MP3) and playback on [miniaudio](https://miniaud.io) |
-| `src/core/texture` | VTF 7.0–7.5 reading and 7.1/7.2 writing, DXT and other formats; image loading on [stb](https://github.com/nothings/stb) |
+| `src/core/texture` | VTF 7.0–7.5 reading and writing in every format but P8 (frames, cube maps, volumes, resources), making textures from pictures, sprite sheets, image files on [stb](https://github.com/nothings/stb) |
 | `src/core/sky` | Sky faces and their orientation, preview rendering, seam checks, export, loading the game's skies |
 | `src/core/material` | Materials (VMT): parameters after patches and fallbacks, proxies, and the preview's drawing |
 | `src/core/particles` | Particle systems in PCF files: reading, editing, copy and paste, the game's built-in functions and their defaults, checks, manifest; the preview's simulation and drawing |
 | `src/app` | Qt app: game and folder browsers, sound editor (cards, value pickers, playback), skybox creator, material view, particle editor, document tabs, preferences |
+| `src/cli` | `vomit-tools-cli`, the texture tools without Qt, and the Linux thumbnailer files |
+| `src/thumbnailer` | The KDE (Dolphin) thumbnail plugin |
 | `src/app/shaders` | The previews' shaders for the graphics card (sky, material, particles), each matching its software renderer in `src/core` |
 
 ## License

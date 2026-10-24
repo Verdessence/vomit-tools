@@ -7,6 +7,8 @@
 //===========================================================================//
 #pragma once
 
+#include <optional>
+#include <utility>
 #include <vector>
 
 #include <QWidget>
@@ -37,6 +39,11 @@ public:
 	void ShowIssues( const std::vector<xv::sound::Issue_t> &issues );
 	// Opens the value editor of the pair at path, if it is in this card or a nested one.
 	bool BeginEdit( const xv::sound::NodePath_t &path );
+	// Which value box has the keyboard focus, here or in a nested card: its pair's path and which
+	// of the editor's boxes. The editor gives it back after rebuilding the cards.
+	[[nodiscard]] std::optional<std::pair<xv::sound::NodePath_t, int>> GetFocusedValue() const;
+	// Gives the keyboard to a value box, here or in a nested card.
+	bool FocusValue( const xv::sound::NodePath_t &path, int nBox );
 	// The card for the block at path, or nullptr.
 	[[nodiscard]] CKvCard *CardFor( const xv::sound::NodePath_t &path );
 	// Plays this block with its settings; a soundscape entry plays as a whole soundscape.
@@ -67,6 +74,7 @@ private:
 	QTableWidget *m_pTable = nullptr;
 	std::vector<std::size_t> m_RowChild; // table row -> child index in the block
 	std::vector<CKvCard *> m_Children;
+	std::vector<std::pair<xv::sound::NodePath_t, QWidget *>> m_ValueEditors; // the simple interface's value boxes
 	bool m_bFilling = false;
 };
 

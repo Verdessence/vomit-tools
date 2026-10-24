@@ -46,13 +46,27 @@ NodePath_t ParentOf( NodePath_t path )
 class CReplaceEntryCommand : public QUndoCommand
 {
 public:
-	CReplaceEntryCommand( CSoundDocument *pDocument, std::size_t nIndex, CNode before, CNode after, const QString &szText )
+	CReplaceEntryCommand( CSoundDocument *pDocument, std::size_t nIndex, CNode before, CNode after, const QString &szText, QString szMergeKey )
 		: QUndoCommand( szText ),
 		  m_pDocument( pDocument ),
 		  m_nIndex( nIndex ),
 		  m_Before( std::move( before ) ),
-		  m_After( std::move( after ) )
+		  m_After( std::move( after ) ),
+		  m_szMergeKey( std::move( szMergeKey ) )
 	{}
+
+	[[nodiscard]] int id() const override { return m_szMergeKey.isEmpty() ? -1 : 1; }
+
+	bool mergeWith( const QUndoCommand *pOther ) override
+	{
+		const auto *pNext = static_cast<const CReplaceEntryCommand *>( pOther );
+		if ( pNext->m_nIndex != m_nIndex || pNext->m_szMergeKey != m_szMergeKey )
+		{
+			return false;
+		}
+		m_After = pNext->m_After;
+		return true;
+	}
 
 	void redo() override
 	{
@@ -71,6 +85,7 @@ private:
 	std::size_t m_nIndex;
 	CNode m_Before;
 	CNode m_After;
+	QString m_szMergeKey;
 };
 
 class CInsertEntryCommand : public QUndoCommand
@@ -249,7 +264,7 @@ const xv::sound::BlockDef_t *CSoundDocument::BlockDef( const NodePath_t &path ) 
 // Purpose: Applies edit to a copy of top-level entry rootIndex and pushes the swap as one undo
 //          step.
 //-----------------------------------------------------------------------------
-void CSoundDocument::EditEntry( std::size_t nRootIndex, const QString &szDescription, const std::function<bool( CNode &entry )> &pfnEdit )
+void CSoundDocument::EditEntry( std::size_t nRootIndex, const QString &szDescription, const std::function<bool( CNode &entry )> &pfnEdit, const QString &szMergeKey )
 {
 	if ( nRootIndex >= m_Document.m_Roots.size() )
 	{
@@ -260,7 +275,7 @@ void CSoundDocument::EditEntry( std::size_t nRootIndex, const QString &szDescrip
 	{
 		return;
 	}
-	m_pUndo->push( new CReplaceEntryCommand( this, nRootIndex, m_Document.m_Roots[ nRootIndex ], std::move( after ), szDescription ) );
+	m_pUndo->push( new CReplaceEntryCommand( this, nRootIndex, m_Document.m_Roots[ nRootIndex ], std::move( after ), szDescription, szMergeKey ) );
 }
 
 //-----------------------------------------------------------------------------
@@ -290,10 +305,19 @@ void CSoundDocument::SetValue( const NodePath_t &path, const QString &szValue )
 	{
 		return;
 	}
-	EditEntry( path[ 0 ], tr( "Set %1" ).arg( QString::fromStdString( pCurrent->GetKey() ) ), [ & ]( CNode &entry ) {
-		CNode *pTarget = Descend( entry, path );
-		return pTarget && pTarget->SetValue( szValue.toStdString() );
-	} );
+	// Steps through one value (a spin box's arrows) undo together.
+	QString szMergeKey = QStringLiteral( "value" );
+	for ( const std::size_t nIndex : path )
+	{
+		szMergeKey += u'/' + QString::number( nIndex );
+	}
+	EditEntry(
+		path[ 0 ], tr( "Set %1" ).arg( QString::fromStdString( pCurrent->GetKey() ) ),
+		[ & ]( CNode &entry ) {
+			CNode *pTarget = Descend( entry, path );
+			return pTarget && pTarget->SetValue( szValue.toStdString() );
+		},
+		szMergeKey );
 }
 
 //-----------------------------------------------------------------------------

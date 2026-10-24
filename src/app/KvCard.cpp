@@ -10,7 +10,9 @@
 #include <optional>
 #include <random>
 
+#include <QAbstractSpinBox>
 #include <QAction>
+#include <QApplication>
 #include <QEvent>
 #include <QHBoxLayout>
 #include <QHeaderView>
@@ -22,6 +24,8 @@
 #include <QToolButton>
 #include <QVBoxLayout>
 
+#include "InterfaceMode.h"
+#include "Language.h"
 #include "SoundDocument.h"
 #include "SoundIndex.h"
 #include "SoundPlayer.h"
@@ -50,6 +54,31 @@ NodePath_t ChildPath( NodePath_t path, std::size_t nChild )
 {
 	path.push_back( nChild );
 	return path;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: A key or block as the interface shows it: tidied in the simple interface.
+//-----------------------------------------------------------------------------
+QString ShownKey( std::string_view szKey )
+{
+	return CInterfaceMode::Instance().IsSimple() ? Qs( ParticleNames().Sound( szKey ) ) : Qs( szKey );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: The boxes of a value editor that take the keyboard, in order.
+//-----------------------------------------------------------------------------
+QList<QWidget *> FocusBoxes( QWidget *pEditor )
+{
+	if ( qobject_cast<QAbstractSpinBox *>( pEditor ) )
+	{
+		return { pEditor };
+	}
+	QList<QWidget *> boxes;
+	for ( QAbstractSpinBox *pBox : pEditor->findChildren<QAbstractSpinBox *>() )
+	{
+		boxes << pBox;
+	}
+	return boxes.isEmpty() ? QList<QWidget *>{ pEditor } : boxes;
 }
 
 //-----------------------------------------------------------------------------
@@ -117,9 +146,13 @@ CKvCard::CKvCard( CSoundDocument &document, const CSoundIndex &index, CSoundPlay
 		setStyleSheet( QString::fromLatin1( CARD_STYLE ) );
 	}
 
-	m_pTab = new QLabel( Qs( pNode->GetKey() ) );
+	m_pTab = new QLabel( bEntry ? Qs( pNode->GetKey() ) : ShownKey( pNode->GetKey() ) );
 	m_pTab->setObjectName( QStringLiteral( "cardTab" ) );
 	m_pTab->setToolTip( pDef ? Qs( pDef->m_szHelp ) : tr( "Not a block the engine knows here" ) );
+	if ( !bEntry && m_pTab->text() != Qs( pNode->GetKey() ) )
+	{
+		m_pTab->setToolTip( Qs( pNode->GetKey() ) + u'\n' + m_pTab->toolTip() );
+	}
 	if ( bEntry )
 	{
 		m_pTab->setToolTip( m_pTab->toolTip() + tr( "\nDouble-click to rename" ) );
@@ -217,6 +250,7 @@ void CKvCard::BuildTable( const CNode &node )
 	m_pTable->horizontalHeader()->setSectionResizeMode( CSoundValueDelegate::COLUMN_MEANING_COLUMN, QHeaderView::ResizeToContents );
 	m_pTable->setContextMenuPolicy( Qt::CustomContextMenu );
 
+	const bool bSimple = CInterfaceMode::Instance().IsSimple();
 	m_bFilling = true;
 	QFont meaningFont = m_pTable->font();
 	meaningFont.setItalic( true );
@@ -236,9 +270,16 @@ void CKvCard::BuildTable( const CNode &node )
 		const QString szValue = Qs( child.GetValue() );
 		const auto nKind = CSoundValueDelegate::KindOf( pDef, szKey );
 
-		auto *pKeyItem = new QTableWidgetItem( szKey );
+		// The simple interface shows keys tidied and leaves them as they are.
+		auto *pKeyItem = new QTableWidgetItem( ShownKey( child.GetKey() ) );
+		pKeyItem->setData( Qt::UserRole, szKey );
 		const xv::sound::KeyDef_t *pKeyDef = pDef ? xv::sound::FindKey( *pDef, szKey.toStdString() ) : nullptr;
 		pKeyItem->setToolTip( pKeyDef ? Qs( pKeyDef->m_szHelp ) : tr( "Not a key the engine reads here" ) );
+		if ( bSimple )
+		{
+			pKeyItem->setFlags( pKeyItem->flags() & ~Qt::ItemIsEditable );
+			pKeyItem->setToolTip( szKey + u'\n' + pKeyItem->toolTip() );
+		}
 		auto *pValueItem = new QTableWidgetItem( szValue );
 		auto *pMeaningItem = new QTableWidgetItem( DescribeValue( nKind, szValue ) );
 		pMeaningItem->setFlags( Qt::ItemIsEnabled );
@@ -248,6 +289,15 @@ void CKvCard::BuildTable( const CNode &node )
 		m_pTable->setItem( nRow, CSoundValueDelegate::COLUMN_KEY_COLUMN, pKeyItem );
 		m_pTable->setItem( nRow, CSoundValueDelegate::COLUMN_VALUE_COLUMN, pValueItem );
 		m_pTable->setItem( nRow, CSoundValueDelegate::COLUMN_MEANING_COLUMN, pMeaningItem );
+
+		const NodePath_t valuePath = ChildPath( m_Path, i );
+		QWidget *pEasier = bSimple ? SimpleValueEditor( nKind, szKey, szValue, [ this, valuePath ]( const QString &szText ) { m_Document.SetValue( valuePath, szText ); } ) : nullptr;
+		if ( pEasier )
+		{
+			pValueItem->setFlags( pValueItem->flags() & ~Qt::ItemIsEditable );
+			m_pTable->setCellWidget( nRow, CSoundValueDelegate::COLUMN_VALUE_COLUMN, pEasier );
+			m_ValueEditors.emplace_back( valuePath, pEasier );
+		}
 
 		const std::string szGamePath = nKind == xv::sound::ValueKind_t::VALUE_KIND_WAVE ? xv::sound::WaveGamePath( child.GetValue() ) : std::string{};
 		if ( m_pPlayer && !szGamePath.empty() )
@@ -272,9 +322,21 @@ void CKvCard::BuildTable( const CNode &node )
 		}
 	}
 	m_bFilling = false;
-	// Exactly as tall as its rows: the card grows instead of the table scrolling.
+	// Exactly as tall as its rows: the card grows instead of the table scrolling, and doesn't take
+	// spare height either (a short card would show its rows centred in empty space).
 	m_pTable->resizeRowsToContents();
 	m_pTable->setFixedHeight( m_pTable->verticalHeader()->length() + 2 * m_pTable->frameWidth() );
+	m_pTable->setSizePolicy( QSizePolicy::Expanding, QSizePolicy::Fixed );
+
+	// One click opens a value for editing (its choices drop down with it); keys still take a
+	// double-click.
+	connect( m_pTable, &QTableWidget::clicked, this, [ this ]( const QModelIndex &index ) {
+		QTableWidgetItem *pItem = m_pTable->item( index.row(), index.column() );
+		if ( index.column() == CSoundValueDelegate::COLUMN_VALUE_COLUMN && pItem && ( pItem->flags() & Qt::ItemIsEditable ) && !m_pTable->cellWidget( index.row(), index.column() ) )
+		{
+			m_pTable->editItem( pItem );
+		}
+	} );
 
 	connect( m_pTable, &QTableWidget::itemChanged, this, [ this ]( QTableWidgetItem *pItem ) {
 		if ( m_bFilling || pItem->row() >= static_cast<int>( m_RowChild.size() ) )
@@ -342,7 +404,7 @@ void CKvCard::FillAddMenu( QMenu *pMenu )
 		{
 			continue;
 		}
-		QAction *pAction = pMenu->addAction( Qs( key.m_szKey ), this, [ this, szName = Qs( key.m_szKey ) ] { AddKey( szName ); } );
+		QAction *pAction = pMenu->addAction( ShownKey( key.m_szKey ), this, [ this, szName = Qs( key.m_szKey ) ] { AddKey( szName ); } );
 		pAction->setToolTip( Qs( key.m_szHelp ) );
 	}
 	pMenu->addAction( tr( "Custom Key…" ), this, [ this ] {
@@ -358,7 +420,7 @@ void CKvCard::FillAddMenu( QMenu *pMenu )
 		for ( const std::string_view szBlock : pDef->m_Blocks )
 		{
 			const xv::sound::BlockDef_t *pBlockDef = m_Document.GetSchema().Block( szBlock );
-			QAction *pAction = pMenu->addAction( Qs( szBlock ), this, [ this, szName = Qs( szBlock ) ] { AddBlock( szName ); } );
+			QAction *pAction = pMenu->addAction( ShownKey( szBlock ), this, [ this, szName = Qs( szBlock ) ] { AddBlock( szName ); } );
 			pAction->setToolTip( pBlockDef ? Qs( pBlockDef->m_szHelp ) : QString{} );
 		}
 	}
@@ -497,6 +559,10 @@ bool CKvCard::BeginEdit( const NodePath_t &path )
 		if ( row != m_RowChild.end() )
 		{
 			const int r = static_cast<int>( row - m_RowChild.begin() );
+			if ( m_pTable->cellWidget( r, CSoundValueDelegate::COLUMN_VALUE_COLUMN ) )
+			{
+				return FocusValue( path, 0 );
+			}
 			m_pTable->setFocus();
 			m_pTable->setCurrentCell( r, CSoundValueDelegate::COLUMN_VALUE_COLUMN );
 			m_pTable->editItem( m_pTable->item( r, CSoundValueDelegate::COLUMN_VALUE_COLUMN ) );
@@ -504,6 +570,55 @@ bool CKvCard::BeginEdit( const NodePath_t &path )
 		}
 	}
 	return std::ranges::any_of( m_Children, [ &path ]( CKvCard *pChild ) { return pChild->BeginEdit( path ); } );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Which value box has the keyboard focus, here or in a nested card: its pair's path and
+//          which of the editor's boxes (an X/Y/Z or "from … to" editor has more than one).
+//-----------------------------------------------------------------------------
+std::optional<std::pair<NodePath_t, int>> CKvCard::GetFocusedValue() const
+{
+	QWidget *pFocus = QApplication::focusWidget();
+	if ( !pFocus )
+	{
+		return std::nullopt;
+	}
+	for ( const auto &[ path, pEditor ] : m_ValueEditors )
+	{
+		const QList<QWidget *> boxes = FocusBoxes( pEditor );
+		for ( int i = 0; i < boxes.size(); i++ )
+		{
+			if ( boxes[ i ] == pFocus || boxes[ i ]->isAncestorOf( pFocus ) )
+			{
+				return std::pair{ path, i };
+			}
+		}
+	}
+	for ( const CKvCard *pChild : m_Children )
+	{
+		if ( auto focused = pChild->GetFocusedValue() )
+		{
+			return focused;
+		}
+	}
+	return std::nullopt;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Gives the keyboard to a value box, here or in a nested card.
+//-----------------------------------------------------------------------------
+bool CKvCard::FocusValue( const NodePath_t &path, int nBox )
+{
+	for ( const auto &[ editorPath, pEditor ] : m_ValueEditors )
+	{
+		if ( editorPath == path )
+		{
+			const QList<QWidget *> boxes = FocusBoxes( pEditor );
+			boxes.value( nBox, boxes.front() )->setFocus();
+			return true;
+		}
+	}
+	return std::ranges::any_of( m_Children, [ &path, nBox ]( CKvCard *pChild ) { return pChild->FocusValue( path, nBox ); } );
 }
 
 //-----------------------------------------------------------------------------

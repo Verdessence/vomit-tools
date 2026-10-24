@@ -7,6 +7,8 @@
 //===========================================================================//
 #pragma once
 
+#include <functional>
+
 #include <QString>
 #include <QStyledItemDelegate>
 
@@ -16,6 +18,13 @@ class CSoundDocument;
 class CSoundIndex;
 
 [[nodiscard]] QString DescribeValue( xv::sound::ValueKind_t nKind, const QString &szValue );
+
+// The simple interface's easier way in for a value: number boxes with the key's unit and step
+// ("from … to" pairs where it takes a range), named lists for channels, room effects and
+// positions, a tick box for 0/1 and X/Y/Z boxes for an origin. Each change goes to pfnCommit as
+// the text the file gets. nullptr where it has no better way (sound files, names, text, values
+// it can't read), and the grid's own editor stays.
+[[nodiscard]] QWidget *SimpleValueEditor( xv::sound::ValueKind_t nKind, const QString &szKey, const QString &szValue, std::function<void( const QString & )> pfnCommit );
 
 // Editors for the key/value grid of one block: keys come from the block's schema, values get a
 // dropdown of every constant that fits (CHAN_*, SNDLVL_*, DSP presets...) or a sound-file picker.
@@ -38,8 +47,12 @@ public:
 	void setModelData( QWidget *pEditor, QAbstractItemModel *pModel, const QModelIndex &index ) const override;
 
 	[[nodiscard]] static xv::sound::ValueKind_t KindOf( const xv::sound::BlockDef_t *pBlock, const QString &szKey );
+	// The key of a grid row: kept in the key cell's user data when the cell shows a tidier name.
+	[[nodiscard]] static QString KeyOf( const QModelIndex &index );
 
 private:
+	[[nodiscard]] QWidget *MakeEditor( QWidget *pParent, const QModelIndex &index ) const;
+
 	const xv::sound::BlockDef_t *m_pBlock;
 	const CSoundIndex &m_Index;
 	const CSoundDocument &m_Document;
