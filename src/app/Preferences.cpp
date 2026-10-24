@@ -6,6 +6,8 @@
 //===========================================================================//
 #include "Preferences.h"
 
+#include "DebugLog.h"
+
 #include <QSettings>
 
 namespace
@@ -16,6 +18,8 @@ constexpr auto GRAPHICS_KEY = "graphicsApi";
 constexpr auto SINGLE_WINDOW_KEY = "singleWindow";
 constexpr auto MATERIAL_VISUAL_KEY = "materialVisual";
 constexpr auto MANIFEST_REMINDER_KEY = "manifestReminder";
+constexpr auto REOPEN_SESSION_KEY = "reopenSession";
+constexpr auto DEBUG_LOG_KEY = "debugLog";
 constexpr auto MATERIAL_LIVE_KEY = "materialLivePreview";
 
 } // namespace
@@ -38,7 +42,9 @@ CPreferences::CPreferences()
 	  m_bSingleWindow( QSettings{}.value( SINGLE_WINDOW_KEY, true ).toBool() ),
 	  m_bMaterialVisual( QSettings{}.value( MATERIAL_VISUAL_KEY, true ).toBool() ),
 	  m_bMaterialLive( QSettings{}.value( MATERIAL_LIVE_KEY, true ).toBool() ),
-	  m_bManifestReminder( QSettings{}.value( MANIFEST_REMINDER_KEY, true ).toBool() )
+	  m_bManifestReminder( QSettings{}.value( MANIFEST_REMINDER_KEY, true ).toBool() ),
+	  m_bReopenSession( QSettings{}.value( REOPEN_SESSION_KEY, true ).toBool() ),
+	  m_bDebugLog( QSettings{}.value( DEBUG_LOG_KEY, false ).toBool() )
 {
 }
 
@@ -109,4 +115,24 @@ void CPreferences::SetManifestReminder( bool bRemind )
 {
 	m_bManifestReminder = bRemind;
 	QSettings{}.setValue( MANIFEST_REMINDER_KEY, bRemind );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+void CPreferences::SetReopenSession( bool bReopen )
+{
+	m_bReopenSession = bReopen;
+	QSettings{}.setValue( REOPEN_SESSION_KEY, bReopen );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+void CPreferences::SetDebugLog( bool bOn )
+{
+	m_bDebugLog = bOn;
+	QSettings{}.setValue( DEBUG_LOG_KEY, bOn );
+	SetDebugLogging( bOn );
+	DebugLog() << "debug log on";
 }

@@ -135,6 +135,19 @@ public:
 		}
 	}
 
+	std::optional<std::string> AddLooseFile( const fs::path &file ) override
+	{
+		std::error_code ec;
+		const fs::path inside = fs::weakly_canonical( file, ec ).lexically_relative( fs::weakly_canonical( GetLocation(), ec ) );
+		if ( inside.empty() || *inside.begin() == ".." || inside.is_absolute() )
+		{
+			return std::nullopt;
+		}
+		std::string szPath = NormalizePath( ToUtf8( inside ) );
+		m_Files.insert_or_assign( szPath, file );
+		return szPath;
+	}
+
 	[[nodiscard]] bool Contains( const std::string &szPath ) const override
 	{
 		return m_Files.contains( szPath );
@@ -251,6 +264,14 @@ fs::path FromUtf8( std::string_view szUtf8 )
 // Purpose: The real file behind a path, for folder mounts; nullopt for files inside a VPK.
 //-----------------------------------------------------------------------------
 std::optional<fs::path> CMount::DiskPath( const std::string & ) const
+{
+	return std::nullopt;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+std::optional<std::string> CMount::AddLooseFile( const fs::path & )
 {
 	return std::nullopt;
 }
@@ -554,6 +575,24 @@ void CFileSystem::MountSearchPath( const CGameInfo &info, const SearchPath_t &se
 	std::string szError;
 	const CMount *pMount = AddDirectory( directory, searchPath.m_Ids, &szError );
 	Record( searchPath, directory, MountRecord_t::Status_t::STATUS_FAILED, std::move( szError ), pMount );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+std::optional<std::string> CFileSystem::AddLooseFile( const fs::path &file )
+{
+	std::optional<std::string> szAdded;
+	for ( const auto &pMount : m_Mounts )
+	{
+		// Every folder mount holding it, as one folder can be mounted under several path IDs; the
+		// game path is the one from the innermost (custom/x inside the game folder: the shortest).
+		if ( auto szPath = pMount->AddLooseFile( file ); szPath && ( !szAdded || szPath->size() < szAdded->size() ) )
+		{
+			szAdded = std::move( szPath );
+		}
+	}
+	return szAdded;
 }
 
 //-----------------------------------------------------------------------------

@@ -21,7 +21,7 @@
 	"free"	"Free"
 	"premium"	"Premium"
 	"free_price"	"$0"
-	"premium_price"	"$29.99 per month"
+	"premium_price"	"$99.99 per month"
 	"features"
 	{
 		"Sound, skybox, particle, texture, material and detail editors"	"yes yes"

@@ -21,6 +21,7 @@
 #include <QVBoxLayout>
 #include <QWheelEvent>
 
+#include "DebugLog.h"
 #include "ImageFiles.h"
 
 using namespace xv;
@@ -319,6 +320,7 @@ void CDetailPreview::RenderNow()
 //-----------------------------------------------------------------------------
 void CDetailPreview::Render()
 {
+	CDebugTimer timer( QStringLiteral( "drawing the 3D detail preview" ) );
 	const qreal flRatio = m_pView->devicePixelRatioF();
 	m_Camera.m_nWidth = std::max( 64, static_cast<int>( m_pView->width() * flRatio ) );
 	m_Camera.m_nHeight = std::max( 64, static_cast<int>( m_pView->height() * flRatio ) );

@@ -35,6 +35,7 @@ private:
 	[[nodiscard]] QWidget *BuildGraphicsPage();
 	[[nodiscard]] QWidget *BuildParticlesPage();
 	[[nodiscard]] QWidget *BuildMaterialsPage();
+	[[nodiscard]] QWidget *BuildAdvancedPage();
 
 	QListWidget *m_pPages = nullptr;
 	QStackedWidget *m_pStack = nullptr;

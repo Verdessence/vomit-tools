@@ -6,12 +6,16 @@
 #pragma once
 
 #include <map>
+#include <optional>
+#include <string>
+#include <utility>
 #include <QWidget>
 #include <QImage>
 #include "DetailDocument.h"
 #include "detail/Detail.h"
 #include "texture/Sheet.h"
 
+class QAction;
 class QComboBox;
 class QLabel;
 class QListWidget;
@@ -35,6 +39,18 @@ public:
 	void SelectNode( xv::detail::NodePath_t path );
 	void SetField( const xv::detail::NodePath_t &path, const QString &szKey, const QString &szValue );
 	void SetSpriteRect( const xv::detail::NodePath_t &path, const QRectF &rect );
+	// A copy of the type, group or entry at path, right after it, its sprites moved by delta (none:
+	// beside the original's where there is room). The copy is selected. Ctrl+D, or Ctrl-drag on the sheet.
+	void DuplicateNode( const xv::detail::NodePath_t &path, std::optional<QPointF> delta = std::nullopt );
+	// Moves every sprite of the type, group or entry at path by delta texels, as one step.
+	void MoveSprites( const xv::detail::NodePath_t &path, QPointF delta );
+	// Puts copied, pasted or dropped blocks at target: inside it when they belong one level down (an
+	// entry on a group, a field on anything), else beside it. With moveFrom, the block moves from
+	// there in this file instead. Returns false when they don't fit there.
+	bool InsertNodes( std::vector<xv::kv1::CNode> nodes, const xv::detail::NodePath_t &target, bool bAfter, std::optional<xv::detail::NodePath_t> moveFrom = std::nullopt );
+	// Ctrl+C and Ctrl+V on the selection.
+	void CopySelection();
+	void PasteAtSelection();
 	bool PackPictures( const xv::detail::NodePath_t &group, const std::map<std::string, xv::texture::CImage> &pictures, const QString &szMaterial, QString *pError = nullptr );
 	[[nodiscard]] const auto &GetIssues() const { return m_Issues; }
 	[[nodiscard]] QString GetSpriteMaterial() const;
@@ -58,11 +74,26 @@ private:
 	void RemoveNode( const xv::detail::NodePath_t &path );
 	void RenameNode( const xv::detail::NodePath_t &path );
 	void ShowCardMenu( const xv::detail::NodePath_t &path, const QPoint &globalAt );
+	void ShowTypesMenu( const QPoint &at );
+	// Where a block of nDepth (0: a field) goes when put at target; nullopt where it can't.
+	struct Placement_t
+	{
+		xv::detail::NodePath_t m_Parent;
+		std::size_t m_nIndex = 0;
+		bool m_bInto = false;
+	};
+	[[nodiscard]] std::optional<Placement_t> PlaceAt( std::size_t nDepth, const xv::detail::NodePath_t &target, bool bAfter ) const;
+	// Whether the block at from can go there: not into itself, and somewhere else than where it is.
+	[[nodiscard]] static bool CanMove( const xv::detail::NodePath_t &from, const Placement_t &place );
+	// The selection shown on the cards, sheet and preview, without making the cards again.
+	void ApplySelection();
 	void LoadSheet();
 	void ChoosePictures();
 	void UpdateSheetRects();
 	void QueueRebuild();
 	[[nodiscard]] QWidget *EntryPicture( const xv::detail::NodePath_t &path );
+	// The "sprite" and "spritesize" values that put an entry's picture at rect on the sheet.
+	[[nodiscard]] std::optional<std::pair<std::string, std::string>> SpriteValues( const xv::kv1::CNode &node, const QRectF &rect ) const;
 	void FillGrounds();
 
 	CDetailDocument *m_pDocument;
@@ -76,6 +107,8 @@ private:
 	QTreeWidget *m_pMessages;
 	QLineEdit *m_pMaterial;
 	CDetailSheet *m_pSheet;
+	QAction *m_pDuplicate = nullptr;
+	QToolButton *m_pDuplicateButton = nullptr;
 	CDetailPreview *m_pPreview = nullptr;
 	QStackedWidget *m_pRight = nullptr;
 	QToolButton *m_pSheetButton = nullptr;

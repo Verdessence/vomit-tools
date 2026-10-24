@@ -42,6 +42,8 @@ public:
 	void Rebuild( const xv::vfs::CFileSystem &fileSystem );
 	[[nodiscard]] int GetFileCount() const { return m_nFileCount; }
 	[[nodiscard]] QModelIndex IndexForPath( const std::string &szPath ) const;
+	// Adds one file (or changes the mount an existing one is read from), keeping the rest of the tree.
+	void AddFile( const std::string &szPath, const xv::vfs::CMount *pMount );
 
 	[[nodiscard]] QModelIndex index( int nRow, int nColumn, const QModelIndex &parent = {} ) const override;
 	[[nodiscard]] QModelIndex parent( const QModelIndex &child ) const override;

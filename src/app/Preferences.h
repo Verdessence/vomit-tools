@@ -36,6 +36,14 @@ public:
 	[[nodiscard]] bool IsManifestReminder() const { return m_bManifestReminder; }
 	void SetManifestReminder( bool bRemind );
 
+	// Whether the files open at closing open again at the next start.
+	[[nodiscard]] bool IsReopenSession() const { return m_bReopenSession; }
+	void SetReopenSession( bool bReopen );
+
+	// Whether the debug log prints what goes on in the background (Advanced).
+	[[nodiscard]] bool IsDebugLog() const { return m_bDebugLog; }
+	void SetDebugLog( bool bOn );
+
 	// Whether materials are edited as a list of parameters (else as their text).
 	[[nodiscard]] bool IsMaterialVisual() const { return m_bMaterialVisual; }
 	void SetMaterialVisual( bool bVisual );
@@ -56,4 +64,6 @@ private:
 	bool m_bMaterialVisual = true;
 	bool m_bMaterialLive = true;
 	bool m_bManifestReminder = true;
+	bool m_bReopenSession = true;
+	bool m_bDebugLog = false;
 };

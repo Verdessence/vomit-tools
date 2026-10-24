@@ -12,6 +12,8 @@
 #include <QButtonGroup>
 #include <QCheckBox>
 #include <QDialogButtonBox>
+#include <QPushButton>
+#include <QDir>
 #include <QFormLayout>
 #include <QHBoxLayout>
 #include <QLabel>
@@ -20,6 +22,8 @@
 #include <QStackedWidget>
 #include <QVBoxLayout>
 
+#include "DebugLog.h"
+#include "FileActions.h"
 #include "Graphics.h"
 #include "InterfaceMode.h"
 #include "Preferences.h"
@@ -77,6 +81,7 @@ CPreferencesDialog::CPreferencesDialog( QWidget *pParent )
 	AddPage( tr( "Graphics" ), BuildGraphicsPage() );
 	AddPage( tr( "Particles" ), BuildParticlesPage() );
 	AddPage( tr( "Materials" ), BuildMaterialsPage() );
+	AddPage( tr( "Advanced" ), BuildAdvancedPage() );
 	for ( const auto &[ szTitle, pfnMake ] : LocalPages() )
 	{
 		if ( QWidget *pPage = pfnMake() )
@@ -160,6 +165,14 @@ QWidget *CPreferencesDialog::BuildInterfacePage()
 	pLayout->addWidget( pManifest );
 	pLayout->addWidget( Hint( tr( "When a soundscape, soundscript or particle file is saved and its manifest doesn't list it, ask "
 								  "whether to add it. \"Don't remind me again\" in that question turns this off." ) ) );
+	auto *pReopen = new QCheckBox( tr( "Reopen the files that were open at closing" ) );
+	pReopen->setObjectName( QStringLiteral( "preferencesReopenSession" ) );
+	pReopen->setChecked( CPreferences::Instance().IsReopenSession() );
+	connect( pReopen, &QCheckBox::toggled, this, []( bool bOn ) { CPreferences::Instance().SetReopenSession( bOn ); } );
+	pLayout->addSpacing( 12 );
+	pLayout->addWidget( pReopen );
+	pLayout->addWidget( Hint( tr( "At the next start, the tabs come back as they were left, with the folder browser's folder. "
+								  "Files opened from the command line or a file manager open instead." ) ) );
 	pLayout->addStretch();
 	return pPage;
 }
@@ -260,6 +273,33 @@ QWidget *CPreferencesDialog::BuildMaterialsPage()
 	pLayout->addWidget( pLive );
 	pLayout->addWidget( Hint( tr( "Off: the preview waits for Refresh, for heavy materials. Typing in the text always redraws "
 								  "it after a pause." ) ) );
+	pLayout->addStretch();
+	return pPage;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: For testing: the debug log.
+//-----------------------------------------------------------------------------
+QWidget *CPreferencesDialog::BuildAdvancedPage()
+{
+	auto *pPage = new QWidget;
+	auto *pLog = new QCheckBox( tr( "Debug log" ) );
+	pLog->setObjectName( QStringLiteral( "preferencesDebugLog" ) );
+	pLog->setChecked( CPreferences::Instance().IsDebugLog() );
+	connect( pLog, &QCheckBox::toggled, this, []( bool bOn ) { CPreferences::Instance().SetDebugLog( bOn ); } );
+	auto *pShow = new QPushButton( tr( "Show Log File" ) );
+	pShow->setObjectName( QStringLiteral( "preferencesShowLog" ) );
+	connect( pShow, &QPushButton::clicked, this, [] { RevealInFileManager( DebugLogPath() ); } );
+	QVBoxLayout *pLayout = PageLayout( pPage );
+	pLayout->addWidget( pLog );
+	pLayout->addWidget( Hint( tr( "Prints what goes on in the background (mounting the game, opening and saving files, "
+								  "drawing previews, with how long each took) to the terminal, and writes it to %1, which "
+								  "starts afresh at each run." )
+								  .arg( QDir::toNativeSeparators( DebugLogPath() ) ) ) );
+	auto *pRow = new QHBoxLayout;
+	pRow->addWidget( pShow );
+	pRow->addStretch();
+	pLayout->addLayout( pRow );
 	pLayout->addStretch();
 	return pPage;
 }

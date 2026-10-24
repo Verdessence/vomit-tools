@@ -12,6 +12,7 @@
 #include <optional>
 
 #include <QMainWindow>
+#include <QPointer>
 
 #include "ChoiceBoxes.h"
 #include "ParticleEditor.h"
@@ -96,6 +97,16 @@ public:
 	// folder unless it is a loose file already. Returns false (after saying why) when it isn't.
 	bool AddToMapManifest( CParticleDocument *pDocument, const QString &szMap );
 
+	// What was open when the window last closed: the folder browser's folder first, then each tab,
+	// one entry each (empty when reopening is turned off in Preferences).
+	[[nodiscard]] static QStringList GetLastSession();
+	// The name to show while an entry is reopened.
+	[[nodiscard]] static QString SessionEntryName( const QString &szEntry );
+	// Reopens one entry; files gone since are skipped without a word.
+	void RestoreSessionEntry( const QString &szEntry );
+	// After the last entry: the tab and side panel that were showing.
+	void FinishRestoringSession();
+
 protected:
 	void closeEvent( QCloseEvent *pEvent ) override;
 	void dragEnterEvent( QDragEnterEvent *pEvent ) override;
@@ -103,6 +114,11 @@ protected:
 
 private:
 	CDetailEditor *GetCurrentDetails() const;
+	// The session entry that reopens tab nIndex; empty for tabs that can't be (new, unsaved files).
+	[[nodiscard]] QString SessionEntryFor( int nIndex ) const;
+	void SaveSession() const;
+	// The folder picked in the side panel's tree (or the one holding the picked file); empty for none.
+	[[nodiscard]] std::filesystem::path GetSelectedFolder() const;
 	CDetailEditor *DetailEditorFor( const QString &szGamePath, const std::filesystem::path &disk = {} ) const;
 	CDetailEditor *AddDetailEditor( CDetailDocument *pDocument );
 	void SetUpDetails( CDetailEditor *pEditor );
@@ -185,6 +201,8 @@ private:
 	bool ExportSky( CSkyEditor *pEditor, bool bChooseFolder );
 	void AddToManifest( CSoundDocument *pDocument );
 	void Remount();
+	// After saving: the files written join the mounted game without mounting all of it again.
+	void FilesWritten( const std::vector<std::filesystem::path> &files );
 	void ChooseWriteFolder();
 	[[nodiscard]] std::filesystem::path GetWriteFolder() const;
 	[[nodiscard]] std::filesystem::path WriteTarget( const QString &szGamePath ) const;
@@ -216,6 +234,7 @@ private:
 	QSortFilterProxyModel *m_pFilter = nullptr;
 	QTreeView *m_pTree = nullptr;
 	QTabWidget *m_pSides = nullptr;
+	QPointer<QWidget> m_pRestoredCurrent; // the tab to show once the last session is reopened
 	QWidget *m_pGameBrowser = nullptr;
 	CFolderBrowser *m_pFolders = nullptr;
 	QTabWidget *m_pTabs = nullptr;

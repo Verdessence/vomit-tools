@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.6.6 - qol (2026-10-25)
 
 - A program icon, and a splash screen that says what is loading.
 - Sound editor: copy and paste entries, blocks and keys (right-click, Ctrl+C, Ctrl+V), within a
@@ -8,6 +8,15 @@
 - Right-click menus follow one order everywhere (copy and paste, add, rename, delete), and long Add
   lists are a search box over a scrolling list.
 - The icon in About; Help → About Premium.
+- The folder browser's folder and the open tabs come back at the next start (Preferences → Interface).
+- Save As starts in the folder picked in the side panel's tree.
+- Details editor: selecting a type or group lights all its sprites on the sheet; drag them to move
+  them together. Duplicate a type, group or entry with the Duplicate button, Ctrl+D or Ctrl-drag.
+- Details editor: types, groups and entries are panels. Click a title or into a field to select one
+  (the Select button is gone), drag it to move it (Ctrl: copy), drop it on another file's to copy,
+  and Ctrl+C / Ctrl+V. The type list has a right-click menu.
+- Saving is faster: the saved file joins the mounted game instead of the whole game being mounted again.
+- Preferences → Advanced → Debug log: prints background work, timed, to the terminal and a log file.
 
 ## 0.6.5 — The Detail Sprite (2026-10-24)
 

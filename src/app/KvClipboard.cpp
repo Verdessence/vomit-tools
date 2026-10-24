@@ -19,9 +19,8 @@ constexpr auto MIME_TYPE = "application/x-vomit-tools-keyvalues";
 //-----------------------------------------------------------------------------
 // Purpose: The clipboard's text: ours first, else plain text.
 //-----------------------------------------------------------------------------
-QByteArray ClipboardText()
+QByteArray MimeText( const QMimeData *pData )
 {
-	const QMimeData *pData = QGuiApplication::clipboard()->mimeData();
 	if ( !pData )
 	{
 		return {};
@@ -38,7 +37,7 @@ QByteArray ClipboardText()
 //-----------------------------------------------------------------------------
 // Purpose: Puts nodes on the clipboard, laid out afresh.
 //-----------------------------------------------------------------------------
-void CopyNodes( const std::vector<xv::kv1::CNode> &nodes )
+QMimeData *NodesMimeData( const std::vector<xv::kv1::CNode> &nodes )
 {
 	xv::kv1::CDocument document;
 	for ( const xv::kv1::CNode &node : nodes )
@@ -49,7 +48,15 @@ void CopyNodes( const std::vector<xv::kv1::CNode> &nodes )
 	auto *pData = new QMimeData;
 	pData->setData( QString::fromLatin1( MIME_TYPE ), text );
 	pData->setText( QString::fromUtf8( text ) );
-	QGuiApplication::clipboard()->setMimeData( pData );
+	return pData;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+void CopyNodes( const std::vector<xv::kv1::CNode> &nodes )
+{
+	QGuiApplication::clipboard()->setMimeData( NodesMimeData( nodes ) );
 }
 
 //-----------------------------------------------------------------------------
@@ -57,7 +64,15 @@ void CopyNodes( const std::vector<xv::kv1::CNode> &nodes )
 //-----------------------------------------------------------------------------
 std::vector<xv::kv1::CNode> PastedNodes()
 {
-	const QByteArray text = ClipboardText();
+	return NodesFromMimeData( QGuiApplication::clipboard()->mimeData() );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: The nodes in dragged or copied data.
+//-----------------------------------------------------------------------------
+std::vector<xv::kv1::CNode> NodesFromMimeData( const QMimeData *pData )
+{
+	const QByteArray text = MimeText( pData );
 	if ( text.trimmed().isEmpty() )
 	{
 		return {};

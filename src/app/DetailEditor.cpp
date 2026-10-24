@@ -7,9 +7,14 @@
 
 #include <algorithm>
 #include <array>
+#include <cctype>
 #include <cmath>
+#include <QAction>
 #include <QApplication>
 #include <QButtonGroup>
+#include <QMouseEvent>
+#include <QMimeData>
+#include <QDrag>
 #include <QComboBox>
 #include <QCompleter>
 #include <QDoubleSpinBox>
@@ -115,31 +120,44 @@ public:
 	std::vector<Rect_t> m_Rects;
 	NodePath_t m_Selected;
 	std::function<void( NodePath_t )> m_pfnSelect;
-	std::function<void( QRectF )> m_pfnRect;
+	std::function<void( QRectF )> m_pfnRect;   // the selected entry moved, resized or drawn anew
+	std::function<void( QPointF )> m_pfnMove;  // the selected type or group's sprites moved by this much
+	std::function<void( QPointF )> m_pfnCopy;  // Ctrl-drag: a copy of the selection, its sprites moved by this much
 	//-----------------------------------------------------------------------------
-	// Purpose: Draw selectable rectangles over the shared texture canvas; the selected one has
-	//          handles to move and resize it.
+	// Purpose: Draw selectable rectangles over the shared texture canvas. The selected entry has
+	//          handles to move and resize it; a selected type or group has all its sprites lit,
+	//          to move together.
 	//-----------------------------------------------------------------------------
 	CDetailSheet()
 	{
 		setObjectName( QStringLiteral( "detailSheet" ) );
 		setMouseTracking( true );
 		setToolTip( tr( "Click a rectangle to select its entry. Drag inside the selected one to move it, or its handles to resize it; "
-						"drag elsewhere to draw it anew. (Sprites can't be turned: the file has no angle for them.) Middle-drag pans; the wheel zooms." ) );
+						"with a group or type selected, drag any of its sprites to move them all. Ctrl-drag (or Ctrl+D) duplicates "
+						"the selection; drag elsewhere to draw the entry's rectangle anew. (Sprites can't be turned: the file has no "
+						"angle for them.) Middle-drag pans; the wheel zooms." ) );
 		m_pfnOverlay = [ this ]( QPainter &painter ) {
+			const bool bMoving = m_nMode == MODE_MOVE || m_nMode == MODE_RESIZE;
+			const QPointF delta = bMoving ? m_Live.topLeft() - m_Start.topLeft() : QPointF{};
+			const bool bEntry = Selected() != nullptr;
 			for ( const auto &entry : m_Rects )
 			{
-				const bool bSelected = entry.m_Path == m_Selected;
-				QPen pen( bSelected ? QColor( 255, 180, 40 ) : QColor( 60, 190, 240 ) );
+				const bool bLit = IsMember( entry.m_Path );
+				QPen pen( bLit ? QColor( 255, 180, 40 ) : QColor( 60, 190, 240 ) );
 				pen.setCosmetic( true );
-				pen.setWidth( bSelected ? 2 : 1 );
+				pen.setWidth( bLit ? 2 : 1 );
 				painter.setPen( pen );
-				painter.drawRect( bSelected && m_nMode != MODE_NONE && m_nMode != MODE_DRAW ? m_Live : entry.m_Rect );
+				painter.drawRect( !bLit || !bMoving ? entry.m_Rect : bEntry ? m_Live
+																			 : entry.m_Rect.translated( delta ) );
+				if ( bLit && m_bCopying )
+				{
+					painter.drawRect( entry.m_Rect );
+				}
 			}
 			if ( const QRectF *pSelected = Selected() )
 			{
 				// The handles, a fixed size on screen.
-				const QRectF shown = m_nMode != MODE_NONE && m_nMode != MODE_DRAW ? m_Live : *pSelected;
+				const QRectF shown = bMoving ? m_Live : *pSelected;
 				const double flHalf = 4.0 / GetScale();
 				QPen pen( QColor( 40, 30, 10 ) );
 				pen.setCosmetic( true );
@@ -150,6 +168,15 @@ public:
 					painter.drawRect( QRectF( at.x() - flHalf, at.y() - flHalf, flHalf * 2, flHalf * 2 ) );
 				}
 				painter.setBrush( Qt::NoBrush );
+			}
+			else if ( const auto bounds = Bounds() )
+			{
+				// A type or group: a dashed box round all of its sprites.
+				QPen pen( QColor( 255, 180, 40 ) );
+				pen.setCosmetic( true );
+				pen.setStyle( Qt::DashLine );
+				painter.setPen( pen );
+				painter.drawRect( bMoving ? m_Live : *bounds );
 			}
 			if ( m_nMode == MODE_DRAW )
 			{
@@ -162,9 +189,32 @@ public:
 		};
 	}
 
+	//-----------------------------------------------------------------------------
+	// Purpose: Whether an entry is the selection or inside it (a selected type or group).
+	//-----------------------------------------------------------------------------
+	[[nodiscard]] bool IsMember( const NodePath_t &path ) const
+	{
+		return m_Selected.size() >= 2 && path.size() >= m_Selected.size() && std::equal( m_Selected.begin(), m_Selected.end(), path.begin() );
+	}
+	//-----------------------------------------------------------------------------
+	// Purpose: The box round every sprite of the selection, if it has any.
+	//-----------------------------------------------------------------------------
+	[[nodiscard]] std::optional<QRectF> Bounds() const
+	{
+		std::optional<QRectF> bounds;
+		for ( const auto &entry : m_Rects )
+		{
+			if ( IsMember( entry.m_Path ) )
+			{
+				bounds = bounds ? bounds->united( entry.m_Rect ) : entry.m_Rect;
+			}
+		}
+		return bounds;
+	}
+
 protected:
 	//-----------------------------------------------------------------------------
-	// Purpose: A handle of the selected rectangle, its inside (move), or elsewhere (draw anew).
+	// Purpose: A handle of the selected rectangle, inside the selection (move), or elsewhere (draw anew).
 	//-----------------------------------------------------------------------------
 	void mousePressEvent( QMouseEvent *pEvent ) override
 	{
@@ -173,14 +223,21 @@ protected:
 			m_From = ImagePoint( pEvent->position() );
 			m_To = m_From;
 			m_nMode = MODE_NONE;
+			m_bCopying = false;
 			if ( const QRectF *pSelected = Selected() )
 			{
 				m_Start = *pSelected;
-				m_Live = m_Start;
 				m_nHandle = HandleAt( pEvent->position() );
 				m_nMode = m_nHandle >= 0 ? MODE_RESIZE : pSelected->contains( m_From ) ? MODE_MOVE
 																					   : MODE_NONE;
 			}
+			else if ( const auto bounds = Bounds(); bounds && OnMember( m_From ) )
+			{
+				m_Start = *bounds;
+				m_nMode = MODE_MOVE;
+			}
+			m_Live = m_Start;
+			m_bCopying = m_nMode == MODE_MOVE && ( pEvent->modifiers() & Qt::ControlModifier ) && m_pfnCopy;
 			if ( m_nMode == MODE_NONE && QRectF( GetImage().rect() ).contains( m_From ) )
 			{
 				m_nMode = MODE_DRAW;
@@ -204,9 +261,10 @@ protected:
 		{
 			static constexpr Qt::CursorShape CURSORS[] = { Qt::SizeFDiagCursor, Qt::SizeVerCursor, Qt::SizeBDiagCursor, Qt::SizeHorCursor, Qt::SizeFDiagCursor, Qt::SizeVerCursor, Qt::SizeBDiagCursor, Qt::SizeHorCursor };
 			const int nHandle = Selected() ? HandleAt( pEvent->position() ) : -1;
-			const QRectF *pSelected = Selected();
-			setCursor( nHandle >= 0 ? CURSORS[ nHandle ] : pSelected && pSelected->contains( ImagePoint( pEvent->position() ) ) ? Qt::SizeAllCursor
-																																 : Qt::CrossCursor );
+			const bool bInside = OnMember( ImagePoint( pEvent->position() ) );
+			setCursor( nHandle >= 0 ? CURSORS[ nHandle ] : bInside && ( pEvent->modifiers() & Qt::ControlModifier ) ? Qt::DragCopyCursor
+													   : bInside                                                   ? Qt::SizeAllCursor
+																												   : Qt::CrossCursor );
 			return;
 		}
 		m_To = ImagePoint( pEvent->position() );
@@ -216,8 +274,8 @@ protected:
 		{
 			// Kept whole on the sheet.
 			QRectF moved = m_Start.translated( std::round( delta.x() ), std::round( delta.y() ) );
-			moved.moveLeft( std::clamp( moved.left(), 0.0, bounds.width() - moved.width() ) );
-			moved.moveTop( std::clamp( moved.top(), 0.0, bounds.height() - moved.height() ) );
+			moved.moveLeft( std::clamp( moved.left(), 0.0, std::max( 0.0, bounds.width() - moved.width() ) ) );
+			moved.moveTop( std::clamp( moved.top(), 0.0, std::max( 0.0, bounds.height() - moved.height() ) ) );
 			m_Live = moved;
 		}
 		else if ( m_nMode == MODE_RESIZE )
@@ -247,7 +305,7 @@ protected:
 		update();
 	}
 	//-----------------------------------------------------------------------------
-	// Purpose: Commit a move or resize, select a hit rectangle, or commit a drawn one.
+	// Purpose: Commit a move, resize or copy, select a hit rectangle, or commit a drawn one.
 	//-----------------------------------------------------------------------------
 	void mouseReleaseEvent( QMouseEvent *pEvent ) override
 	{
@@ -256,14 +314,28 @@ protected:
 			return;
 		}
 		const Mode_t nMode = m_nMode;
+		const bool bCopying = m_bCopying;
 		m_nMode = MODE_NONE;
+		m_bCopying = false;
 		m_To = ImagePoint( pEvent->position() );
 		const bool bClick = QLineF( m_From, m_To ).length() * GetScale() < 4;
+		const QPointF delta = m_Live.topLeft() - m_Start.topLeft();
 		if ( ( nMode == MODE_MOVE || nMode == MODE_RESIZE ) && !bClick )
 		{
-			if ( m_pfnRect && m_Live != m_Start )
+			if ( bCopying )
 			{
-				m_pfnRect( m_Live );
+				m_pfnCopy( delta );
+			}
+			else if ( Selected() )
+			{
+				if ( m_pfnRect && m_Live != m_Start )
+				{
+					m_pfnRect( m_Live );
+				}
+			}
+			else if ( m_pfnMove && !delta.isNull() )
+			{
+				m_pfnMove( delta );
 			}
 		}
 		else if ( bClick )
@@ -313,6 +385,13 @@ private:
 		return it == m_Rects.end() ? nullptr : &it->m_Rect;
 	}
 	//-----------------------------------------------------------------------------
+	// Purpose: Whether a point of the sheet is on one of the selection's sprites.
+	//-----------------------------------------------------------------------------
+	[[nodiscard]] bool OnMember( QPointF at ) const
+	{
+		return std::ranges::any_of( m_Rects, [ & ]( const Rect_t &entry ) { return IsMember( entry.m_Path ) && entry.m_Rect.contains( at ); } );
+	}
+	//-----------------------------------------------------------------------------
 	// Purpose: The eight handles, from the top left round.
 	//-----------------------------------------------------------------------------
 	[[nodiscard]] static std::array<QPointF, 8> Handles( const QRectF &r )
@@ -344,10 +423,200 @@ private:
 
 	QPointF m_From;
 	QPointF m_To;
-	QRectF m_Start; // the selected rectangle when the drag began
+	QRectF m_Start; // the selected rectangle (or the selection's box) when the drag began
 	QRectF m_Live;  // it as the drag has it now
 	Mode_t m_nMode = MODE_NONE;
+	bool m_bCopying = false;
 	int m_nHandle = -1;
+};
+
+namespace
+{
+constexpr auto DRAG_SOURCE_FORMAT = "application/x-vomit-tools-detail-path";
+const QString SELECTED_CARD_STYLE = QStringLiteral( "QGroupBox[selected=\"true\"] { border: 1px solid palette(highlight); margin-top: 12px; padding-top: 8px; } QGroupBox::title { subcontrol-origin: margin; }" );
+
+//-----------------------------------------------------------------------------
+// Purpose: Which editor a drag came from and the path it took, so a drop in the same file moves.
+//-----------------------------------------------------------------------------
+QByteArray DragSourceData( const void *pEditor, const NodePath_t &path )
+{
+	QStringList parts{ QString::number( reinterpret_cast<quintptr>( pEditor ) ) };
+	for ( std::size_t n : path )
+	{
+		parts << QString::number( n );
+	}
+	return parts.join( u',' ).toLatin1();
+}
+std::optional<NodePath_t> DragSourceFrom( const QMimeData *pData, const void *pEditor )
+{
+	const QList<QByteArray> parts = pData ? pData->data( QString::fromLatin1( DRAG_SOURCE_FORMAT ) ).split( ',' ) : QList<QByteArray>{};
+	if ( parts.size() < 3 || parts.front().toULongLong() != reinterpret_cast<quintptr>( pEditor ) )
+	{
+		return std::nullopt;
+	}
+	NodePath_t path;
+	for ( qsizetype i = 1; i < parts.size(); ++i )
+	{
+		path.push_back( parts[ i ].toULongLong() );
+	}
+	return path;
+}
+//-----------------------------------------------------------------------------
+// Purpose: The level a block from elsewhere belongs at, from what it holds: 2 a type, 3 a group,
+//          4 an entry; 0 a field.
+//-----------------------------------------------------------------------------
+std::size_t DepthOf( const CNode &node )
+{
+	if ( !node.IsBlock() )
+	{
+		return 0;
+	}
+	const auto holdsEntryKeys = []( const CNode &block ) {
+		return block.Find( "sprite" ) || block.Find( "model" ) || block.Find( "amount" ) || block.Find( "spritesize" ) || block.Find( "detailOrientation" );
+	};
+	if ( node.Find( "density" ) )
+	{
+		return 2;
+	}
+	if ( node.Find( "alpha" ) )
+	{
+		return 3;
+	}
+	if ( holdsEntryKeys( node ) )
+	{
+		return 4;
+	}
+	const auto &children = node.GetChildren();
+	if ( std::ranges::any_of( children, []( const CNode &child ) { return child.IsBlock() && child.Find( "alpha" ); } ) )
+	{
+		return 2;
+	}
+	return std::ranges::any_of( children, [ & ]( const CNode &child ) { return child.IsBlock() && holdsEntryKeys( child ); } ) ? 3 : 4;
+}
+} // namespace
+
+//-----------------------------------------------------------------------------
+// Purpose: A type, group or entry as a panel: clicking its title (or anywhere not a field) selects
+//          it, dragging it moves it (Ctrl: copies it), and blocks dropped on it land inside it or
+//          beside it, from this file or another.
+//-----------------------------------------------------------------------------
+class CDetailCard : public QGroupBox
+{
+public:
+	enum Hint_t
+	{
+		HINT_NONE,
+		HINT_INTO,
+		HINT_BEFORE,
+		HINT_AFTER,
+	};
+	NodePath_t m_Path;
+	std::function<void( const NodePath_t & )> m_pfnSelect;
+	std::function<QMimeData *( const NodePath_t & )> m_pfnDragData;
+	// Whether data dropped here (bAfter: in the lower half) has somewhere to go, marking where; with
+	// bDrop, puts it there. Null data: the drag left, take the mark away.
+	std::function<bool( const QMimeData *, const NodePath_t &, bool bAfter, Qt::DropAction, bool bDrop )> m_pfnDrop;
+
+	CDetailCard( const QString &szTitle, NodePath_t path )
+		: QGroupBox( szTitle ),
+		  m_Path( std::move( path ) )
+	{
+		setAcceptDrops( true );
+		setFocusPolicy( Qt::ClickFocus );
+		setToolTip( tr( "Click the title to select; drag it to move it, Ctrl-drag to copy it. Ctrl+C, Ctrl+V and Ctrl+D copy, paste and duplicate." ) );
+	}
+
+protected:
+	void mousePressEvent( QMouseEvent *pEvent ) override
+	{
+		if ( pEvent->button() == Qt::LeftButton )
+		{
+			m_DragFrom = pEvent->position().toPoint();
+			setFocus( Qt::MouseFocusReason );
+			if ( m_pfnSelect )
+			{
+				m_pfnSelect( m_Path );
+			}
+			pEvent->accept();
+			return;
+		}
+		QGroupBox::mousePressEvent( pEvent );
+	}
+	void mouseMoveEvent( QMouseEvent *pEvent ) override
+	{
+		if ( !( pEvent->buttons() & Qt::LeftButton ) || !m_pfnDragData || ( pEvent->position().toPoint() - m_DragFrom ).manhattanLength() < QApplication::startDragDistance() )
+		{
+			return;
+		}
+		auto *pDrag = new QDrag( this );
+		pDrag->setMimeData( m_pfnDragData( m_Path ) );
+		pDrag->setPixmap( grab().scaledToWidth( std::min( width(), 260 ), Qt::SmoothTransformation ) );
+		pDrag->exec( Qt::MoveAction | Qt::CopyAction, Qt::MoveAction );
+	}
+	void dragEnterEvent( QDragEnterEvent *pEvent ) override { dragMoveEvent( pEvent ); }
+	void dragMoveEvent( QDragMoveEvent *pEvent ) override
+	{
+		const Qt::DropAction nAction = ( pEvent->modifiers() & Qt::ControlModifier ) ? Qt::CopyAction : Qt::MoveAction;
+		if ( !m_pfnDrop || !m_pfnDrop( pEvent->mimeData(), m_Path, pEvent->position().y() > height() / 2.0, nAction, false ) )
+		{
+			pEvent->ignore();
+			return;
+		}
+		pEvent->setDropAction( nAction );
+		pEvent->accept();
+	}
+	void dragLeaveEvent( QDragLeaveEvent * ) override
+	{
+		if ( m_pfnDrop )
+		{
+			m_pfnDrop( nullptr, m_Path, false, Qt::IgnoreAction, false );
+		}
+	}
+	void dropEvent( QDropEvent *pEvent ) override
+	{
+		const Qt::DropAction nAction = ( pEvent->modifiers() & Qt::ControlModifier ) ? Qt::CopyAction : Qt::MoveAction;
+		pEvent->setDropAction( nAction );
+		pEvent->accept();
+		if ( m_pfnDrop )
+		{
+			m_pfnDrop( pEvent->mimeData(), m_Path, pEvent->position().y() > height() / 2.0, nAction, true );
+		}
+	}
+	void paintEvent( QPaintEvent *pEvent ) override
+	{
+		QGroupBox::paintEvent( pEvent );
+		if ( m_nHint == HINT_NONE )
+		{
+			return;
+		}
+		QPainter painter( this );
+		QPen pen( palette().color( QPalette::Highlight ) );
+		pen.setWidth( 3 );
+		painter.setPen( pen );
+		if ( m_nHint == HINT_INTO )
+		{
+			painter.drawRect( rect().adjusted( 1, 1, -2, -2 ) );
+		}
+		else
+		{
+			const int y = m_nHint == HINT_BEFORE ? 1 : height() - 2;
+			painter.drawLine( 0, y, width(), y );
+		}
+	}
+
+public:
+	void SetHint( Hint_t nHint )
+	{
+		if ( m_nHint != nHint )
+		{
+			m_nHint = nHint;
+			update();
+		}
+	}
+
+private:
+	QPoint m_DragFrom;
+	Hint_t m_nHint = HINT_NONE;
 };
 
 //-----------------------------------------------------------------------------
@@ -430,6 +699,8 @@ CDetailEditor::CDetailEditor( CDetailDocument *pDocument, QWidget *pParent )
 			m_pTypes->item( i )->setHidden( !m_pTypes->item( i )->text().contains( szText, Qt::CaseInsensitive ) );
 		}
 	} );
+	m_pTypes->setContextMenuPolicy( Qt::CustomContextMenu );
+	connect( m_pTypes, &QWidget::customContextMenuRequested, this, &CDetailEditor::ShowTypesMenu );
 	connect( m_pTypes, &QListWidget::currentItemChanged, this, [ this ]( QListWidgetItem *pItem ) {
 		if ( pItem && !m_bFilling )
 		{
@@ -442,6 +713,47 @@ CDetailEditor::CDetailEditor( CDetailDocument *pDocument, QWidget *pParent )
 	m_pSheet = new CDetailSheet;
 	m_pSheet->m_pfnSelect = [ this ]( NodePath_t path ) { SelectNode( std::move( path ) ); };
 	m_pSheet->m_pfnRect = [ this ]( QRectF area ) { SetSpriteRect( m_Selected, area ); };
+	m_pSheet->m_pfnMove = [ this ]( QPointF delta ) { MoveSprites( m_Selected, delta ); };
+	m_pSheet->m_pfnCopy = [ this ]( QPointF delta ) { DuplicateNode( m_Selected, delta ); };
+	m_pDuplicate = new QAction( tr( "Duplicate" ), this );
+	m_pDuplicate->setObjectName( QStringLiteral( "detailDuplicate" ) );
+	m_pDuplicate->setShortcut( QKeySequence( Qt::CTRL | Qt::Key_D ) );
+	m_pDuplicate->setShortcutContext( Qt::WidgetWithChildrenShortcut );
+	m_pDuplicate->setToolTip( tr( "Copy the selected type, group or entry, its sprites beside the original's (Ctrl+D; or Ctrl-drag them on the sheet)" ) );
+	m_pDuplicate->setEnabled( false );
+	connect( m_pDuplicate, &QAction::triggered, this, [ this ] { DuplicateNode( m_Selected ); } );
+	addAction( m_pDuplicate );
+	// Copy and paste the selection; in a field, they are the field's own.
+	auto *pCopy = new QAction( tr( "Copy" ), this );
+	pCopy->setObjectName( QStringLiteral( "detailCopy" ) );
+	pCopy->setShortcut( QKeySequence::Copy );
+	pCopy->setShortcutContext( Qt::WidgetWithChildrenShortcut );
+	connect( pCopy, &QAction::triggered, this, &CDetailEditor::CopySelection );
+	addAction( pCopy );
+	auto *pPaste = new QAction( tr( "Paste" ), this );
+	pPaste->setObjectName( QStringLiteral( "detailPaste" ) );
+	pPaste->setShortcut( QKeySequence::Paste );
+	pPaste->setShortcutContext( Qt::WidgetWithChildrenShortcut );
+	connect( pPaste, &QAction::triggered, this, &CDetailEditor::PasteAtSelection );
+	addAction( pPaste );
+	// Clicking into a field selects its card.
+	connect( qApp, &QApplication::focusChanged, this, [ this ]( QWidget *, QWidget *pNow ) {
+		if ( m_bFilling || !pNow || !m_pCards->isAncestorOf( pNow ) )
+		{
+			return;
+		}
+		for ( QWidget *pWidget = pNow; pWidget && pWidget != m_pCards; pWidget = pWidget->parentWidget() )
+		{
+			if ( auto *pCard = dynamic_cast<CDetailCard *>( pWidget ) )
+			{
+				if ( pCard->m_Path != m_Selected )
+				{
+					SelectNode( pCard->m_Path );
+				}
+				break;
+			}
+		}
+	} );
 	// The right: the sheet or the 3D preview.
 	m_pPreview = new CDetailPreview;
 	m_pSheetButton = new QToolButton;
@@ -460,6 +772,14 @@ CDetailEditor::CDetailEditor( CDetailDocument *pDocument, QWidget *pParent )
 		pSwitch->addWidget( pButton );
 	}
 	pSwitch->addStretch();
+	// Duplicate sits at the end of the row, for the sheet.
+	m_pDuplicateButton = new QToolButton;
+	m_pDuplicateButton->setObjectName( QStringLiteral( "detailDuplicateButton" ) );
+	m_pDuplicateButton->setDefaultAction( m_pDuplicate );
+	m_pDuplicateButton->setIcon( QIcon::fromTheme( QStringLiteral( "edit-copy" ) ) );
+	m_pDuplicateButton->setToolButtonStyle( Qt::ToolButtonTextBesideIcon );
+	m_pDuplicateButton->setAutoRaise( true );
+	pSwitch->addWidget( m_pDuplicateButton );
 	m_pSheetButton->setChecked( true );
 	m_pRight = new QStackedWidget;
 	m_pRight->addWidget( m_pSheet );
@@ -551,6 +871,11 @@ void CDetailEditor::Rebuild()
 		pLayout->addWidget( new QLabel( tr( "Add a detail type to begin." ) ) );
 	}
 	pLayout->addStretch();
+	// Cards dropped on a field land on its card, not as text in the field.
+	for ( auto *pField : pHost->findChildren<QLineEdit *>() )
+	{
+		pField->setAcceptDrops( false );
+	}
 	m_pCards->setWidget( pHost );
 	m_pCards->verticalScrollBar()->setValue( nScroll );
 	if ( !szFocus.isEmpty() )
@@ -573,13 +898,64 @@ void CDetailEditor::Rebuild()
 QWidget *CDetailEditor::BuildCard( const NodePath_t &path )
 {
 	const auto *pNode = Node( m_pDocument->GetDocument(), path );
-	auto *pCard = new QGroupBox( QString::fromStdString( pNode->GetKey() ) );
+	auto *pCard = new CDetailCard( QString::fromStdString( pNode->GetKey() ), path );
 	pCard->setObjectName( FieldName( path, QStringLiteral( "card" ) ) );
 	pCard->setProperty( "selected", path == m_Selected );
 	if ( path == m_Selected )
 	{
-		pCard->setStyleSheet( QStringLiteral( "QGroupBox[selected=\"true\"] { border: 1px solid palette(highlight); margin-top: 12px; padding-top: 8px; } QGroupBox::title { subcontrol-origin: margin; }" ) );
+		pCard->setStyleSheet( SELECTED_CARD_STYLE );
 	}
+	pCard->m_pfnSelect = [ this ]( const NodePath_t &selected ) { SelectNode( selected ); };
+	pCard->m_pfnDragData = [ this ]( const NodePath_t &dragged ) {
+		const auto *pDragged = Node( m_pDocument->GetDocument(), dragged );
+		QMimeData *pData = NodesMimeData( pDragged ? std::vector<CNode>{ *pDragged } : std::vector<CNode>{} );
+		pData->setData( QString::fromLatin1( DRAG_SOURCE_FORMAT ), DragSourceData( this, dragged ) );
+		return pData;
+	};
+	pCard->m_pfnDrop = [ this ]( const QMimeData *pData, NodePath_t target, bool bAfter, Qt::DropAction nAction, bool bDrop ) {
+		const auto mark = [ this ]( const NodePath_t &marked, CDetailCard::Hint_t nHint ) {
+			for ( auto *pBox : m_pCards->widget()->findChildren<QGroupBox *>() )
+			{
+				if ( auto *pOther = dynamic_cast<CDetailCard *>( pBox ) )
+				{
+					pOther->SetHint( pOther->m_Path == marked ? nHint : CDetailCard::HINT_NONE );
+				}
+			}
+		};
+		auto nodes = pData ? NodesFromMimeData( pData ) : std::vector<CNode>{};
+		if ( nodes.empty() || bDrop )
+		{
+			mark( {}, CDetailCard::HINT_NONE );
+		}
+		if ( nodes.empty() )
+		{
+			return false;
+		}
+		const auto source = DragSourceFrom( pData, this );
+		const auto moveFrom = source && nAction == Qt::MoveAction ? source : std::nullopt;
+		const std::size_t nDepth = source ? source->size() : DepthOf( nodes.front() );
+		// Over a card inside one of its level, it goes after that one (a group over its entries).
+		if ( nDepth >= 2 && target.size() > nDepth )
+		{
+			target.resize( nDepth );
+			bAfter = true;
+		}
+		const auto place = PlaceAt( nDepth, target, bAfter );
+		if ( !place || ( moveFrom && !CanMove( *moveFrom, *place ) ) )
+		{
+			mark( {}, CDetailCard::HINT_NONE );
+			return false;
+		}
+		if ( bDrop )
+		{
+			// The cards are made again by the edit, the one dropped on too: after the drop is done.
+			QTimer::singleShot( 0, this, [ this, nodes = std::move( nodes ), target, bAfter, moveFrom ] { InsertNodes( nodes, target, bAfter, moveFrom ); } );
+			return true;
+		}
+		mark( target, place->m_bInto ? CDetailCard::HINT_INTO : bAfter ? CDetailCard::HINT_AFTER
+																		: CDetailCard::HINT_BEFORE );
+		return true;
+	};
 	// Right-click, as everywhere: copy and paste, add, rename, delete.
 	pCard->setContextMenuPolicy( Qt::CustomContextMenu );
 	connect( pCard, &QWidget::customContextMenuRequested, this, [ this, pCard, path ]( const QPoint &at ) { ShowCardMenu( path, pCard->mapToGlobal( at ) ); } );
@@ -591,7 +967,6 @@ QWidget *CDetailEditor::BuildCard( const NodePath_t &path )
 		connect( pButton, &QToolButton::clicked, this, pfnAction );
 		pTools->addWidget( pButton );
 	};
-	button( tr( "Select" ), [ this, path ] { SelectNode( path ); } );
 	button( tr( "Rename…" ), [ this, path ] { RenameNode( path ); } );
 	button( tr( "Delete" ), [ this, path ] { RemoveNode( path ); } );
 	if ( path.size() == 2 )
@@ -815,15 +1190,177 @@ void CDetailEditor::SelectNode( NodePath_t path )
 	{
 		return;
 	}
+	const bool bSameType = m_Selected.size() >= 2 && m_Selected[ 0 ] == path[ 0 ] && m_Selected[ 1 ] == path[ 1 ];
 	m_Selected = std::move( path );
-	// Selection may originate in a card's button signal; keep that button alive until it returns.
-	QueueRebuild();
-	QTimer::singleShot( 0, this, [ this ] {
-		if ( auto *pCard = m_pCards->widget()->findChild<QWidget *>( FieldName( m_Selected, QStringLiteral( "card" ) ) ) )
+	auto *pCard = m_pCards->widget() ? dynamic_cast<CDetailCard *>( m_pCards->widget()->findChild<QGroupBox *>( FieldName( m_Selected, QStringLiteral( "card" ) ) ) ) : nullptr;
+	// Within the type shown, and with its card there, the cards stay: a field being clicked into
+	// keeps its box.
+	if ( bSameType && !m_bQueued && pCard && pCard->m_Path == m_Selected )
+	{
+		ApplySelection();
+		const QRect shown( m_pCards->widget()->mapFrom( m_pCards->viewport(), QPoint( 0, 0 ) ), m_pCards->viewport()->size() );
+		if ( !shown.intersects( QRect( pCard->mapTo( m_pCards->widget(), QPoint( 0, 0 ) ), pCard->size() ) ) )
 		{
 			m_pCards->ensureVisible( 0, pCard->mapTo( m_pCards->widget(), QPoint( 0, 0 ) ).y(), 0, 12 );
 		}
+		return;
+	}
+	// Selection may originate in a card's button signal; keep that button alive until it returns.
+	QueueRebuild();
+	QTimer::singleShot( 0, this, [ this ] {
+		if ( auto *pShown = m_pCards->widget()->findChild<QWidget *>( FieldName( m_Selected, QStringLiteral( "card" ) ) ) )
+		{
+			m_pCards->ensureVisible( 0, pShown->mapTo( m_pCards->widget(), QPoint( 0, 0 ) ).y(), 0, 12 );
+		}
 	} );
+}
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+void CDetailEditor::ApplySelection()
+{
+	for ( auto *pBox : m_pCards->widget()->findChildren<QGroupBox *>() )
+	{
+		auto *pCard = dynamic_cast<CDetailCard *>( pBox );
+		if ( !pCard )
+		{
+			continue;
+		}
+		const bool bSelected = pCard->m_Path == m_Selected;
+		if ( pCard->property( "selected" ).toBool() != bSelected )
+		{
+			pCard->setProperty( "selected", bSelected );
+			pCard->setStyleSheet( bSelected ? SELECTED_CARD_STYLE : QString{} );
+		}
+	}
+	UpdateSheetRects();
+	m_pPreview->SetScene( &m_pDocument->GetDocument(), NodePath_t( m_Selected.begin(), m_Selected.begin() + 2 ), m_Selected );
+}
+//-----------------------------------------------------------------------------
+// Purpose: A block one level down goes inside the target; one at its level, before or after it;
+//          a field, into it.
+//-----------------------------------------------------------------------------
+std::optional<CDetailEditor::Placement_t> CDetailEditor::PlaceAt( std::size_t nDepth, const NodePath_t &target, bool bAfter ) const
+{
+	const auto *pTarget = Node( m_pDocument->GetDocument(), target );
+	if ( !pTarget || target.size() < 2 )
+	{
+		return std::nullopt;
+	}
+	if ( nDepth == 0 || target.size() + 1 == nDepth )
+	{
+		return Placement_t{ target, pTarget->GetChildren().size(), true };
+	}
+	if ( target.size() == nDepth )
+	{
+		return Placement_t{ NodePath_t( target.begin(), target.end() - 1 ), target.back() + ( bAfter ? 1 : 0 ), false };
+	}
+	return std::nullopt;
+}
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+bool CDetailEditor::CanMove( const NodePath_t &from, const Placement_t &place )
+{
+	const bool bIntoItself = place.m_Parent.size() >= from.size() && std::equal( from.begin(), from.end(), place.m_Parent.begin() );
+	const bool bSameSpot = NodePath_t( from.begin(), from.end() - 1 ) == place.m_Parent && ( place.m_nIndex == from.back() || place.m_nIndex == from.back() + 1 );
+	return !bIntoItself && !bSameSpot;
+}
+//-----------------------------------------------------------------------------
+// Purpose: Insert (or move) blocks where PlaceAt puts them, as one undo step, and select the first.
+//-----------------------------------------------------------------------------
+bool CDetailEditor::InsertNodes( std::vector<CNode> nodes, const NodePath_t &target, bool bAfter, std::optional<NodePath_t> moveFrom )
+{
+	if ( nodes.empty() )
+	{
+		return false;
+	}
+	if ( moveFrom )
+	{
+		nodes.resize( 1 );
+	}
+	const std::size_t nDepth = moveFrom ? moveFrom->size() : DepthOf( nodes.front() );
+	const auto place = PlaceAt( nDepth, target, bAfter );
+	if ( !place || ( moveFrom && !CanMove( *moveFrom, *place ) ) )
+	{
+		return false;
+	}
+	const bool bSameParent = moveFrom && NodePath_t( moveFrom->begin(), moveFrom->end() - 1 ) == place->m_Parent;
+	NodePath_t selected;
+	m_pDocument->Edit( moveFrom ? tr( "Move \"%1\"" ).arg( QString::fromStdString( nodes.front().GetKey() ) ) : tr( "Paste" ), [ & ]( auto &edited ) {
+		auto *pParent = Node( edited, place->m_Parent );
+		if ( !pParent )
+		{
+			return;
+		}
+		std::size_t nIndex = std::min( place->m_nIndex, pParent->GetChildren().size() );
+		std::size_t nInserted = 0;
+		for ( CNode &node : nodes )
+		{
+			if ( nDepth == 0 && node.IsPair() )
+			{
+				Set( edited, place->m_Parent, node.GetKey(), node.GetValue() );
+				continue;
+			}
+			// Sibling names stay unique, as everywhere in the editor.
+			if ( !bSameParent && pParent->Find( node.GetKey() ) )
+			{
+				std::string szBase = node.GetKey();
+				while ( !szBase.empty() && std::isdigit( static_cast<unsigned char>( szBase.back() ) ) )
+				{
+					szBase.pop_back();
+				}
+				node.SetKey( UniqueName( *pParent, szBase.empty() ? "Copy" : szBase ) );
+			}
+			pParent->InsertChild( nIndex, std::move( node ) );
+			if ( selected.empty() )
+			{
+				selected = place->m_Parent;
+				selected.push_back( nIndex );
+			}
+			nIndex++;
+			nInserted++;
+		}
+		if ( moveFrom && nInserted == 1 )
+		{
+			// The original, shifted by the insertion when it came after it; then the copy shifted
+			// back when the original came before it.
+			NodePath_t from = *moveFrom;
+			const std::size_t nLevel = place->m_Parent.size();
+			if ( from.size() > nLevel && std::equal( place->m_Parent.begin(), place->m_Parent.end(), from.begin() ) && from[ nLevel ] >= place->m_nIndex )
+			{
+				from[ nLevel ]++;
+			}
+			const NodePath_t fromParent( from.begin(), from.end() - 1 );
+			if ( auto *pFromParent = Node( edited, fromParent ) )
+			{
+				pFromParent->RemoveChild( from.back() );
+			}
+			if ( selected.size() >= from.size() && std::equal( fromParent.begin(), fromParent.end(), selected.begin() ) && selected[ from.size() - 1 ] > from.back() )
+			{
+				selected[ from.size() - 1 ]--;
+			}
+		}
+	} );
+	SelectNode( selected.empty() ? place->m_Parent : selected );
+	return true;
+}
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+void CDetailEditor::CopySelection()
+{
+	if ( const auto *pNode = m_Selected.size() >= 2 ? Node( m_pDocument->GetDocument(), m_Selected ) : nullptr )
+	{
+		CopyNodes( { *pNode } );
+	}
+}
+//-----------------------------------------------------------------------------
+// Purpose: Beside the selection when the pasted block is of its level, inside it when one below.
+//-----------------------------------------------------------------------------
+void CDetailEditor::PasteAtSelection()
+{
+	InsertNodes( PastedNodes(), m_Selected, true );
 }
 //-----------------------------------------------------------------------------
 // Purpose: Apply one field edit to the original KeyValues tokens.
@@ -1020,6 +1557,7 @@ void CDetailEditor::UpdateSheetRects()
 {
 	m_pSheet->m_Rects.clear();
 	m_pSheet->m_Selected = m_Selected;
+	m_pDuplicate->setEnabled( m_Selected.size() >= 2 && Node( m_pDocument->GetDocument(), m_Selected ) );
 	const auto size = m_pSheet->GetImage().size();
 	for ( const auto &type : Types( m_pDocument->GetDocument() ) )
 	{
@@ -1047,19 +1585,34 @@ void CDetailEditor::UpdateSheetRects()
 //-----------------------------------------------------------------------------
 void CDetailEditor::SetSpriteRect( const NodePath_t &path, const QRectF &rect )
 {
-	const auto size = m_pSheet->GetImage().size();
 	const auto *pNode = Node( m_pDocument->GetDocument(), path );
-	if ( size.isEmpty() || path.size() != 4 || !pNode || !pNode->Find( "sprite" ) || rect.isEmpty() )
+	const auto values = path.size() == 4 && pNode ? SpriteValues( *pNode, rect ) : std::nullopt;
+	if ( !values )
 	{
 		return;
+	}
+	m_pDocument->Edit( tr( "Set sprite rectangle and size" ), [ & ]( auto &document ) {
+		Set( document, path, "sprite", values->first );
+		Set( document, path, "spritesize", values->second );
+	} );
+}
+//-----------------------------------------------------------------------------
+// Purpose: Convert a pixel selection to square sheet coordinates; resize world dimensions together.
+//-----------------------------------------------------------------------------
+std::optional<std::pair<std::string, std::string>> CDetailEditor::SpriteValues( const CNode &node, const QRectF &rect ) const
+{
+	const auto size = m_pSheet->GetImage().size();
+	if ( size.isEmpty() || !node.Find( "sprite" ) || rect.isEmpty() )
+	{
+		return std::nullopt;
 	}
 	const auto clipped = rect.intersected( QRectF( QPointF( 0, 0 ), QSizeF( size ) ) );
 	if ( clipped.isEmpty() )
 	{
-		return;
+		return std::nullopt;
 	}
-	const auto oldRect = Numbers( pNode->Find( "sprite" )->GetValue() );
-	const auto *pSize = pNode->Find( "spritesize" );
+	const auto oldRect = Numbers( node.Find( "sprite" )->GetValue() );
+	const auto *pSize = node.Find( "spritesize" );
 	const auto oldSize = pSize ? Numbers( pSize->GetValue() ) : std::vector<double>{};
 	const double flHeight = clipped.height() / size.height() * size.width();
 	const double flY = clipped.y() / size.height() * size.width();
@@ -1071,9 +1624,131 @@ void CDetailEditor::SetSpriteRect( const NodePath_t &path, const QRectF &rect )
 		flHeightUnits = oldSize[ 3 ] * ( clipped.height() / size.height() ) / ( oldRect[ 3 ] / oldRect[ 4 ] );
 	}
 	const QString szSize = QStringLiteral( "%1 %2 %3 %4" ).arg( oldSize.size() == 4 ? oldSize[ 0 ] : .5 ).arg( oldSize.size() == 4 ? oldSize[ 1 ] : 0 ).arg( flWidthUnits, 0, 'g', 12 ).arg( flHeightUnits, 0, 'g', 12 );
-	m_pDocument->Edit( tr( "Set sprite rectangle and size" ), [ & ]( auto &document ) {
-		Set( document, path, "sprite", szRect.toStdString() );
-		Set( document, path, "spritesize", szSize.toStdString() );
+	return std::pair{ szRect.toStdString(), szSize.toStdString() };
+}
+//-----------------------------------------------------------------------------
+// Purpose: The sheet rectangles of the entries at or under path, with the path after it.
+//-----------------------------------------------------------------------------
+namespace
+{
+std::vector<std::pair<NodePath_t, QRectF>> RectsUnder( const std::vector<CDetailSheet::Rect_t> &rects, const NodePath_t &path )
+{
+	std::vector<std::pair<NodePath_t, QRectF>> under;
+	for ( const auto &entry : rects )
+	{
+		if ( entry.m_Path.size() >= path.size() && std::equal( path.begin(), path.end(), entry.m_Path.begin() ) )
+		{
+			under.emplace_back( NodePath_t( entry.m_Path.begin() + static_cast<std::ptrdiff_t>( path.size() ), entry.m_Path.end() ), entry.m_Rect );
+		}
+	}
+	return under;
+}
+} // namespace
+//-----------------------------------------------------------------------------
+// Purpose: Copy a type, group or entry next to itself, its sprites moved by delta or beside it.
+//-----------------------------------------------------------------------------
+void CDetailEditor::DuplicateNode( const NodePath_t &path, std::optional<QPointF> delta )
+{
+	const auto &document = m_pDocument->GetDocument();
+	if ( path.size() < 2 || !Node( document, path ) )
+	{
+		return;
+	}
+	const auto under = RectsUnder( m_pSheet->m_Rects, path );
+	if ( !delta )
+	{
+		// Beside the original's sprites: to their right, else below them, else on top of them.
+		delta = QPointF{};
+		if ( !under.empty() )
+		{
+			QRectF bounds = under.front().second;
+			for ( const auto &[ rest, rect ] : under )
+			{
+				bounds = bounds.united( rect );
+			}
+			const QRectF sheet( m_pSheet->GetImage().rect() );
+			if ( sheet.contains( bounds.translated( bounds.width(), 0 ) ) )
+			{
+				delta = QPointF( bounds.width(), 0 );
+			}
+			else if ( sheet.contains( bounds.translated( 0, bounds.height() ) ) )
+			{
+				delta = QPointF( 0, bounds.height() );
+			}
+		}
+	}
+	// The copies' sprite values, worked out from the originals (the same text).
+	std::vector<std::pair<NodePath_t, std::pair<std::string, std::string>>> values;
+	for ( const auto &[ rest, rect ] : under )
+	{
+		NodePath_t original = path;
+		original.insert( original.end(), rest.begin(), rest.end() );
+		if ( const auto *pEntry = Node( document, original ); pEntry && !delta->isNull() )
+		{
+			if ( auto value = SpriteValues( *pEntry, rect.translated( *delta ) ) )
+			{
+				values.emplace_back( rest, std::move( *value ) );
+			}
+		}
+	}
+	const NodePath_t parent( path.begin(), path.end() - 1 );
+	NodePath_t copy = parent;
+	copy.push_back( path.back() + 1 );
+	const QString szName = QString::fromStdString( Node( document, path )->GetKey() );
+	m_pDocument->Edit( tr( "Duplicate \"%1\"" ).arg( szName ), [ & ]( auto &edited ) {
+		auto *pParent = Node( edited, parent );
+		const auto *pOriginal = Node( edited, path );
+		if ( !pParent || !pOriginal )
+		{
+			return;
+		}
+		CNode duplicate = *pOriginal;
+		std::string szBase = duplicate.GetKey();
+		while ( !szBase.empty() && std::isdigit( static_cast<unsigned char>( szBase.back() ) ) )
+		{
+			szBase.pop_back();
+		}
+		duplicate.SetKey( UniqueName( *pParent, szBase.empty() ? "Copy" : szBase ) );
+		pParent->InsertChild( copy.back(), std::move( duplicate ) );
+		for ( const auto &[ rest, value ] : values )
+		{
+			NodePath_t target = copy;
+			target.insert( target.end(), rest.begin(), rest.end() );
+			Set( edited, target, "sprite", value.first );
+			Set( edited, target, "spritesize", value.second );
+		}
+	} );
+	SelectNode( copy );
+}
+//-----------------------------------------------------------------------------
+// Purpose: Move all the sprites of a type, group or entry together.
+//-----------------------------------------------------------------------------
+void CDetailEditor::MoveSprites( const NodePath_t &path, QPointF delta )
+{
+	const auto &document = m_pDocument->GetDocument();
+	std::vector<std::pair<NodePath_t, std::pair<std::string, std::string>>> values;
+	for ( const auto &[ rest, rect ] : RectsUnder( m_pSheet->m_Rects, path ) )
+	{
+		NodePath_t entry = path;
+		entry.insert( entry.end(), rest.begin(), rest.end() );
+		if ( const auto *pEntry = Node( document, entry ) )
+		{
+			if ( auto value = SpriteValues( *pEntry, rect.translated( delta ) ) )
+			{
+				values.emplace_back( entry, std::move( *value ) );
+			}
+		}
+	}
+	if ( values.empty() || delta.isNull() )
+	{
+		return;
+	}
+	m_pDocument->Edit( tr( "Move sprites" ), [ & ]( auto &edited ) {
+		for ( const auto &[ entry, value ] : values )
+		{
+			Set( edited, entry, "sprite", value.first );
+			Set( edited, entry, "spritesize", value.second );
+		}
 	} );
 }
 //-----------------------------------------------------------------------------
@@ -1505,27 +2180,19 @@ void CDetailEditor::ShowCardMenu( const NodePath_t &path, const QPoint &globalAt
 		{
 			CopyNodes( { *pCopied } );
 		}
-	} );
-	menu.addAction( tr( "Paste into \"%1\"" ).arg( szName ), this, [ this, path ] {
-		const auto nodes = PastedNodes();
-		if ( nodes.empty() )
-		{
-			return;
-		}
-		m_pDocument->Edit( tr( "Paste" ), [ & ]( auto &document ) {
-			if ( auto *pBlock = Node( document, path ); pBlock && pBlock->IsBlock() )
-			{
-				for ( const CNode &node : nodes )
-				{
-					pBlock->AppendChild( node );
-				}
-			}
-		} );
-	} )->setEnabled( CanPasteNodes() );
+	} )->setShortcut( QKeySequence::Copy );
+	auto *pPaste = menu.addAction( tr( "Paste" ), this, [ this, path ] { InsertNodes( PastedNodes(), path, true ); } );
+	pPaste->setShortcut( QKeySequence::Paste );
+	pPaste->setEnabled( CanPasteNodes() );
+	if ( path.size() >= 2 )
+	{
+		menu.addAction( tr( "Duplicate" ), this, [ this, path ] { DuplicateNode( path ); } )->setShortcut( QKeySequence( Qt::CTRL | Qt::Key_D ) );
+	}
 	menu.addSeparator();
 	QMenu *pAdd = menu.addMenu( tr( "Add" ) );
 	if ( path.size() == 2 )
 	{
+		pAdd->addAction( tr( "Type" ), this, &CDetailEditor::AddType );
 		pAdd->addAction( tr( "Group" ), this, [ this, path ] { AddBlock( path, false ); } );
 	}
 	if ( path.size() == 3 )
@@ -1549,4 +2216,26 @@ void CDetailEditor::ShowCardMenu( const NodePath_t &path, const QPoint &globalAt
 	menu.addSeparator();
 	menu.addAction( tr( "Delete \"%1\"" ).arg( szName ), this, [ this, path ] { RemoveNode( path ); } );
 	menu.exec( globalAt );
+}
+//-----------------------------------------------------------------------------
+// Purpose: The type list's right-click: a type's own menu, or adding and pasting types.
+//-----------------------------------------------------------------------------
+void CDetailEditor::ShowTypesMenu( const QPoint &at )
+{
+	if ( QListWidgetItem *pItem = m_pTypes->itemAt( at ) )
+	{
+		ShowCardMenu( DataPath( pItem->data( Qt::UserRole ) ), m_pTypes->viewport()->mapToGlobal( at ) );
+		return;
+	}
+	QMenu menu( this );
+	menu.addAction( tr( "Add Type" ), this, &CDetailEditor::AddType );
+	const auto types = Types( m_pDocument->GetDocument() );
+	auto *pPaste = menu.addAction( tr( "Paste" ), this, [ this, types ] {
+		if ( !types.empty() )
+		{
+			InsertNodes( PastedNodes(), types.back().m_Path, true );
+		}
+	} );
+	pPaste->setEnabled( CanPasteNodes() && !types.empty() );
+	menu.exec( m_pTypes->viewport()->mapToGlobal( at ) );
 }

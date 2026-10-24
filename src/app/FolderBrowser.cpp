@@ -151,3 +151,12 @@ void CFolderBrowser::SetFolder( const QString &szFolder )
 	m_pView->show();
 	m_pEmpty->hide();
 }
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+QString CFolderBrowser::GetSelectedPath() const
+{
+	const QModelIndex current = m_pView->currentIndex();
+	return !m_szFolder.isEmpty() && current.isValid() && m_pView->selectionModel()->isSelected( current ) ? m_pModel->filePath( current ) : QString{};
+}

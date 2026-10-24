@@ -74,6 +74,9 @@ public:
 
 	// The real file behind a path, for folder mounts; nullopt for files inside a VPK.
 	[[nodiscard]] virtual std::optional<std::filesystem::path> DiskPath( const std::string &szPath ) const;
+	// Takes in a file written under a folder mount since it was mounted; returns its path in the
+	// mount, or nullopt when the file isn't inside it (and always for VPKs).
+	virtual std::optional<std::string> AddLooseFile( const std::filesystem::path &file );
 
 private:
 	Kind_t m_nKind;
@@ -112,6 +115,9 @@ public:
 	[[nodiscard]] const std::vector<MountRecord_t> &GetRecords() const { return m_Records; }
 
 	[[nodiscard]] const CMount *Resolve( std::string_view szPath, std::string_view szPathId = "game" ) const;
+	// Takes in a file just written on disk without mounting everything again; returns its game
+	// path, or nullopt when no mounted folder holds it (a new search path needs a full Mount).
+	std::optional<std::string> AddLooseFile( const std::filesystem::path &file );
 	[[nodiscard]] std::optional<std::vector<std::byte>> Read( std::string_view szPath, std::string_view szPathId = "game" ) const;
 	[[nodiscard]] std::optional<std::string> ReadText( std::string_view szPath, std::string_view szPathId = "game" ) const;
 

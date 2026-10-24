@@ -22,6 +22,8 @@ public:
 
 	void SetFolder( const QString &szFolder );
 	[[nodiscard]] QString GetFolder() const { return m_szFolder; }
+	// The file or folder picked in the list; empty for none.
+	[[nodiscard]] QString GetSelectedPath() const;
 
 signals:
 	void FileSelected( const QString &szPath );  // single click: preview

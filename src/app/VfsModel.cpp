@@ -108,6 +108,68 @@ QModelIndex CVfsModel::IndexForPath( const std::string &szPath ) const
 }
 
 //-----------------------------------------------------------------------------
+// Purpose: Walk down the path, inserting missing folders and the file where sorting puts them.
+//-----------------------------------------------------------------------------
+void CVfsModel::AddFile( const std::string &szPath, const xv::vfs::CMount *pMount )
+{
+	if ( !m_pRoot )
+	{
+		m_pRoot = std::make_unique<Node_t>();
+	}
+	const auto indexOf = [ this ]( Node_t *pNode ) { return pNode == m_pRoot.get() ? QModelIndex{} : createIndex( pNode->m_nRow, 0, pNode ); };
+	Node_t *pParent = m_pRoot.get();
+	std::size_t nStart = 0;
+	for ( ;; )
+	{
+		const auto nSlash = szPath.find( '/', nStart );
+		const bool bFile = nSlash == std::string::npos;
+		const QString szName = QString::fromStdString( szPath.substr( nStart, bFile ? std::string::npos : nSlash - nStart ) );
+		auto &children = pParent->m_Children;
+		const auto it = std::ranges::find_if( children, [ & ]( const auto &child ) { return child->m_szName == szName && child->m_szPath.empty() != bFile; } );
+		if ( it != children.end() )
+		{
+			if ( bFile )
+			{
+				( *it )->m_pMount = pMount;
+				emit dataChanged( createIndex( ( *it )->m_nRow, 0, it->get() ), createIndex( ( *it )->m_nRow, COLUMN_COLUMN_COUNT - 1, it->get() ) );
+				return;
+			}
+			pParent = it->get();
+			nStart = nSlash + 1;
+			continue;
+		}
+		// Folders first, then by name, as Rebuild sorts them.
+		const auto at = std::ranges::find_if( children, [ & ]( const auto &child ) {
+			const bool bFolder = child->m_szPath.empty();
+			return bFile == bFolder ? !bFile : szName < child->m_szName;
+		} );
+		const int nRow = static_cast<int>( at - children.begin() );
+		auto pNode = std::make_unique<Node_t>();
+		pNode->m_szName = szName;
+		pNode->m_pParent = pParent;
+		if ( bFile )
+		{
+			pNode->m_szPath = szPath;
+			pNode->m_pMount = pMount;
+		}
+		beginInsertRows( indexOf( pParent ), nRow, nRow );
+		Node_t *pAdded = children.insert( at, std::move( pNode ) )->get();
+		for ( int i = nRow; i < static_cast<int>( children.size() ); ++i )
+		{
+			children[ static_cast<std::size_t>( i ) ]->m_nRow = i;
+		}
+		endInsertRows();
+		if ( bFile )
+		{
+			m_nFileCount++;
+			return;
+		}
+		pParent = pAdded;
+		nStart = nSlash + 1;
+	}
+}
+
+//-----------------------------------------------------------------------------
 // Purpose:
 //-----------------------------------------------------------------------------
 CVfsModel::Node_t *CVfsModel::NodeAt( const QModelIndex &index ) const

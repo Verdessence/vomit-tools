@@ -59,6 +59,7 @@ add_library(vomit_tools_ui STATIC
         ParticleRenderer.h
         ParticleSearch.cpp
         ParticleSearch.h
+        DebugLog.cpp
         Preferences.cpp
         Preferences.h
         PreferencesDialog.cpp

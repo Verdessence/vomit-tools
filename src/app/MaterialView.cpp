@@ -28,6 +28,7 @@
 #include <QTreeWidget>
 #include <QVBoxLayout>
 
+#include "DebugLog.h"
 #include "FileViews.h"
 #include "Graphics.h"
 #include "ImageFiles.h"
@@ -435,6 +436,7 @@ CMaterialView::~CMaterialView() = default;
 //-----------------------------------------------------------------------------
 xv::texture::CImage CMaterialView::RenderPicture( int nSize, material::Shape_t nShape, material::Backdrop_t nBackdrop, float flTime, xv::CVec3 vecLight ) const
 {
+	CDebugTimer timer( QStringLiteral( "drawing a %1 px material picture" ).arg( nSize ) );
 	if ( !m_Material || !m_pProxies )
 	{
 		return {};

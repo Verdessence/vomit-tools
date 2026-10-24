@@ -12,6 +12,7 @@
 #include <QIcon>
 
 #include "AboutDialog.h"
+#include "DebugLog.h"
 #include "Language.h"
 #include "Graphics.h"
 #include "MainWindow.h"
@@ -42,6 +43,12 @@ int main( int nArgc, char *argv[] )
 	parser.addOption( edit );
 	parser.process( app );
 
+	if ( CPreferences::Instance().IsDebugLog() )
+	{
+		SetDebugLogging( true );
+		DebugLog() << "vomit-tools" << CAboutDialog::VersionText() << "starting; log at" << DebugLogPath();
+	}
+
 	// Files go to the window already open, when there is one.
 	CSingleInstance instance;
 	const bool bSingle = CPreferences::Instance().IsSingleWindow();
@@ -59,11 +66,14 @@ int main( int nArgc, char *argv[] )
 	const QStringList paths = parser.positionalArguments();
 	const QString szLastGame = paths.isEmpty() ? QSettings{}.value( QStringLiteral( "lastGameInfo" ) ).toString() : QString{};
 	const QStringList edits = parser.values( edit );
-	CSplash splash( 3 + ( szLastGame.isEmpty() ? 0 : 1 ) + static_cast<int>( paths.size() + edits.size() ) );
+	// What was open last time comes back unless files were asked for.
+	const QStringList session = paths.isEmpty() && edits.isEmpty() ? CMainWindow::GetLastSession() : QStringList{};
+	CSplash splash( 3 + ( szLastGame.isEmpty() ? 0 : 1 ) + static_cast<int>( session.size() + paths.size() + edits.size() ) );
 	splash.show();
 	splash.SetStep( QStringLiteral( "graphics" ) );
 	// What the previews draw with, settled before any of them is made.
 	static_cast<void>( CGraphics::Instance() );
+	DebugLog() << "drawing with" << GraphicsApiName( CGraphics::Instance().GetActive() ) << CGraphics::Instance().GetDescription();
 	splash.SetStep( QStringLiteral( "names and parameters" ) );
 	static_cast<void>( ParticleNames() );
 	static_cast<void>( MaterialParameters() );
@@ -84,6 +94,12 @@ int main( int nArgc, char *argv[] )
 		splash.SetStep( QFileInfo{ szLastGame }.dir().dirName() );
 		window.OpenGame( szLastGame );
 	}
+	for ( const QString &szEntry : session )
+	{
+		splash.SetStep( CMainWindow::SessionEntryName( szEntry ) );
+		window.RestoreSessionEntry( szEntry );
+	}
+	window.FinishRestoringSession();
 	for ( const QString &szPath : paths )
 	{
 		splash.SetStep( QFileInfo{ szPath }.fileName() );

@@ -53,6 +53,7 @@
 #include <QUrl>
 #include <QVBoxLayout>
 
+#include "DebugLog.h"
 #include "AboutDialog.h"
 #include "BuildInfo.h"
 #include "FileActions.h"
@@ -95,6 +96,10 @@ namespace
 {
 
 constexpr auto LAST_GAME_KEY = "lastGameInfo";
+constexpr auto LAST_FOLDER_KEY = "lastFolder";
+constexpr auto SESSION_KEY = "lastSession";
+constexpr auto SESSION_CURRENT_KEY = "lastSessionTab";
+constexpr auto SESSION_SIDE_KEY = "lastSessionSide";
 constexpr auto RECENT_KEY = "recentPaths";
 constexpr auto VOLUME_KEY = "volume";
 constexpr auto SKY_EXPORT_KEY = "skyExportFolder";
@@ -879,6 +884,7 @@ void CMainWindow::OpenFolder( const QString &szFolder )
 {
 	m_pFolders->SetFolder( szFolder );
 	m_pSides->setCurrentWidget( m_pFolders );
+	QSettings{}.setValue( LAST_FOLDER_KEY, m_pFolders->GetFolder() );
 	AddRecent( szFolder );
 	AutoMountFor( szFolder );
 }
@@ -917,6 +923,7 @@ bool CMainWindow::OpenGame( const QString &szGameInfoPath )
 			}
 		}
 	}
+	DebugLog() << "opening the game" << szGameInfoPath;
 	m_Game = std::move( info );
 	QSettings{}.setValue( LAST_GAME_KEY, szGameInfoPath );
 	AddRecent( szGameInfoPath );
@@ -937,10 +944,22 @@ void CMainWindow::Remount()
 	const QString szSelected = m_pFilter->mapToSource( m_pTree->currentIndex() ).data( CVfsModel::ROLE_PATH_ROLE ).toString();
 
 	QApplication::setOverrideCursor( Qt::WaitCursor );
-	m_pFileSystem->Mount( *m_Game );
-	m_pModel->Rebuild( *m_pFileSystem );
-	m_SoundIndex.Rebuild( *m_pFileSystem );
+	DebugLog() << "mounting" << ToQString( m_Game->m_File ) << "again, all of it";
+	{
+		CDebugTimer timer( QStringLiteral( "mounting the search paths" ) );
+		m_pFileSystem->Mount( *m_Game );
+	}
+	{
+		CDebugTimer timer( QStringLiteral( "building the Game tree" ) );
+		m_pModel->Rebuild( *m_pFileSystem );
+	}
+	DebugLog() << m_pModel->GetFileCount() << "files in the game," << m_pFileSystem->GetRecords().size() << "search paths";
+	{
+		CDebugTimer timer( QStringLiteral( "indexing the sounds" ) );
+		m_SoundIndex.Rebuild( *m_pFileSystem );
+	}
 	QApplication::restoreOverrideCursor();
+	CDebugTimer timer( QStringLiteral( "updating the open tabs for the game" ) );
 
 	m_ParticleGame.reset();
 	for ( int i = 0; i < m_pTabs->count(); i++ )
@@ -968,6 +987,70 @@ void CMainWindow::Remount()
 	ShowMounts();
 	UpdateGameLabel();
 	UpdateTitle();
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Adding a saved file to its folder mount and the tree takes a moment; a full Remount
+//          reads every VPK and folder again. Only what the file can change is looked at again.
+//-----------------------------------------------------------------------------
+void CMainWindow::FilesWritten( const std::vector<fs::path> &files )
+{
+	if ( !m_Game )
+	{
+		return;
+	}
+	CDebugTimer timer( QStringLiteral( "taking in the saved files" ) );
+	bool bSounds = false, bScripts = false, bArt = false, bParticles = false;
+	for ( const fs::path &file : files )
+	{
+		const auto szPath = m_pFileSystem->AddLooseFile( file );
+		DebugLog() << "saved" << ToQString( file ) << ( szPath ? QStringLiteral( "as the game's %1" ).arg( QString::fromStdString( *szPath ) ) : QStringLiteral( "outside the mounted folders" ) );
+		if ( !szPath )
+		{
+			// Outside every mounted folder: a folder the game hasn't mounted yet (a new write folder
+			// in custom/) is only found by mounting again; a file elsewhere isn't the game's.
+			const fs::path inGame = file.lexically_normal().lexically_relative( m_Game->m_GameDir.parent_path().lexically_normal() );
+			if ( !inGame.empty() && *inGame.begin() != ".." )
+			{
+				Remount();
+				return;
+			}
+			continue;
+		}
+		if ( const xv::vfs::CMount *pMount = m_pFileSystem->Resolve( *szPath ) )
+		{
+			m_pModel->AddFile( *szPath, pMount );
+		}
+		const QString szGamePath = QString::fromStdString( *szPath );
+		bSounds |= szGamePath.startsWith( u"sound/" );
+		bScripts |= szGamePath.startsWith( u"scripts/" );
+		bArt |= szGamePath.startsWith( u"materials/" ) || szGamePath.startsWith( u"models/" );
+		bParticles |= IsParticlePath( szGamePath ) || szGamePath.startsWith( u"particles/" );
+	}
+	if ( bSounds )
+	{
+		m_SoundIndex.Rebuild( *m_pFileSystem );
+	}
+	if ( bParticles )
+	{
+		m_ParticleGame.reset();
+	}
+	for ( int i = 0; i < m_pTabs->count(); i++ )
+	{
+		if ( auto *pDetails = qobject_cast<CDetailEditor *>( m_pTabs->widget( i ) ); pDetails && bArt )
+		{
+			SetUpDetails( pDetails );
+		}
+		else if ( auto *pEditor = qobject_cast<CSoundEditor *>( m_pTabs->widget( i ) ); pEditor && ( bSounds || bScripts ) )
+		{
+			pEditor->Relint();
+		}
+		else if ( auto *pParticles = qobject_cast<CParticleEditor *>( m_pTabs->widget( i ) ); pParticles && bParticles )
+		{
+			pParticles->SetGame( ParticleGame() );
+		}
+	}
+	UpdateGameLabel();
 }
 
 //-----------------------------------------------------------------------------
@@ -1205,6 +1288,7 @@ void CMainWindow::PreviewDiskFile( const QString &szPath )
 //-----------------------------------------------------------------------------
 void CMainWindow::OpenDiskFile( const QString &szPath )
 {
+	DebugLog() << "opening" << szPath;
 	const QFileInfo info{ szPath };
 	if ( info.fileName().compare( u"gameinfo.txt", Qt::CaseInsensitive ) == 0 )
 	{
@@ -1784,6 +1868,7 @@ const ParticleGame_t &CMainWindow::ParticleGame()
 	ParticleGame_t game;
 	if ( m_Game )
 	{
+		CDebugTimer timer( QStringLiteral( "reading the game's particle files" ) );
 		QApplication::setOverrideCursor( Qt::WaitCursor );
 		auto pSchema = std::make_shared<xv::particles::CSchema>();
 		for ( const std::string &szPath : m_pFileSystem->Find( "particles", ".pcf", true ) )
@@ -2009,6 +2094,7 @@ bool CMainWindow::WriteParticles( CParticleEditor *pEditor, const fs::path &targ
 	pDocument->SetDiskPath( target );
 	pDocument->MarkSaved();
 	statusBar()->showMessage( tr( "Saved %1" ).arg( ToQString( target ) ), 8000 );
+	FilesWritten( { target } );
 	return true;
 }
 
@@ -2034,11 +2120,10 @@ bool CMainWindow::Save( CParticleEditor *pEditor )
 		if ( AskAddToManifest( tr( "%1 is not listed in %2, so the game only loads it for maps that ask for it.\n\nAdd it now?" )
 					.arg( pDocument->GetGamePath(), QString::fromUtf8( xv::particles::MANIFEST_PATH ) ) ) )
 		{
-			AddToManifest( pDocument ); // remounts
+			AddToManifest( pDocument ); // takes the manifest into the game too
 			return true;
 		}
 	}
-	Remount();
 	return true;
 }
 
@@ -2081,7 +2166,6 @@ bool CMainWindow::SaveAs( CParticleEditor *pEditor )
 	{
 		return false;
 	}
-	Remount();
 	return true;
 }
 
@@ -2104,7 +2188,7 @@ void CMainWindow::AddToManifest( CParticleDocument *pDocument )
 	}
 	if ( const auto target = WriteGameFile( szManifestPath, xv::kv1::Write( parsed.m_Document ), tr( "Manifest" ) ) )
 	{
-		Remount();
+		FilesWritten( { *target } );
 		statusBar()->showMessage( tr( "Added %1 to %2" ).arg( pDocument->GetGamePath(), ToQString( *target ) ), 8000 );
 	}
 }
@@ -2154,7 +2238,7 @@ bool CMainWindow::AddToMapManifest( CParticleDocument *pDocument, const QString 
 	}
 	if ( const auto target = WriteGameFile( szManifestPath, xv::kv1::Write( parsed.m_Document ), tr( "Manifest" ) ) )
 	{
-		Remount();
+		FilesWritten( { *target } );
 		statusBar()->showMessage( tr( "Added %1 to %2" ).arg( pDocument->GetGamePath(), ToQString( *target ) ), 8000 );
 		return true;
 	}
@@ -2250,6 +2334,7 @@ bool CMainWindow::WriteDocument( CSoundEditor *pEditor, const fs::path &target )
 	pDocument->SetDiskPath( target );
 	pDocument->MarkSaved();
 	statusBar()->showMessage( tr( "Saved %1" ).arg( ToQString( target ) ), 8000 );
+	FilesWritten( { target } );
 	return true;
 }
 
@@ -2276,11 +2361,10 @@ bool CMainWindow::Save( CSoundEditor *pEditor )
 		if ( AskAddToManifest( tr( "%1 is not listed in %2, so the game won't load it.\n\nAdd it now?" )
 					.arg( pDocument->GetGamePath(), QString::fromUtf8( xv::sound::ManifestPathFor( pDocument->GetKind() ) ) ) ) )
 		{
-			AddToManifest( pDocument ); // remounts
+			AddToManifest( pDocument ); // takes the manifest into the game too
 			return true;
 		}
 	}
-	Remount();
 	return true;
 }
 
@@ -2298,7 +2382,6 @@ bool CMainWindow::SaveAs( CSoundEditor *pEditor )
 	{
 		return false;
 	}
-	Remount();
 	return true;
 }
 
@@ -2353,7 +2436,7 @@ void CMainWindow::AddToManifest( CSoundDocument *pDocument )
 	// Edit the loose manifest in place; a manifest inside a VPK gets an overriding copy in the write folder.
 	if ( const auto target = WriteGameFile( szManifestPath, xv::kv1::Write( parsed.m_Document ), tr( "Manifest" ) ) )
 	{
-		Remount();
+		FilesWritten( { *target } );
 		statusBar()->showMessage( tr( "Added %1 to %2" ).arg( pDocument->GetGamePath(), ToQString( *target ) ), 8000 );
 	}
 }
@@ -2534,8 +2617,201 @@ void CMainWindow::closeEvent( QCloseEvent *pEvent )
 			return;
 		}
 	}
+	SaveSession();
 	m_pPlayer->Stop();
 	pEvent->accept();
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: An entry is "<kind>\t<disk or game>\t<path>"; the folder's is "folder\tdisk\t<path>".
+//-----------------------------------------------------------------------------
+QString CMainWindow::SessionEntryFor( int nIndex ) const
+{
+	const auto entry = []( const char *pszKind, const fs::path &disk, const QString &szGamePath ) {
+		return !disk.empty() ? QStringLiteral( "%1\tdisk\t%2" ).arg( QLatin1String( pszKind ), ToQString( disk ) ) : QStringLiteral( "%1\tgame\t%2" ).arg( QLatin1String( pszKind ), szGamePath );
+	};
+	QWidget *pTab = m_pTabs->widget( nIndex );
+	if ( auto *pEditor = qobject_cast<CSoundEditor *>( pTab ); pEditor && !pEditor->GetDocument()->IsNew() )
+	{
+		return entry( "sound", pEditor->GetDocument()->GetDiskPath(), pEditor->GetDocument()->GetGamePath() );
+	}
+	if ( auto *pEditor = qobject_cast<CParticleEditor *>( pTab ); pEditor && !pEditor->GetDocument()->IsNew() )
+	{
+		return entry( "particles", pEditor->GetDocument()->GetDiskPath(), pEditor->GetDocument()->GetGamePath() );
+	}
+	if ( auto *pEditor = qobject_cast<CTextureEditor *>( pTab ); pEditor && !pEditor->GetDocument()->IsNew() )
+	{
+		return entry( "texture", pEditor->GetDocument()->GetDiskPath(), pEditor->GetDocument()->GetGamePath() );
+	}
+	if ( auto *pEditor = qobject_cast<CMaterialEditor *>( pTab ); pEditor && !pEditor->IsNew() )
+	{
+		return entry( "material", pEditor->GetDiskPath(), pEditor->GetGamePath() );
+	}
+	if ( auto *pEditor = qobject_cast<CDetailEditor *>( pTab ); pEditor && !pEditor->GetDocument()->IsNew() )
+	{
+		return entry( "detail", pEditor->GetDocument()->GetDiskPath(), pEditor->GetDocument()->GetGamePath() );
+	}
+	if ( auto *pSky = qobject_cast<CSkyEditor *>( pTab ) )
+	{
+		// A sky from files reopens from one of its faces; one from the game, by its name.
+		for ( xv::sky::Face_t nFace : xv::sky::FACES )
+		{
+			const auto &slot = pSky->GetDocument()->Slot( nFace );
+			if ( !slot.m_pImage )
+			{
+				continue;
+			}
+			if ( !pSky->GetDocument()->GetOrigin().isEmpty() && QFileInfo{ slot.m_szSource }.isAbsolute() )
+			{
+				return entry( "sky", ToPath( slot.m_szSource ), {} );
+			}
+			if ( pSky->GetDocument()->GetOrigin().isEmpty() && !slot.m_szMaterial.isEmpty() && !pSky->GetDocument()->GetName().isEmpty() )
+			{
+				return entry( "sky", {}, pSky->GetDocument()->GetName() );
+			}
+			break;
+		}
+	}
+	return {};
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Keeps what is open for the next start.
+//-----------------------------------------------------------------------------
+void CMainWindow::SaveSession() const
+{
+	QStringList entries;
+	QString szCurrent;
+	for ( int i = 0; i < m_pTabs->count(); ++i )
+	{
+		const QString szEntry = SessionEntryFor( i );
+		if ( !szEntry.isEmpty() && !entries.contains( szEntry ) )
+		{
+			entries << szEntry;
+		}
+		if ( i == m_pTabs->currentIndex() )
+		{
+			szCurrent = szEntry;
+		}
+	}
+	DebugLog() << "keeping" << entries.size() << "tabs for the next start";
+	QSettings settings;
+	settings.setValue( SESSION_KEY, entries );
+	settings.setValue( SESSION_CURRENT_KEY, szCurrent );
+	settings.setValue( SESSION_SIDE_KEY, m_pSides->currentWidget() == m_pFolders ? QStringLiteral( "folder" ) : QStringLiteral( "game" ) );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+QStringList CMainWindow::GetLastSession()
+{
+	QStringList entries;
+	const QString szFolder = QSettings{}.value( LAST_FOLDER_KEY ).toString();
+	if ( !szFolder.isEmpty() && QFileInfo{ szFolder }.isDir() )
+	{
+		entries << QStringLiteral( "folder\tdisk\t" ) + szFolder;
+	}
+	if ( CPreferences::Instance().IsReopenSession() )
+	{
+		entries << QSettings{}.value( SESSION_KEY ).toStringList();
+	}
+	return entries;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+QString CMainWindow::SessionEntryName( const QString &szEntry )
+{
+	const QString szPath = szEntry.section( u'\t', 2 );
+	return szEntry.startsWith( u"folder\t" ) ? QDir{ szPath }.dirName() : QFileInfo{ szPath }.fileName();
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+void CMainWindow::RestoreSessionEntry( const QString &szEntry )
+{
+	DebugLog() << "reopening" << QString( szEntry ).replace( u'\t', u' ' );
+	const QString szKind = szEntry.section( u'\t', 0, 0 );
+	const bool bDisk = szEntry.section( u'\t', 1, 1 ) == u"disk";
+	const QString szPath = szEntry.section( u'\t', 2 );
+	if ( szPath.isEmpty() )
+	{
+		return;
+	}
+	if ( szKind == u"folder" )
+	{
+		// Shown without taking the side panel from the game; the side comes back at the end.
+		if ( QFileInfo{ szPath }.isDir() )
+		{
+			m_pFolders->SetFolder( szPath );
+			AutoMountFor( szPath );
+		}
+		return;
+	}
+	QWidget *pBefore = m_pTabs->currentWidget();
+	if ( bDisk )
+	{
+		if ( !QFileInfo{ szPath }.isFile() )
+		{
+			return;
+		}
+		OpenDiskFile( szPath );
+	}
+	else if ( !m_Game || ( szKind != u"sky" && !m_pFileSystem->Resolve( xv::vfs::NormalizePath( szPath.toStdString() ) ) ) )
+	{
+		return;
+	}
+	else if ( szKind == u"sound" )
+	{
+		OpenSoundFile( szPath );
+	}
+	else if ( szKind == u"particles" )
+	{
+		OpenParticleFile( szPath );
+	}
+	else if ( szKind == u"texture" )
+	{
+		OpenTextureFile( szPath );
+	}
+	else if ( szKind == u"material" )
+	{
+		OpenMaterialFile( szPath );
+	}
+	else if ( szKind == u"detail" )
+	{
+		OpenDetailFile( szPath );
+	}
+	else if ( szKind == u"sky" )
+	{
+		OpenSky( szPath );
+	}
+	if ( szEntry == QSettings{}.value( SESSION_CURRENT_KEY ).toString() && m_pTabs->currentWidget() != pBefore )
+	{
+		m_pRestoredCurrent = m_pTabs->currentWidget();
+	}
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+void CMainWindow::FinishRestoringSession()
+{
+	if ( m_pRestoredCurrent )
+	{
+		m_pTabs->setCurrentWidget( m_pRestoredCurrent );
+	}
+	const QString szSide = QSettings{}.value( SESSION_SIDE_KEY ).toString();
+	if ( szSide == u"folder" && !m_pFolders->GetFolder().isEmpty() )
+	{
+		m_pSides->setCurrentWidget( m_pFolders );
+	}
+	else if ( szSide == u"game" && m_Game )
+	{
+		m_pSides->setCurrentWidget( m_pGameBrowser );
+	}
 }
 
 //-----------------------------------------------------------------------------
@@ -3060,6 +3336,7 @@ bool CMainWindow::WriteTexture( CTextureEditor *pEditor, const fs::path &target 
 	pDocument->SetDiskPath( target );
 	pDocument->MarkSaved();
 	statusBar()->showMessage( tr( "Saved %1" ).arg( ToQString( target ) ), 8000 );
+	FilesWritten( { target } );
 	return true;
 }
 
@@ -3089,7 +3366,6 @@ bool CMainWindow::Save( CTextureEditor *pEditor )
 			{
 				return false;
 			}
-			Remount();
 		}
 	}
 	if ( bMaterial )
@@ -3121,7 +3397,6 @@ bool CMainWindow::SaveAs( CTextureEditor *pEditor )
 	{
 		return false;
 	}
-	Remount();
 	return true;
 }
 
@@ -3159,7 +3434,25 @@ bool CMainWindow::ConfirmClose( CTextureEditor *pEditor )
 //-----------------------------------------------------------------------------
 QString CMainWindow::AskSavePath( const fs::path &start, const QString &szFilters, QString *pFilter, const fs::path &extra )
 {
-	QFileDialog dialog( this, tr( "Save As" ), ToQString( start ), szFilters );
+	// Where the side panel's tree has a folder (or a file in one) picked, it starts there; where the
+	// file would otherwise go stays in the side list.
+	fs::path from = start;
+	std::vector<fs::path> made;
+	if ( fs::path picked = GetSelectedFolder(); !picked.empty() )
+	{
+		std::error_code ec;
+		for ( fs::path dir = picked; !dir.empty() && !fs::exists( dir, ec ) && dir != dir.parent_path(); dir = dir.parent_path() )
+		{
+			made.push_back( dir );
+		}
+		fs::create_directories( picked, ec );
+		if ( fs::is_directory( picked, ec ) )
+		{
+			const fs::path name = fs::is_directory( start, ec ) ? fs::path{} : start.filename();
+			from = name.empty() ? picked : picked / name;
+		}
+	}
+	QFileDialog dialog( this, tr( "Save As" ), ToQString( from ), szFilters );
 	dialog.setObjectName( QStringLiteral( "saveAsDialog" ) );
 	dialog.setAcceptMode( QFileDialog::AcceptSave );
 	dialog.setFileMode( QFileDialog::AnyFile );
@@ -3180,6 +3473,10 @@ QString CMainWindow::AskSavePath( const fs::path &start, const QString &szFilter
 		}
 	};
 	add( extra );
+	if ( from != start )
+	{
+		add( start.has_extension() ? start.parent_path() : start );
+	}
 	if ( m_Game )
 	{
 		std::error_code ec;
@@ -3196,7 +3493,19 @@ QString CMainWindow::AskSavePath( const fs::path &start, const QString &szFilter
 	add( ToPath( QStandardPaths::writableLocation( QStandardPaths::PicturesLocation ) ) );
 	add( ToPath( QStandardPaths::writableLocation( QStandardPaths::DesktopLocation ) ) );
 	dialog.setSidebarUrls( places );
-	if ( dialog.exec() != QDialog::Accepted || dialog.selectedFiles().isEmpty() )
+	const bool bChosen = dialog.exec() == QDialog::Accepted && !dialog.selectedFiles().isEmpty();
+	// Folders made only to start in go again unless the file goes in one of them.
+	const fs::path chosen = bChosen ? ToPath( dialog.selectedFiles().front() ).lexically_normal() : fs::path{};
+	for ( const fs::path &dir : made )
+	{
+		std::error_code ec;
+		const fs::path inside = chosen.lexically_relative( dir.lexically_normal() );
+		if ( chosen.empty() || inside.empty() || *inside.begin() == ".." )
+		{
+			fs::remove( dir, ec ); // only when still empty
+		}
+	}
+	if ( !bChosen )
 	{
 		return {};
 	}
@@ -3212,6 +3521,39 @@ QString CMainWindow::AskSavePath( const fs::path &start, const QString &szFilter
 		szFile += u'.' + match.captured( 1 );
 	}
 	return szFile;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: A folder picked in the Folder tree, or one in the Game tree as it sits in the write folder.
+//-----------------------------------------------------------------------------
+fs::path CMainWindow::GetSelectedFolder() const
+{
+	if ( m_pSides->currentWidget() == m_pFolders )
+	{
+		const QString szPicked = m_pFolders->GetSelectedPath();
+		if ( szPicked.isEmpty() )
+		{
+			return {};
+		}
+		const QFileInfo info{ szPicked };
+		return ToPath( info.isDir() ? info.absoluteFilePath() : info.absolutePath() );
+	}
+	if ( m_pSides->currentWidget() == m_pGameBrowser && m_Game && m_pTree->selectionModel() )
+	{
+		const QModelIndex proxyIndex = m_pTree->currentIndex();
+		if ( !proxyIndex.isValid() || !m_pTree->selectionModel()->isSelected( proxyIndex ) )
+		{
+			return {};
+		}
+		const QModelIndex index = m_pFilter->mapToSource( proxyIndex ).siblingAtColumn( 0 );
+		QString szPath = index.data( CVfsModel::ROLE_PATH_ROLE ).toString();
+		if ( !index.data( CVfsModel::ROLE_IS_DIRECTORY_ROLE ).toBool() )
+		{
+			szPath = szPath.section( u'/', 0, -2 );
+		}
+		return szPath.isEmpty() ? GetWriteFolder() : WriteTarget( szPath );
+	}
+	return {};
 }
 
 //-----------------------------------------------------------------------------
@@ -3390,6 +3732,7 @@ bool CMainWindow::WriteMaterial( CMaterialEditor *pEditor, const fs::path &targe
 	pEditor->SetDiskPath( target );
 	pEditor->MarkSaved();
 	statusBar()->showMessage( tr( "Saved %1" ).arg( ToQString( target ) ), 8000 );
+	FilesWritten( { target } );
 	return true;
 }
 
@@ -3406,7 +3749,6 @@ bool CMainWindow::Save( CMaterialEditor *pEditor )
 	{
 		return false;
 	}
-	Remount();
 	return true;
 }
 
@@ -3424,7 +3766,6 @@ bool CMainWindow::SaveAs( CMaterialEditor *pEditor )
 	{
 		return false;
 	}
-	Remount();
 	return true;
 }
 
@@ -3669,14 +4010,8 @@ bool CMainWindow::WriteDetail( CDetailEditor *pEditor, const fs::path &target )
 	pEditor->GetDocument()->SetDiskPath( target );
 	pEditor->GetDocument()->SetGamePath( GamePathForDisk( target ) );
 	pEditor->GetDocument()->MarkSaved();
-	if ( m_Game )
-	{
-		Remount();
-	}
-	else
-	{
-		SetUpDetails( pEditor );
-	}
+	FilesWritten( { target } );
+	SetUpDetails( pEditor );
 	return true;
 }
 //-----------------------------------------------------------------------------
