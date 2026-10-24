@@ -125,6 +125,14 @@ QWidget *CPreferencesDialog::BuildInterfacePage()
 	pLayout->addWidget( pSingle );
 	pLayout->addWidget( Hint( tr( "Files opened from a file manager or the command line become tabs in the running window "
 								  "instead of starting another. Takes effect from the next start." ) ) );
+	auto *pManifest = new QCheckBox( tr( "Offer to add saved files to the game's manifest" ) );
+	pManifest->setObjectName( QStringLiteral( "preferencesManifestReminder" ) );
+	pManifest->setChecked( CPreferences::Instance().IsManifestReminder() );
+	connect( pManifest, &QCheckBox::toggled, this, []( bool bOn ) { CPreferences::Instance().SetManifestReminder( bOn ); } );
+	pLayout->addSpacing( 12 );
+	pLayout->addWidget( pManifest );
+	pLayout->addWidget( Hint( tr( "When a soundscape, soundscript or particle file is saved and its manifest doesn't list it, ask "
+								  "whether to add it. \"Don't remind me again\" in that question turns this off." ) ) );
 	pLayout->addStretch();
 	return pPage;
 }

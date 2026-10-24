@@ -78,6 +78,7 @@ public:
 	void GoToLine( int nLine );
 
 signals:
+	void OpenDetailTypeRequested( const QString &szName );
 	void ModifiedChanged( bool bModified );
 	// The preview was drawn again (after an edit, a pause or Refresh).
 	void PreviewUpdated();

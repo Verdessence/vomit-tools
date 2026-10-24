@@ -32,6 +32,10 @@ public:
 	[[nodiscard]] bool IsSingleWindow() const { return m_bSingleWindow; }
 	void SetSingleWindow( bool bSingle );
 
+	// Whether saving a file the game's manifest doesn't list offers to add it.
+	[[nodiscard]] bool IsManifestReminder() const { return m_bManifestReminder; }
+	void SetManifestReminder( bool bRemind );
+
 	// Whether materials are edited as a list of parameters (else as their text).
 	[[nodiscard]] bool IsMaterialVisual() const { return m_bMaterialVisual; }
 	void SetMaterialVisual( bool bVisual );
@@ -51,4 +55,5 @@ private:
 	bool m_bSingleWindow = true;
 	bool m_bMaterialVisual = true;
 	bool m_bMaterialLive = true;
+	bool m_bManifestReminder = true;
 };

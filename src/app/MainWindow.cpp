@@ -24,7 +24,11 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QMenuBar>
+#include <QCheckBox>
 #include <QMessageBox>
+#include <QMenu>
+#include <QGuiApplication>
+#include <QClipboard>
 #include <QMimeData>
 #include <QProgressDialog>
 #include <QPushButton>
@@ -51,6 +55,7 @@
 
 #include "AboutDialog.h"
 #include "BuildInfo.h"
+#include "FileActions.h"
 #include "FileViews.h"
 #include "FolderBrowser.h"
 #include "ImageFiles.h"
@@ -60,12 +65,15 @@
 #include "MenuPicker.h"
 #include "ParticleDocument.h"
 #include "ParticleSearch.h"
+#include "Preferences.h"
 #include "PreferencesDialog.h"
 #include "QtPaths.h"
 #include "SkyDocument.h"
 #include "SkyEditor.h"
 #include "SoundDocument.h"
 #include "SoundEditor.h"
+#include "DetailEditor.h"
+#include "MaterialForm.h"
 #include "SoundPlayer.h"
 #include "BatchConvertDialog.h"
 #include "MakeMaterialDialog.h"
@@ -310,8 +318,54 @@ CMainWindow::CMainWindow( QWidget *pParent, xv::audio::CEngine::Output_t nAudio 
 	m_pTree = new QTreeView;
 	m_pTree->setModel( m_pFilter );
 	m_pTree->setUniformRowHeights( true );
-	m_pTree->header()->setSectionResizeMode( CVfsModel::COLUMN_NAME_COLUMN, QHeaderView::Stretch );
+	// Every column can be sized; the widths are kept between runs.
+	m_pTree->header()->setSectionResizeMode( QHeaderView::Interactive );
 	m_pTree->header()->setStretchLastSection( false );
+	m_pTree->setColumnWidth( CVfsModel::COLUMN_NAME_COLUMN, 220 );
+	m_pTree->header()->restoreState( QSettings{}.value( QStringLiteral( "gameBrowserColumns" ) ).toByteArray() );
+	connect( m_pTree->header(), &QHeaderView::sectionResized, this, [ this ] { QSettings{}.setValue( QStringLiteral( "gameBrowserColumns" ), m_pTree->header()->saveState() ); } );
+	m_pTree->setContextMenuPolicy( Qt::CustomContextMenu );
+	connect( m_pTree, &QTreeView::customContextMenuRequested, this, [ this ]( const QPoint &at ) {
+		const QModelIndex proxyIndex = m_pTree->indexAt( at );
+		if ( !proxyIndex.isValid() )
+		{
+			return;
+		}
+		const QModelIndex index = m_pFilter->mapToSource( proxyIndex );
+		const QString szPath = index.siblingAtColumn( 0 ).data( CVfsModel::ROLE_PATH_ROLE ).toString();
+		const bool bFolder = index.siblingAtColumn( 0 ).data( CVfsModel::ROLE_IS_DIRECTORY_ROLE ).toBool();
+		const std::string szGamePath = xv::vfs::NormalizePath( szPath.toStdString() );
+		fs::path disk;
+		if ( const xv::vfs::CMount *pMount = bFolder ? nullptr : m_pFileSystem->Resolve( szGamePath ) )
+		{
+			disk = pMount->DiskPath( szGamePath ).value_or( fs::path{} );
+		}
+		// A loose file gets the file's own menu; one in a VPK, what can be done with it here.
+		if ( !disk.empty() )
+		{
+			ShowFileMenu( m_pTree, m_pTree->viewport()->mapToGlobal( at ), ToQString( disk ), [ this, proxyIndex ] { emit m_pTree->activated( proxyIndex ); } );
+			return;
+		}
+		QMenu menu( this );
+		if ( !bFolder )
+		{
+			menu.addAction( tr( "Open" ), this, [ this, proxyIndex ] { emit m_pTree->activated( proxyIndex ); } );
+		}
+		menu.addAction( tr( "Copy Game Path" ), this, [ szPath ] { QGuiApplication::clipboard()->setText( szPath ); } );
+		if ( !bFolder )
+		{
+			menu.addAction( tr( "Save a Copy…" ), this, [ this, szPath, szGamePath ] {
+				const QString szFile = QFileDialog::getSaveFileName( this, tr( "Save a Copy" ), QDir{ QDir::homePath() }.filePath( QFileInfo{ szPath }.fileName() ) );
+				const auto bytes = szFile.isEmpty() ? std::nullopt : m_pFileSystem->Read( szGamePath );
+				QSaveFile out( szFile );
+				if ( bytes && ( !out.open( QIODevice::WriteOnly ) || out.write( reinterpret_cast<const char *>( bytes->data() ), static_cast<qint64>( bytes->size() ) ) != static_cast<qint64>( bytes->size() ) || !out.commit() ) )
+				{
+					QMessageBox::warning( this, tr( "Save a Copy" ), tr( "Couldn't write %1." ).arg( szFile ) );
+				}
+			} );
+		}
+		menu.exec( m_pTree->viewport()->mapToGlobal( at ) );
+	} );
 	m_pTree->setToolTip( tr( "The game's files as the engine sees them. Double-click a soundscape, soundscript, sky material or particle file to edit it" ) );
 	connect( m_pTree->selectionModel(), &QItemSelectionModel::currentChanged, this, &CMainWindow::PreviewFile );
 	connect( m_pTree, &QTreeView::activated, this, [ this ]( const QModelIndex &proxyIndex ) {
@@ -323,6 +377,10 @@ CMainWindow::CMainWindow( QWidget *pParent, xv::audio::CEngine::Output_t nAudio 
 		else if ( const QString szSky = SkyNameFor( szPath ); !szSky.isEmpty() )
 		{
 			OpenSky( szSky );
+		}
+		else if ( szPath.endsWith( u".vbsp", Qt::CaseInsensitive ) )
+		{
+			OpenDetailFile( szPath );
 		}
 		else if ( IsParticlePath( szPath ) )
 		{
@@ -362,15 +420,16 @@ CMainWindow::CMainWindow( QWidget *pParent, xv::audio::CEngine::Output_t nAudio 
 	m_pTabs->tabBar()->setTabButton( 0, QTabBar::LeftSide, nullptr );
 	connect( m_pTabs, &QTabWidget::tabCloseRequested, this, &CMainWindow::CloseTab );
 	connect( m_pTabs, &QTabWidget::currentChanged, this, [ this ] {
+		CDetailEditor *pDetails = GetCurrentDetails();
 		CSoundEditor *pEditor = GetCurrentEditor();
 		CSkyEditor *pSky = GetCurrentSky();
 		CParticleEditor *pParticles = GetCurrentParticles();
 		CTextureEditor *pTexture = GetCurrentTexture();
-		m_pUndoGroup->setActiveStack( pEditor ? pEditor->GetDocument()->GetUndoStack()
-				: pSky                        ? pSky->GetDocument()->GetUndoStack()
-				: pParticles                  ? pParticles->GetDocument()->GetUndoStack()
-				: pTexture                    ? pTexture->GetDocument()->GetUndoStack()
-											  : nullptr );
+		m_pUndoGroup->setActiveStack( pDetails ? pDetails->GetDocument()->GetUndoStack() : pEditor ? pEditor->GetDocument()->GetUndoStack()
+				: pSky                                                                             ? pSky->GetDocument()->GetUndoStack()
+				: pParticles                                                                       ? pParticles->GetDocument()->GetUndoStack()
+				: pTexture                                                                         ? pTexture->GetDocument()->GetUndoStack()
+																								   : nullptr );
 		UpdateTitle();
 	} );
 
@@ -422,6 +481,7 @@ void CMainWindow::BuildMenus( QAction *pSearchPathsToggle )
 	pFile->addAction( tr( "New &Soundscape File…" ), this, [ this ] { NewSoundFile( FileKind_t::FILE_KIND_SOUNDSCAPE ); } );
 	pFile->addAction( tr( "New Sound&script File…" ), this, [ this ] { NewSoundFile( FileKind_t::FILE_KIND_SOUNDSCRIPT ); } );
 	pFile->addAction( tr( "New S&kybox" ), this, [ this ] { NewSky(); } );
+	pFile->addAction( tr( "New Detail File…" ), this, [ this ] { NewDetailFile(); } );
 	pFile->addAction( tr( "New &Particle File…" ), this, &CMainWindow::NewParticleFile );
 	pFile->addAction( tr( "Create &VTF from Pictures…" ), this, &CMainWindow::ChooseNewTexture );
 	pFile->addAction( tr( "Con&vert a Folder of Textures…" ), this, &CMainWindow::ChooseBatchConvert );
@@ -430,7 +490,11 @@ void CMainWindow::BuildMenus( QAction *pSearchPathsToggle )
 	pFile->addSeparator();
 	// For a sky, saving is exporting its VTFs and VMTs.
 	pFile->addAction( tr( "&Save" ), QKeySequence::Save, this, [ this ] {
-		if ( CSoundEditor *pEditor = GetCurrentEditor() )
+		if ( CDetailEditor *pDetails = GetCurrentDetails() )
+		{
+			Save( pDetails );
+		}
+		else if ( CSoundEditor *pEditor = GetCurrentEditor() )
 		{
 			Save( pEditor );
 		}
@@ -452,7 +516,11 @@ void CMainWindow::BuildMenus( QAction *pSearchPathsToggle )
 		}
 	} );
 	pFile->addAction( tr( "Save &As…" ), QKeySequence::SaveAs, this, [ this ] {
-		if ( CSoundEditor *pEditor = GetCurrentEditor() )
+		if ( CDetailEditor *pDetails = GetCurrentDetails() )
+		{
+			SaveAs( pDetails );
+		}
+		else if ( CSoundEditor *pEditor = GetCurrentEditor() )
 		{
 			SaveAs( pEditor );
 		}
@@ -474,7 +542,7 @@ void CMainWindow::BuildMenus( QAction *pSearchPathsToggle )
 		}
 	} );
 	pFile->addAction( tr( "&Close Tab" ), QKeySequence::Close, this, [ this ] {
-		if ( GetCurrentEditor() || GetCurrentSky() || GetCurrentParticles() || GetCurrentTexture() || GetCurrentMaterial() )
+		if ( GetCurrentDetails() || GetCurrentEditor() || GetCurrentSky() || GetCurrentParticles() || GetCurrentTexture() || GetCurrentMaterial() )
 		{
 			CloseTab( m_pTabs->currentIndex() );
 		}
@@ -717,7 +785,7 @@ void CMainWindow::ChooseFiles()
 {
 	const QString szStart = m_pFolders->GetFolder().isEmpty() && m_Game ? ToQString( m_Game->m_GameDir ) : m_pFolders->GetFolder();
 	const QStringList files = QFileDialog::getOpenFileNames( this, tr( "Open File" ), szStart,
-		tr( "Soundscapes and soundscripts (*.txt);;Sounds (*.wav *.mp3);;Textures (*.vtf);;Sky faces and textures (*.vmt *.vtf *.png *.tga *.jpg *.jpeg *.bmp *.psd *.hdr);;Particles (*.pcf *.dmx);;"
+		tr( "Soundscapes and soundscripts (*.txt);;Detail files (*.vbsp);;Sounds (*.wav *.mp3);;Textures (*.vtf);;Sky faces and textures (*.vmt *.vtf *.png *.tga *.jpg *.jpeg *.bmp *.psd *.hdr);;Particles (*.pcf *.dmx);;"
 			"KeyValues (*.txt *.vmt *.vdf *.res);;Game info (gameinfo.txt);;All files (*)" ) );
 	OpenPaths( files );
 }
@@ -830,6 +898,11 @@ bool CMainWindow::OpenGame( const QString &szGameInfoPath )
 	{
 		for ( int i = m_pTabs->count() - 1; i >= 0; i-- )
 		{
+			auto *pDetails = qobject_cast<CDetailEditor *>( m_pTabs->widget( i ) );
+			if ( pDetails && pDetails->GetDocument()->GetDiskPath().empty() && !pDetails->GetDocument()->IsNew() && !CloseTab( i ) )
+			{
+				return false;
+			}
 			auto *pEditor = qobject_cast<CSoundEditor *>( m_pTabs->widget( i ) );
 			if ( pEditor && pEditor->GetDocument()->GetDiskPath().empty() && !pEditor->GetDocument()->IsNew() && !CloseTab( i ) )
 			{
@@ -870,7 +943,11 @@ void CMainWindow::Remount()
 	m_ParticleGame.reset();
 	for ( int i = 0; i < m_pTabs->count(); i++ )
 	{
-		if ( auto *pEditor = qobject_cast<CSoundEditor *>( m_pTabs->widget( i ) ) )
+		if ( auto *pDetails = qobject_cast<CDetailEditor *>( m_pTabs->widget( i ) ) )
+		{
+			SetUpDetails( pDetails );
+		}
+		else if ( auto *pEditor = qobject_cast<CSoundEditor *>( m_pTabs->widget( i ) ) )
 		{
 			pEditor->Relint();
 		}
@@ -1016,7 +1093,11 @@ void CMainWindow::PreviewGameFile( const QString &szPath, const QString &szSourc
 	const xv::material::Reader_t pfnRead = [ this ]( std::string_view szGamePath ) { return m_pFileSystem->Read( szGamePath ); };
 	QWidget *pView = CreateFileView( szPath, szSource, *bytes, m_pPlayer, nullptr, pfnRead );
 	LinkMaterial( pView, pfnRead, szPath, [ this, szPath, szSource ] { PreviewGameFile( szPath, szSource ); } );
-	if ( const FileKind_t nKind = xv::sound::FileKindForPath( szPath.toStdString() ); nKind != FileKind_t::FILE_KIND_UNKNOWN )
+	if ( szPath.endsWith( u".vbsp", Qt::CaseInsensitive ) )
+	{
+		pView = WithEditButton( pView, tr( "This is a detail file." ), tr( "Open in Details Editor" ), [ this, szPath ] { OpenDetailFile( szPath ); } );
+	}
+	else if ( const FileKind_t nKind = xv::sound::FileKindForPath( szPath.toStdString() ); nKind != FileKind_t::FILE_KIND_UNKNOWN )
 	{
 		pView = WithEditButton( pView, tr( "This is a %1 file." ).arg( KindName( nKind ) ), tr( "Open in Editor" ), [ this, szPath ] { OpenSoundFile( szPath ); } );
 	}
@@ -1085,6 +1166,10 @@ void CMainWindow::PreviewDiskFile( const QString &szPath )
 		pView = WithEditButton( pView, tr( "This is the %1 face of the sky %2 (%3 of its 6 faces are here)." ).arg( face ? QString::fromUtf8( xv::sky::Suffix( *face ) ) : QString{}, QString::fromStdString( sky->m_szName ) ).arg( sky->Count() ),
 			tr( "Open Sky in Editor" ), [ this, szPath ] { OpenDiskFile( szPath ); } );
 	}
+	else if ( info.suffix().compare( u"vbsp", Qt::CaseInsensitive ) == 0 )
+	{
+		pView = WithEditButton( pView, tr( "This is a detail file." ), tr( "Open in Details Editor" ), [ this, szPath ] { OpenDiskFile( szPath ); } );
+	}
 	else if ( info.suffix().compare( u"txt", Qt::CaseInsensitive ) == 0 )
 	{
 		const FileKind_t nKind = xv::sound::GuessFileKind( info.fileName().toStdString(), xv::kv1::Parse( data->toStdString() ).m_Document );
@@ -1132,6 +1217,11 @@ void CMainWindow::OpenDiskFile( const QString &szPath )
 		return;
 	}
 	const fs::path file = ToPath( info.absoluteFilePath() );
+	if ( auto *pDetails = DetailEditorFor( {}, file ) )
+	{
+		m_pTabs->setCurrentWidget( pDetails );
+		return;
+	}
 	if ( CSoundEditor *pEditor = EditorForDisk( file ) )
 	{
 		m_pTabs->setCurrentWidget( pEditor );
@@ -1156,6 +1246,13 @@ void CMainWindow::OpenDiskFile( const QString &szPath )
 	if ( !data )
 	{
 		QMessageBox::warning( this, tr( "Cannot open" ), tr( "Could not read %1." ).arg( QDir::toNativeSeparators( szPath ) ) );
+		return;
+	}
+	if ( info.suffix().compare( u"vbsp", Qt::CaseInsensitive ) == 0 )
+	{
+		auto *pDocument = new CDetailDocument( GamePathForDisk( file ), xv::kv1::Parse( data->toStdString() ) );
+		pDocument->SetDiskPath( file );
+		AddDetailEditor( pDocument );
 		return;
 	}
 	if ( info.suffix().compare( u"txt", Qt::CaseInsensitive ) == 0 )
@@ -1630,16 +1727,32 @@ void CMainWindow::NewSoundFile( FileKind_t nKind )
 		tr( "File name (scripts/%1<name>.txt), e.g. your map's name:" ).arg( szPrefix ), QLineEdit::Normal, {}, &bOk )
 							   .trimmed()
 							   .toLower();
-	if ( !bOk || szName.isEmpty() )
+	if ( !bOk )
 	{
 		return;
 	}
-	if ( !QRegularExpression( QStringLiteral( "^[a-z0-9_.-]+$" ) ).match( szName ).hasMatch() )
+	// The prefix goes on by itself; typed anyway, it isn't doubled.
+	QString szBare = szName;
+	if ( szBare.startsWith( szPrefix ) )
+	{
+		szBare.remove( 0, szPrefix.size() );
+	}
+	if ( szBare.endsWith( QStringLiteral( ".txt" ) ) )
+	{
+		szBare.chop( 4 );
+	}
+	if ( szBare.isEmpty() )
+	{
+		QMessageBox::warning( this, tr( "No name" ), tr( "Give the file a name, such as your map's: it becomes scripts/%1<name>.txt." ).arg( szPrefix ) );
+		return;
+	}
+	const QString &szFileName = szBare;
+	if ( !QRegularExpression( QStringLiteral( "^[a-z0-9_.-]+$" ) ).match( szFileName ).hasMatch() )
 	{
 		QMessageBox::warning( this, tr( "Invalid name" ), tr( "Use letters, digits, '_', '-' and '.' only." ) );
 		return;
 	}
-	const QString szGamePath = QStringLiteral( "scripts/%1%2.txt" ).arg( szPrefix, szName );
+	const QString szGamePath = QStringLiteral( "scripts/%1%2.txt" ).arg( szPrefix, szFileName );
 	if ( m_Game && m_pFileSystem->Resolve( szGamePath.toStdString() ) )
 	{
 		if ( QMessageBox::question( this, tr( "File exists" ), tr( "%1 already exists in the game. Open it instead?" ).arg( szGamePath ) ) == QMessageBox::Yes )
@@ -1651,7 +1764,7 @@ void CMainWindow::NewSoundFile( FileKind_t nKind )
 	auto *pDocument = new CSoundDocument( szGamePath, nKind, xv::kv1::Parse( "" ) );
 	pDocument->MarkUnsaved();
 	CSoundEditor *pEditor = AddEditor( pDocument );
-	const QString szEntry = nKind == FileKind_t::FILE_KIND_SOUNDSCAPE ? szName + QStringLiteral( ".default" ) : szName + QStringLiteral( ".sound" );
+	const QString szEntry = nKind == FileKind_t::FILE_KIND_SOUNDSCAPE ? szFileName + QStringLiteral( ".default" ) : szFileName + QStringLiteral( ".sound" );
 	pDocument->InsertEntry( 0, EntryTemplate( *pDocument, szEntry.toStdString() ), tr( "New %1" ).arg( szEntry ) );
 	pEditor->SelectEntry( 0 );
 }
@@ -1913,13 +2026,11 @@ bool CMainWindow::Save( CParticleEditor *pEditor )
 	{
 		return false;
 	}
-	if ( m_Game && !pEditor->GetListedInManifest() && !pEditor->property( "manifestOffered" ).toBool() )
+	if ( m_Game && !pEditor->GetListedInManifest() && !pEditor->property( "manifestOffered" ).toBool() && CPreferences::Instance().IsManifestReminder() )
 	{
 		pEditor->setProperty( "manifestOffered", true );
-		const auto nAnswer = QMessageBox::question( this, tr( "Add to manifest?" ),
-			tr( "%1 is not listed in %2, so the game only loads it for maps that ask for it.\n\nAdd it now?" )
-				.arg( pDocument->GetGamePath(), QString::fromUtf8( xv::particles::MANIFEST_PATH ) ) );
-		if ( nAnswer == QMessageBox::Yes )
+		if ( AskAddToManifest( tr( "%1 is not listed in %2, so the game only loads it for maps that ask for it.\n\nAdd it now?" )
+					.arg( pDocument->GetGamePath(), QString::fromUtf8( xv::particles::MANIFEST_PATH ) ) ) )
 		{
 			AddToManifest( pDocument ); // remounts
 			return true;
@@ -2155,13 +2266,13 @@ bool CMainWindow::Save( CSoundEditor *pEditor )
 	{
 		return false;
 	}
-	if ( m_Game && !pEditor->GetListedInManifest() && !pEditor->property( "manifestOffered" ).toBool() )
+	// A file with nothing in it yet isn't worth listing.
+	const bool bHasEntries = std::ranges::any_of( pDocument->GetDocument().m_Roots, &xv::kv1::CNode::IsBlock );
+	if ( m_Game && bHasEntries && !pEditor->GetListedInManifest() && !pEditor->property( "manifestOffered" ).toBool() && CPreferences::Instance().IsManifestReminder() )
 	{
 		pEditor->setProperty( "manifestOffered", true );
-		const auto nAnswer = QMessageBox::question( this, tr( "Add to manifest?" ),
-			tr( "%1 is not listed in %2, so the game won't load it.\n\nAdd it now?" )
-				.arg( pDocument->GetGamePath(), QString::fromUtf8( xv::sound::ManifestPathFor( pDocument->GetKind() ) ) ) );
-		if ( nAnswer == QMessageBox::Yes )
+		if ( AskAddToManifest( tr( "%1 is not listed in %2, so the game won't load it.\n\nAdd it now?" )
+					.arg( pDocument->GetGamePath(), QString::fromUtf8( xv::sound::ManifestPathFor( pDocument->GetKind() ) ) ) ) )
 		{
 			AddToManifest( pDocument ); // remounts
 			return true;
@@ -2190,6 +2301,25 @@ bool CMainWindow::SaveAs( CSoundEditor *pEditor )
 }
 
 //-----------------------------------------------------------------------------
+// Purpose: Asks whether to list a saved file in its manifest, with "Don't remind me again"
+//          (Preferences → Interface turns it back on).
+//-----------------------------------------------------------------------------
+bool CMainWindow::AskAddToManifest( const QString &szText )
+{
+	QMessageBox box( QMessageBox::Question, tr( "Add to manifest?" ), szText, QMessageBox::Yes | QMessageBox::No, this );
+	box.setObjectName( QStringLiteral( "manifestQuestion" ) );
+	auto *pStop = new QCheckBox( tr( "Don't remind me again" ) );
+	pStop->setToolTip( tr( "Preferences → Interface brings it back" ) );
+	box.setCheckBox( pStop );
+	const bool bYes = box.exec() == QMessageBox::Yes;
+	if ( pStop->isChecked() )
+	{
+		CPreferences::Instance().SetManifestReminder( false );
+	}
+	return bYes;
+}
+
+//-----------------------------------------------------------------------------
 // Purpose:
 //-----------------------------------------------------------------------------
 void CMainWindow::AddToManifest( CSoundDocument *pDocument )
@@ -2197,6 +2327,12 @@ void CMainWindow::AddToManifest( CSoundDocument *pDocument )
 	if ( !m_Game )
 	{
 		QMessageBox::information( this, tr( "Manifest" ), tr( "Manifests belong to a game; open the game first." ) );
+		return;
+	}
+	if ( std::ranges::none_of( pDocument->GetDocument().m_Roots, &xv::kv1::CNode::IsBlock ) )
+	{
+		QMessageBox::warning( this, tr( "Manifest" ), tr( "%1 has nothing in it yet; add a %2 before listing it in the manifest." )
+				.arg( pDocument->GetGamePath(), QString::fromUtf8( pDocument->GetSchema().m_szEntryNoun.data(), static_cast<qsizetype>( pDocument->GetSchema().m_szEntryNoun.size() ) ) ) );
 		return;
 	}
 	const FileKind_t nKind = pDocument->GetKind();
@@ -2286,6 +2422,17 @@ bool CMainWindow::ConfirmClose( CParticleEditor *pEditor )
 //-----------------------------------------------------------------------------
 bool CMainWindow::CloseTab( int nIndex )
 {
+	if ( auto *pDetails = qobject_cast<CDetailEditor *>( m_pTabs->widget( nIndex ) ) )
+	{
+		if ( !ConfirmClose( pDetails ) )
+		{
+			return false;
+		}
+		m_pUndoGroup->removeStack( pDetails->GetDocument()->GetUndoStack() );
+		m_pTabs->removeTab( nIndex );
+		pDetails->deleteLater();
+		return true;
+	}
 	if ( auto *pMaterial = qobject_cast<CMaterialEditor *>( m_pTabs->widget( nIndex ) ) )
 	{
 		if ( !ConfirmClose( pMaterial ) )
@@ -2349,6 +2496,14 @@ bool CMainWindow::CloseTab( int nIndex )
 //-----------------------------------------------------------------------------
 void CMainWindow::closeEvent( QCloseEvent *pEvent )
 {
+	for ( int i = 0; i < m_pTabs->count(); ++i )
+	{
+		if ( auto *pDetails = qobject_cast<CDetailEditor *>( m_pTabs->widget( i ) ); pDetails && !ConfirmClose( pDetails ) )
+		{
+			pEvent->ignore();
+			return;
+		}
+	}
 	for ( int i = 0; i < m_pTabs->count(); i++ )
 	{
 		if ( auto *pEditor = qobject_cast<CSoundEditor *>( m_pTabs->widget( i ) ); pEditor && !ConfirmClose( pEditor ) )
@@ -2417,7 +2572,11 @@ void CMainWindow::UpdateTitle()
 	{
 		szTitle.prepend( QString::fromStdString( m_Game->m_szGame ) + QStringLiteral( " — " ) );
 	}
-	if ( CSoundEditor *pEditor = GetCurrentEditor() )
+	if ( auto *pDetails = GetCurrentDetails() )
+	{
+		szTitle.prepend( m_pTabs->tabText( m_pTabs->indexOf( pDetails ) ) + QStringLiteral( " — " ) );
+	}
+	else if ( CSoundEditor *pEditor = GetCurrentEditor() )
 	{
 		const CSoundDocument *pDocument = pEditor->GetDocument();
 		szTitle.prepend( ( pDocument->IsModified() ? QStringLiteral( "*" ) : QString{} ) + pDocument->GetFileName() + QStringLiteral( " — " ) );
@@ -2639,6 +2798,59 @@ xv::material::Reader_t CMainWindow::ReaderFor( CTextureEditor *pTexture, const f
 //-----------------------------------------------------------------------------
 void CMainWindow::SetUpMaterial( CMaterialEditor *pMaterial )
 {
+	pMaterial->GetForm()->SetDetailTypes( [ this ] {
+		std::vector<Choice_t> choices;
+		const auto add = [ & ]( const xv::kv1::CDocument &document ) {
+			for ( const auto &type : xv::detail::Types( document ) )
+			{
+				const auto szName = QString::fromStdString( type.m_szName );
+				if ( std::ranges::none_of( choices, [ & ]( const Choice_t &choice ) { return choice.m_szValue.compare( szName, Qt::CaseInsensitive ) == 0; } ) )
+				{
+					choices.push_back( { szName, szName } );
+				}
+			}
+		};
+		for ( int i = 0; i < m_pTabs->count(); ++i )
+		{
+			if ( auto *pDetails = qobject_cast<CDetailEditor *>( m_pTabs->widget( i ) ) )
+			{
+				add( pDetails->GetDocument()->GetDocument() );
+			}
+		}
+		if ( !DetailEditorFor( QStringLiteral( "detail.vbsp" ) ) )
+		{
+			if ( const auto text = m_pFileSystem->ReadText( "detail.vbsp" ) )
+			{
+				add( xv::kv1::Parse( *text ).m_Document );
+			}
+		}
+		return choices;
+	} );
+	if ( !pMaterial->property( "detailLinkConnected" ).toBool() )
+	{
+		pMaterial->setProperty( "detailLinkConnected", true );
+		connect( pMaterial, &CMaterialEditor::OpenDetailTypeRequested, this, [ this ]( const QString &szName ) {
+			for ( int i = 0; i < m_pTabs->count(); ++i )
+			{
+				if ( auto *pDetails = qobject_cast<CDetailEditor *>( m_pTabs->widget( i ) ) )
+				{
+					for ( const auto &type : xv::detail::Types( pDetails->GetDocument()->GetDocument() ) )
+					{
+						if ( QString::fromStdString( type.m_szName ).compare( szName, Qt::CaseInsensitive ) == 0 )
+						{
+							m_pTabs->setCurrentWidget( pDetails );
+							pDetails->SelectType( szName );
+							return;
+						}
+					}
+				}
+			}
+			if ( auto *pDetails = OpenDetailFile( QStringLiteral( "detail.vbsp" ) ) )
+			{
+				pDetails->SelectType( szName );
+			}
+		} );
+	}
 	pMaterial->SetSurfaceProps( SurfaceProps() );
 	pMaterial->SetTextureNames( [ this ] { return TextureNames(); } );
 }
@@ -3266,4 +3478,238 @@ void CMainWindow::ChooseBatchConvert()
 	{
 		Remount();
 	}
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Find an open detail file by its disk identity or mounted game path.
+//-----------------------------------------------------------------------------
+CDetailEditor *CMainWindow::DetailEditorFor( const QString &szGamePath, const fs::path &disk ) const
+{
+	for ( int i = 0; i < m_pTabs->count(); ++i )
+	{
+		auto *pEditor = qobject_cast<CDetailEditor *>( m_pTabs->widget( i ) );
+		if ( !pEditor )
+		{
+			continue;
+		}
+		const auto *pDocument = pEditor->GetDocument();
+		if ( !disk.empty() && pDocument->GetDiskPath().lexically_normal() == disk.lexically_normal() )
+		{
+			return pEditor;
+		}
+		if ( disk.empty() && !szGamePath.isEmpty() && pDocument->GetGamePath().compare( szGamePath, Qt::CaseInsensitive ) == 0 )
+		{
+			return pEditor;
+		}
+	}
+	return nullptr;
+}
+//-----------------------------------------------------------------------------
+// Purpose: Return the active details tab for global save and undo actions.
+//-----------------------------------------------------------------------------
+CDetailEditor *CMainWindow::GetCurrentDetails() const
+{
+	return qobject_cast<CDetailEditor *>( m_pTabs->currentWidget() );
+}
+//-----------------------------------------------------------------------------
+// Purpose: Open a detail file through the game's mount precedence.
+//-----------------------------------------------------------------------------
+CDetailEditor *CMainWindow::OpenDetailFile( const QString &szGamePath )
+{
+	const auto szPath = xv::vfs::NormalizePath( szGamePath.toStdString() );
+	fs::path disk;
+	if ( const auto *pMount = m_pFileSystem->Resolve( szPath ) )
+	{
+		disk = pMount->DiskPath( szPath ).value_or( fs::path{} );
+	}
+	if ( auto *pEditor = DetailEditorFor( QString::fromStdString( szPath ), disk ) )
+	{
+		m_pTabs->setCurrentWidget( pEditor );
+		return pEditor;
+	}
+	const auto text = m_pFileSystem->ReadText( szPath );
+	if ( !text )
+	{
+		QMessageBox::warning( this, tr( "Cannot open" ), tr( "Could not read %1." ).arg( szGamePath ) );
+		return nullptr;
+	}
+	auto *pDocument = new CDetailDocument( QString::fromStdString( szPath ), xv::kv1::Parse( *text ) );
+	pDocument->SetDiskPath( disk );
+	return AddDetailEditor( pDocument );
+}
+//-----------------------------------------------------------------------------
+// Purpose: Start a new detail file without writing until the user saves it.
+//-----------------------------------------------------------------------------
+CDetailEditor *CMainWindow::NewDetailFile()
+{
+	auto *pDocument = new CDetailDocument( QStringLiteral( "detail.vbsp" ), xv::kv1::Parse( "detail\n{\n}\n" ) );
+	pDocument->MarkUnsaved();
+	return AddDetailEditor( pDocument );
+}
+//-----------------------------------------------------------------------------
+// Purpose: Resolve local assets beside a detail file before the mounted game's assets.
+//-----------------------------------------------------------------------------
+void CMainWindow::SetUpDetails( CDetailEditor *pEditor )
+{
+	const auto disk = pEditor->GetDocument()->GetDiskPath();
+	const auto reader = [ this, disk ]( std::string_view szPath ) -> std::optional<std::vector<std::byte>> {
+		const auto szGamePath = QString::fromUtf8( szPath.data(), static_cast<qsizetype>( szPath.size() ) );
+		if ( auto *pTexture = TextureEditorFor( szGamePath ) )
+		{
+			return pTexture->GetDocument()->GetBytes();
+		}
+		if ( auto *pMaterial = MaterialEditorFor( szGamePath, {} ) )
+		{
+			const auto bytes = pMaterial->GetText().toUtf8();
+			return std::vector<std::byte>( reinterpret_cast<const std::byte *>( bytes.constData() ), reinterpret_cast<const std::byte *>( bytes.constData() + bytes.size() ) );
+		}
+		return xv::material::DiskReader( disk.empty() ? fs::path{} : disk.parent_path() / "materials" / "detail.vmt", m_Game ? m_pFileSystem.get() : nullptr )( szPath );
+	};
+	if ( !m_Game && disk.empty() )
+	{
+		pEditor->SetContext( reader, {}, false );
+		return;
+	}
+	std::vector<std::string> materials = m_Game ? m_pFileSystem->Find( "materials", ".vmt", true ) : std::vector<std::string>{};
+	if ( !disk.empty() )
+	{
+		std::error_code ec;
+		for ( fs::recursive_directory_iterator it( disk.parent_path() / "materials", fs::directory_options::skip_permission_denied, ec ), end; it != end && !ec; it.increment( ec ) )
+		{
+			if ( it->is_regular_file( ec ) && QString::fromStdString( xv::vfs::ToUtf8( it->path().extension() ) ).compare( u".vmt", Qt::CaseInsensitive ) == 0 )
+			{
+				materials.push_back( xv::vfs::NormalizePath( xv::vfs::ToUtf8( it->path().lexically_relative( disk.parent_path() ) ) ) );
+			}
+		}
+	}
+	std::ranges::sort( materials );
+	materials.erase( std::unique( materials.begin(), materials.end() ), materials.end() );
+	pEditor->SetContext( reader, std::move( materials ) );
+}
+//-----------------------------------------------------------------------------
+// Purpose: Attach detail history, resource context and generated textures to the main window.
+//-----------------------------------------------------------------------------
+CDetailEditor *CMainWindow::AddDetailEditor( CDetailDocument *pDocument )
+{
+	auto *pEditor = new CDetailEditor( pDocument );
+	m_pUndoGroup->addStack( pDocument->GetUndoStack() );
+	m_pTabs->addTab( pEditor, pDocument->GetFileName() );
+	connect( pDocument, &CDetailDocument::ModifiedChanged, this, [ this, pEditor ] {
+		const auto *pDoc = pEditor->GetDocument();
+		const int i = m_pTabs->indexOf( pEditor );
+		m_pTabs->setTabText( i, ( pDoc->IsModified() ? QStringLiteral( "*" ) : QString{} ) + pDoc->GetFileName() );
+		m_pTabs->setTabToolTip( i, pDoc->GetDiskPath().empty() ? pDoc->GetGamePath() : ToQString( pDoc->GetDiskPath() ) );
+		UpdateTitle();
+	} );
+	connect( pEditor, &CDetailEditor::OpenTextureRequested, this, [ this, pEditor ]( const QString &szPath ) {
+		const auto disk = pEditor->GetDocument()->GetDiskPath();
+		if ( !disk.empty() )
+		{
+			const auto local = xv::vfs::FindCaseInsensitive( disk.parent_path() / xv::vfs::FromUtf8( szPath.toStdString() ) );
+			std::error_code ec;
+			if ( fs::is_regular_file( local, ec ) )
+			{
+				OpenDiskFile( ToQString( local ) );
+				return;
+			}
+		}
+		OpenTextureFile( szPath );
+	} );
+	connect( pEditor, &CDetailEditor::PackedTexture, this, [ this ]( const QString &szMaterial, const std::vector<std::byte> &bytes ) {
+		const QString szTexture = QStringLiteral( "materials/%1.vtf" ).arg( szMaterial );
+		auto *pTextureDocument = new CTextureDocument( szTexture, bytes );
+		pTextureDocument->MarkUnsaved();
+		if ( m_Game )
+		{
+			pTextureDocument->SetSuggestedPath( WriteTarget( szTexture ) );
+		}
+		auto *pTexture = AddTextureEditor( pTextureDocument, false );
+		xv::kv1::CDocument document;
+		auto root = xv::kv1::CNode::MakeBlock( "UnlitGeneric" );
+		root.AppendChild( xv::kv1::CNode::MakePair( "$basetexture", szMaterial.toStdString() ) );
+		root.AppendChild( xv::kv1::CNode::MakePair( "$vertexcolor", "1" ) );
+		root.AppendChild( xv::kv1::CNode::MakePair( "$nocull", "1" ) );
+		root.AppendChild( xv::kv1::CNode::MakePair( "$translucent", "1" ) );
+		document.AppendRoot( std::move( root ) );
+		auto *pMaterial = new CMaterialEditor( QStringLiteral( "materials/%1.vmt" ).arg( szMaterial ), QString::fromStdString( xv::kv1::Write( document ) ), ReaderFor( pTexture, {} ) );
+		pMaterial->MarkUnsaved();
+		if ( m_Game )
+		{
+			pMaterial->SetSuggestedPath( WriteTarget( pMaterial->GetGamePath() ) );
+		}
+		SetUpMaterial( pMaterial );
+		pTexture->SetMaterial( pMaterial );
+		statusBar()->showMessage( tr( "Save the new texture and material, then set the map's detailmaterial to %1." ).arg( szMaterial ), 15000 );
+	} );
+	connect( pEditor, &CDetailEditor::RefreshRequested, this, [ this, pEditor ] { SetUpDetails( pEditor ); } );
+	SetUpDetails( pEditor );
+	if ( pDocument->IsNew() )
+	{
+		pDocument->MarkUnsaved();
+	}
+	m_pTabs->setCurrentWidget( pEditor );
+	return pEditor;
+}
+//-----------------------------------------------------------------------------
+// Purpose: Atomically save original detail tokens to the chosen loose file.
+//-----------------------------------------------------------------------------
+bool CMainWindow::WriteDetail( CDetailEditor *pEditor, const fs::path &target )
+{
+	std::error_code ec;
+	fs::create_directories( target.parent_path(), ec );
+	QSaveFile file( ToQString( target ) );
+	const auto bytes = pEditor->GetDocument()->GetSerialize();
+	if ( !file.open( QIODevice::WriteOnly ) || file.write( bytes.data(), static_cast<qint64>( bytes.size() ) ) != static_cast<qint64>( bytes.size() ) || !file.commit() )
+	{
+		QMessageBox::critical( this, tr( "Save failed" ), file.errorString() );
+		return false;
+	}
+	pEditor->GetDocument()->SetDiskPath( target );
+	pEditor->GetDocument()->SetGamePath( GamePathForDisk( target ) );
+	pEditor->GetDocument()->MarkSaved();
+	if ( m_Game )
+	{
+		Remount();
+	}
+	else
+	{
+		SetUpDetails( pEditor );
+	}
+	return true;
+}
+//-----------------------------------------------------------------------------
+// Purpose: Save loose files in place and VPK files to the configured write folder.
+//-----------------------------------------------------------------------------
+bool CMainWindow::Save( CDetailEditor *pEditor )
+{
+	const auto *pDocument = pEditor->GetDocument();
+	if ( pDocument->IsNew() || ( pDocument->GetDiskPath().empty() && !m_Game ) )
+	{
+		return SaveAs( pEditor );
+	}
+	return WriteDetail( pEditor, pDocument->GetDiskPath().empty() ? WriteTarget( pDocument->GetGamePath() ) : pDocument->GetDiskPath() );
+}
+//-----------------------------------------------------------------------------
+// Purpose: Choose the destination for a new or copied detail file.
+//-----------------------------------------------------------------------------
+bool CMainWindow::SaveAs( CDetailEditor *pEditor )
+{
+	const auto *pDocument = pEditor->GetDocument();
+	const fs::path start = !pDocument->GetDiskPath().empty() ? pDocument->GetDiskPath() : m_Game ? WriteTarget( pDocument->GetGamePath() )
+																								 : ToPath( QDir::homePath() ) / "detail.vbsp";
+	const QString szPath = AskSavePath( start, tr( "Detail files (*.vbsp);;All files (*)" ) );
+	return !szPath.isEmpty() && WriteDetail( pEditor, ToPath( szPath ) );
+}
+//-----------------------------------------------------------------------------
+// Purpose: Protect unsaved detail edits when closing a tab or the application.
+//-----------------------------------------------------------------------------
+bool CMainWindow::ConfirmClose( CDetailEditor *pEditor )
+{
+	if ( !pEditor->GetDocument()->IsModified() )
+	{
+		return true;
+	}
+	m_pTabs->setCurrentWidget( pEditor );
+	const auto nAnswer = QMessageBox::question( this, tr( "Unsaved changes" ), tr( "Save changes to %1?" ).arg( pEditor->GetDocument()->GetFileName() ), QMessageBox::Save | QMessageBox::Discard | QMessageBox::Cancel, QMessageBox::Save );
+	return nAnswer == QMessageBox::Save ? Save( pEditor ) : nAnswer == QMessageBox::Discard;
 }

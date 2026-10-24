@@ -591,7 +591,7 @@ QWidget *CreateFileView( const QString &szPath, const QString &szSource, std::sp
 	{
 		return new CDmxView( szPath, bytes, pParent );
 	}
-	if ( szSuffix == u"txt" || szSuffix == u"vdf" || szSuffix == u"res" )
+	if ( szSuffix == u"txt" || szSuffix == u"vbsp" || szSuffix == u"vdf" || szSuffix == u"res" )
 	{
 		return new CKeyValuesView( szPath, bytes, pParent );
 	}

@@ -1,6 +1,8 @@
 //===========================================================================//
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
+// Purpose: Main application window, file routing and editor lifecycle.
+//
 //===========================================================================//
 #pragma once
 
@@ -21,6 +23,8 @@
 #include "vfs/Steam.h"
 #include "vfs/Vfs.h"
 
+class CDetailDocument;
+class CDetailEditor;
 class CFolderBrowser;
 class CParticleDocument;
 class CParticleSearch;
@@ -61,6 +65,8 @@ public:
 	void OpenFolder( const QString &szFolder );
 	void OpenDiskFile( const QString &szPath );
 	// Opens a soundscape or soundscript from the mounted game in an editor tab.
+	CDetailEditor *OpenDetailFile( const QString &szGamePath );
+	CDetailEditor *NewDetailFile();
 	CSoundEditor *OpenSoundFile( const QString &szGamePath );
 	// A new, empty skybox editor tab (or one for the given document).
 	CSkyEditor *NewSky( CSkyDocument *pDocument = nullptr );
@@ -96,6 +102,14 @@ protected:
 	void dropEvent( QDropEvent *pEvent ) override;
 
 private:
+	CDetailEditor *GetCurrentDetails() const;
+	CDetailEditor *DetailEditorFor( const QString &szGamePath, const std::filesystem::path &disk = {} ) const;
+	CDetailEditor *AddDetailEditor( CDetailDocument *pDocument );
+	void SetUpDetails( CDetailEditor *pEditor );
+	bool Save( CDetailEditor *pEditor );
+	bool SaveAs( CDetailEditor *pEditor );
+	bool WriteDetail( CDetailEditor *pEditor, const std::filesystem::path &target );
+	bool ConfirmClose( CDetailEditor *pEditor );
 	void BuildMenus( QAction *pSearchPathsToggle );
 	void BuildPlaybackBar();
 	// "VOMIT TOOLS - FREE EDITION - <version> - <OS> - MADE IN THE PHILIPPINES", bottom right.
@@ -114,6 +128,7 @@ private:
 	void LinkMaterial( QWidget *pView, const xv::material::Reader_t &pfnRead, const QString &szMaterial, const std::function<void()> &pfnBack );
 	[[nodiscard]] QWidget *WithEditButton( QWidget *pView, const QString &szText, const QString &szButton, const std::function<void()> &pfnOpen );
 	void NewSoundFile( xv::sound::FileKind_t nKind );
+	bool AskAddToManifest( const QString &szText );
 	bool Save( CSoundEditor *pEditor );
 	bool SaveAs( CSoundEditor *pEditor );
 	bool WriteDocument( CSoundEditor *pEditor, const std::filesystem::path &target );

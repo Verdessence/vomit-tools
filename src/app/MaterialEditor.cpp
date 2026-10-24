@@ -275,6 +275,22 @@ CMaterialEditor::CMaterialEditor( QString szGamePath, const QString &szText, xv:
 	pHeader->addWidget( m_pTextButton );
 	pHeader->addSpacing( 8 );
 	pHeader->addWidget( m_pAdd );
+	auto *pDetail = new QPushButton( tr( "Open detail type" ) );
+	pDetail->setObjectName( QStringLiteral( "openDetailType" ) );
+	const auto updateDetail = [ this, pDetail ] {
+		const auto material = xv::material::ParseMaterial( GetText().toStdString(), m_pfnRead );
+		pDetail->setVisible( material && material->Has( "%detailtype" ) );
+	};
+	connect( m_pText, &QPlainTextEdit::textChanged, pDetail, updateDetail );
+	connect( pDetail, &QPushButton::clicked, this, [ this ] {
+		if ( const auto material = xv::material::ParseMaterial( GetText().toStdString(), m_pfnRead ) )
+		{
+			emit OpenDetailTypeRequested( QString::fromStdString( material->Value( "%detailtype" ) ) );
+		}
+	} );
+	connect( m_pForm, &CMaterialForm::OpenDetailTypeRequested, this, &CMaterialEditor::OpenDetailTypeRequested );
+	updateDetail();
+	pHeader->addWidget( pDetail );
 	pHeader->addStretch();
 	pHeader->addWidget( m_pLive );
 	pHeader->addWidget( m_pRefresh );

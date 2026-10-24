@@ -14,9 +14,19 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QPushButton>
+#include <QSettings>
 #include <QToolButton>
 #include <QTreeView>
 #include <QVBoxLayout>
+
+#include "FileActions.h"
+
+namespace
+{
+
+constexpr auto HEADER_KEY = "folderBrowserColumns";
+
+} // namespace
 
 //-----------------------------------------------------------------------------
 // Purpose:
@@ -45,6 +55,18 @@ CFolderBrowser::CFolderBrowser( QWidget *pParent )
 			}
 		}
 	} );
+	auto *pReveal = new QToolButton;
+	pReveal->setObjectName( QStringLiteral( "folderReveal" ) );
+	pReveal->setText( tr( "Show in File Manager" ) );
+	pReveal->setToolTip( tr( "Open the picked file's folder in the system's file manager, the file selected" ) );
+	connect( pReveal, &QToolButton::clicked, this, [ this ] {
+		const QModelIndex current = m_pView->currentIndex();
+		const QString szPath = current.isValid() ? m_pModel->filePath( current ) : m_szFolder;
+		if ( !szPath.isEmpty() )
+		{
+			RevealInFileManager( szPath );
+		}
+	} );
 	m_pPath = new QLabel;
 	m_pPath->setTextInteractionFlags( Qt::TextSelectableByMouse );
 	m_pPath->setSizePolicy( QSizePolicy::Ignored, QSizePolicy::Preferred );
@@ -54,15 +76,40 @@ CFolderBrowser::CFolderBrowser( QWidget *pParent )
 	pBar->addWidget( pOpen );
 	pBar->addWidget( pUp );
 	pBar->addWidget( m_pPath, 1 );
+	pBar->addWidget( pReveal );
 
 	m_pView = new QTreeView;
 	m_pView->setModel( m_pModel );
 	m_pView->setUniformRowHeights( true );
 	m_pView->setSortingEnabled( true );
 	m_pView->sortByColumn( 0, Qt::AscendingOrder );
-	m_pView->header()->setSectionResizeMode( 0, QHeaderView::Stretch );
+	// Every column can be sized; the widths are kept between runs.
+	m_pView->header()->setSectionResizeMode( QHeaderView::Interactive );
 	m_pView->header()->setStretchLastSection( false );
 	m_pView->setColumnHidden( 2, true ); // type
+	m_pView->setColumnWidth( 0, 220 );
+	m_pView->header()->restoreState( QSettings{}.value( HEADER_KEY ).toByteArray() );
+	connect( m_pView->header(), &QHeaderView::sectionResized, this, [ this ] { QSettings{}.setValue( HEADER_KEY, m_pView->header()->saveState() ); } );
+	m_pView->setContextMenuPolicy( Qt::CustomContextMenu );
+	connect( m_pView, &QTreeView::customContextMenuRequested, this, [ this ]( const QPoint &at ) {
+		const QModelIndex index = m_pView->indexAt( at );
+		const QString szPath = index.isValid() ? m_pModel->filePath( index ) : m_szFolder;
+		if ( szPath.isEmpty() )
+		{
+			return;
+		}
+		const bool bFolder = !index.isValid() || m_pModel->isDir( index );
+		ShowFileMenu( m_pView, m_pView->viewport()->mapToGlobal( at ), szPath, [ this, szPath, bFolder ] {
+			if ( bFolder )
+			{
+				SetFolder( szPath );
+			}
+			else
+			{
+				emit FileActivated( szPath );
+			}
+		} );
+	} );
 	m_pView->setToolTip( tr( "Double-click a file to open it; soundscapes and soundscripts open in the editor" ) );
 	connect( m_pView->selectionModel(), &QItemSelectionModel::currentChanged, this, [ this ]( const QModelIndex &index ) {
 		if ( index.isValid() && !m_pModel->isDir( index ) )

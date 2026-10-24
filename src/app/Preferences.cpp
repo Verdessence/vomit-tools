@@ -15,6 +15,7 @@ constexpr auto GRID_ANIMATION_KEY = "particleGridAnimatesAll";
 constexpr auto GRAPHICS_KEY = "graphicsApi";
 constexpr auto SINGLE_WINDOW_KEY = "singleWindow";
 constexpr auto MATERIAL_VISUAL_KEY = "materialVisual";
+constexpr auto MANIFEST_REMINDER_KEY = "manifestReminder";
 constexpr auto MATERIAL_LIVE_KEY = "materialLivePreview";
 
 } // namespace
@@ -36,7 +37,8 @@ CPreferences::CPreferences()
 	  m_nGraphicsApi( GraphicsApiFromKey( QSettings{}.value( GRAPHICS_KEY ).toString().toStdString() ).value_or( GraphicsApi_t::GRAPHICS_API_AUTO ) ),
 	  m_bSingleWindow( QSettings{}.value( SINGLE_WINDOW_KEY, true ).toBool() ),
 	  m_bMaterialVisual( QSettings{}.value( MATERIAL_VISUAL_KEY, true ).toBool() ),
-	  m_bMaterialLive( QSettings{}.value( MATERIAL_LIVE_KEY, true ).toBool() )
+	  m_bMaterialLive( QSettings{}.value( MATERIAL_LIVE_KEY, true ).toBool() ),
+	  m_bManifestReminder( QSettings{}.value( MANIFEST_REMINDER_KEY, true ).toBool() )
 {
 }
 
@@ -98,4 +100,13 @@ void CPreferences::SetMaterialLive( bool bLive )
 	m_bMaterialLive = bLive;
 	QSettings{}.setValue( MATERIAL_LIVE_KEY, bLive );
 	emit MaterialEditingChanged();
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+void CPreferences::SetManifestReminder( bool bRemind )
+{
+	m_bManifestReminder = bRemind;
+	QSettings{}.setValue( MANIFEST_REMINDER_KEY, bRemind );
 }

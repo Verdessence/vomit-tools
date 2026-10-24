@@ -901,13 +901,17 @@ std::vector<ScreenQuad_t> Layout( const CSimulation &simulation, const CCamera &
 //-----------------------------------------------------------------------------
 std::vector<ScreenMesh_t> LayoutModel( const CSimulation &simulation, const CCamera &camera, const ModelSpriteLookup_t &pfnSprites )
 {
-	std::vector<ScreenMesh_t> meshes;
 	const model::CModel *pModel = simulation.GetModel();
-	if ( !pModel )
-	{
-		return meshes;
-	}
-	const model::CTransform toWorld = simulation.ModelToWorld();
+	return pModel ? LayoutMesh( *pModel, simulation.ModelToWorld(), camera, pfnSprites ) : std::vector<ScreenMesh_t>{};
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: A model's triangles on screen, placed by toWorld, lit from behind the camera.
+//-----------------------------------------------------------------------------
+std::vector<ScreenMesh_t> LayoutMesh( const model::CModel &model, const model::CTransform &toWorld, const CCamera &camera, const ModelSpriteLookup_t &pfnSprites )
+{
+	std::vector<ScreenMesh_t> meshes;
+	const model::CModel *pModel = &model;
 	const CVec3 vecForward = camera.GetForward();
 	const CVec3 vecRight = Normalized( Cross( vecForward, { 0, 0, 1 } ) );
 	const CVec3 vecLight = Normalized( -vecForward + CVec3{ 0, 0, 0.8f } - vecRight * 0.4f );
@@ -975,6 +979,15 @@ std::vector<ScreenQuad_t> GridQuads( const CCamera &camera )
 //-----------------------------------------------------------------------------
 void Render( const CSimulation &simulation, const CCamera &camera, const SpriteLookup_t &pfnSprites, texture::CImage &out, const RenderOptions_t &options )
 {
+	// The model, if any, first: it fills the depth the particles are tested against.
+	RenderScene( camera, LayoutModel( simulation, camera, options.m_pfnModelSprites ), Layout( simulation, camera, pfnSprites ), out, options );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Meshes (nearest wins), then quads in the order given, over the background and grid.
+//-----------------------------------------------------------------------------
+void RenderScene( const CCamera &camera, std::span<const ScreenMesh_t> meshes, std::span<const ScreenQuad_t> shapes, texture::CImage &out, const RenderOptions_t &options )
+{
 	const int nWidth = std::max( 1, camera.m_nWidth );
 	const int nHeight = std::max( 1, camera.m_nHeight );
 	std::vector<float> buffer( static_cast<std::size_t>( nWidth ) * static_cast<std::size_t>( nHeight ) * 3 );
@@ -989,8 +1002,6 @@ void Render( const CSimulation &simulation, const CCamera &camera, const SpriteL
 		DrawGrid( camera, buffer );
 	}
 
-	// The model, if any, first: it fills the depth the particles are tested against.
-	const std::vector<ScreenMesh_t> meshes = LayoutModel( simulation, camera, options.m_pfnModelSprites );
 	std::vector<float> depth;
 	if ( !meshes.empty() )
 	{
@@ -998,7 +1009,7 @@ void Render( const CSimulation &simulation, const CCamera &camera, const SpriteL
 	}
 
 	std::vector<CQuad> quads;
-	for ( const ScreenQuad_t &shape : Layout( simulation, camera, pfnSprites ) )
+	for ( const ScreenQuad_t &shape : shapes )
 	{
 		CQuad quad;
 		for ( std::size_t c = 0; c < 4; c++ )

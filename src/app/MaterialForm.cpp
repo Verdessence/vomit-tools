@@ -259,7 +259,7 @@ public:
 
 	QWidget *createEditor( QWidget *pParent, const QStyleOptionViewItem &, const QModelIndex &index ) const override
 	{
-		const int nKind = index.data( ROLE_KIND ).toInt();
+		const int nKind = index.siblingAtColumn( 0 ).data( ROLE_KIND ).toInt();
 		if ( index.column() == 0 )
 		{
 			return nKind == KIND_SHADER ? nullptr : new QLineEdit( pParent );
@@ -268,7 +268,7 @@ public:
 		{
 			return nullptr;
 		}
-		const QString szValue = index.data( ROLE_VALUE ).toString();
+		const QString szValue = index.siblingAtColumn( 0 ).data( ROLE_VALUE ).toString();
 		const xv::particles::CNames &names = ParticleNames();
 		const auto searchBox = [ this, pParent ]( const std::vector<Choice_t> &choices ) {
 			QComboBox *pBox = MakeSearchBox( choices, pParent );
@@ -295,6 +295,10 @@ public:
 			}
 			return searchBox( shaders );
 		}
+		if ( index.siblingAtColumn( 0 ).data( ROLE_KEY ).toString().compare( u"%detailtype", Qt::CaseInsensitive ) == 0 )
+		{
+			return searchBox( m_pForm->GetDetailTypes() );
+		}
 		switch ( static_cast<ParameterKind_t>( nKind ) )
 		{
 			case ParameterKind_t::PARAMETER_KIND_SURFACE:
@@ -302,7 +306,7 @@ public:
 			case ParameterKind_t::PARAMETER_KIND_CHOICE:
 			{
 				std::vector<Choice_t> choices;
-				for ( const xv::particles::NamedValue_t &choice : names.Choices( index.data( ROLE_KEY ).toString().toStdString() ) )
+				for ( const xv::particles::NamedValue_t &choice : names.Choices( index.siblingAtColumn( 0 ).data( ROLE_KEY ).toString().toStdString() ) )
 				{
 					choices.push_back( { Qs( choice.m_szValue ), Qs( choice.m_szName ), Qs( choice.m_szValue ) } );
 				}
@@ -360,7 +364,7 @@ public:
 
 	void setEditorData( QWidget *pEditor, const QModelIndex &index ) const override
 	{
-		const QString szText = index.data( index.column() == 0 ? ROLE_KEY : ROLE_VALUE ).toString();
+		const QString szText = index.siblingAtColumn( 0 ).data( index.column() == 0 ? ROLE_KEY : ROLE_VALUE ).toString();
 		if ( auto *pBox = qobject_cast<QComboBox *>( pEditor ) )
 		{
 			if ( pBox->isEditable() )
@@ -1277,6 +1281,10 @@ void CMaterialForm::ShowMenu( const QPoint &at )
 	}
 	const int nKind = pItem ? pItem->data( 0, ROLE_KIND ).toInt() : KIND_SHADER;
 	QMenu menu( this );
+	if ( pItem && pItem->data( 0, ROLE_KEY ).toString().compare( u"%detailtype", Qt::CaseInsensitive ) == 0 )
+	{
+		menu.addAction( tr( "Open detail type" ), this, [ this, pItem ] { emit OpenDetailTypeRequested( pItem->data( 0, ROLE_VALUE ).toString() ); } );
+	}
 	menu.addAction( tr( "Add Parameter…" ), this, &CMaterialForm::ChooseParameterToAdd );
 	QMenu *pProxies = menu.addMenu( tr( "Add Proxy" ) );
 	for ( const ProxyStart_t &start : PROXIES )

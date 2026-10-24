@@ -1,6 +1,10 @@
 add_library(vomit_tools_core STATIC
         audio/Audio.cpp
         audio/Audio.h
+        detail/Detail.cpp
+        detail/Detail.h
+        detail/Scatter.cpp
+        detail/Scatter.h
         dmx/Dmx.cpp
         dmx/Dmx.h
         kv1/Kv1.cpp

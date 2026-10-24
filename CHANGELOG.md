@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.6.5 — The Detail Sprite (2026-10-24)
+
+### Details editor (new)
+- Open and create `.vbsp` detail files with lossless saves, undo, type selection, group and entry
+  cards, simple controls, and checks against the game’s models and material references.
+- **3D preview:** the type scattered on its ground material (picked from the materials that use
+  it), blended across so each group shows; sprites in their orientation and shape, and models.
+- Each entry's card shows its sprite; on the sheet, drag the picked one's handles to move or resize it.
+- Select or draw sprite rectangles on the sheet; pack pictures with existing sprites into a new
+  VTF and VMT, updating their rectangles together. Open the sheet in the texture editor.
+- Search the game’s detail types from `%detailtype` in the material editor and open their cards.
+
+### File browsers
+- Right-click a file or folder for its menu (Explorer's own on Windows). **Show in File Manager**
+  in the Folder tab. Every column can be resized, and the widths are kept.
+
+### Other
+- Saving a file the manifest doesn't list asks once, with **Don't remind me again** (back on in
+  Preferences → Interface); an empty file isn't offered.
+- A new sound file or entry without a name warns instead of doing nothing.
+
 ## 0.6.0 — The VTF (2026-10-24)
 
 ### Texture editor (new)

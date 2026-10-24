@@ -1,0 +1,33 @@
+//===========================================================================//
+// SPDX-License-Identifier: GPL-3.0-or-later
+//
+// Purpose: Detail file fields, checked against CS:S detail.vbsp and VDC Detail props.
+//===========================================================================//
+// Defaults here are starting values for newly added fields.
+"detail_parameters"
+{
+	"type"
+	{
+		"density" { "kind" "positive" "label" "Density" "default" "1000" "units" "per million square units" }
+	}
+	"group"
+	{
+		"alpha" { "kind" "normal" "label" "Blend alpha" "default" "1" }
+	}
+	"entry"
+	{
+		"amount" { "kind" "normal" "label" "Proportion" "default" "1" }
+		"model" { "kind" "model" "label" "Model" "default" "models/props/example.mdl" }
+		"sprite" { "kind" "rect" "label" "Sheet rectangle" "default" "0 0 128 128 512" "units" "X Y width height sheet width" }
+		"spritesize" { "kind" "size" "label" "Origin and size" "default" "0.5 0 16 16" "units" "U V width height (units)" }
+		"spriterandomscale" { "kind" "normal" "label" "Size variation" "default" "0.2" }
+		"detailOrientation" { "kind" "orientation" "label" "Camera orientation" "default" "2" }
+		"upright" { "kind" "presence" "label" "Keep upright (remove to disable)" "default" "1" }
+		"minangle" { "kind" "angle" "label" "Minimum slope angle" "default" "180" "units" "degrees" }
+		"maxangle" { "kind" "angle" "label" "Maximum slope angle" "default" "180" "units" "degrees" }
+		"sprite_shape" { "kind" "shape" "label" "Sprite shape" "default" "cross" }
+		"sway" { "kind" "normal" "label" "Sway" "default" "0.1" }
+		"shape_angle" { "kind" "number" "label" "Triangle flare" "default" "20" "units" "degrees" }
+		"shape_size" { "kind" "normal" "label" "Triangle spacing" "default" "0" }
+	}
+}

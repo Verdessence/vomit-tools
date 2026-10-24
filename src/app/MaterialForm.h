@@ -67,6 +67,8 @@ public:
 	// The text without the parameters and blocks unticked on the left: what the preview draws.
 	[[nodiscard]] QString GetPreviewText() const;
 
+	void SetDetailTypes( std::function<std::vector<Choice_t>()> pfnTypes ) { m_pfnDetailTypes = std::move( pfnTypes ); }
+	[[nodiscard]] std::vector<Choice_t> GetDetailTypes() const { return m_pfnDetailTypes ? m_pfnDetailTypes() : std::vector<Choice_t>{}; }
 	// The game's surface properties, for $surfaceprop.
 	void SetSurfaceProps( std::vector<Choice_t> surfaceProps ) { m_SurfaceProps = std::move( surfaceProps ); }
 	// The textures under materials/ to offer (without materials/ and .vtf), asked for the first
@@ -98,6 +100,7 @@ public:
 	[[nodiscard]] QStringList GetTextureNames();
 
 signals:
+	void OpenDetailTypeRequested( const QString &szName );
 	// The whole text after an edit made here.
 	void TextEdited( const QString &szText );
 	// Undo or redo was pressed in the list: the text's own undo takes it.
@@ -122,6 +125,7 @@ private:
 	xv::kv1::CParseResult m_Parsed;
 	QTreeWidget *m_pTree = nullptr;
 	QLabel *m_pBlocked = nullptr;
+	std::function<std::vector<Choice_t>()> m_pfnDetailTypes;
 	std::vector<Choice_t> m_SurfaceProps;
 	std::function<QStringList()> m_pfnTextureNames;
 	QStringList m_TextureNames;

@@ -187,6 +187,14 @@ texture asks where to save.
 options. On Linux it also provides VTF thumbnails for GNOME Files, Thunar, Nemo and Caja, and a
 plugin draws them in Dolphin when KDE Frameworks 6 is found at build time.
 
+## Detail props editor
+
+`detail.vbsp` (or a map's own detail file) opens in it: detail types on the left, their groups and
+entries as cards (each sprite shown beside its fields), the sprite sheet on the right with every
+rectangle drawn (drag the picked one to move or resize it), and a **3D preview** that scatters the
+type on its ground material. Checks cover amounts, alphas, rectangles, missing models and which
+materials use each type. **Pack pictures…** builds a new sheet; undo covers everything.
+
 ## Particle editor
 
 - **Opening:** double-click a `.pcf` in the **Game** or **Folder** tab, open one from **File → Open

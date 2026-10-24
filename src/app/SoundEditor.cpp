@@ -457,9 +457,14 @@ void CSoundEditor::AddEntry()
 {
 	const QString szNoun = Qs( m_pDocument->GetSchema().m_szEntryNoun );
 	bool bOk = false;
-	const QString szName = QInputDialog::getText( this, tr( "New %1" ).arg( szNoun ), tr( "Name:" ), QLineEdit::Normal, {}, &bOk );
-	if ( !bOk || szName.isEmpty() )
+	const QString szName = QInputDialog::getText( this, tr( "New %1" ).arg( szNoun ), tr( "Name:" ), QLineEdit::Normal, {}, &bOk ).trimmed();
+	if ( !bOk )
 	{
+		return;
+	}
+	if ( szName.isEmpty() )
+	{
+		QMessageBox::warning( this, tr( "No name" ), tr( "A %1 needs a name; nothing was added." ).arg( szNoun ) );
 		return;
 	}
 	const std::size_t nIndex = m_Current ? *m_Current + 1 : m_pDocument->GetDocument().m_Roots.size();

@@ -127,9 +127,14 @@ struct ScreenMesh_t
 // The simulation's model, if it has one, lit from over the camera's shoulder. Triangles reaching
 // behind the camera are left out.
 [[nodiscard]] std::vector<ScreenMesh_t> LayoutModel( const CSimulation &simulation, const CCamera &camera, const ModelSpriteLookup_t &pfnSprites );
+// A model's triangles on screen, placed by toWorld, lit from behind the camera.
+[[nodiscard]] std::vector<ScreenMesh_t> LayoutMesh( const model::CModel &model, const model::CTransform &toWorld, const CCamera &camera, const ModelSpriteLookup_t &pfnSprites );
 // The ground grid, as thin quads.
 [[nodiscard]] std::vector<ScreenQuad_t> GridQuads( const CCamera &camera );
 // Draws into out (camera.width x camera.height). Rows are split over the available cores.
 void Render( const CSimulation &simulation, const CCamera &camera, const SpriteLookup_t &pfnSprites, texture::CImage &out, const RenderOptions_t &options = {} );
+// Any scene drawn the same way: meshes (nearest wins, filling the depth), then quads in the order
+// given (back to front), each tested against the meshes' depth at its centre's depth.
+void RenderScene( const CCamera &camera, std::span<const ScreenMesh_t> meshes, std::span<const ScreenQuad_t> quads, texture::CImage &out, const RenderOptions_t &options = {} );
 
 } // namespace xv::particles

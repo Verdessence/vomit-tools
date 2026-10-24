@@ -8,6 +8,15 @@ add_library(vomit_tools_ui STATIC
         ChoiceBoxes.cpp
         ChoiceBoxes.h
         ${CMAKE_CURRENT_BINARY_DIR}/BuildInfo.cpp
+        DetailDocument.cpp
+        DetailDocument.h
+        DetailEditor.cpp
+        DetailEditor.h
+        DetailPreview.cpp
+        DetailPreview.h
+        TextureCanvas.h
+        FileActions.cpp
+        FileActions.h
         FileViews.cpp
         FileViews.h
         FolderBrowser.cpp
@@ -134,8 +143,12 @@ endif()
 qt_add_resources(vomit_tools_ui "vomit_tools_data"
         PREFIX "/data"
         BASE data
-        FILES data/lang_en.txt data/material_parameters.txt data/particle_inputs.txt)
+        FILES data/detail_parameters.txt data/lang_en.txt data/material_parameters.txt data/particle_inputs.txt)
 target_link_libraries(vomit_tools_ui PUBLIC vomit_tools::core Qt6::Widgets Qt6::Network)
+if(WIN32)
+    # Explorer's right-click menu in the file trees.
+    target_link_libraries(vomit_tools_ui PRIVATE shell32 ole32)
+endif()
 vomit_tools_set_warnings(vomit_tools_ui)
 
 qt_add_executable(vomit-tools
