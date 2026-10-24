@@ -22,6 +22,8 @@
   while its proxies play.
 - The particle preview's **GPU** checkbox is gone: Preferences decides for every view. A view whose
   graphics card fails draws in software.
+- Material-preview snapshots requested before the window is shown draw in software, avoiding stale
+  images and a Vulkan driver crash during shutdown.
 
 ### Particle editor: layout and grid
 - **Layout:** the preview and the properties sit in the middle; the selected system's lists move to

@@ -480,6 +480,12 @@ QImage CMaterialView::GetPreview() const
 #ifdef VOMIT_TOOLS_GPU
 	if ( auto *pView = qobject_cast<QRhiWidget *>( m_pCanvas->m_pGpu ) )
 	{
+		// A hidden widget has no window render target. Qt's temporary renderer can return stale
+		// snapshots on some drivers or crash during shutdown, so draw this snapshot in software.
+		if ( !pView->isVisible() )
+		{
+			return m_Now ? ToQImage( material::RenderPreview( *m_Now, m_Textures, Options() ) ) : QImage{};
+		}
 		return pView->grabFramebuffer().copy( m_pCanvas->DeviceSquare() );
 	}
 #endif

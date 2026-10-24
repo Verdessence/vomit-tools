@@ -82,6 +82,19 @@ add_dependencies(vomit_tools_ui vomit_tools_build_info)
 # The previews draw on the graphics card (Vulkan first, through Qt's RHI) where Qt has QRhiWidget
 # (6.7+) and the shader tools to build their shaders; otherwise they draw in software only.
 if(Qt6_VERSION VERSION_GREATER_EQUAL 6.7 AND TARGET Qt6::ShaderTools AND TARGET Qt6::GuiPrivate)
+    # Qt can support Vulkan without installing the SDK headers an application needs to use it.
+    # Only the headers are needed: Qt loads the driver at run time.
+    if(QT_FEATURE_vulkan)
+        find_package(VulkanHeaders CONFIG QUIET)
+        if(NOT TARGET Vulkan::Headers)
+            set(VULKAN_HEADERS_ENABLE_MODULE OFF CACHE BOOL "Build Vulkan C++ modules")
+            FetchContent_Declare(vulkan_headers
+                    URL https://github.com/KhronosGroup/Vulkan-Headers/archive/b379292b2ab6df5771ba9870d53cf8b2c9295daf.tar.gz
+                    DOWNLOAD_EXTRACT_TIMESTAMP ON)
+            FetchContent_MakeAvailable(vulkan_headers)
+        endif()
+        target_link_libraries(vomit_tools_ui PRIVATE Vulkan::Headers)
+    endif()
     qt_add_shaders(vomit_tools_ui "vomit_tools_shaders"
             PREFIX "/shaders"
             BASE shaders

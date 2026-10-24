@@ -227,6 +227,8 @@ OpenGL, Direct3D or Metal); otherwise they draw in software.
 [stb](https://github.com/nothings/stb) are fetched at configure time; to build offline, point
 `FETCHCONTENT_SOURCE_DIR_SOURCEPP`, `FETCHCONTENT_SOURCE_DIR_MINIAUDIO` and `FETCHCONTENT_SOURCE_DIR_STB`
 at local copies.
+Vulkan builds use an installed Vulkan-Headers package or fetch pinned headers automatically;
+`FETCHCONTENT_SOURCE_DIR_VULKAN_HEADERS` can point at an offline copy. A Vulkan SDK is not needed.
 
 ### Linux
 
