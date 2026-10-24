@@ -33,6 +33,8 @@ add_library(vomit_tools_ui STATIC
         Language.cpp
         Language.h
         KvCard.h
+        KvClipboard.cpp
+        KvClipboard.h
         MainWindow.cpp
         MainWindow.h
         MakeMaterialDialog.cpp
@@ -61,9 +63,13 @@ add_library(vomit_tools_ui STATIC
         Preferences.h
         PreferencesDialog.cpp
         PreferencesDialog.h
+        PremiumDialog.cpp
+        PremiumDialog.h
         QtPaths.h
         SingleInstance.cpp
         SingleInstance.h
+        Splash.cpp
+        Splash.h
         SkyDocument.cpp
         SkyDocument.h
         SkyEditor.cpp
@@ -143,7 +149,12 @@ endif()
 qt_add_resources(vomit_tools_ui "vomit_tools_data"
         PREFIX "/data"
         BASE data
-        FILES data/detail_parameters.txt data/lang_en.txt data/material_parameters.txt data/particle_inputs.txt)
+        FILES data/detail_parameters.txt data/lang_en.txt data/material_parameters.txt data/particle_inputs.txt data/premium.txt)
+# The splash screen's logo and the window icon.
+qt_add_resources(vomit_tools_ui "vomit_tools_assets"
+        PREFIX "/assets"
+        BASE ../assets
+        FILES ../assets/logo_wide.png ../assets/premium_character.gif ../assets/vomit-tools.png)
 target_link_libraries(vomit_tools_ui PUBLIC vomit_tools::core Qt6::Widgets Qt6::Network)
 if(WIN32)
     # Explorer's right-click menu in the file trees.
@@ -154,10 +165,17 @@ vomit_tools_set_warnings(vomit_tools_ui)
 qt_add_executable(vomit-tools
         main.cpp)
 target_link_libraries(vomit-tools PRIVATE vomit_tools_ui)
+# Additions kept out of the repository, when this checkout has any.
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/local/Local.cmake")
+    include("${CMAKE_CURRENT_SOURCE_DIR}/local/Local.cmake")
+endif()
 vomit_tools_set_warnings(vomit-tools)
 
 if(WIN32)
     set_target_properties(vomit-tools PROPERTIES WIN32_EXECUTABLE ON)
+    # The program's icon in Explorer and the taskbar.
+    file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/vomit-tools-icon.rc" "IDI_ICON1 ICON \"${PROJECT_SOURCE_DIR}/src/assets/vomit.ico\"\n")
+    target_sources(vomit-tools PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/vomit-tools-icon.rc")
     if(MSVC)
         target_sources(vomit-tools PRIVATE vomit-tools.manifest)
     else()

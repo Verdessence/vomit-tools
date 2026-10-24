@@ -11,7 +11,9 @@
 #include <QApplication>
 #include <QClipboard>
 #include <QDialogButtonBox>
+#include <QHBoxLayout>
 #include <QLabel>
+#include <QPixmap>
 #include <QPushButton>
 #include <QSysInfo>
 #include <QVBoxLayout>
@@ -91,10 +93,26 @@ CAboutDialog::CAboutDialog( QWidget *pParent )
 	connect( pAboutQt, &QPushButton::clicked, qApp, &QApplication::aboutQt );
 	connect( pButtons, &QDialogButtonBox::rejected, this, &QDialog::reject );
 
+	// The icon beside the name and version.
+	auto *pIcon = new QLabel;
+	pIcon->setObjectName( QStringLiteral( "icon" ) );
+	const qreal flRatio = devicePixelRatioF();
+	QPixmap icon = QPixmap( QStringLiteral( ":/assets/vomit-tools.png" ) ).scaled( QSize( 96, 96 ) * flRatio, Qt::KeepAspectRatio, Qt::SmoothTransformation );
+	icon.setDevicePixelRatio( flRatio );
+	pIcon->setPixmap( icon );
+	auto *pTitles = new QVBoxLayout;
+	pTitles->addStretch();
+	pTitles->addWidget( pName );
+	pTitles->addWidget( pVersion );
+	pTitles->addStretch();
+	auto *pHeader = new QHBoxLayout;
+	pHeader->setSpacing( 14 );
+	pHeader->addWidget( pIcon );
+	pHeader->addLayout( pTitles, 1 );
+
 	auto *pLayout = new QVBoxLayout( this );
 	pLayout->setSpacing( 10 );
-	pLayout->addWidget( pName );
-	pLayout->addWidget( pVersion );
+	pLayout->addLayout( pHeader );
 	pLayout->addWidget( pAbout );
 	pLayout->addWidget( pDetails );
 	pLayout->addSpacing( 6 );

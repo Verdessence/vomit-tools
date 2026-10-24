@@ -53,6 +53,8 @@ private:
 	void JumpTo( const xv::sound::NodePath_t &path );
 	void AddEntry();
 	void DuplicateEntry();
+	void CopyEntry();
+	void PasteEntries();
 	void DeleteEntry();
 
 	CSoundDocument *m_pDocument;

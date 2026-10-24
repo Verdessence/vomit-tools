@@ -31,7 +31,9 @@
 #include <QVBoxLayout>
 
 #include "InterfaceMode.h"
+#include "KvClipboard.h"
 #include "Language.h"
+#include "MenuPicker.h"
 #include "material/Parameters.h"
 #include "util/Numbers.h"
 
@@ -1266,7 +1268,52 @@ void CMaterialForm::PickColour( QTreeWidgetItem *pItem )
 }
 
 //-----------------------------------------------------------------------------
-// Purpose: Right-click: add a parameter or a proxy, pick a colour, rename or remove.
+// Purpose: The block a new parameter goes in: the picked block, the picked row's block, or the
+//          material's own.
+//-----------------------------------------------------------------------------
+std::vector<int> CMaterialForm::TargetBlock() const
+{
+	std::vector<int> block{ RootIndex() };
+	if ( const QTreeWidgetItem *pItem = m_pTree->currentItem(); pItem && pItem->data( 0, ROLE_KIND ).toInt() != KIND_SHADER )
+	{
+		block = PathOf( pItem );
+		if ( pItem->data( 0, ROLE_KIND ).toInt() != KIND_BLOCK )
+		{
+			block.pop_back();
+		}
+	}
+	return block;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: The clipboard's keys and blocks at the end of the target block, as one edit.
+//-----------------------------------------------------------------------------
+bool CMaterialForm::Paste()
+{
+	const std::vector<kv1::CNode> nodes = PastedNodes();
+	if ( nodes.empty() || RootIndex() < 0 || m_Parsed.HasErrors() )
+	{
+		return false;
+	}
+	kv1::CDocument document = m_Parsed.m_Document;
+	const std::vector<int> block = TargetBlock();
+	kv1::CNode *pBlock = NodeAt( document, block );
+	if ( !pBlock || !pBlock->IsBlock() )
+	{
+		return false;
+	}
+	for ( const kv1::CNode &node : nodes )
+	{
+		pBlock->AppendChild( node );
+	}
+	std::vector<int> last = block;
+	last.push_back( static_cast<int>( pBlock->GetChildren().size() ) - 1 );
+	Apply( document, last );
+	return true;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Right-click, the same everywhere: copy and paste, add, edit, then remove.
 //-----------------------------------------------------------------------------
 void CMaterialForm::ShowMenu( const QPoint &at )
 {
@@ -1280,20 +1327,65 @@ void CMaterialForm::ShowMenu( const QPoint &at )
 		m_pTree->setCurrentItem( pItem );
 	}
 	const int nKind = pItem ? pItem->data( 0, ROLE_KIND ).toInt() : KIND_SHADER;
+	const QString szKey = pItem ? pItem->data( 0, ROLE_KEY ).toString() : QString{};
 	QMenu menu( this );
-	if ( pItem && pItem->data( 0, ROLE_KEY ).toString().compare( u"%detailtype", Qt::CaseInsensitive ) == 0 )
+	if ( pItem && szKey.compare( u"%detailtype", Qt::CaseInsensitive ) == 0 )
 	{
-		menu.addAction( tr( "Open detail type" ), this, [ this, pItem ] { emit OpenDetailTypeRequested( pItem->data( 0, ROLE_VALUE ).toString() ); } );
+		menu.addAction( tr( "Open Detail Type" ), this, [ this, pItem ] { emit OpenDetailTypeRequested( pItem->data( 0, ROLE_VALUE ).toString() ); } );
+		menu.addSeparator();
 	}
-	menu.addAction( tr( "Add Parameter…" ), this, &CMaterialForm::ChooseParameterToAdd );
-	QMenu *pProxies = menu.addMenu( tr( "Add Proxy" ) );
+	if ( pItem )
+	{
+		menu.addAction( tr( "Copy \"%1\"" ).arg( szKey ), this, [ this, path = PathOf( pItem ) ] {
+			kv1::CDocument document = m_Parsed.m_Document;
+			if ( const kv1::CNode *pNode = NodeAt( document, path ) )
+			{
+				CopyNodes( { *pNode } );
+			}
+		} );
+	}
+	menu.addAction( tr( "Paste" ), this, &CMaterialForm::Paste )->setEnabled( CanPasteNodes() );
+	menu.addSeparator();
+
+	// Add: a search box over each list, that scrolls.
+	QMenu *pAdd = menu.addMenu( tr( "Add" ) );
+	const std::vector<int> block = TargetBlock();
+	kv1::CDocument document = m_Parsed.m_Document;
+	QStringList existing;
+	if ( const kv1::CNode *pBlock = NodeAt( document, block ) )
+	{
+		for ( const kv1::CNode &child : pBlock->GetChildren() )
+		{
+			existing << Qs( child.GetKey() );
+		}
+	}
+	const xv::particles::CNames &names = ParticleNames();
+	std::vector<PickerItem_t> parameters;
+	std::vector<PickerItem_t> others;
+	for ( const xv::material::ParameterDef_t &parameter : MaterialParameters().GetParameters() )
+	{
+		const QString szParameter = Qs( parameter.m_szKey );
+		if ( existing.contains( szParameter, Qt::CaseInsensitive ) )
+		{
+			continue;
+		}
+		const xv::particles::PlainName_t plain = names.MaterialParameter( parameter.m_szKey );
+		const QString szShown = CInterfaceMode::Instance().IsSimple() ? QStringLiteral( "%1 (%2)" ).arg( Qs( plain.m_szName ), szParameter ) : szParameter;
+		auto &list = xv::material::CParameterTable::IsFor( parameter, Shader().toStdString() ) ? parameters : others;
+		list.push_back( { szShown, Qs( plain.m_szMeaning ), [ this, szParameter, block ] { AddParameter( szParameter, block ); } } );
+	}
+	AddPicker( pAdd, tr( "Parameter for %1" ).arg( Shader() ), std::move( parameters ), tr( "All of them are set" ) );
+	AddPicker( pAdd, tr( "Other Parameter" ), std::move( others ), {} );
+	std::vector<PickerItem_t> proxies;
 	for ( const ProxyStart_t &start : PROXIES )
 	{
 		const QString szName = QString::fromLatin1( start.m_pszName );
-		pProxies->addAction( szName, this, [ this, szName ] { AddProxy( szName ); } );
+		proxies.push_back( { szName, {}, [ this, szName ] { AddProxy( szName ); } } );
 	}
-	pProxies->addSeparator();
-	pProxies->addAction( tr( "Other…" ), this, [ this ] {
+	AddPicker( pAdd, tr( "Proxy" ), std::move( proxies ), {} );
+	pAdd->addSeparator();
+	pAdd->addAction( tr( "Parameter by Name…" ), this, &CMaterialForm::ChooseParameterToAdd );
+	pAdd->addAction( tr( "Proxy by Name…" ), this, [ this ] {
 		bool bOk = false;
 		const QString szName = QInputDialog::getText( this, tr( "Add Proxy" ), tr( "Proxy name:" ), QLineEdit::Normal, {}, &bOk );
 		if ( bOk )
@@ -1301,6 +1393,7 @@ void CMaterialForm::ShowMenu( const QPoint &at )
 			AddProxy( szName );
 		}
 	} );
+
 	if ( pItem )
 	{
 		menu.addSeparator();
@@ -1314,10 +1407,12 @@ void CMaterialForm::ShowMenu( const QPoint &at )
 		}
 		if ( nKind != KIND_SHADER )
 		{
-			menu.addAction( tr( "Rename" ), this, [ this, pItem ] { m_pTree->editItem( pItem, 0 ); } );
-			QAction *pRemove = menu.addAction( tr( "Remove" ), this, [ this, szKey = pItem->data( 0, ROLE_KEY ).toString() ] { RemoveParameter( szKey ); } );
+			menu.addAction( tr( "Rename…" ), this, [ this, pItem ] { m_pTree->editItem( pItem, 0 ); } );
+			menu.addSeparator();
+			QAction *pRemove = menu.addAction( tr( "Delete \"%1\"" ).arg( szKey ), this, [ this, szKey ] { RemoveParameter( szKey ); } );
 			pRemove->setShortcut( QKeySequence::Delete );
 		}
 	}
+	menu.setToolTipsVisible( true );
 	menu.exec( m_pTree->viewport()->mapToGlobal( at ) );
 }

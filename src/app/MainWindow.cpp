@@ -67,6 +67,7 @@
 #include "ParticleSearch.h"
 #include "Preferences.h"
 #include "PreferencesDialog.h"
+#include "PremiumDialog.h"
 #include "QtPaths.h"
 #include "SkyDocument.h"
 #include "SkyEditor.h"
@@ -593,6 +594,7 @@ void CMainWindow::BuildMenus( QAction *pSearchPathsToggle )
 
 	auto *pHelp = menuBar()->addMenu( tr( "&Help" ) );
 	pHelp->addAction( tr( "&About vomit-tools" ), this, [ this ] { CAboutDialog{ this }.exec(); } );
+	pHelp->addAction( tr( "About &Premium…" ), this, [ this ] { CPremiumDialog{ this }.exec(); } );
 	pHelp->addAction( tr( "About &Qt" ), qApp, &QApplication::aboutQt );
 }
 

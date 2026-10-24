@@ -57,6 +57,7 @@ private:
 	void AddBlock( const xv::detail::NodePath_t &parent, bool bModel );
 	void RemoveNode( const xv::detail::NodePath_t &path );
 	void RenameNode( const xv::detail::NodePath_t &path );
+	void ShowCardMenu( const xv::detail::NodePath_t &path, const QPoint &globalAt );
 	void LoadSheet();
 	void ChoosePictures();
 	void UpdateSheetRects();

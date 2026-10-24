@@ -87,6 +87,8 @@ public:
 	bool AddProxy( const QString &szProxy );
 	// Asks which parameter to add to the block picked in the list (or the material's own).
 	void ChooseParameterToAdd();
+	// The clipboard's keys and blocks into the picked block (or the material's own).
+	bool Paste();
 	// Picks the row written on a line of the text (1-based); false when none is.
 	bool SelectLine( int nLine );
 
@@ -119,6 +121,7 @@ private:
 	[[nodiscard]] std::vector<int> PathOf( const QTreeWidgetItem *pItem ) const;
 	[[nodiscard]] QTreeWidgetItem *ItemAt( const std::vector<int> &path ) const;
 	[[nodiscard]] QString Shader() const;
+	[[nodiscard]] std::vector<int> TargetBlock() const;
 	void PickColour( QTreeWidgetItem *pItem );
 
 	QString m_szText;

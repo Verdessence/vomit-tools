@@ -4,14 +4,21 @@
 //===========================================================================//
 #include <QApplication>
 #include <QCommandLineParser>
+#include <QDir>
 #include <QFileInfo>
 #include <QSettings>
+#include <QTimer>
+
+#include <QIcon>
 
 #include "AboutDialog.h"
+#include "Language.h"
 #include "Graphics.h"
 #include "MainWindow.h"
 #include "Preferences.h"
+#include "PremiumDialog.h"
 #include "SingleInstance.h"
+#include "Splash.h"
 
 //-----------------------------------------------------------------------------
 // Purpose:
@@ -22,6 +29,7 @@ int main( int nArgc, char *argv[] )
 	QApplication::setApplicationName( QStringLiteral( "vomit-tools" ) );
 	QApplication::setOrganizationName( QStringLiteral( "vomit-tools" ) );
 	QApplication::setApplicationVersion( CAboutDialog::VersionText() );
+	QApplication::setWindowIcon( QIcon( QStringLiteral( ":/assets/vomit-tools.png" ) ) );
 
 	QCommandLineParser parser;
 	parser.setApplicationDescription( QStringLiteral( "Soundscape, skybox and particle editors for Source engine games" ) );
@@ -47,32 +55,51 @@ int main( int nArgc, char *argv[] )
 		return 0;
 	}
 
+	// The splash, a step for each thing loaded before the window is ready.
+	const QStringList paths = parser.positionalArguments();
+	const QString szLastGame = paths.isEmpty() ? QSettings{}.value( QStringLiteral( "lastGameInfo" ) ).toString() : QString{};
+	const QStringList edits = parser.values( edit );
+	CSplash splash( 3 + ( szLastGame.isEmpty() ? 0 : 1 ) + static_cast<int>( paths.size() + edits.size() ) );
+	splash.show();
+	splash.SetStep( QStringLiteral( "graphics" ) );
 	// What the previews draw with, settled before any of them is made.
 	static_cast<void>( CGraphics::Instance() );
+	splash.SetStep( QStringLiteral( "names and parameters" ) );
+	static_cast<void>( ParticleNames() );
+	static_cast<void>( MaterialParameters() );
+	splash.SetStep( QStringLiteral( "the window" ) );
 	CMainWindow window;
-	window.show();
 	if ( bSingle )
 	{
-		instance.Listen( [ &window ]( const QStringList &paths ) {
-			window.OpenPaths( paths );
+		instance.Listen( [ &window ]( const QStringList &received ) {
+			window.OpenPaths( received );
 			window.setWindowState( ( window.windowState() & ~Qt::WindowMinimized ) | Qt::WindowActive );
 			window.raise();
 			window.activateWindow();
 		} );
 	}
 
-	const QStringList paths = parser.positionalArguments();
-	if ( paths.isEmpty() )
+	if ( !szLastGame.isEmpty() )
 	{
-		if ( const QString szGame = QSettings{}.value( QStringLiteral( "lastGameInfo" ) ).toString(); !szGame.isEmpty() )
-		{
-			window.OpenGame( szGame );
-		}
+		splash.SetStep( QFileInfo{ szLastGame }.dir().dirName() );
+		window.OpenGame( szLastGame );
 	}
-	window.OpenPaths( paths );
-	for ( const QString &szFile : parser.values( edit ) )
+	for ( const QString &szPath : paths )
 	{
+		splash.SetStep( QFileInfo{ szPath }.fileName() );
+		window.OpenPaths( { szPath } );
+	}
+	for ( const QString &szFile : edits )
+	{
+		splash.SetStep( QFileInfo{ szFile }.fileName() );
 		window.OpenSoundFile( szFile );
+	}
+	window.show();
+	splash.finish( &window );
+	// The first start says hello.
+	if ( !CPremiumDialog::HasBeenShown() )
+	{
+		QTimer::singleShot( 600, &window, [ &window ] { CPremiumDialog{ &window }.exec(); } );
 	}
 	return QApplication::exec();
 }

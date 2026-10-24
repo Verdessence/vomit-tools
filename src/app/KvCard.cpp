@@ -13,6 +13,7 @@
 #include <QAbstractSpinBox>
 #include <QAction>
 #include <QApplication>
+#include <QContextMenuEvent>
 #include <QEvent>
 #include <QHBoxLayout>
 #include <QHeaderView>
@@ -22,10 +23,13 @@
 #include <QMessageBox>
 #include <QTableWidget>
 #include <QToolButton>
+#include <QUndoStack>
 #include <QVBoxLayout>
 
 #include "InterfaceMode.h"
+#include "KvClipboard.h"
 #include "Language.h"
+#include "MenuPicker.h"
 #include "SoundDocument.h"
 #include "SoundIndex.h"
 #include "SoundPlayer.h"
@@ -360,17 +364,26 @@ void CKvCard::BuildTable( const CNode &node )
 	connect( pRemove, &QAction::triggered, this, [ this ] { RemoveRow( m_pTable->currentRow() ); } );
 	m_pTable->addAction( pRemove );
 
-	connect( m_pTable, &QTableWidget::customContextMenuRequested, this, [ this, pRemove ]( const QPoint &position ) {
-		QMenu menu;
+	// Ctrl+C copies the picked key, Ctrl+V pastes into this block.
+	auto *pCopy = new QAction( tr( "Copy" ), m_pTable );
+	pCopy->setShortcut( QKeySequence::Copy );
+	pCopy->setShortcutContext( Qt::WidgetShortcut );
+	connect( pCopy, &QAction::triggered, this, [ this ] { CopyRow( m_pTable->currentRow() ); } );
+	m_pTable->addAction( pCopy );
+	auto *pPaste = new QAction( tr( "Paste" ), m_pTable );
+	pPaste->setShortcut( QKeySequence::Paste );
+	pPaste->setShortcutContext( Qt::WidgetShortcut );
+	connect( pPaste, &QAction::triggered, this, &CKvCard::Paste );
+	m_pTable->addAction( pPaste );
+
+	connect( m_pTable, &QTableWidget::customContextMenuRequested, this, [ this ]( const QPoint &position ) {
 		const int nRow = m_pTable->rowAt( position.y() );
 		if ( nRow >= 0 )
 		{
 			m_pTable->setCurrentCell( nRow, CSoundValueDelegate::COLUMN_VALUE_COLUMN );
-			pRemove->setText( tr( "Delete \"%1\"" ).arg( m_pTable->item( nRow, CSoundValueDelegate::COLUMN_KEY_COLUMN )->text() ) );
-			menu.addAction( pRemove );
-			menu.addSeparator();
 		}
-		FillAddMenu( &menu );
+		QMenu menu;
+		FillContextMenu( &menu, nRow );
 		menu.exec( m_pTable->viewport()->mapToGlobal( position ) );
 	} );
 }
@@ -395,7 +408,8 @@ void CKvCard::FillAddMenu( QMenu *pMenu )
 		return;
 	}
 
-	pMenu->addSection( tr( "Keys" ) );
+	// Long lists as a search box over a list that scrolls, like every Add menu.
+	std::vector<PickerItem_t> keys;
 	for ( const xv::sound::KeyDef_t &key : pDef->m_Keys )
 	{
 		// Only rndwave's "wave" may repeat; other keys are offered once.
@@ -404,8 +418,18 @@ void CKvCard::FillAddMenu( QMenu *pMenu )
 		{
 			continue;
 		}
-		QAction *pAction = pMenu->addAction( ShownKey( key.m_szKey ), this, [ this, szName = Qs( key.m_szKey ) ] { AddKey( szName ); } );
-		pAction->setToolTip( Qs( key.m_szHelp ) );
+		keys.push_back( { ShownKey( key.m_szKey ), Qs( key.m_szHelp ), [ this, szName = Qs( key.m_szKey ) ] { AddKey( szName ); } } );
+	}
+	AddPicker( pMenu, tr( "Key" ), std::move( keys ), tr( "Every key is already here" ) );
+	if ( !pDef->m_Blocks.empty() )
+	{
+		std::vector<PickerItem_t> blocks;
+		for ( const std::string_view szBlock : pDef->m_Blocks )
+		{
+			const xv::sound::BlockDef_t *pBlockDef = m_Document.GetSchema().Block( szBlock );
+			blocks.push_back( { ShownKey( szBlock ), pBlockDef ? Qs( pBlockDef->m_szHelp ) : QString{}, [ this, szName = Qs( szBlock ) ] { AddBlock( szName ); } } );
+		}
+		AddPicker( pMenu, tr( "Block" ), std::move( blocks ), {} );
 	}
 	pMenu->addAction( tr( "Custom Key…" ), this, [ this ] {
 		const QString szKey = QInputDialog::getText( this, tr( "Add Key" ), tr( "Key:" ) );
@@ -414,17 +438,100 @@ void CKvCard::FillAddMenu( QMenu *pMenu )
 			AddKey( szKey );
 		}
 	} );
-	if ( !pDef->m_Blocks.empty() )
+	pMenu->setToolTipsVisible( true );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: The right-click menu, the same everywhere: copy and paste, add, then delete. nRow is
+//          the key under the pointer, or -1 for the block itself.
+//-----------------------------------------------------------------------------
+void CKvCard::FillContextMenu( QMenu *pMenu, int nRow )
+{
+	const bool bRow = nRow >= 0 && nRow < static_cast<int>( m_RowChild.size() );
+	const QString szKey = bRow ? m_pTable->item( nRow, CSoundValueDelegate::COLUMN_KEY_COLUMN )->text() : QString{};
+	const CNode *pNode = m_Document.Node( m_Path );
+	const QString szBlock = pNode ? ShownKey( pNode->GetKey() ) : QString{};
+	if ( bRow )
 	{
-		pMenu->addSection( tr( "Blocks" ) );
-		for ( const std::string_view szBlock : pDef->m_Blocks )
+		pMenu->addAction( tr( "Copy \"%1\"" ).arg( szKey ), this, [ this, nRow ] { CopyRow( nRow ); } )->setShortcut( QKeySequence::Copy );
+	}
+	pMenu->addAction( tr( "Copy \"%1\"" ).arg( szBlock ), this, [ this ] {
+		if ( const CNode *pBlock = m_Document.Node( m_Path ) )
 		{
-			const xv::sound::BlockDef_t *pBlockDef = m_Document.GetSchema().Block( szBlock );
-			QAction *pAction = pMenu->addAction( ShownKey( szBlock ), this, [ this, szName = Qs( szBlock ) ] { AddBlock( szName ); } );
-			pAction->setToolTip( pBlockDef ? Qs( pBlockDef->m_szHelp ) : QString{} );
+			CopyNodes( { *pBlock } );
 		}
+	} );
+	QAction *pPaste = pMenu->addAction( tr( "Paste into \"%1\"" ).arg( szBlock ), this, &CKvCard::Paste );
+	pPaste->setShortcut( QKeySequence::Paste );
+	pPaste->setEnabled( CanPasteNodes() );
+	pMenu->addSeparator();
+	QMenu *pAdd = pMenu->addMenu( tr( "Add" ) );
+	FillAddMenu( pAdd );
+	pMenu->addSeparator();
+	if ( bRow )
+	{
+		pMenu->addAction( tr( "Delete \"%1\"" ).arg( szKey ), this, [ this, nRow ] { RemoveRow( nRow ); } )->setShortcut( QKeySequence::Delete );
+	}
+	if ( m_Path.size() > 1 )
+	{
+		pMenu->addAction( tr( "Delete \"%1\"" ).arg( szBlock ), this, [ this ] { m_Document.RemoveNode( m_Path ); } );
 	}
 	pMenu->setToolTipsVisible( true );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: The block's own right-click (its header and edges; the table has its own).
+//-----------------------------------------------------------------------------
+void CKvCard::contextMenuEvent( QContextMenuEvent *pEvent )
+{
+	QMenu menu;
+	FillContextMenu( &menu, -1 );
+	menu.exec( pEvent->globalPos() );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: A key, as KeyValues on the clipboard.
+//-----------------------------------------------------------------------------
+void CKvCard::CopyRow( int nRow )
+{
+	const CNode *pNode = m_Document.Node( m_Path );
+	if ( pNode && nRow >= 0 && nRow < static_cast<int>( m_RowChild.size() ) )
+	{
+		CopyNodes( { pNode->Child( m_RowChild[ static_cast<std::size_t>( nRow ) ] ) } );
+	}
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: The clipboard's keys and blocks into this block, as one undo step: keys after its
+//          keys, blocks at its end.
+//-----------------------------------------------------------------------------
+void CKvCard::Paste()
+{
+	const std::vector<CNode> nodes = PastedNodes();
+	const CNode *pNode = m_Document.Node( m_Path );
+	if ( nodes.empty() || !pNode )
+	{
+		return;
+	}
+	// The editor rebuilds its cards after a change: nothing of this one is used once it starts.
+	CSoundDocument &document = m_Document;
+	const NodePath_t path = m_Path;
+	std::size_t nPair = GetPairInsertIndex();
+	std::size_t nEnd = pNode->GetChildren().size();
+	document.GetUndoStack()->beginMacro( tr( "Paste %n item(s)", nullptr, static_cast<int>( nodes.size() ) ) );
+	for ( const CNode &node : nodes )
+	{
+		if ( node.IsPair() )
+		{
+			document.InsertChild( path, nPair++, node, tr( "Paste %1" ).arg( Qs( node.GetKey() ) ) );
+			nEnd++;
+		}
+		else
+		{
+			document.InsertChild( path, nEnd++, node, tr( "Paste %1" ).arg( Qs( node.GetKey() ) ) );
+		}
+	}
+	document.GetUndoStack()->endMacro();
 }
 
 //-----------------------------------------------------------------------------

@@ -41,6 +41,8 @@
 #include "SpinBoxes.h"
 #include "ChoiceBoxes.h"
 #include "DetailPreview.h"
+#include "KvClipboard.h"
+#include "MenuPicker.h"
 #include "TextureCanvas.h"
 #include "texture/Build.h"
 #include "vfs/Vfs.h"
@@ -578,6 +580,9 @@ QWidget *CDetailEditor::BuildCard( const NodePath_t &path )
 	{
 		pCard->setStyleSheet( QStringLiteral( "QGroupBox[selected=\"true\"] { border: 1px solid palette(highlight); margin-top: 12px; padding-top: 8px; } QGroupBox::title { subcontrol-origin: margin; }" ) );
 	}
+	// Right-click, as everywhere: copy and paste, add, rename, delete.
+	pCard->setContextMenuPolicy( Qt::CustomContextMenu );
+	connect( pCard, &QWidget::customContextMenuRequested, this, [ this, pCard, path ]( const QPoint &at ) { ShowCardMenu( path, pCard->mapToGlobal( at ) ); } );
 	auto *pLayout = new QVBoxLayout( pCard );
 	auto *pTools = new QHBoxLayout;
 	const auto button = [ & ]( const QString &szLabel, const std::function<void()> &pfnAction ) {
@@ -1481,4 +1486,67 @@ QWidget *CDetailEditor::EntryPicture( const NodePath_t &path )
 	painter.end();
 	pPicture->setPixmap( shown );
 	return pBox;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: A card's right-click: copy and paste, add, rename, delete.
+//-----------------------------------------------------------------------------
+void CDetailEditor::ShowCardMenu( const NodePath_t &path, const QPoint &globalAt )
+{
+	const auto *pNode = Node( m_pDocument->GetDocument(), path );
+	if ( !pNode )
+	{
+		return;
+	}
+	const QString szName = QString::fromStdString( pNode->GetKey() );
+	QMenu menu( this );
+	menu.addAction( tr( "Copy \"%1\"" ).arg( szName ), this, [ this, path ] {
+		if ( const auto *pCopied = Node( m_pDocument->GetDocument(), path ) )
+		{
+			CopyNodes( { *pCopied } );
+		}
+	} );
+	menu.addAction( tr( "Paste into \"%1\"" ).arg( szName ), this, [ this, path ] {
+		const auto nodes = PastedNodes();
+		if ( nodes.empty() )
+		{
+			return;
+		}
+		m_pDocument->Edit( tr( "Paste" ), [ & ]( auto &document ) {
+			if ( auto *pBlock = Node( document, path ); pBlock && pBlock->IsBlock() )
+			{
+				for ( const CNode &node : nodes )
+				{
+					pBlock->AppendChild( node );
+				}
+			}
+		} );
+	} )->setEnabled( CanPasteNodes() );
+	menu.addSeparator();
+	QMenu *pAdd = menu.addMenu( tr( "Add" ) );
+	if ( path.size() == 2 )
+	{
+		pAdd->addAction( tr( "Group" ), this, [ this, path ] { AddBlock( path, false ); } );
+	}
+	if ( path.size() == 3 )
+	{
+		pAdd->addAction( tr( "Sprite" ), this, [ this, path ] { AddBlock( path, false ); } );
+		pAdd->addAction( tr( "Model" ), this, [ this, path ] { AddBlock( path, true ); } );
+	}
+	std::vector<PickerItem_t> fields;
+	for ( const auto &key : m_Schema.GetKeys() )
+	{
+		if ( key.m_nDepth != static_cast<int>( path.size() ) || pNode->Find( key.m_szKey ) )
+		{
+			continue;
+		}
+		fields.push_back( { QString::fromStdString( CInterfaceMode::Instance().IsSimple() ? key.m_szLabel : key.m_szKey ), QString::fromStdString( key.m_szUnits ),
+			[ this, path, key ] { SetField( path, QString::fromStdString( key.m_szKey ), QString::fromStdString( key.m_szDefault ) ); } } );
+	}
+	AddPicker( pAdd, tr( "Field" ), std::move( fields ), tr( "Every field is set" ) );
+	menu.addSeparator();
+	menu.addAction( tr( "Rename…" ), this, [ this, path ] { RenameNode( path ); } );
+	menu.addSeparator();
+	menu.addAction( tr( "Delete \"%1\"" ).arg( szName ), this, [ this, path ] { RemoveNode( path ); } );
+	menu.exec( globalAt );
 }

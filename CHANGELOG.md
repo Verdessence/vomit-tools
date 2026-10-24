@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+- A program icon, and a splash screen that says what is loading.
+- Sound editor: copy and paste entries, blocks and keys (right-click, Ctrl+C, Ctrl+V), within a
+  file or between files; they go on the clipboard as KeyValues text.
+- Right-click menus follow one order everywhere (copy and paste, add, rename, delete), and long Add
+  lists are a search box over a scrolling list.
+- The icon in About; Help → About Premium.
+
 ## 0.6.5 — The Detail Sprite (2026-10-24)
 
 ### Details editor (new)

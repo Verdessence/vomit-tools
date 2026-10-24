@@ -8,10 +8,16 @@
 //===========================================================================//
 #pragma once
 
+#include <functional>
+
 #include <QDialog>
 
 class QListWidget;
 class QStackedWidget;
+
+// Adds a page to Preferences from code a local build brings in (a folder kept out of the
+// repository); pfnMake gives the page, or null to leave it out.
+void AddLocalPreferencesPage( const QString &szTitle, std::function<QWidget *()> pfnMake );
 
 class CPreferencesDialog : public QDialog
 {

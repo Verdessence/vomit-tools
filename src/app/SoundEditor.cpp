@@ -15,6 +15,8 @@
 #include <QLineEdit>
 #include <QListWidget>
 #include <QMessageBox>
+#include <QUndoStack>
+#include <QMenu>
 #include <QScrollArea>
 #include <QScrollBar>
 #include <QSplitter>
@@ -24,6 +26,7 @@
 #include <QVBoxLayout>
 
 #include "InterfaceMode.h"
+#include "KvClipboard.h"
 #include "KvCard.h"
 #include "SoundDocument.h"
 #include "SoundIndex.h"
@@ -185,6 +188,48 @@ CSoundEditor::CSoundEditor( CSoundDocument *pDocument, const CSoundIndex &index,
 			ShowEntry();
 		}
 	} );
+	// Whole entries copy and paste, within this file or into another.
+	m_pEntries->setContextMenuPolicy( Qt::CustomContextMenu );
+	connect( m_pEntries, &QListWidget::customContextMenuRequested, this, [ this ]( const QPoint &at ) {
+		if ( QListWidgetItem *pItem = m_pEntries->itemAt( at ) )
+		{
+			m_pEntries->setCurrentItem( pItem );
+		}
+		const bool bOnEntry = m_pEntries->itemAt( at ) && m_Current;
+		const QString szName = bOnEntry ? m_pEntries->currentItem()->text() : QString{};
+		const QString szNoun = Qs( m_pDocument->GetSchema().m_szEntryNoun );
+		QMenu menu;
+		if ( bOnEntry )
+		{
+			menu.addAction( tr( "Copy \"%1\"" ).arg( szName ), this, &CSoundEditor::CopyEntry )->setShortcut( QKeySequence::Copy );
+		}
+		QAction *pPaste = menu.addAction( tr( "Paste" ), this, &CSoundEditor::PasteEntries );
+		pPaste->setShortcut( QKeySequence::Paste );
+		pPaste->setEnabled( CanPasteNodes() );
+		if ( bOnEntry )
+		{
+			menu.addAction( tr( "Duplicate" ), this, &CSoundEditor::DuplicateEntry );
+		}
+		menu.addSeparator();
+		menu.addAction( tr( "New %1…" ).arg( szNoun ), this, &CSoundEditor::AddEntry );
+		if ( bOnEntry )
+		{
+			menu.addSeparator();
+			menu.addAction( tr( "Rename…" ), this, [ this ] { emit m_pEntries->itemDoubleClicked( m_pEntries->currentItem() ); } );
+			menu.addAction( tr( "Delete \"%1\"" ).arg( szName ), this, &CSoundEditor::DeleteEntry )->setShortcut( QKeySequence::Delete );
+		}
+		menu.exec( m_pEntries->viewport()->mapToGlobal( at ) );
+	} );
+	auto *pCopy = new QAction( tr( "Copy" ), m_pEntries );
+	pCopy->setShortcut( QKeySequence::Copy );
+	pCopy->setShortcutContext( Qt::WidgetShortcut );
+	connect( pCopy, &QAction::triggered, this, &CSoundEditor::CopyEntry );
+	m_pEntries->addAction( pCopy );
+	auto *pPasteKey = new QAction( tr( "Paste" ), m_pEntries );
+	pPasteKey->setShortcut( QKeySequence::Paste );
+	pPasteKey->setShortcutContext( Qt::WidgetShortcut );
+	connect( pPasteKey, &QAction::triggered, this, &CSoundEditor::PasteEntries );
+	m_pEntries->addAction( pPasteKey );
 	connect( m_pEntries, &QListWidget::itemDoubleClicked, this, [ this ] {
 		if ( m_pCard )
 		{
@@ -486,6 +531,52 @@ void CSoundEditor::DuplicateEntry()
 	copy.SetKey( szName.toStdString() );
 	m_pDocument->InsertEntry( *m_Current + 1, std::move( copy ), tr( "Duplicate as %1" ).arg( szName ) );
 	m_Current = *m_Current + 1;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: The picked entry, as KeyValues on the clipboard.
+//-----------------------------------------------------------------------------
+void CSoundEditor::CopyEntry()
+{
+	if ( m_Current && *m_Current < m_pDocument->GetDocument().m_Roots.size() )
+	{
+		CopyNodes( { m_pDocument->GetDocument().m_Roots[ *m_Current ] } );
+	}
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: The clipboard's blocks as entries after the picked one, as one undo step; a name the
+//          file has already gets _copy.
+//-----------------------------------------------------------------------------
+void CSoundEditor::PasteEntries()
+{
+	std::vector<xv::kv1::CNode> nodes = PastedNodes();
+	std::erase_if( nodes, []( const xv::kv1::CNode &node ) { return !node.IsBlock(); } );
+	if ( nodes.empty() )
+	{
+		if ( CanPasteNodes() )
+		{
+			QMessageBox::information( this, tr( "Paste" ), tr( "Those are keys: paste them into a block on the right." ) );
+		}
+		return;
+	}
+	const auto taken = [ this ]( const std::string &szName ) {
+		return std::ranges::any_of( m_pDocument->GetDocument().m_Roots, [ &szName ]( const xv::kv1::CNode &root ) { return xv::kv1::EqualsIgnoreCase( root.GetKey(), szName ); } );
+	};
+	std::size_t nIndex = m_Current ? *m_Current + 1 : m_pDocument->GetDocument().m_Roots.size();
+	m_pDocument->GetUndoStack()->beginMacro( tr( "Paste %n entry(s)", nullptr, static_cast<int>( nodes.size() ) ) );
+	for ( xv::kv1::CNode &node : nodes )
+	{
+		std::string szName = node.GetKey();
+		while ( taken( szName ) )
+		{
+			szName += "_copy";
+		}
+		node.SetKey( szName );
+		m_pDocument->InsertEntry( nIndex, std::move( node ), tr( "Paste %1" ).arg( Qs( szName ) ) );
+		m_Current = nIndex++;
+	}
+	m_pDocument->GetUndoStack()->endMacro();
 }
 
 //-----------------------------------------------------------------------------

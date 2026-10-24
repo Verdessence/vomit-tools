@@ -6,6 +6,9 @@
 //===========================================================================//
 #include "PreferencesDialog.h"
 
+#include <utility>
+#include <vector>
+
 #include <QButtonGroup>
 #include <QCheckBox>
 #include <QDialogButtonBox>
@@ -45,6 +48,15 @@ QVBoxLayout *PageLayout( QWidget *pPage )
 	return pLayout;
 }
 
+//-----------------------------------------------------------------------------
+// Purpose: Pages a local build adds.
+//-----------------------------------------------------------------------------
+std::vector<std::pair<QString, std::function<QWidget *()>>> &LocalPages()
+{
+	static std::vector<std::pair<QString, std::function<QWidget *()>>> pages;
+	return pages;
+}
+
 } // namespace
 
 //-----------------------------------------------------------------------------
@@ -65,6 +77,13 @@ CPreferencesDialog::CPreferencesDialog( QWidget *pParent )
 	AddPage( tr( "Graphics" ), BuildGraphicsPage() );
 	AddPage( tr( "Particles" ), BuildParticlesPage() );
 	AddPage( tr( "Materials" ), BuildMaterialsPage() );
+	for ( const auto &[ szTitle, pfnMake ] : LocalPages() )
+	{
+		if ( QWidget *pPage = pfnMake() )
+		{
+			AddPage( szTitle, pPage );
+		}
+	}
 	m_pPages->setCurrentRow( 0 );
 
 	auto *pButtons = new QDialogButtonBox( QDialogButtonBox::Close );
@@ -76,6 +95,14 @@ CPreferencesDialog::CPreferencesDialog( QWidget *pParent )
 	pLayout->addLayout( pColumns, 1 );
 	pLayout->addWidget( pButtons );
 	resize( 620, 380 );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Adds a page to Preferences from code a local build brings in.
+//-----------------------------------------------------------------------------
+void AddLocalPreferencesPage( const QString &szTitle, std::function<QWidget *()> pfnMake )
+{
+	LocalPages().emplace_back( szTitle, std::move( pfnMake ) );
 }
 
 //-----------------------------------------------------------------------------

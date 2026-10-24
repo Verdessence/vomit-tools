@@ -53,6 +53,9 @@ public:
 protected:
 	bool eventFilter( QObject *pWatched, QEvent *pEvent ) override;
 
+protected:
+	void contextMenuEvent( QContextMenuEvent *pEvent ) override;
+
 signals:
 	// A key or block was added; the editor reopens it for editing once the cards are rebuilt.
 	void Added( const xv::sound::NodePath_t &path );
@@ -60,6 +63,9 @@ signals:
 private:
 	void BuildTable( const xv::kv1::CNode &node );
 	void FillAddMenu( QMenu *pMenu );
+	void FillContextMenu( QMenu *pMenu, int nRow );
+	void CopyRow( int nRow );
+	void Paste();
 	void AddKey( const QString &szKey );
 	void AddBlock( const QString &szKey );
 	void RemoveRow( int nRow );

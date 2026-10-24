@@ -1834,16 +1834,18 @@ void CParticleEditor::FillAddMenu()
 //-----------------------------------------------------------------------------
 void CParticleEditor::ShowStackMenu( const QPoint &pos )
 {
+	// The same order as every right-click: add, then move, then remove.
 	QMenu menu;
+	FillAddMenu();
+	menu.addMenu( m_pAdd->menu() )->setText( tr( "Add" ) );
 	if ( QTreeWidgetItem *pItem = m_pStack->itemAt( pos ); pItem && pItem->data( 0, ROLE_ELEMENT_ROLE ).toInt() >= 0 )
 	{
-		menu.addAction( tr( "Remove" ), this, &CParticleEditor::RemoveSelected );
+		menu.addSeparator();
 		menu.addAction( tr( "Move Up" ), this, [ this ] { MoveSelected( -1 ); } );
 		menu.addAction( tr( "Move Down" ), this, [ this ] { MoveSelected( 1 ); } );
 		menu.addSeparator();
+		menu.addAction( tr( "Delete \"%1\"" ).arg( pItem->text( 0 ) ), this, &CParticleEditor::RemoveSelected );
 	}
-	FillAddMenu();
-	menu.addMenu( m_pAdd->menu() )->setText( tr( "Add" ) );
 	menu.exec( m_pStack->viewport()->mapToGlobal( pos ) );
 }
 
@@ -1879,13 +1881,24 @@ void CParticleEditor::ShowPropertyMenu( const QPoint &pos )
 //-----------------------------------------------------------------------------
 void CParticleEditor::ShowSystemMenu( QWidget *pView, const QPoint &pos )
 {
+	// The same order as every right-click: copy and paste, add, rename, delete.
 	QMenu menu;
-	menu.addAction( tr( "New System" ), this, [ this ] { NewSystem(); } );
 	const bool bOnItem = pView == m_pGrid ? m_pGrid->itemAt( pos ) != nullptr : m_pSystems->itemAt( pos ) != nullptr;
 	if ( bOnItem )
 	{
+		menu.addAction( tr( "Copy" ), this, &CParticleEditor::CopySystems )->setShortcut( QKeySequence::Copy );
+	}
+	menu.addAction( tr( "Paste" ), this, &CParticleEditor::PasteSystems )->setEnabled( QApplication::clipboard()->mimeData()->hasFormat( QString::fromLatin1( CLIPBOARD_TYPE ) ) );
+	if ( bOnItem )
+	{
 		menu.addAction( tr( "Duplicate" ), this, &CParticleEditor::DuplicateSystem );
-		menu.addAction( tr( "Rename" ), this, [ this, pView ] {
+	}
+	menu.addSeparator();
+	menu.addAction( tr( "New System" ), this, [ this ] { NewSystem(); } );
+	if ( bOnItem )
+	{
+		menu.addSeparator();
+		menu.addAction( tr( "Rename…" ), this, [ this, pView ] {
 			if ( pView == m_pGrid )
 			{
 				m_pGrid->editItem( m_pGrid->currentItem() );
@@ -1895,11 +1908,9 @@ void CParticleEditor::ShowSystemMenu( QWidget *pView, const QPoint &pos )
 				m_pSystems->editItem( m_pSystems->currentItem() );
 			}
 		} );
-		menu.addAction( tr( "Delete" ), this, &CParticleEditor::DeleteSystem );
 		menu.addSeparator();
-		menu.addAction( tr( "Copy" ), this, &CParticleEditor::CopySystems );
+		menu.addAction( tr( "Delete" ), this, &CParticleEditor::DeleteSystem )->setShortcut( QKeySequence::Delete );
 	}
-	menu.addAction( tr( "Paste" ), this, &CParticleEditor::PasteSystems )->setEnabled( QApplication::clipboard()->mimeData()->hasFormat( QString::fromLatin1( CLIPBOARD_TYPE ) ) );
 	menu.exec( ( pView == m_pGrid ? m_pGrid->viewport() : m_pSystems->viewport() )->mapToGlobal( pos ) );
 }
 

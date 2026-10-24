@@ -1,0 +1,35 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+//
+// The text of Help → About Premium (also shown the first time the app starts). Edit freely:
+//   \n in a value starts a new line.
+//   Each feature is "<name>" "<free> <premium>", each one yes or no.
+//   The picture is src/assets/premium_character.gif (it plays over and over); replace that
+//   file to change it. A GIF animates everywhere; ffmpeg makes one from a video:
+//   ffmpeg -i in.mp4 -vf "fps=10,split[a][b];[a]palettegen[p];[b][p]paletteuse" -loop 0 premium_character.gif
+// Nothing typed into the window is kept or sent anywhere.
+"premium"
+{
+	"title"	"vomit-tools Premium"
+	"greeting"	"H-hi there...\nDo you th-think I could have your credit card information, p-please?"
+	"card"	"Card number:"
+	"expiry"	"Expiry date:"
+	"code"	"Security code:"
+	"accept"	"Th-thanks"
+	"later"	"Maybe later"
+	"thanks"	"Th-thank you! Premium is yours."
+	"note"	"By accepting, you agree to the Terms and Conditions."
+	"free"	"Free"
+	"premium"	"Premium"
+	"free_price"	"$0"
+	"premium_price"	"$29.99 per month"
+	"features"
+	{
+		"Sound, skybox, particle, texture, material and detail editors"	"yes yes"
+		"vomit-tools-cli and file manager thumbnails"	"no yes"
+		"Every update, forever"	"yes yes"
+		"Source code"	"no yes"
+		"Premium role in discord server"	"no yes"
+		"Access to exclusive tools"	"no yes"
+		"Feature requests"	"no yes"
+	}
+}
