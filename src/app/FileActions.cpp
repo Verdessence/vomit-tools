@@ -20,9 +20,12 @@
 #include <QWidget>
 
 #ifdef Q_OS_WIN
+// windows.h first: the shell headers need it.
+#include <windows.h>
+
+#include <shellapi.h>
 #include <shlobj.h>
 #include <shobjidl.h>
-#include <windows.h>
 #endif
 
 namespace
