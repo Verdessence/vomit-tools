@@ -83,11 +83,13 @@
 #include "TextureDocument.h"
 #include "TextureEditor.h"
 #include "VfsModel.h"
+#include "VpkEditor.h"
 #include "dmx/Dmx.h"
 #include "material/Parameters.h"
 #include "particles/Particles.h"
 #include "sky/Sky.h"
 #include "sound/SoundLint.h"
+#include "vfs/Package.h"
 
 namespace fs = std::filesystem;
 using xv::sound::FileKind_t;
@@ -392,6 +394,10 @@ CMainWindow::CMainWindow( QWidget *pParent, xv::audio::CEngine::Output_t nAudio 
 		{
 			OpenParticleFile( szPath );
 		}
+		else if ( const QString szDisk = DiskPathForGame( szPath ); !szDisk.isEmpty() && xv::vfs::CPackage::IsPackageFile( ToPath( szDisk ) ) )
+		{
+			OpenPackage( szDisk );
+		}
 	} );
 
 	m_pGameBrowser = new QWidget;
@@ -451,6 +457,14 @@ CMainWindow::CMainWindow( QWidget *pParent, xv::audio::CEngine::Output_t nAudio 
 	m_pMounts->horizontalHeader()->setStretchLastSection( true );
 	m_pMounts->verticalHeader()->setVisible( false );
 	m_pMounts->setEditTriggers( QAbstractItemView::NoEditTriggers );
+	m_pMounts->setToolTip( tr( "Double-click a VPK to open it in its own tab" ) );
+	connect( m_pMounts, &QTableWidget::cellDoubleClicked, this, [ this ]( int nRow ) {
+		const auto &records = m_pFileSystem->GetRecords();
+		if ( nRow >= 0 && nRow < static_cast<int>( records.size() ) && xv::vfs::CPackage::IsPackageFile( records[ static_cast<std::size_t>( nRow ) ].m_Location ) )
+		{
+			OpenPackage( ToQString( records[ static_cast<std::size_t>( nRow ) ].m_Location ) );
+		}
+	} );
 	auto *pMountsDock = new QDockWidget( tr( "Search Paths" ), this );
 	pMountsDock->setObjectName( QStringLiteral( "searchPathsDock" ) );
 	pMountsDock->setWidget( m_pMounts );
@@ -479,6 +493,7 @@ void CMainWindow::BuildMenus( QAction *pSearchPathsToggle )
 	auto *pFile = menuBar()->addMenu( tr( "&File" ) );
 	pFile->addAction( tr( "&Open File…" ), QKeySequence::Open, this, &CMainWindow::ChooseFiles );
 	pFile->addAction( tr( "Open &Folder…" ), QKeySequence{ Qt::CTRL | Qt::SHIFT | Qt::Key_O }, this, &CMainWindow::ChooseFolder );
+	pFile->addAction( tr( "Open V&PK or Map…" ), this, &CMainWindow::ChoosePackage );
 	auto *pGames = pFile->addMenu( tr( "Open &Game" ) );
 	connect( pGames, &QMenu::aboutToShow, this, [ this, pGames ] { FillGameMenu( pGames ); } );
 	auto *pRecent = pFile->addMenu( tr( "Open &Recent" ) );
@@ -548,7 +563,7 @@ void CMainWindow::BuildMenus( QAction *pSearchPathsToggle )
 		}
 	} );
 	pFile->addAction( tr( "&Close Tab" ), QKeySequence::Close, this, [ this ] {
-		if ( GetCurrentDetails() || GetCurrentEditor() || GetCurrentSky() || GetCurrentParticles() || GetCurrentTexture() || GetCurrentMaterial() )
+		if ( GetCurrentDetails() || GetCurrentEditor() || GetCurrentSky() || GetCurrentParticles() || GetCurrentTexture() || GetCurrentMaterial() || qobject_cast<CVpkEditor *>( m_pTabs->currentWidget() ) )
 		{
 			CloseTab( m_pTabs->currentIndex() );
 		}
@@ -793,7 +808,7 @@ void CMainWindow::ChooseFiles()
 	const QString szStart = m_pFolders->GetFolder().isEmpty() && m_Game ? ToQString( m_Game->m_GameDir ) : m_pFolders->GetFolder();
 	const QStringList files = QFileDialog::getOpenFileNames( this, tr( "Open File" ), szStart,
 		tr( "Soundscapes and soundscripts (*.txt);;Detail files (*.vbsp);;Sounds (*.wav *.mp3);;Textures (*.vtf);;Sky faces and textures (*.vmt *.vtf *.png *.tga *.jpg *.jpeg *.bmp *.psd *.hdr);;Particles (*.pcf *.dmx);;"
-			"KeyValues (*.txt *.vmt *.vdf *.res);;Game info (gameinfo.txt);;All files (*)" ) );
+			"KeyValues (*.txt *.vmt *.vdf *.res);;Archives and maps (*.vpk *.bsp *.gcf *.gma *.pak *.wad *.xzp *.zip);;Game info (gameinfo.txt);;All files (*)" ) );
 	OpenPaths( files );
 }
 
@@ -809,6 +824,126 @@ void CMainWindow::ChooseFolder()
 	{
 		OpenFolder( szFolder );
 	}
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: File > Open VPK, starting in the mounted game's folder, where its VPKs are.
+//-----------------------------------------------------------------------------
+void CMainWindow::ChoosePackage()
+{
+	const QString szStart = m_Game ? ToQString( m_Game->m_GameDir ) : !m_pFolders->GetFolder().isEmpty() ? m_pFolders->GetFolder()
+																												: QDir::homePath();
+	const QString szFile = QFileDialog::getOpenFileName( this, tr( "Open VPK" ), szStart,
+		tr( "VPKs (*.vpk);;Maps (*.bsp);;All archives (*.vpk *.bsp *.gcf *.gma *.pak *.wad *.xzp *.zip);;All files (*)" ) );
+	if ( !szFile.isEmpty() )
+	{
+		OpenPackage( szFile );
+	}
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: An archive in a tab of its own, or the tab it's already in. A numbered VPK part opens
+//          its _dir file.
+//-----------------------------------------------------------------------------
+CVpkEditor *CMainWindow::OpenPackage( const QString &szPath )
+{
+	DebugLog() << "opening archive" << szPath;
+	std::string szError;
+	auto pPackage = xv::vfs::CPackage::Open( ToPath( szPath ), &szError );
+	if ( !pPackage )
+	{
+		QMessageBox::warning( this, tr( "Cannot open" ), QString::fromStdString( szError ) );
+		return nullptr;
+	}
+	std::error_code ec;
+	for ( int i = 0; i < m_pTabs->count(); i++ )
+	{
+		auto *pOpen = qobject_cast<CVpkEditor *>( m_pTabs->widget( i ) );
+		if ( pOpen && fs::equivalent( pOpen->GetPackage().GetFile(), pPackage->GetFile(), ec ) )
+		{
+			m_pTabs->setCurrentWidget( pOpen );
+			return pOpen;
+		}
+	}
+	// The game the archive belongs to supplies what it lacks, like the textures its materials name.
+	AutoMountFor( szPath );
+	AddRecent( ToQString( pPackage->GetFile() ) );
+	const xv::material::Reader_t pfnGame = [ this ]( std::string_view szGamePath ) { return m_Game ? m_pFileSystem->Read( szGamePath ) : std::nullopt; };
+	auto *pEditor = new CVpkEditor( std::move( pPackage ), m_pPlayer, pfnGame );
+	connect( pEditor, &CVpkEditor::StatusMessage, this, [ this ]( const QString &szText ) { statusBar()->showMessage( szText, 5000 ); } );
+	pEditor->SetCanOpen( []( const QString &szFile ) {
+		return szFile.endsWith( u".vbsp", Qt::CaseInsensitive ) || szFile.endsWith( u".vtf", Qt::CaseInsensitive ) || szFile.endsWith( u".vmt", Qt::CaseInsensitive ) || IsParticlePath( szFile ) ||
+			   xv::sound::FileKindForPath( xv::vfs::NormalizePath( szFile.toStdString() ) ) != FileKind_t::FILE_KIND_UNKNOWN;
+	} );
+	connect( pEditor, &CVpkEditor::OpenRequested, this, [ this, pEditor ]( const QString &szFile ) { OpenArchiveFile( pEditor, szFile ); } );
+	const int nIndex = m_pTabs->addTab( pEditor, pEditor->GetFileName() );
+	m_pTabs->setTabToolTip( nIndex, ToQString( pEditor->GetPackage().GetFile() ) );
+	m_pTabs->setCurrentIndex( nIndex );
+	return pEditor;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: A file from an archive tab in its editor, as a copy that has never been saved: Save
+//          asks where, and the archive is left alone. Each open makes a new copy, since the
+//          game's own file of the same path may be open too.
+//-----------------------------------------------------------------------------
+QWidget *CMainWindow::OpenArchiveFile( CVpkEditor *pArchive, const QString &szPath )
+{
+	const auto bytes = pArchive->GetPackage().Read( szPath.toStdString() );
+	if ( !bytes )
+	{
+		QMessageBox::warning( this, tr( "Cannot open" ), tr( "Could not read %1 from %2." ).arg( szPath, pArchive->GetFileName() ) );
+		return nullptr;
+	}
+	const std::string szGamePath = xv::vfs::NormalizePath( szPath.toStdString() );
+	const QString szName = QString::fromStdString( szGamePath );
+	const std::string szText( reinterpret_cast<const char *>( bytes->data() ), bytes->size() );
+	if ( szName.endsWith( u".vbsp" ) )
+	{
+		auto *pDocument = new CDetailDocument( szName, xv::kv1::Parse( szText ) );
+		pDocument->MarkUnsaved();
+		return AddDetailEditor( pDocument );
+	}
+	if ( const FileKind_t nKind = xv::sound::FileKindForPath( szGamePath ); nKind != FileKind_t::FILE_KIND_UNKNOWN )
+	{
+		auto *pDocument = new CSoundDocument( szName, nKind, xv::kv1::Parse( szText ) );
+		pDocument->MarkUnsaved();
+		return AddEditor( pDocument );
+	}
+	if ( auto particles = IsParticlePath( szName ) ? ReadParticleFile( *bytes ) : std::nullopt )
+	{
+		auto *pDocument = new CParticleDocument( szName, std::move( *particles ) );
+		pDocument->MarkUnsaved();
+		return AddParticleEditor( pDocument );
+	}
+	if ( szName.endsWith( u".vtf" ) )
+	{
+		auto *pDocument = new CTextureDocument( szName, std::vector<std::byte>( *bytes ) );
+		if ( pDocument->IsValid() )
+		{
+			pDocument->MarkUnsaved();
+			return AddTextureEditor( pDocument, false );
+		}
+		delete pDocument;
+	}
+	if ( szName.endsWith( u".vmt" ) )
+	{
+		// Its textures come from the archive while that's open, then from the game.
+		const QPointer<CVpkEditor> pSource = pArchive;
+		const xv::material::Reader_t pfnRead = [ this, pSource ]( std::string_view szFile ) -> std::optional<std::vector<std::byte>> {
+			if ( pSource )
+			{
+				return pSource->GetReader()( szFile );
+			}
+			return m_Game ? m_pFileSystem->Read( szFile ) : std::nullopt;
+		};
+		auto *pEditor = new CMaterialEditor( szName, QString::fromStdString( szText ), pfnRead );
+		pEditor->MarkUnsaved();
+		SetUpMaterial( pEditor );
+		return AddMaterialEditor( pEditor );
+	}
+	QMessageBox::warning( this, tr( "Cannot open" ), tr( "%1 has no editor in this version." ).arg( szPath ) );
+	return nullptr;
 }
 
 //-----------------------------------------------------------------------------
@@ -1169,6 +1304,12 @@ void CMainWindow::PreviewFile( const QModelIndex &proxyIndex )
 //-----------------------------------------------------------------------------
 void CMainWindow::PreviewGameFile( const QString &szPath, const QString &szSource )
 {
+	// The game folder's own VPKs are loose files in it too; they're shown, not read.
+	if ( const QString szDisk = DiskPathForGame( szPath ); !szDisk.isEmpty() && xv::vfs::CPackage::IsPackageFile( ToPath( szDisk ) ) )
+	{
+		PreviewDiskFile( szDisk );
+		return;
+	}
 	const auto bytes = m_pFileSystem->Read( szPath.toStdString() );
 	if ( !bytes )
 	{
@@ -1207,6 +1348,17 @@ void CMainWindow::PreviewGameFile( const QString &szPath, const QString &szSourc
 }
 
 //-----------------------------------------------------------------------------
+// Purpose: The real file behind a game path, when it's a loose file; empty for files in VPKs.
+//-----------------------------------------------------------------------------
+QString CMainWindow::DiskPathForGame( const QString &szGamePath ) const
+{
+	const std::string szPath = xv::vfs::NormalizePath( szGamePath.toStdString() );
+	const xv::vfs::CMount *pMount = m_pFileSystem->Resolve( szPath );
+	const auto disk = pMount ? pMount->DiskPath( szPath ) : std::nullopt;
+	return disk ? ToQString( *disk ) : QString{};
+}
+
+//-----------------------------------------------------------------------------
 // Purpose: A material's textures and included materials open in the preview when double-clicked,
 //          with a button back to the material.
 //-----------------------------------------------------------------------------
@@ -1235,6 +1387,15 @@ void CMainWindow::LinkMaterial( QWidget *pView, const xv::material::Reader_t &pf
 //-----------------------------------------------------------------------------
 void CMainWindow::PreviewDiskFile( const QString &szPath )
 {
+	// Archives run to gigabytes: they aren't read just to show what they are.
+	if ( xv::vfs::CPackage::IsPackageFile( ToPath( szPath ) ) )
+	{
+		const QFileInfo info{ szPath };
+		SetPreview( WithEditButton( new CFileInfoView( info.fileName(), QDir::toNativeSeparators( info.absolutePath() ), static_cast<std::size_t>( info.size() ) ),
+			szPath.endsWith( u".bsp", Qt::CaseInsensitive ) ? tr( "This is a map." ) : tr( "This is an archive." ), tr( "Open" ), [ this, szPath ] { OpenPackage( szPath ); } ) );
+		m_pTabs->setCurrentWidget( m_pPreviewHost );
+		return;
+	}
 	const auto data = ReadDiskFile( szPath );
 	if ( !data )
 	{
@@ -1293,6 +1454,11 @@ void CMainWindow::OpenDiskFile( const QString &szPath )
 	if ( info.fileName().compare( u"gameinfo.txt", Qt::CaseInsensitive ) == 0 )
 	{
 		OpenGame( szPath );
+		return;
+	}
+	if ( xv::vfs::CPackage::IsPackageFile( ToPath( szPath ) ) )
+	{
+		OpenPackage( szPath );
 		return;
 	}
 	AutoMountFor( szPath );
@@ -2104,7 +2270,7 @@ bool CMainWindow::WriteParticles( CParticleEditor *pEditor, const fs::path &targ
 bool CMainWindow::Save( CParticleEditor *pEditor )
 {
 	CParticleDocument *pDocument = pEditor->GetDocument();
-	if ( pDocument->GetDiskPath().empty() && !m_Game )
+	if ( pDocument->IsNew() || ( pDocument->GetDiskPath().empty() && !m_Game ) )
 	{
 		return SaveAs( pEditor );
 	}
@@ -2344,7 +2510,7 @@ bool CMainWindow::WriteDocument( CSoundEditor *pEditor, const fs::path &target )
 bool CMainWindow::Save( CSoundEditor *pEditor )
 {
 	CSoundDocument *pDocument = pEditor->GetDocument();
-	if ( pDocument->GetDiskPath().empty() && !m_Game )
+	if ( pDocument->IsNew() || ( pDocument->GetDiskPath().empty() && !m_Game ) )
 	{
 		return SaveAs( pEditor );
 	}
@@ -2507,6 +2673,12 @@ bool CMainWindow::ConfirmClose( CParticleEditor *pEditor )
 //-----------------------------------------------------------------------------
 bool CMainWindow::CloseTab( int nIndex )
 {
+	if ( auto *pPackage = qobject_cast<CVpkEditor *>( m_pTabs->widget( nIndex ) ) )
+	{
+		m_pTabs->removeTab( nIndex );
+		pPackage->deleteLater();
+		return true;
+	}
 	if ( auto *pDetails = qobject_cast<CDetailEditor *>( m_pTabs->widget( nIndex ) ) )
 	{
 		if ( !ConfirmClose( pDetails ) )
@@ -2650,6 +2822,10 @@ QString CMainWindow::SessionEntryFor( int nIndex ) const
 	if ( auto *pEditor = qobject_cast<CDetailEditor *>( pTab ); pEditor && !pEditor->GetDocument()->IsNew() )
 	{
 		return entry( "detail", pEditor->GetDocument()->GetDiskPath(), pEditor->GetDocument()->GetGamePath() );
+	}
+	if ( auto *pPackage = qobject_cast<CVpkEditor *>( pTab ) )
+	{
+		return entry( "vpk", pPackage->GetPackage().GetFile(), {} );
 	}
 	if ( auto *pSky = qobject_cast<CSkyEditor *>( pTab ) )
 	{
@@ -2875,6 +3051,10 @@ void CMainWindow::UpdateTitle()
 	else if ( CMaterialEditor *pMaterial = GetCurrentMaterial() )
 	{
 		szTitle.prepend( ( pMaterial->IsModified() ? QStringLiteral( "*" ) : QString{} ) + pMaterial->GetFileName() + QStringLiteral( " — " ) );
+	}
+	else if ( auto *pPackage = qobject_cast<CVpkEditor *>( m_pTabs->currentWidget() ) )
+	{
+		szTitle.prepend( pPackage->GetFileName() + QStringLiteral( " — " ) );
 	}
 	setWindowTitle( szTitle );
 }

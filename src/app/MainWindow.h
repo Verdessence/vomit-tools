@@ -46,6 +46,7 @@ class CMaterialEditor;
 class CTextureDocument;
 class CTextureEditor;
 class CVfsModel;
+class CVpkEditor;
 
 class CMainWindow : public QMainWindow
 {
@@ -87,6 +88,10 @@ public:
 	CMaterialEditor *OpenMaterialFile( const QString &szGamePath );
 	// A new, unsaved material for a texture, in its editor, after asking which shader and so on.
 	CMaterialEditor *MakeMaterialFor( CTextureEditor *pEditor );
+	// Opens an archive on disk (a VPK, GCF...) in a tab to browse, preview and export from.
+	CVpkEditor *OpenPackage( const QString &szPath );
+	// Opens a file of an archive tab in its editor as an unsaved copy; returns that editor's tab.
+	QWidget *OpenArchiveFile( CVpkEditor *pArchive, const QString &szPath );
 	// Shows the search over every particle system, with query typed in.
 	CParticleSearch *FindParticleSystem( const QString &szQuery = {} );
 	// Edit > Preferences: one window, raised again when it is already open.
@@ -137,10 +142,13 @@ private:
 	void ChooseGameInfo();
 	void ChooseFiles();
 	void ChooseFolder();
+	void ChoosePackage();
 	void AutoMountFor( const QString &szPath );
 	void PreviewFile( const QModelIndex &proxyIndex );
 	void PreviewGameFile( const QString &szPath, const QString &szSource );
 	void PreviewDiskFile( const QString &szPath );
+	// The real file behind a game path, when it's a loose file; empty for files in VPKs.
+	[[nodiscard]] QString DiskPathForGame( const QString &szGamePath ) const;
 	void LinkMaterial( QWidget *pView, const xv::material::Reader_t &pfnRead, const QString &szMaterial, const std::function<void()> &pfnBack );
 	[[nodiscard]] QWidget *WithEditButton( QWidget *pView, const QString &szText, const QString &szButton, const std::function<void()> &pfnOpen );
 	void NewSoundFile( xv::sound::FileKind_t nKind );

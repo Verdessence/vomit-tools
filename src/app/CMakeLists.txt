@@ -5,6 +5,8 @@ add_library(vomit_tools_ui STATIC
         BatchConvertDialog.cpp
         BatchConvertDialog.h
         BuildInfo.h
+        BspViews.cpp
+        BspViews.h
         ChoiceBoxes.cpp
         ChoiceBoxes.h
         ${CMAKE_CURRENT_BINARY_DIR}/BuildInfo.cpp
@@ -105,7 +107,9 @@ add_library(vomit_tools_ui STATIC
         TexturePresets.cpp
         TexturePresets.h
         VfsModel.cpp
-        VfsModel.h)
+        VfsModel.h
+        VpkEditor.cpp
+        VpkEditor.h)
 target_include_directories(vomit_tools_ui PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
 # The version and `git describe` shown in Help → About. Regenerated at every build so the commit
 # stays current; the file is only rewritten (and recompiled) when it changes.
