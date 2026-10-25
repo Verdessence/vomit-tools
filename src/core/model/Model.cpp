@@ -7,6 +7,8 @@
 //===========================================================================//
 #include "Model.h"
 
+#include "Binary.h"
+
 #include <algorithm>
 #include <cmath>
 #include <cstring>
@@ -303,7 +305,7 @@ CVec3 CModel::HitboxPoint( std::size_t nHitbox, CVec3 vecUvw ) const
 //-----------------------------------------------------------------------------
 // Purpose: Reads the .mdl, then its .vvd and .vtx.
 //-----------------------------------------------------------------------------
-std::optional<CModel> LoadModel( std::string_view szMdlPath, const Reader_t &pfnRead, std::string *pError )
+std::optional<CModel> LoadModel( std::string_view szMdlPath, const Reader_t &pfnRead, std::string *pError, const Selection_t &selection )
 {
 	const std::string szMdl = vfs::NormalizePath( szMdlPath );
 	const auto mdlData = pfnRead( szMdl );
@@ -355,13 +357,13 @@ std::optional<CModel> LoadModel( std::string_view szMdlPath, const Reader_t &pfn
 			{
 				const std::size_t nAt = nBoxIndex + static_cast<std::size_t>( i ) * HITBOX_SIZE;
 				Hitbox_t box;
-				box.m_nBone = std::clamp( mdl.Read<std::int32_t>( nAt ), 0, std::max( 0, nBones - 1 ) );
+				box.m_nBone = mdl.Read<std::int32_t>( nAt );
 				box.m_nGroup = mdl.Read<std::int32_t>( nAt + 4 );
 				box.m_vecMin = mdl.Vector( nAt + 8 );
 				box.m_vecMax = mdl.Vector( nAt + 20 );
 				if ( const auto nName = mdl.Read<std::int32_t>( nAt + 32 ) )
 				{
-					box.m_szName = mdl.String( nAt + static_cast<std::size_t>( nName ) );
+					box.m_szName = mdl.String( CBinary( *mdlData ).HitboxNameBase( mdl.Read<std::int32_t>( 4 ), nAt ) + static_cast<std::size_t>( nName ) );
 				}
 				model.m_Hitboxes.push_back( std::move( box ) );
 			}
@@ -378,7 +380,8 @@ std::optional<CModel> LoadModel( std::string_view szMdlPath, const Reader_t &pfn
 			const std::size_t nAt = nAttachmentIndex + static_cast<std::size_t>( i ) * ATTACHMENT_SIZE;
 			Attachment_t attachment;
 			attachment.m_szName = mdl.String( nAt + static_cast<std::size_t>( mdl.Read<std::int32_t>( nAt ) ) );
-			attachment.m_nBone = std::clamp( mdl.Read<std::int32_t>( nAt + 8 ), 0, std::max( 0, nBones - 1 ) );
+			attachment.m_nFlags = mdl.Read<std::int32_t>( nAt + 4 );
+			attachment.m_nBone = mdl.Read<std::int32_t>( nAt + 8 );
 			attachment.m_Local = mdl.Matrix( nAt + 12 );
 			model.m_Attachments.push_back( std::move( attachment ) );
 		}
@@ -424,7 +427,9 @@ std::optional<CModel> LoadModel( std::string_view szMdlPath, const Reader_t &pfn
 	}
 	std::vector<int> skin; // skin family 0: material reference -> texture
 	const auto nSkinRefs = mdl.Read<std::int32_t>( 220 );
-	const auto nSkinIndex = static_cast<std::size_t>( mdl.Read<std::int32_t>( 228 ) );
+	const auto nFamilies = mdl.Read<std::int32_t>( 224 );
+	const int nSkin = std::clamp( selection.m_nSkin, 0, std::max( 0, nFamilies - 1 ) );
+	const auto nSkinIndex = static_cast<std::size_t>( mdl.Read<std::int32_t>( 228 ) ) + static_cast<std::size_t>( nSkin ) * static_cast<std::size_t>( std::max( 0, nSkinRefs ) ) * 2;
 	if ( nSkinRefs > 0 && mdl.Array( nSkinIndex, nSkinRefs, 2 ) )
 	{
 		for ( std::int32_t i = 0; i < nSkinRefs; i++ )
@@ -455,15 +460,35 @@ std::optional<CModel> LoadModel( std::string_view szMdlPath, const Reader_t &pfn
 		return Fail( pError, szVvd + " doesn't belong to " + szMdl );
 	}
 	const auto nRootVertices = vvd.Read<std::int32_t>( 16 );
+	if ( nRootVertices < 0 || nRootVertices > MAX_COUNT )
+		return Fail( pError, szVvd + ": invalid vertex count" );
 	const auto nFixups = vvd.Read<std::int32_t>( 48 );
 	const auto nFixupStart = static_cast<std::size_t>( vvd.Read<std::int32_t>( 52 ) );
 	const auto nVertexStart = static_cast<std::size_t>( vvd.Read<std::int32_t>( 56 ) );
+	bool bInvalidVertex = false;
 	const auto readVertex = [ & ]( std::int32_t nIndex ) {
 		const std::size_t nAt = nVertexStart + static_cast<std::size_t>( nIndex ) * VVD_VERTEX_SIZE;
 		Vertex_t vertex;
+		vertex.m_nBones = vvd.Read<std::uint8_t>( nAt + 15 );
+		if ( vertex.m_nBones > 3 )
+		{
+			bInvalidVertex = true;
+			vertex.m_nBones = 0;
+		}
+		for ( int i = 0; i < vertex.m_nBones; i++ )
+		{
+			vertex.m_Weights[ i ] = vvd.Read<float>( nAt + i * 4 );
+			vertex.m_Bones[ i ] = vvd.Read<std::uint8_t>( nAt + 12 + i );
+		}
 		vertex.m_vecPosition = vvd.Vector( nAt + 16 );
 		vertex.m_vecNormal = vvd.Vector( nAt + 28 );
 		vertex.m_Uv = { vvd.Read<float>( nAt + 40 ), vvd.Read<float>( nAt + 44 ) };
+		for ( float flValue : { vertex.m_vecPosition.m_flX, vertex.m_vecPosition.m_flY, vertex.m_vecPosition.m_flZ, vertex.m_vecNormal.m_flX, vertex.m_vecNormal.m_flY, vertex.m_vecNormal.m_flZ, vertex.m_Uv[ 0 ], vertex.m_Uv[ 1 ] } )
+			if ( !std::isfinite( flValue ) || std::abs( flValue ) > 1e7f )
+				bInvalidVertex = true;
+		for ( int i = 0; i < vertex.m_nBones; i++ )
+			if ( !std::isfinite( vertex.m_Weights[ i ] ) || vertex.m_Weights[ i ] < 0 || vertex.m_Weights[ i ] > 1.001f )
+				bInvalidVertex = true;
 		return vertex;
 	};
 	if ( nFixups > 0 )
@@ -481,6 +506,8 @@ std::optional<CModel> LoadModel( std::string_view szMdlPath, const Reader_t &pfn
 			{
 				continue; // LOD 0 keeps every fixup whose lod is 0 or more
 			}
+			if ( nCount < 0 || model.m_Vertices.size() + static_cast<std::size_t>( nCount ) > static_cast<std::size_t>( nRootVertices ) )
+				return Fail( pError, szVvd + ": vertex fixups exceed the declared vertex count" );
 			for ( std::int32_t k = 0; k < nCount; k++ )
 			{
 				model.m_Vertices.push_back( readVertex( nSource + k ) );
@@ -498,6 +525,9 @@ std::optional<CModel> LoadModel( std::string_view szMdlPath, const Reader_t &pfn
 			model.m_Vertices.push_back( readVertex( i ) );
 		}
 	}
+
+	if ( bInvalidVertex )
+		return Fail( pError, szVvd + ": invalid vertex data or more than three weighted bones per vertex" );
 
 	// Triangles: the .vtx for DirectX 9 first, the others when it's missing.
 	std::optional<std::vector<std::byte>> vtxData;
@@ -529,12 +559,18 @@ std::optional<CModel> LoadModel( std::string_view szMdlPath, const Reader_t &pfn
 	}
 	for ( std::int32_t nPart = 0; nPart < std::min( nBodyParts, nVtxBodyParts ); nPart++ )
 	{
-		// The first model of each body part is its default.
+		// Bodygroup choices select a model independently in each part.
 		const std::size_t nPartAt = nBodyPartIndex + static_cast<std::size_t>( nPart ) * BODY_PART_SIZE;
-		const std::size_t nModelAt = nPartAt + static_cast<std::size_t>( mdl.Read<std::int32_t>( nPartAt + 12 ) );
+		const int nModels = mdl.Read<std::int32_t>( nPartAt + 4 );
+		const int nChoice = nPart < static_cast<int>( selection.m_Bodygroups.size() ) ? selection.m_Bodygroups[ nPart ] : 0;
+		if ( nChoice < 0 || nChoice >= nModels )
+		{
+			return Fail( pError, "Invalid bodygroup selection" );
+		}
+		const std::size_t nModelAt = static_cast<std::size_t>( nChoice ) * MODEL_SIZE + nPartAt + static_cast<std::size_t>( mdl.Read<std::int32_t>( nPartAt + 12 ) );
 		const std::size_t nVtxPartAt = nVtxBodyPartIndex + static_cast<std::size_t>( nPart ) * VTX_BODY_PART_SIZE;
-		const std::size_t nVtxModelAt = nVtxPartAt + static_cast<std::size_t>( vtx.Read<std::int32_t>( nVtxPartAt + 4 ) );
-		if ( mdl.Read<std::int32_t>( nPartAt + 4 ) < 1 || vtx.Read<std::int32_t>( nVtxPartAt ) < 1 || !mdl.Array( nModelAt, 1, MODEL_SIZE ) || !vtx.Array( nVtxModelAt, 1, VTX_MODEL_SIZE ) )
+		const std::size_t nVtxModelAt = static_cast<std::size_t>( nChoice ) * VTX_MODEL_SIZE + nVtxPartAt + static_cast<std::size_t>( vtx.Read<std::int32_t>( nVtxPartAt + 4 ) );
+		if ( mdl.Read<std::int32_t>( nPartAt + 4 ) < 1 || vtx.Read<std::int32_t>( nVtxPartAt ) <= nChoice || !mdl.Array( nModelAt, 1, MODEL_SIZE ) || !vtx.Array( nVtxModelAt, 1, VTX_MODEL_SIZE ) )
 		{
 			continue;
 		}
@@ -546,7 +582,8 @@ std::optional<CModel> LoadModel( std::string_view szMdlPath, const Reader_t &pfn
 		{
 			continue;
 		}
-		const std::size_t nLodAt = nVtxModelAt + static_cast<std::size_t>( vtx.Read<std::int32_t>( nVtxModelAt + 4 ) );
+		const int nLod = std::clamp( selection.m_nLod, 0, vtx.Read<std::int32_t>( nVtxModelAt ) - 1 );
+		const std::size_t nLodAt = static_cast<std::size_t>( nLod ) * VTX_LOD_SIZE + nVtxModelAt + static_cast<std::size_t>( vtx.Read<std::int32_t>( nVtxModelAt + 4 ) );
 		if ( !vtx.Array( nLodAt, 1, VTX_LOD_SIZE ) )
 		{
 			continue;
@@ -653,7 +690,7 @@ std::optional<CModel> LoadModel( std::string_view szMdlPath, const Reader_t &pfn
 			}
 		}
 	}
-	if ( vtx.IsFailed() || vvd.IsFailed() )
+	if ( mdl.IsFailed() || vtx.IsFailed() || vvd.IsFailed() )
 	{
 		return Fail( pError, szMdl + ": its .vvd or .vtx is damaged" );
 	}

@@ -63,6 +63,7 @@ struct Attachment_t
 	std::string m_szName;
 	int m_nBone = 0;
 	CTransform m_Local; // attachment space to bone space
+	int m_nFlags = 0;
 };
 
 struct Vertex_t
@@ -70,6 +71,9 @@ struct Vertex_t
 	CVec3 m_vecPosition; // model space, in the reference pose
 	CVec3 m_vecNormal;
 	std::array<float, 2> m_Uv{};
+	std::array<float, 3> m_Weights{};
+	std::array<int, 3> m_Bones{};
+	int m_nBones = 0;
 };
 
 struct Mesh_t
@@ -104,8 +108,15 @@ public:
 // Reads a file of the game ("models/player/ct_gign.vvd"); nullopt when it isn't there.
 using Reader_t = std::function<std::optional<std::vector<std::byte>>( std::string_view szGamePath )>;
 
+struct Selection_t
+{
+	std::vector<int> m_Bodygroups;
+	int m_nSkin = 0;
+	int m_nLod = 0;
+};
+
 // Reads models/<...>.mdl and its .vvd and .vtx. The files are untrusted: every count and offset is
 // checked, and nullopt (with the reason in error) comes back for anything that doesn't add up.
-[[nodiscard]] std::optional<CModel> LoadModel( std::string_view szMdlPath, const Reader_t &pfnRead, std::string *pError = nullptr );
+[[nodiscard]] std::optional<CModel> LoadModel( std::string_view szMdlPath, const Reader_t &pfnRead, std::string *pError = nullptr, const Selection_t &selection = {} );
 
 } // namespace xv::model

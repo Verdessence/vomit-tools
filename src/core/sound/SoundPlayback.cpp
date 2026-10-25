@@ -7,6 +7,7 @@
 #include "SoundPlayback.h"
 
 #include <algorithm>
+#include <cmath>
 #include <format>
 
 #include "../util/Numbers.h"
@@ -272,6 +273,7 @@ public:
 		double m_flVolumeScale = 1;
 		std::optional<int> m_PositionOverride;
 		std::optional<int> m_AmbientPositionOverride;
+		std::size_t m_nSource = 0; // the planned soundscape's child block this comes from
 	};
 
 	void Add( const kv1::CNode &soundscape, const Context_t &context )
@@ -288,21 +290,28 @@ public:
 			return;
 		}
 		m_Stack.push_back( szName );
-		for ( const kv1::CNode &child : soundscape.GetChildren() )
+		const bool bTop = m_Stack.size() == 1;
+		for ( std::size_t i = 0; i < soundscape.GetChildren().size(); i++ )
 		{
+			const kv1::CNode &child = soundscape.GetChildren()[ i ];
 			if ( !child.IsBlock() )
 			{
 				continue;
+			}
+			Context_t here = context;
+			if ( bTop )
+			{
+				here.m_nSource = i;
 			}
 			const std::string szKey = ToLower( child.GetKey() );
 			const std::string szOrigin = soundscape.GetKey() + " › " + child.GetKey();
 			if ( szKey == "playlooping" || szKey == "playrandom" )
 			{
-				AddRule( child, szKey == "playlooping", szOrigin, context );
+				AddRule( child, szKey == "playlooping", szOrigin, here );
 			}
 			else if ( szKey == "playsoundscape" )
 			{
-				AddNested( child, szOrigin, context );
+				AddNested( child, szOrigin, here );
 			}
 		}
 		m_Stack.pop_back();
@@ -346,6 +355,7 @@ private:
 			}
 		}
 		rule.m_szOrigin = szOrigin;
+		rule.m_nSource = context.m_nSource;
 		m_Plan.m_Rules.push_back( std::move( rule ) );
 	}
 
@@ -383,8 +393,7 @@ private:
 
 //-----------------------------------------------------------------------------
 // Purpose: Every looping and random sound a soundscape plays, nested playsoundscapes included,
-//          with their
-//          volume scaling and position overrides applied.
+//          with their volume scaling and position overrides applied.
 //-----------------------------------------------------------------------------
 SoundscapePlan_t PlanSoundscape( const kv1::CNode &soundscape, const SoundscapeLookup_t &pfnLookup )
 {
@@ -396,6 +405,31 @@ SoundscapePlan_t PlanSoundscape( const kv1::CNode &soundscape, const SoundscapeL
 		plan.m_nDsp = ParseNumber<int>( Trim( pDsp->GetValue() ) ).value_or( 0 );
 	}
 	return plan;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Pan follows the sound's angle from straight ahead, so one behind is centred too: a
+//          stereo preview can't tell front from back.
+//-----------------------------------------------------------------------------
+PositionMix_t MixAt( std::optional<double> soundLevel, double flRight, double flAhead )
+{
+	constexpr double NOMINAL_CLIP_DISTANCE = 1000.0;
+	PositionMix_t mix;
+	const double flDistance = std::hypot( flRight, flAhead );
+	if ( soundLevel )
+	{
+		mix.m_flGain = std::clamp( 1.0 - flDistance * SoundLevelToAttenuation( *soundLevel ) / NOMINAL_CLIP_DISTANCE, 0.0, 1.0 );
+	}
+	mix.m_flPan = flDistance > 1e-6 ? std::clamp( flRight / flDistance, -1.0, 1.0 ) : 0.0;
+	return mix;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Solo wins over ignore, as on a mixing desk: with anything soloed, only soloed rules play.
+//-----------------------------------------------------------------------------
+void ApplySoloIgnore( SoundscapePlan_t &plan, const std::set<std::size_t> &ignored, const std::set<std::size_t> &soloed )
+{
+	std::erase_if( plan.m_Rules, [ & ]( const SoundscapeRule_t &rule ) { return soloed.empty() ? ignored.contains( rule.m_nSource ) : !soloed.contains( rule.m_nSource ); } );
 }
 
 //-----------------------------------------------------------------------------

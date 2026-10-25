@@ -82,11 +82,13 @@ struct ZipEntry_t
 };
 
 //-----------------------------------------------------------------------------
-// Purpose: bspzip packs with LZMA streams that have no end marker, which minizip-ng won't take;
-//          read here with the size the zip gives. After the local header (30 bytes, the name and
-//          the extra field) come the LZMA SDK version, the properties' size and the properties.
+// Purpose: Stored and LZMA entries are read here, by their place in the zip rather than by name
+//          (names can repeat). bspzip packs with LZMA streams that have no end marker, which
+//          minizip-ng won't take, so those unpack with the size the zip gives. The data follows
+//          the local header (30 bytes, the name and the extra field); an LZMA entry's data starts
+//          with the LZMA SDK version, the properties' size and the properties.
 //-----------------------------------------------------------------------------
-std::optional<std::vector<std::byte>> ReadLzmaEntry( std::span<const std::byte> zip, const ZipEntry_t &entry )
+std::optional<std::vector<std::byte>> ReadRawEntry( std::span<const std::byte> zip, const ZipEntry_t &entry )
 {
 	const auto read16 = [ &zip ]( std::size_t nAt ) { return static_cast<std::size_t>( std::to_integer<unsigned>( zip[ nAt ] ) | ( std::to_integer<unsigned>( zip[ nAt + 1 ] ) << 8 ) ); };
 	const auto nHeader = static_cast<std::size_t>( entry.m_nLocalHeader );
@@ -95,13 +97,22 @@ std::optional<std::vector<std::byte>> ReadLzmaEntry( std::span<const std::byte> 
 		return std::nullopt;
 	}
 	const std::size_t nData = nHeader + 30 + read16( nHeader + 26 ) + read16( nHeader + 28 );
-	if ( nData + 4 > zip.size() )
+	const auto nPacked = static_cast<std::size_t>( std::max<std::int64_t>( entry.m_nPacked, 0 ) );
+	if ( nData + nPacked > zip.size() )
+	{
+		return std::nullopt;
+	}
+	if ( entry.m_nMethod == MZ_COMPRESS_METHOD_STORE )
+	{
+		const auto stored = zip.subspan( nData, nPacked );
+		return std::vector<std::byte>( stored.begin(), stored.end() );
+	}
+	if ( nPacked < 4 )
 	{
 		return std::nullopt;
 	}
 	const std::size_t nProperties = read16( nData + 2 );
-	const auto nPacked = static_cast<std::size_t>( std::max<std::int64_t>( entry.m_nPacked, 0 ) );
-	if ( nPacked < 4 + nProperties || nData + nPacked > zip.size() )
+	if ( nPacked < 4 + nProperties )
 	{
 		return std::nullopt;
 	}
@@ -115,7 +126,7 @@ struct CPackage::Zip_t
 {
 	std::vector<std::byte> m_Bytes;
 	void *m_pReader = mz_zip_reader_create();
-	std::unordered_map<std::string, ZipEntry_t> m_Entries; // path with forward slashes -> entry
+	std::vector<ZipEntry_t> m_Entries; // by PackageEntry_t::m_nStored
 
 	~Zip_t()
 	{
@@ -239,7 +250,8 @@ std::unique_ptr<CPackage> CPackage::OpenMap( const fs::path &file, std::string *
 		added.m_nSize = static_cast<std::uint64_t>( pInfo->uncompressed_size );
 		added.m_nCrc = pInfo->crc;
 		pPackage->m_nTotalSize += added.m_nSize;
-		pZip->m_Entries.emplace( std::move( szPath ), ZipEntry_t{ pInfo->filename, pInfo->compression_method, pInfo->disk_offset, pInfo->compressed_size, pInfo->uncompressed_size } );
+		added.m_nStored = pZip->m_Entries.size();
+		pZip->m_Entries.push_back( ZipEntry_t{ pInfo->filename, pInfo->compression_method, pInfo->disk_offset, pInfo->compressed_size, pInfo->uncompressed_size } );
 	}
 	pPackage->m_pZip = std::move( pZip );
 	pPackage->m_pBsp = std::make_unique<bsp::CBsp>( std::move( *map ) );
@@ -252,11 +264,17 @@ std::unique_ptr<CPackage> CPackage::OpenMap( const fs::path &file, std::string *
 //-----------------------------------------------------------------------------
 void CPackage::BuildIndex()
 {
-	std::ranges::sort( m_Entries, []( const PackageEntry_t &a, const PackageEntry_t &b ) { return NormalizePath( a.m_szPath ) < NormalizePath( b.m_szPath ); } );
+	// Stable, so a repeated path keeps the archive's order and Find gives its first.
+	std::ranges::stable_sort( m_Entries, []( const PackageEntry_t &a, const PackageEntry_t &b ) { return NormalizePath( a.m_szPath ) < NormalizePath( b.m_szPath ); } );
 	m_Index.reserve( m_Entries.size() );
 	for ( std::size_t i = 0; i < m_Entries.size(); i++ )
 	{
-		m_Index.emplace( NormalizePath( m_Entries[ i ].m_szPath ), i );
+		const auto [ it, bNew ] = m_Index.emplace( NormalizePath( m_Entries[ i ].m_szPath ), i );
+		if ( !bNew )
+		{
+			m_Entries[ i ].m_bDuplicate = true;
+			m_Entries[ it->second ].m_bDuplicate = true;
+		}
 	}
 }
 
@@ -275,22 +293,28 @@ const PackageEntry_t *CPackage::Find( std::string_view szPath ) const
 std::optional<std::vector<std::byte>> CPackage::Read( std::string_view szPath ) const
 {
 	const PackageEntry_t *pEntry = Find( szPath );
-	if ( !pEntry )
-	{
-		return std::nullopt;
-	}
+	return pEntry ? Read( *pEntry ) : std::nullopt;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Other zip methods (deflate, from other packers) go through minizip-ng by name, which
+//          finds the first of a repeated name.
+//-----------------------------------------------------------------------------
+std::optional<std::vector<std::byte>> CPackage::Read( const PackageEntry_t &entry ) const
+{
+	const PackageEntry_t *pEntry = &entry;
 	if ( m_pZip )
 	{
-		const auto it = m_pZip->m_Entries.find( pEntry->m_szPath );
-		if ( it == m_pZip->m_Entries.end() )
+		if ( pEntry->m_nStored >= m_pZip->m_Entries.size() )
 		{
 			return std::nullopt;
 		}
-		if ( it->second.m_nMethod == MZ_COMPRESS_METHOD_LZMA )
+		const ZipEntry_t &stored = m_pZip->m_Entries[ pEntry->m_nStored ];
+		if ( stored.m_nMethod == MZ_COMPRESS_METHOD_STORE || stored.m_nMethod == MZ_COMPRESS_METHOD_LZMA )
 		{
-			return ReadLzmaEntry( m_pZip->m_Bytes, it->second );
+			return ReadRawEntry( m_pZip->m_Bytes, stored );
 		}
-		if ( mz_zip_reader_locate_entry( m_pZip->m_pReader, it->second.m_szName.c_str(), 0 ) != MZ_OK )
+		if ( mz_zip_reader_locate_entry( m_pZip->m_pReader, stored.m_szName.c_str(), 0 ) != MZ_OK )
 		{
 			return std::nullopt;
 		}

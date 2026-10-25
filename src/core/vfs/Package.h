@@ -40,6 +40,10 @@ struct PackageEntry_t
 	// The numbered VPK part that holds the data (pak01_003.vpk is 3); -1 when it sits in the
 	// archive itself.
 	int m_nArchive = -1;
+	// Another entry has the same path. Repacked maps can hold a file twice with different data;
+	// each entry still reads its own.
+	bool m_bDuplicate = false;
+	std::size_t m_nStored = 0; // the archive's own index for it (a map's zip entry)
 };
 
 class CPackage
@@ -65,7 +69,9 @@ public:
 	[[nodiscard]] const PackageEntry_t *Find( std::string_view szPath ) const;
 
 	// Paths are as GetEntries gives them, but any case and either slash work.
+	// With duplicate paths, the first in the archive's order is read; Read( entry ) reads any.
 	[[nodiscard]] std::optional<std::vector<std::byte>> Read( std::string_view szPath ) const;
+	[[nodiscard]] std::optional<std::vector<std::byte>> Read( const PackageEntry_t &entry ) const;
 	// Writes one file out to target (its folders are made as needed).
 	bool Extract( std::string_view szPath, const std::filesystem::path &target, std::string *pError = nullptr ) const;
 	// Writes each file under folder, keeping the archive's folders below stripPrefix ("" keeps

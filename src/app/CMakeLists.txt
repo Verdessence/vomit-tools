@@ -33,11 +33,15 @@ add_library(vomit_tools_ui STATIC
         InterfaceMode.h
         KvCard.cpp
         Language.cpp
+        ListenCanvas.cpp
+        ListenCanvas.h
         Language.h
         KvCard.h
         KvClipboard.cpp
         KvClipboard.h
         MainWindow.cpp
+        ManifestDialog.cpp
+        ManifestDialog.h
         MainWindow.h
         MakeMaterialDialog.cpp
         MakeMaterialDialog.h
@@ -49,6 +53,15 @@ add_library(vomit_tools_ui STATIC
         MaterialRenderer.h
         MaterialView.cpp
         MaterialView.h
+        ModelRenderer.cpp
+        ModelRenderer.h
+        ModelDocument.cpp
+        ModelDocument.h
+        ModelEditor.cpp
+        ModelEditor.h
+        ModelEditorPanels.cpp
+        ModelView.cpp
+        ModelView.h
         MenuPicker.cpp
         MenuPicker.h
         ParticleDocument.cpp
@@ -143,7 +156,7 @@ if(Qt6_VERSION VERSION_GREATER_EQUAL 6.7 AND TARGET Qt6::ShaderTools AND TARGET 
     qt_add_shaders(vomit_tools_ui "vomit_tools_shaders"
             PREFIX "/shaders"
             BASE shaders
-            FILES shaders/particle.vert shaders/particle.frag shaders/fullscreen.vert shaders/sky.frag shaders/material.frag)
+            FILES shaders/particle.vert shaders/particle.frag shaders/fullscreen.vert shaders/sky.frag shaders/material.frag shaders/model.vert shaders/model.frag)
     target_link_libraries(vomit_tools_ui PRIVATE Qt6::GuiPrivate)
     target_compile_definitions(vomit_tools_ui PUBLIC VOMIT_TOOLS_GPU)
     message(STATUS "vomit-tools: previews on the graphics card")

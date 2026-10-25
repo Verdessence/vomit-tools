@@ -338,6 +338,7 @@ void CSoundDocument::InsertChild( const NodePath_t &parent, std::size_t nIndex, 
 		pBlock->InsertChild( nIndex, std::move( child ) );
 		return true;
 	} );
+	ShiftTicks( parent, nIndex, 1 );
 }
 
 //-----------------------------------------------------------------------------
@@ -354,6 +355,7 @@ void CSoundDocument::RemoveNode( const NodePath_t &path )
 	if ( path.size() == 1 )
 	{
 		m_pUndo->push( new CRemoveEntryCommand( this, path[ 0 ], szDescription ) );
+		ShiftTicks( {}, path[ 0 ], -1 );
 		return;
 	}
 	EditEntry( path[ 0 ], szDescription, [ & ]( CNode &entry ) {
@@ -365,6 +367,7 @@ void CSoundDocument::RemoveNode( const NodePath_t &path )
 		pParent->RemoveChild( path.back() );
 		return true;
 	} );
+	ShiftTicks( ParentOf( path ), path.back(), -1 );
 }
 
 //-----------------------------------------------------------------------------
@@ -372,5 +375,88 @@ void CSoundDocument::RemoveNode( const NodePath_t &path )
 //-----------------------------------------------------------------------------
 void CSoundDocument::InsertEntry( std::size_t nIndex, CNode entry, const QString &szDescription )
 {
-	m_pUndo->push( new CInsertEntryCommand( this, std::min( nIndex, m_Document.m_Roots.size() ), std::move( entry ), szDescription ) );
+	const std::size_t nAt = std::min( nIndex, m_Document.m_Roots.size() );
+	m_pUndo->push( new CInsertEntryCommand( this, nAt, std::move( entry ), szDescription ) );
+	ShiftTicks( {}, nAt, 1 );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+void CSoundDocument::SetSoloed( const NodePath_t &rule, bool bSoloed )
+{
+	if ( rule.size() != 2 || m_Soloed.contains( rule ) == bSoloed )
+	{
+		return;
+	}
+	bSoloed ? void( m_Soloed.insert( rule ) ) : void( m_Soloed.erase( rule ) );
+	emit SoloIgnoreChanged( rule[ 0 ] );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+void CSoundDocument::SetIgnored( const NodePath_t &rule, bool bIgnored )
+{
+	if ( rule.size() != 2 || m_Ignored.contains( rule ) == bIgnored )
+	{
+		return;
+	}
+	bIgnored ? void( m_Ignored.insert( rule ) ) : void( m_Ignored.erase( rule ) );
+	emit SoloIgnoreChanged( rule[ 0 ] );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+void CSoundDocument::ApplySoloIgnore( std::size_t nRoot, xv::sound::SoundscapePlan_t &plan ) const
+{
+	std::set<std::size_t> soloed;
+	std::set<std::size_t> ignored;
+	for ( const auto &rule : m_Soloed )
+	{
+		if ( rule[ 0 ] == nRoot )
+		{
+			soloed.insert( rule[ 1 ] );
+		}
+	}
+	for ( const auto &rule : m_Ignored )
+	{
+		if ( rule[ 0 ] == nRoot )
+		{
+			ignored.insert( rule[ 1 ] );
+		}
+	}
+	xv::sound::ApplySoloIgnore( plan, ignored, soloed );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Ticks are { entry, rule } paths: an entry insert or delete moves the first index, a
+//          rule insert or delete in that entry the second.
+//-----------------------------------------------------------------------------
+void CSoundDocument::ShiftTicks( const NodePath_t &parent, std::size_t nFrom, int nBy )
+{
+	if ( parent.size() > 1 )
+	{
+		return;
+	}
+	const std::size_t nLevel = parent.size();
+	for ( auto *pTicks : { &m_Soloed, &m_Ignored } )
+	{
+		std::set<NodePath_t> moved;
+		for ( NodePath_t rule : *pTicks )
+		{
+			const bool bUnder = nLevel == 0 || rule[ 0 ] == parent[ 0 ];
+			if ( bUnder && rule[ nLevel ] >= nFrom )
+			{
+				if ( nBy < 0 && rule[ nLevel ] == nFrom )
+				{
+					continue;
+				}
+				rule[ nLevel ] = static_cast<std::size_t>( static_cast<std::ptrdiff_t>( rule[ nLevel ] ) + nBy );
+			}
+			moved.insert( std::move( rule ) );
+		}
+		*pTicks = std::move( moved );
+	}
 }

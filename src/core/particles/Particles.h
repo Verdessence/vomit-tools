@@ -213,6 +213,16 @@ struct SystemSummary_t
 };
 [[nodiscard]] std::vector<SystemSummary_t> Summarize( const dmx::Document_t &document, std::string_view szFile );
 
+// The particle files a map needs for the systems it uses (info_particle_system's effect_name), the
+// systems those spawn included.
+struct NeededFiles_t
+{
+	std::map<std::string, std::vector<std::string>> m_Files; // file -> the used systems it defines
+	std::vector<std::string> m_Missing;                       // used systems no file defines
+};
+// Systems are matched by name in any case; where two files define one, the first in summaries wins.
+[[nodiscard]] NeededFiles_t NeededFiles( const std::vector<SystemSummary_t> &summaries, const std::vector<std::string> &used );
+
 struct SearchHit_t
 {
 	const SystemSummary_t *m_pSystem = nullptr;
@@ -265,5 +275,11 @@ inline constexpr std::string_view MANIFEST_PATH = "particles/particles_manifest.
 // Adds path to the manifest's block, creating the block in an empty manifest. Returns false if it
 // was already listed.
 bool AddToManifest( kv1::CDocument &manifest, std::string_view szPath, bool bPrecache = false );
+// Takes every listing of path out (with or without its '!'). Returns false if it wasn't listed.
+bool RemoveFromManifest( kv1::CDocument &manifest, std::string_view szPath );
+// Whether the manifest lists path with a '!' (every system in it precached).
+[[nodiscard]] bool IsPrecached( const kv1::CDocument &manifest, std::string_view szPath );
+// Puts the '!' on path's listing or takes it off. Returns false if it isn't listed.
+bool SetPrecached( kv1::CDocument &manifest, std::string_view szPath, bool bPrecache );
 
 } // namespace xv::particles

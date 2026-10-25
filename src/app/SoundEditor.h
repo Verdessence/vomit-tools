@@ -15,6 +15,7 @@
 #include "sound/SoundLint.h"
 
 class CKvCard;
+class CListenCanvas;
 class QAction;
 class QLabel;
 class QLineEdit;
@@ -51,6 +52,7 @@ private:
 	void Lint();
 	void ShowIssueList();
 	void JumpTo( const xv::sound::NodePath_t &path );
+	void ShowUsedPositions();
 	void AddEntry();
 	void DuplicateEntry();
 	void CopyEntry();
@@ -69,8 +71,11 @@ private:
 	QAction *m_pDelete = nullptr;
 	QAction *m_pAddToManifest = nullptr;
 	CKvCard *m_pCard = nullptr;
+	QAction *m_pListenAction = nullptr;
+	CListenCanvas *m_pListen = nullptr;
 
 	std::optional<std::size_t> m_Current;
+	std::optional<std::size_t> m_PlayingSoundscape; // the entry this editor last played as a whole, while it plays
 	std::vector<xv::sound::Issue_t> m_Issues;
 	std::optional<xv::sound::NodePath_t> m_PendingEdit;
 	bool m_bListedInManifest = true;

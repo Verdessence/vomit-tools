@@ -266,6 +266,19 @@ void CEngine::Stop( Voice_t nVoice )
 //-----------------------------------------------------------------------------
 // Purpose:
 //-----------------------------------------------------------------------------
+void CEngine::SetMix( Voice_t nVoice, float flVolume, float flPan )
+{
+	const auto it = m_pImpl->m_Voices.find( nVoice );
+	if ( it != m_pImpl->m_Voices.end() )
+	{
+		ma_sound_set_volume( &it->second->m_Sound, flVolume );
+		ma_sound_set_pan( &it->second->m_Sound, flPan );
+	}
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
 void CEngine::StopAll()
 {
 	for ( auto &[ voice, playing ] : m_pImpl->m_Voices )

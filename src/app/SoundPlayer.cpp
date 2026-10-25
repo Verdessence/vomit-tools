@@ -196,11 +196,13 @@ xv::audio::CEngine::Voice_t CSoundPlayer::Start( std::shared_ptr<const xv::audio
 		return 0;
 	}
 	xv::audio::PlayParams_t params;
-	params.m_flVolume = static_cast<float>( request.m_flVolume );
+	const xv::sound::PositionMix_t mix = MixFor( request );
+	params.m_flVolume = static_cast<float>( request.m_flVolume * mix.m_flGain );
 	params.m_flPitch = static_cast<float>( request.m_flPitch / 100.0 );
 	params.m_bLoop = request.m_bLoop;
 	params.m_flDelaySeconds = request.m_flDelaySeconds;
 	params.m_flStartSeconds = flStartSeconds;
+	params.m_flPan = static_cast<float>( mix.m_flPan );
 	// "position random" puts each sound somewhere around the listener; a stereo pan stands in for that.
 	if ( request.m_bRandomPosition )
 	{
@@ -213,7 +215,48 @@ xv::audio::CEngine::Voice_t CSoundPlayer::Start( std::shared_ptr<const xv::audio
 		return 0;
 	}
 	SetActive( true );
+	if ( request.m_Position && *request.m_Position >= 0 && *request.m_Position < 8 )
+	{
+		m_Positioned.emplace( nVoice, request );
+		emit PositionHeard( *request.m_Position );
+	}
 	return nVoice;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Positions outside 0-7, or with listening off, play as written.
+//-----------------------------------------------------------------------------
+xv::sound::PositionMix_t CSoundPlayer::MixFor( const PlayRequest_t &request ) const
+{
+	if ( !m_Scene.m_bOn || !request.m_Position || *request.m_Position < 0 || *request.m_Position >= 8 )
+	{
+		return {};
+	}
+	const QPointF offset = m_Scene.m_Positions[ static_cast<std::size_t>( *request.m_Position ) ] - m_Scene.m_Listener;
+	return xv::sound::MixAt( request.m_SoundLevel, offset.x(), offset.y() );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+void CSoundPlayer::SetListenScene( const ListenScene_t &scene )
+{
+	m_Scene = scene;
+	if ( !m_pEngine )
+	{
+		return;
+	}
+	for ( auto it = m_Positioned.begin(); it != m_Positioned.end(); )
+	{
+		if ( !m_pEngine->Playing( it->first ) )
+		{
+			it = m_Positioned.erase( it );
+			continue;
+		}
+		const xv::sound::PositionMix_t mix = MixFor( it->second );
+		m_pEngine->SetMix( it->first, static_cast<float>( it->second.m_flVolume * mix.m_flGain ), static_cast<float>( mix.m_flPan ) );
+		++it;
+	}
 }
 
 //-----------------------------------------------------------------------------
@@ -355,6 +398,7 @@ void CSoundPlayer::Stop()
 {
 	m_Simulation.reset();
 	m_nLastVoice = 0;
+	m_Positioned.clear();
 	if ( m_pEngine )
 	{
 		m_pEngine->StopAll();

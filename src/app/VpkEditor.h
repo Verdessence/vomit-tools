@@ -19,8 +19,10 @@
 namespace xv::vfs
 {
 class CPackage;
-}
+struct PackageEntry_t;
+} // namespace xv::vfs
 
+class CEntityView;
 class CPackageFilter;
 class CPackageModel;
 class CSoundPlayer;
@@ -41,6 +43,11 @@ public:
 
 	[[nodiscard]] const xv::vfs::CPackage &GetPackage() const { return *m_pPackage; }
 	[[nodiscard]] QString GetFileName() const;
+	// A map's Stripper config edited in its Entities tab: unsaved changes, and saving them.
+	[[nodiscard]] bool IsModified() const;
+	bool Save();
+	// The Entities tab; null unless a map is open.
+	[[nodiscard]] CEntityView *GetEntityView() const { return m_pEntities; }
 	// Reads from the archive first, then the game; for editors opened from it.
 	[[nodiscard]] const xv::material::Reader_t &GetReader() const { return m_pfnRead; }
 	// Which files have an editor: those get an Open in Editor button and open on double-click.
@@ -65,6 +72,9 @@ signals:
 	void StatusMessage( const QString &szText );
 	// A file the SetCanOpen test passed was asked to open in its editor.
 	void OpenRequested( const QString &szPath );
+	// A map's "Particles Manifest…" button: generate its <map>_particles.txt.
+	void MapParticlesRequested();
+	void ModifiedChanged( bool bModified );
 
 private:
 	void ApplySearch();
@@ -73,6 +83,7 @@ private:
 	void ShowContextMenu( const QPoint &at );
 	[[nodiscard]] QString AskExportFolder();
 	void SetPreviewWidget( QWidget *pView );
+	void PreviewEntry( const xv::vfs::PackageEntry_t &entry );
 
 	std::unique_ptr<xv::vfs::CPackage> m_pPackage;
 	CSoundPlayer *m_pPlayer = nullptr;
@@ -85,6 +96,7 @@ private:
 	QTimer *m_pSearchDelay = nullptr;
 	QLabel *m_pCount = nullptr;
 	QWidget *m_pPreviewHost = nullptr;
+	CEntityView *m_pEntities = nullptr;
 	QString m_szPreviewed;
 	int m_nMatches = 0;
 };

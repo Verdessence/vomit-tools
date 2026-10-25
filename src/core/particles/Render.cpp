@@ -297,8 +297,27 @@ void FillMesh( const ScreenMesh_t &mesh, std::vector<float> &buffer, std::vector
 				{
 					continue;
 				}
-				flNearest = flDepth;
 				const auto mix = [ & ]( float fa, float fb, float fc ) { return ( w0 * fa * flInvA + w1 * fb * flInvB + w2 * fc * flInvC ) / flInv; };
+				if ( mesh.m_pShading )
+				{
+					const auto mixVector = [ & ]( CVec3 va, CVec3 vb, CVec3 vc ) { return CVec3{ mix( va.m_flX, vb.m_flX, vc.m_flX ), mix( va.m_flY, vb.m_flY, vc.m_flY ), mix( va.m_flZ, vb.m_flZ, vc.m_flZ ) }; };
+					const auto &sa = a.m_Surface, &sb = b.m_Surface, &sc = c.m_Surface;
+					material::MeshSample_t sample{ mixVector( sa.m_vecPosition, sb.m_vecPosition, sc.m_vecPosition ), mixVector( sa.m_vecNormal, sb.m_vecNormal, sc.m_vecNormal ), mixVector( sa.m_vecTangent, sb.m_vecTangent, sc.m_vecTangent ), mixVector( sa.m_vecBitangent, sb.m_vecBitangent, sc.m_vecBitangent ), mix( a.m_Uv[ 0 ], b.m_Uv[ 0 ], c.m_Uv[ 0 ] ), mix( a.m_Uv[ 1 ], b.m_Uv[ 1 ], c.m_Uv[ 1 ] ) };
+					const auto fragment = material::ShadeMesh( *mesh.m_pShading, sample, mesh.m_Options );
+					if ( fragment.m_bDiscard )
+						continue;
+					float *pOut = buffer.data() + ( static_cast<std::size_t>( y ) * nWidth + x ) * 3;
+					const auto gamma = []( float v ) {v=std::clamp(v,0.0f,1.0f);return v<=0.0031308f?v*12.92f:1.055f*std::pow(v,1.0f/2.4f)-0.055f; };
+					const std::array<float, 3> color{ gamma( fragment.m_vecColor.m_flX ), gamma( fragment.m_vecColor.m_flY ), gamma( fragment.m_vecColor.m_flZ ) };
+					for ( int k = 0; k < 3; k++ )
+						pOut[ k ] = fragment.m_bAdditive ? pOut[ k ] + color[ k ] * fragment.m_flAlpha : fragment.m_bBlend ? pOut[ k ] * ( 1 - fragment.m_flAlpha ) + color[ k ] * fragment.m_flAlpha
+																														   : color[ k ];
+					if ( !fragment.m_bBlend && !fragment.m_bAdditive )
+						flNearest = flDepth;
+					continue;
+				}
+				flNearest = flDepth;
+
 				std::array<float, 4> texel{ 0.6f, 0.6f, 0.6f, 1.0f };
 				if ( pImage )
 				{
@@ -922,7 +941,7 @@ std::vector<ScreenMesh_t> LayoutMesh( const model::CModel &model, const model::C
 		if ( const auto at = camera.Project( toWorld.Apply( vertex.m_vecPosition ) ) )
 		{
 			const float flLight = 0.5f + 0.7f * std::max( 0.0f, Dot( Normalized( toWorld.Rotate( vertex.m_vecNormal ) ), vecLight ) );
-			projected[ i ] = ScreenVertex_t{ *at, vertex.m_Uv, { flLight, flLight, flLight } };
+			projected[ i ] = ScreenVertex_t{ *at, vertex.m_Uv, { flLight, flLight, flLight }, { toWorld.Apply( vertex.m_vecPosition ), toWorld.Rotate( vertex.m_vecNormal ), {}, {}, vertex.m_Uv[ 0 ], vertex.m_Uv[ 1 ] } };
 		}
 	}
 	for ( const model::Mesh_t &mesh : pModel->m_Meshes )
@@ -1008,6 +1027,9 @@ void RenderScene( const CCamera &camera, std::span<const ScreenMesh_t> meshes, s
 		depth.assign( static_cast<std::size_t>( nWidth ) * static_cast<std::size_t>( nHeight ), std::numeric_limits<float>::infinity() );
 	}
 
+	Sprite_t white;
+	white.m_Mips.emplace_back( 1, 1 );
+	std::ranges::fill( white.m_Mips[ 0 ].m_Pixels, std::uint8_t{ 255 } );
 	std::vector<CQuad> quads;
 	for ( const ScreenQuad_t &shape : shapes )
 	{
@@ -1022,8 +1044,9 @@ void RenderScene( const CCamera &camera, std::span<const ScreenMesh_t> meshes, s
 		quad.m_flDepth = shape.m_flDepth;
 		quad.m_nBlend = shape.m_nBlend;
 		quad.m_flAddSelf = shape.m_flAddSelf;
-		const float flTexels = ( shape.m_Rect[ 2 ] - shape.m_Rect[ 0 ] ) * static_cast<float>( shape.m_pSprite->m_Mips[ 0 ].m_nWidth );
-		quad.m_pImage = &MipFor( *shape.m_pSprite, flTexels, shape.m_flPixels );
+		const Sprite_t &sprite = shape.m_pSprite && !shape.m_pSprite->m_Mips.empty() ? *shape.m_pSprite : white;
+		const float flTexels = ( shape.m_Rect[ 2 ] - shape.m_Rect[ 0 ] ) * static_cast<float>( sprite.m_Mips[ 0 ].m_nWidth );
+		quad.m_pImage = &MipFor( sprite, flTexels, shape.m_flPixels );
 		if ( quad.Finish( nWidth, nHeight ) )
 		{
 			quads.push_back( quad );

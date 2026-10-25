@@ -622,8 +622,15 @@ Fragment_t Shade( const Shading_t &s, const Surface_t &surface, const PreviewOpt
 			const float flDot = Dot( normal, light );
 			flDiffuse = s.m_bHalfLambert ? ( flDot * 0.5f + 0.5f ) * ( flDot * 0.5f + 0.5f ) : std::max( 0.0f, flDot );
 		}
-		const float flAmbient = 0.22f;
-		colour = albedo * ( flAmbient + 0.95f * flDiffuse );
+		CVec3 vecAmbient{ 0.22f, 0.22f, 0.22f };
+		if ( options.m_bAmbientCube )
+		{
+			const auto x = normal.m_flX >= 0 ? CVec3{ 0.20f, 0.21f, 0.23f } : CVec3{ 0.16f, 0.17f, 0.20f };
+			const auto y = normal.m_flY >= 0 ? CVec3{ 0.30f, 0.32f, 0.36f } : CVec3{ 0.10f, 0.09f, 0.08f };
+			const auto z = normal.m_flZ >= 0 ? CVec3{ 0.22f, 0.23f, 0.25f } : CVec3{ 0.14f, 0.15f, 0.18f };
+			vecAmbient = x * ( normal.m_flX * normal.m_flX ) + y * ( normal.m_flY * normal.m_flY ) + z * ( normal.m_flZ * normal.m_flZ );
+		}
+		colour = Times( albedo, vecAmbient + CVec3{ 1, 1, 1 } * ( flDiffuse * 0.95f ) );
 	}
 	if ( s.m_Detail.IsValid() && ( s.m_nDetailMode == 5 || s.m_nDetailMode == 6 ) )
 	{
@@ -1007,4 +1014,12 @@ std::vector<std::string> PreviewNotes( const CMaterial &material, const CTexture
 	return notes;
 }
 
+//-----------------------------------------------------------------------------
+// Purpose: Shades an interpolated model fragment through the material preview's shared path.
+//-----------------------------------------------------------------------------
+MeshFragment_t ShadeMesh( const Shading_t &shading, const MeshSample_t &surface, const PreviewOptions_t &options )
+{
+	const auto fragment = Shade( shading, { surface.m_vecPosition, Normalized( surface.m_vecNormal ), Normalized( surface.m_vecTangent ), Normalized( surface.m_vecBitangent ), surface.m_flU, surface.m_flV }, options, 0.5f );
+	return { fragment.m_vecColor, fragment.m_flAlpha, fragment.m_bDiscard, fragment.m_bBlend, fragment.m_bAdditive };
+}
 } // namespace xv::material

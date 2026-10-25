@@ -12,6 +12,7 @@
 #include <functional>
 #include <optional>
 #include <random>
+#include <set>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -71,6 +72,9 @@ struct SoundscapeRule_t
 	bool m_bRandomPosition = false;
 	std::optional<double> m_SoundLevel;
 	std::string m_szOrigin;
+	// Which child block of the planned soundscape this came from (a playsoundscape's index for
+	// everything nested in it); what solo and ignore go by.
+	std::size_t m_nSource = 0;
 };
 
 struct SoundscapePlan_t
@@ -85,6 +89,22 @@ using SoundscapeLookup_t = std::function<const kv1::CNode *( std::string_view sz
 // Every looping and random sound a soundscape plays, nested playsoundscapes included, with their
 // volume scaling and position overrides applied.
 [[nodiscard]] SoundscapePlan_t PlanSoundscape( const kv1::CNode &soundscape, const SoundscapeLookup_t &pfnLookup );
+
+// How a sound at a position is heard from the listener: its loudness scaled by distance, and a
+// stereo pan for its direction. Distances are in world units, x to the listener's right, y ahead.
+struct PositionMix_t
+{
+	double m_flGain = 1; // 0-1
+	double m_flPan = 0;  // -1 left to 1 right
+};
+// The engine's falloff: the gain drops linearly with distance times the sound level's attenuation,
+// reaching nothing at its nominal clip distance (1000 units) over the attenuation. No sound level
+// means heard the same everywhere.
+[[nodiscard]] PositionMix_t MixAt( std::optional<double> soundLevel, double flRight, double flAhead );
+
+// Drops the rules whose source block is ignored, or, when any are soloed, every rule whose source
+// isn't soloed. Indices are the soundscape's child indices, as in SoundscapeRule_t::m_nSource.
+void ApplySoloIgnore( SoundscapePlan_t &plan, const std::set<std::size_t> &ignored, const std::set<std::size_t> &soloed );
 
 // Runs a soundscape plan on a clock: start() returns the loops, Advance() the random sounds that
 // came due. Each random sound waits a random time from its interval before playing.

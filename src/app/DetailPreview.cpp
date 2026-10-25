@@ -10,11 +10,14 @@
 #include <cmath>
 #include <numbers>
 
+#include <QCheckBox>
+#include <QDoubleSpinBox>
 #include <QComboBox>
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QMouseEvent>
 #include <QPainter>
+#include <QPolygonF>
 #include <QPushButton>
 #include <QSpinBox>
 #include <QTimer>
@@ -128,8 +131,23 @@ protected:
 		camera.m_flDistance = std::clamp( camera.m_flDistance * ( pEvent->angleDelta().y() > 0 ? 0.85f : 1.18f ), 20.0f, 8000.0f );
 		m_pPreview->Redraw();
 	}
-	void mouseDoubleClickEvent( QMouseEvent * ) override
+	void mouseDoubleClickEvent( QMouseEvent *pEvent ) override
 	{
+		const QPointF at = pEvent->position() * m_pPreview->devicePixelRatioF();
+		const CDetailPreview::ModelTriangle_t *pPicked = nullptr;
+		for ( const auto &triangle : m_pPreview->m_ModelTriangles )
+		{
+			QPolygonF polygon;
+			for ( const auto &corner : triangle.m_Corners )
+				polygon << corner;
+			if ( polygon.containsPoint( at, Qt::OddEvenFill ) && ( !pPicked || triangle.m_flDepth < pPicked->m_flDepth ) )
+				pPicked = &triangle;
+		}
+		if ( pPicked )
+		{
+			emit m_pPreview->OpenModelRequested( pPicked->m_szPath );
+			return;
+		}
 		particles::CCamera &camera = m_pPreview->m_Camera;
 		camera.m_vecTarget = {};
 		camera.m_flYaw = 135.0f;
@@ -181,6 +199,46 @@ CDetailPreview::CDetailPreview( QWidget *pParent )
 	pControls->addWidget( pReroll );
 	pControls->addWidget( m_pSize );
 	pControls->addWidget( m_pBlend, 1 );
+	// Sway: the tops of sprites bend with the wind by their entry's share of the game's maximum.
+	m_pSway = new QCheckBox( tr( "Sway" ) );
+	m_pSway->setObjectName( QStringLiteral( "detailSway" ) );
+	m_pSway->setToolTip( tr( "Animate the sprites bending in the wind, by each entry's sway" ) );
+	m_pMaxSway = new QDoubleSpinBox;
+	m_pMaxSway->setObjectName( QStringLiteral( "detailMaxSway" ) );
+	m_pMaxSway->setRange( 0.0, 100.0 );
+	m_pMaxSway->setDecimals( 1 );
+	m_pMaxSway->setValue( 5.0 );
+	m_pMaxSway->setPrefix( tr( "max " ) );
+	m_pMaxSway->setSuffix( tr( " units" ) );
+	m_pMaxSway->setToolTip( tr( "How far a sprite with sway 1 bends: the game's cl_detail_max_sway" ) );
+	m_pWind = new QSpinBox;
+	m_pWind->setObjectName( QStringLiteral( "detailWind" ) );
+	m_pWind->setRange( 0, 359 );
+	m_pWind->setWrapping( true );
+	m_pWind->setPrefix( tr( "wind " ) );
+	m_pWind->setSuffix( QStringLiteral( "°" ) );
+	m_pWind->setToolTip( tr( "Which way the wind blows (yaw); a map sets it with env_wind" ) );
+	auto *pSwayControls = new QHBoxLayout;
+	pSwayControls->addWidget( m_pSway );
+	pSwayControls->addWidget( m_pMaxSway );
+	pSwayControls->addWidget( m_pWind );
+	pSwayControls->addStretch();
+	m_pSwayTimer = new QTimer( this );
+	m_pSwayTimer->setInterval( 40 );
+	connect( m_pSwayTimer, &QTimer::timeout, this, [ this ] {
+		if ( isVisible() )
+		{
+			Redraw();
+		}
+	} );
+	connect( m_pSway, &QCheckBox::toggled, this, [ this ]( bool bOn ) {
+		bOn ? m_pSwayTimer->start() : m_pSwayTimer->stop();
+		m_SwayClock.start();
+		Redraw();
+	} );
+	connect( m_pMaxSway, &QDoubleSpinBox::valueChanged, this, &CDetailPreview::Redraw );
+	connect( m_pWind, &QSpinBox::valueChanged, this, &CDetailPreview::Redraw );
+
 	m_pNotes = new QLabel;
 	m_pNotes->setObjectName( QStringLiteral( "detailPreviewNotes" ) );
 	m_pNotes->setWordWrap( true );
@@ -188,6 +246,7 @@ CDetailPreview::CDetailPreview( QWidget *pParent )
 	pLayout->setContentsMargins( 0, 0, 0, 0 );
 	pLayout->addWidget( m_pView, 1 );
 	pLayout->addLayout( pControls );
+	pLayout->addLayout( pSwayControls );
 	pLayout->addWidget( m_pNotes );
 
 	connect( m_pSeed, &QSpinBox::valueChanged, this, &CDetailPreview::Redraw );
@@ -316,11 +375,33 @@ void CDetailPreview::RenderNow()
 }
 
 //-----------------------------------------------------------------------------
+// Purpose: How far a sprite's top is pushed now: the wind's direction times the game's maximum
+//          times the entry's sway, swinging with a slow wave and a quicker flutter on top. The
+//          prop's position sets where in the swing it is, so a field ripples rather than moving
+//          as one.
+//-----------------------------------------------------------------------------
+CVec3 CDetailPreview::SwayOffset( const CVec3 &vecOrigin, const std::vector<double> &sway ) const
+{
+	if ( !m_pSway->isChecked() || sway.size() != 1 || sway.front() <= 0.0 )
+	{
+		return {};
+	}
+	const float flSeconds = static_cast<float>( m_SwayClock.isValid() ? m_SwayClock.elapsed() : 0 ) / 1000.0f;
+	const float flPhase = ( vecOrigin.m_flX + vecOrigin.m_flY ) * 0.01f;
+	const float flSwing = 0.75f * std::sin( flSeconds * 1.6f + flPhase ) + 0.25f * std::sin( flSeconds * 4.1f + flPhase * 2.3f );
+	// Leaning with the wind more than against it, as grass does.
+	const float flAmount = static_cast<float>( m_pMaxSway->value() * std::min( sway.front(), 1.0 ) ) * ( 0.5f + 0.5f * flSwing );
+	const float flWind = static_cast<float>( m_pWind->value() ) * std::numbers::pi_v<float> / 180.0f;
+	return CVec3{ std::cos( flWind ), std::sin( flWind ), 0.0f } * flAmount;
+}
+
+//-----------------------------------------------------------------------------
 // Purpose: The ground, then models and sprites, from the camera.
 //-----------------------------------------------------------------------------
 void CDetailPreview::Render()
 {
 	CDebugTimer timer( QStringLiteral( "drawing the 3D detail preview" ) );
+	m_ModelTriangles.clear();
 	const qreal flRatio = m_pView->devicePixelRatioF();
 	m_Camera.m_nWidth = std::max( 64, static_cast<int>( m_pView->width() * flRatio ) );
 	m_Camera.m_nHeight = std::max( 64, static_cast<int>( m_pView->height() * flRatio ) );
@@ -400,6 +481,19 @@ void CDetailPreview::Render()
 			const model::CTransform toWorld = model::CTransform::Translation( prop.m_vecOrigin ) * model::CTransform::Rotation( 0.0f, prop.m_flYaw, 0.0f );
 			for ( particles::ScreenMesh_t &mesh : particles::LayoutMesh( *loaded.m_Model, toWorld, m_Camera, [ &loaded ]( std::size_t i ) { return i < loaded.m_Sprites.size() ? loaded.m_Sprites[ i ].get() : nullptr; } ) )
 			{
+				for ( std::size_t i = 0; i + 2 < mesh.m_Vertices.size(); i += 3 )
+				{
+					ModelTriangle_t triangle;
+					triangle.m_szPath = QString::fromStdString( szModel );
+					for ( int j = 0; j < 3; j++ )
+					{
+						const auto &p = mesh.m_Vertices[ i + j ].m_vecPosition;
+						triangle.m_Corners[ j ] = { p[ 0 ], p[ 1 ] };
+						triangle.m_flDepth += p[ 2 ] / 3.0f;
+					}
+					m_ModelTriangles.push_back( triangle );
+				}
+
 				if ( isPicked( prop.m_Entry ) )
 				{
 					for ( particles::ScreenVertex_t &vertex : mesh.m_Vertices )
@@ -427,9 +521,11 @@ void CDetailPreview::Render()
 		const float flRight = flLeft + flWidth;
 		const float flBottom = -static_cast<float>( size[ 1 ] ) * flHeight;
 		const float flTop = flBottom + flHeight;
+		// The top edge leans along the wind; each prop swings at its own point of the cycle.
+		const CVec3 vecSway = SwayOffset( prop.m_vecOrigin, NumbersOf( *pEntry, "sway" ) );
 		const auto addQuad = [ & ]( CVec3 vecAcross, CVec3 vecUpward, CVec3 vecOffset ) {
 			const CVec3 vecOrigin = prop.m_vecOrigin + vecOffset;
-			const CVec3 corners[ 4 ] = { vecOrigin + vecAcross * flLeft + vecUpward * flTop, vecOrigin + vecAcross * flRight + vecUpward * flTop,
+			const CVec3 corners[ 4 ] = { vecOrigin + vecAcross * flLeft + vecUpward * flTop + vecSway, vecOrigin + vecAcross * flRight + vecUpward * flTop + vecSway,
 				vecOrigin + vecAcross * flRight + vecUpward * flBottom, vecOrigin + vecAcross * flLeft + vecUpward * flBottom };
 			particles::ScreenQuad_t quad;
 			for ( std::size_t c = 0; c < 4; c++ )

@@ -5,6 +5,7 @@
 //          the ground in its material, blended from one end to the other so each group shows
 //          where its alpha is, sprites from the sheet in their orientation and shape, and models.
 //          Drag to turn around it, right-drag to move, the wheel zooms; the picked entry is tinted.
+//          Sprites can sway in the wind, by each entry's sway.
 //
 //===========================================================================//
 #pragma once
@@ -14,6 +15,7 @@
 #include <optional>
 #include <string>
 
+#include <QElapsedTimer>
 #include <QImage>
 #include <QWidget>
 
@@ -23,7 +25,10 @@
 #include "model/Model.h"
 #include "particles/Render.h"
 
+class QCheckBox;
 class QComboBox;
+class QDoubleSpinBox;
+class QTimer;
 class QLabel;
 class QSpinBox;
 class CDetailView;
@@ -53,6 +58,9 @@ public:
 	// Draws now rather than at the next turn of the event loop.
 	void RenderNow();
 
+signals:
+	void OpenModelRequested( const QString &szPath );
+
 protected:
 	void showEvent( QShowEvent *pEvent ) override;
 
@@ -66,6 +74,7 @@ private:
 	void Redraw();
 	void Render();
 	const Model_t &ModelFor( const std::string &szPath );
+	[[nodiscard]] xv::CVec3 SwayOffset( const xv::CVec3 &vecOrigin, const std::vector<double> &sway ) const;
 
 	const xv::kv1::CDocument *m_pDocument = nullptr;
 	xv::detail::NodePath_t m_Type;
@@ -77,6 +86,13 @@ private:
 	std::map<std::string, Model_t> m_Models;
 	xv::particles::CCamera m_Camera;
 	QImage m_Image;
+	struct ModelTriangle_t
+	{
+		std::array<QPointF, 3> m_Corners;
+		QString m_szPath;
+		float m_flDepth = 0;
+	};
+	std::vector<ModelTriangle_t> m_ModelTriangles;
 	std::size_t m_nPlaced = 0;
 	bool m_bQueued = false;
 	CDetailView *m_pView = nullptr;
@@ -84,4 +100,9 @@ private:
 	QComboBox *m_pSize = nullptr;
 	QComboBox *m_pBlend = nullptr;
 	QLabel *m_pNotes = nullptr;
+	QCheckBox *m_pSway = nullptr;
+	QDoubleSpinBox *m_pMaxSway = nullptr;
+	QSpinBox *m_pWind = nullptr;
+	QTimer *m_pSwayTimer = nullptr;
+	QElapsedTimer m_SwayClock;
 };

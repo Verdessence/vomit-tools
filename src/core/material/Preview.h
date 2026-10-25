@@ -75,6 +75,7 @@ struct PreviewOptions_t
 	CVec3 m_vecLight{ -0.45f, 0.55f, 0.7f }; // towards the light: x right, y up, z out of the screen
 	float m_flRepeat = 1.0f;                // times the texture fits across the square (twice that around the ball)
 	Backdrop_t m_nBackdrop = Backdrop_t::BACKDROP_CHECKERS;
+	bool m_bAmbientCube = false; // model lighting from six broad directions
 	bool m_bHdr = false;       // a sky's HDR texture rather than its LDR one
 	float m_flExposure = 0.0f; // stops, for HDR
 };
@@ -179,4 +180,18 @@ struct Shading_t
 // What the preview leaves out or only approximates for this material, a line each.
 [[nodiscard]] std::vector<std::string> PreviewNotes( const CMaterial &material, const CTextureSet &textures );
 
+// A mesh surface in the preview's camera coordinates. The eye is at (0,0,3).
+struct MeshSample_t
+{
+	CVec3 m_vecPosition, m_vecNormal, m_vecTangent, m_vecBitangent;
+	float m_flU = 0, m_flV = 0;
+};
+struct MeshFragment_t
+{
+	CVec3 m_vecColor;
+	float m_flAlpha = 1;
+	bool m_bDiscard = false, m_bBlend = false, m_bAdditive = false;
+};
+// Uses the same shading as flat and sphere previews, including material masks and normal maps.
+[[nodiscard]] MeshFragment_t ShadeMesh( const Shading_t &shading, const MeshSample_t &surface, const PreviewOptions_t &options );
 } // namespace xv::material

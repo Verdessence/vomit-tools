@@ -11,6 +11,7 @@
 #include <cstddef>
 #include <deque>
 #include <filesystem>
+#include <array>
 #include <map>
 #include <memory>
 #include <optional>
@@ -19,6 +20,7 @@
 
 #include <QElapsedTimer>
 #include <QObject>
+#include <QPointF>
 #include <QString>
 
 #include "audio/Audio.h"
@@ -63,6 +65,21 @@ public:
 	[[nodiscard]] std::optional<double> Position( xv::audio::CEngine::Voice_t nVoice );
 	void SetVolume( float flVolume );
 
+	// Listening from positions: where the listener stands and where env_soundscape's eight
+	// position targets are, in world units (x to the right, y ahead). Sounds at a position are
+	// then heard by distance and direction; off, positions aren't simulated.
+	struct ListenScene_t
+	{
+		bool m_bOn = false;
+		QPointF m_Listener;
+		std::array<QPointF, 8> m_Positions;
+	};
+	// Remixes what is playing at once.
+	void SetListenScene( const ListenScene_t &scene );
+	[[nodiscard]] const ListenScene_t &GetListenScene() const { return m_Scene; }
+	// The volume and pan a request gets in the scene (its own volume when listening is off).
+	[[nodiscard]] xv::sound::PositionMix_t MixFor( const xv::sound::PlayRequest_t &request ) const;
+
 	// Game files from the mounted game, else from the mod folder a file was opened from.
 	[[nodiscard]] static std::optional<std::vector<std::byte>> ReadGameFile( const xv::vfs::CFileSystem &fileSystem, const std::string &szGamePath, const std::filesystem::path &localRoot );
 
@@ -70,6 +87,8 @@ signals:
 	void Started( const QString &szDescription );
 	void Stopped();
 	void Failed( const QString &szMessage );
+	// A sound at a position started, for the listening canvas to show.
+	void PositionHeard( int nPosition );
 
 private:
 	std::shared_ptr<const xv::audio::CClip> Load( const std::string &szGamePath, const std::filesystem::path &localRoot );
@@ -96,4 +115,7 @@ private:
 	QElapsedTimer m_Clock;
 	QTimer *m_pTimer = nullptr;
 	bool m_bActive = false;
+
+	ListenScene_t m_Scene;
+	std::map<xv::audio::CEngine::Voice_t, xv::sound::PlayRequest_t> m_Positioned; // playing voices at a position
 };

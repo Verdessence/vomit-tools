@@ -70,6 +70,8 @@ public:
 	// Where a voice is in its clip, in seconds of the clip (pitch doesn't change the scale);
 	// nullopt once it has finished or been stopped.
 	[[nodiscard]] std::optional<double> Position( Voice_t nVoice );
+	// Changes a playing voice's volume and pan (as in PlayParams_t); nothing once it has ended.
+	void SetMix( Voice_t nVoice, float flVolume, float flPan );
 	// Voices still playing; finished one-shots are released first.
 	[[nodiscard]] std::size_t VoiceCount();
 	void SetVolume( float flVolume );

@@ -15,6 +15,7 @@
 #include <QApplication>
 #include <QContextMenuEvent>
 #include <QEvent>
+#include <QCheckBox>
 #include <QHBoxLayout>
 #include <QHeaderView>
 #include <QInputDialog>
@@ -186,6 +187,23 @@ CKvCard::CKvCard( CSoundDocument &document, const CSoundIndex &index, CSoundPlay
 				: tr( "Play with these settings (volume, pitch, random picks)" ) );
 		connect( pPlay, &QToolButton::clicked, this, &CKvCard::Play );
 		pHeader->addWidget( pPlay, 0, Qt::AlignBottom );
+	}
+	if ( m_pPlayer && IsSoundscapeRule() )
+	{
+		// For listening only: not written to the file.
+		auto *pSolo = new QCheckBox( tr( "Solo" ) );
+		pSolo->setObjectName( QStringLiteral( "ruleSolo" ) );
+		pSolo->setToolTip( tr( "Play only the soloed rules when the soundscape plays (not saved)" ) );
+		pSolo->setChecked( m_Document.IsSoloed( m_Path ) );
+		connect( pSolo, &QCheckBox::toggled, this, [ this ]( bool bOn ) { m_Document.SetSoloed( m_Path, bOn ); } );
+		auto *pIgnore = new QCheckBox( tr( "Ignore" ) );
+		pIgnore->setObjectName( QStringLiteral( "ruleIgnore" ) );
+		pIgnore->setToolTip( tr( "Leave this rule out when the soundscape plays (not saved)" ) );
+		pIgnore->setChecked( m_Document.IsIgnored( m_Path ) );
+		connect( pIgnore, &QCheckBox::toggled, this, [ this ]( bool bOn ) { m_Document.SetIgnored( m_Path, bOn ); } );
+		pHeader->addSpacing( 6 );
+		pHeader->addWidget( pSolo, 0, Qt::AlignBottom );
+		pHeader->addWidget( pIgnore, 0, Qt::AlignBottom );
 	}
 	pHeader->addStretch();
 	pHeader->addWidget( pAdd, 0, Qt::AlignBottom );
@@ -751,6 +769,21 @@ bool CKvCard::GetPlayable() const
 }
 
 //-----------------------------------------------------------------------------
+// Purpose: A playlooping, playrandom or playsoundscape straight inside a soundscape: the blocks
+//          that get solo and ignore ticks.
+//-----------------------------------------------------------------------------
+bool CKvCard::IsSoundscapeRule() const
+{
+	const CNode *pNode = m_Document.Node( m_Path );
+	if ( m_Path.size() != 2 || !pNode || m_Document.GetKind() != xv::sound::FileKind_t::FILE_KIND_SOUNDSCAPE )
+	{
+		return false;
+	}
+	const std::string szKey = xv::sound::ToLower( pNode->GetKey() );
+	return szKey == "playlooping" || szKey == "playrandom" || szKey == "playsoundscape";
+}
+
+//-----------------------------------------------------------------------------
 // Purpose: Plays this block with its settings; a soundscape entry plays as a whole soundscape.
 //-----------------------------------------------------------------------------
 void CKvCard::Play()
@@ -764,7 +797,10 @@ void CKvCard::Play()
 	const bool bSoundscape = m_Document.GetKind() == xv::sound::FileKind_t::FILE_KIND_SOUNDSCAPE;
 	if ( bSoundscape && m_Path.size() == 1 )
 	{
-		m_pPlayer->PlaySoundscape( xv::sound::PlanSoundscape( *pNode, lookup ), Qs( pNode->GetKey() ), m_Document.GetLocalRoot() );
+		auto plan = xv::sound::PlanSoundscape( *pNode, lookup );
+		m_Document.ApplySoloIgnore( m_Path[ 0 ], plan );
+		m_pPlayer->PlaySoundscape( plan, Qs( pNode->GetKey() ), m_Document.GetLocalRoot() );
+		emit PlayedSoundscape( m_Path[ 0 ] );
 		return;
 	}
 	if ( bSoundscape && xv::kv1::EqualsIgnoreCase( pNode->GetKey(), "playsoundscape" ) )

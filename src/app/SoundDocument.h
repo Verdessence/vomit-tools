@@ -10,6 +10,7 @@
 
 #include <filesystem>
 #include <functional>
+#include <set>
 #include <vector>
 
 #include <QObject>
@@ -17,6 +18,7 @@
 
 #include "kv1/Kv1.h"
 #include "sound/SoundLint.h"
+#include "sound/SoundPlayback.h"
 #include "sound/SoundSchema.h"
 
 class QUndoStack;
@@ -58,9 +60,20 @@ public:
 	void RemoveNode( const xv::sound::NodePath_t &path );
 	void InsertEntry( std::size_t nIndex, xv::kv1::CNode entry, const QString &szDescription );
 
+	// Solo and ignore ticks on a soundscape's rules ({ entry, rule } paths), for listening only:
+	// never saved and not part of undo. They follow rules moved by adding and deleting.
+	[[nodiscard]] bool IsSoloed( const xv::sound::NodePath_t &rule ) const { return m_Soloed.contains( rule ); }
+	[[nodiscard]] bool IsIgnored( const xv::sound::NodePath_t &rule ) const { return m_Ignored.contains( rule ); }
+	void SetSoloed( const xv::sound::NodePath_t &rule, bool bSoloed );
+	void SetIgnored( const xv::sound::NodePath_t &rule, bool bIgnored );
+	// Drops from a plan of entry nRoot what the ticks leave out.
+	void ApplySoloIgnore( std::size_t nRoot, xv::sound::SoundscapePlan_t &plan ) const;
+
 signals:
 	void Changed();
 	void ModifiedChanged( bool bModified );
+	// A solo or ignore tick changed on entry nRoot.
+	void SoloIgnoreChanged( std::size_t nRoot );
 
 private:
 	friend class CReplaceEntryCommand;
@@ -71,7 +84,13 @@ private:
 	// Edits with the same non-empty merge key in a row become one undo step.
 	void EditEntry( std::size_t nRootIndex, const QString &szDescription, const std::function<bool( xv::kv1::CNode &entry )> &pfnEdit, const QString &szMergeKey = {} );
 
+	// Moves the ticks under parent (a {} parent means entries) from nFrom on by nBy, dropping any
+	// at nFrom when nBy is negative (a delete).
+	void ShiftTicks( const xv::sound::NodePath_t &parent, std::size_t nFrom, int nBy );
+
 	QString m_szGamePath;
+	std::set<xv::sound::NodePath_t> m_Soloed;
+	std::set<xv::sound::NodePath_t> m_Ignored;
 	xv::sound::FileKind_t m_nKind;
 	const xv::sound::CSchema *m_pSchema;
 	xv::kv1::CDocument m_Document;

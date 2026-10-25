@@ -148,7 +148,7 @@ public:
 				pen.setWidth( bLit ? 2 : 1 );
 				painter.setPen( pen );
 				painter.drawRect( !bLit || !bMoving ? entry.m_Rect : bEntry ? m_Live
-																			 : entry.m_Rect.translated( delta ) );
+																			: entry.m_Rect.translated( delta ) );
 				if ( bLit && m_bCopying )
 				{
 					painter.drawRect( entry.m_Rect );
@@ -263,8 +263,8 @@ protected:
 			const int nHandle = Selected() ? HandleAt( pEvent->position() ) : -1;
 			const bool bInside = OnMember( ImagePoint( pEvent->position() ) );
 			setCursor( nHandle >= 0 ? CURSORS[ nHandle ] : bInside && ( pEvent->modifiers() & Qt::ControlModifier ) ? Qt::DragCopyCursor
-													   : bInside                                                   ? Qt::SizeAllCursor
-																												   : Qt::CrossCursor );
+					: bInside                                                                                       ? Qt::SizeAllCursor
+																													: Qt::CrossCursor );
 			return;
 		}
 		m_To = ImagePoint( pEvent->position() );
@@ -953,7 +953,7 @@ QWidget *CDetailEditor::BuildCard( const NodePath_t &path )
 			return true;
 		}
 		mark( target, place->m_bInto ? CDetailCard::HINT_INTO : bAfter ? CDetailCard::HINT_AFTER
-																		: CDetailCard::HINT_BEFORE );
+																	   : CDetailCard::HINT_BEFORE );
 		return true;
 	};
 	// Right-click, as everywhere: copy and paste, add, rename, delete.
@@ -2123,6 +2123,9 @@ QWidget *CDetailEditor::EntryPicture( const NodePath_t &path )
 	if ( const auto *pModel = pEntry->Find( "model" ); pModel && pModel->IsPair() )
 	{
 		pPicture->setText( tr( "model" ) );
+		const QString szModel = QString::fromStdString( pModel->GetValue() );
+		pPicture->setText( QStringLiteral( "<a href='model'>%1</a>" ).arg( tr( "Open Model" ) ) );
+		connect( pPicture, &QLabel::linkActivated, this, [ this, szModel ] { emit OpenModelRequested( szModel ); } );
 		pCaption->setText( szCaption + QStringLiteral( "<br>" ) + QFileInfo{ QString::fromStdString( pModel->GetValue() ) }.fileName().toHtmlEscaped() );
 		pCaption->setToolTip( QString::fromStdString( pModel->GetValue() ) );
 		return pBox;
@@ -2176,11 +2179,12 @@ void CDetailEditor::ShowCardMenu( const NodePath_t &path, const QPoint &globalAt
 	const QString szName = QString::fromStdString( pNode->GetKey() );
 	QMenu menu( this );
 	menu.addAction( tr( "Copy \"%1\"" ).arg( szName ), this, [ this, path ] {
-		if ( const auto *pCopied = Node( m_pDocument->GetDocument(), path ) )
-		{
-			CopyNodes( { *pCopied } );
-		}
-	} )->setShortcut( QKeySequence::Copy );
+			if ( const auto *pCopied = Node( m_pDocument->GetDocument(), path ) )
+			{
+				CopyNodes( { *pCopied } );
+			}
+		} )
+		->setShortcut( QKeySequence::Copy );
 	auto *pPaste = menu.addAction( tr( "Paste" ), this, [ this, path ] { InsertNodes( PastedNodes(), path, true ); } );
 	pPaste->setShortcut( QKeySequence::Paste );
 	pPaste->setEnabled( CanPasteNodes() );

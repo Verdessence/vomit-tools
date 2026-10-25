@@ -67,6 +67,8 @@ struct LintContext_t
 
 // Adds path to the manifest's block. Returns false if it was already listed or there is no block.
 bool AddToManifest( kv1::CDocument &manifest, FileKind_t nKind, std::string_view szPath );
+// Takes every listing of path out. Returns false if it wasn't listed.
+bool RemoveFromManifest( kv1::CDocument &manifest, std::string_view szPath );
 
 [[nodiscard]] std::string ToLower( std::string_view szText );
 

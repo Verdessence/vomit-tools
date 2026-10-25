@@ -49,6 +49,7 @@ public:
 	// Plays this block with its settings; a soundscape entry plays as a whole soundscape.
 	void Play();
 	[[nodiscard]] bool GetPlayable() const;
+	[[nodiscard]] bool IsSoundscapeRule() const;
 
 protected:
 	bool eventFilter( QObject *pWatched, QEvent *pEvent ) override;
@@ -59,6 +60,8 @@ protected:
 signals:
 	// A key or block was added; the editor reopens it for editing once the cards are rebuilt.
 	void Added( const xv::sound::NodePath_t &path );
+	// A whole soundscape (entry nRoot) started playing from this card, ticks applied.
+	void PlayedSoundscape( std::size_t nRoot );
 
 private:
 	void BuildTable( const xv::kv1::CNode &node );

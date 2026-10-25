@@ -587,4 +587,28 @@ bool AddToManifest( kv1::CDocument &manifest, FileKind_t nKind, std::string_view
 	return true;
 }
 
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+bool RemoveFromManifest( kv1::CDocument &manifest, std::string_view szPath )
+{
+	kv1::CNode *pBlock = ManifestBlock( manifest );
+	if ( !pBlock )
+	{
+		return false;
+	}
+	const std::string szWanted = vfs::NormalizePath( szPath );
+	bool bRemoved = false;
+	for ( std::size_t i = pBlock->GetChildren().size(); i-- > 0; )
+	{
+		const kv1::CNode &child = pBlock->GetChildren()[ i ];
+		if ( child.IsPair() && IsManifestKey( child.GetKey() ) && vfs::NormalizePath( child.GetValue() ) == szWanted )
+		{
+			pBlock->RemoveChild( i );
+			bRemoved = true;
+		}
+	}
+	return bRemoved;
+}
+
 } // namespace xv::sound

@@ -61,19 +61,20 @@ enum Role_t
 {
 	ROLE_PATH = Qt::UserRole + 1, // a file's path in the archive, or a folder's (no trailing slash)
 	ROLE_IS_FOLDER,
-	ROLE_SIZE
+	ROLE_SIZE,
+	ROLE_ENTRY // a file's PackageEntry_t, as a quintptr
 };
 
 //-----------------------------------------------------------------------------
 // Purpose: Where a file's data sits, for the Stored In column: the archive itself, or one of a
-//          VPK's numbered parts (pak01_003.vpk).
+//          VPK's numbered parts (pak01_003.vpk). A path the archive holds twice says so.
 //-----------------------------------------------------------------------------
 QString StoredIn( const xv::vfs::CPackage &package, const xv::vfs::PackageEntry_t &entry )
 {
 	const QString szFile = ToQString( package.GetFile().filename() );
 	if ( entry.m_nArchive < 0 )
 	{
-		return szFile;
+		return entry.m_bDuplicate ? QObject::tr( "%1 (path packed twice)" ).arg( szFile ) : szFile;
 	}
 	QString szPart = szFile;
 	szPart.replace( QRegularExpression( QStringLiteral( "_dir\\.vpk$" ), QRegularExpression::CaseInsensitiveOption ), QStringLiteral( "_%1.vpk" ).arg( entry.m_nArchive, 3, 10, QLatin1Char( '0' ) ) );
@@ -195,6 +196,8 @@ public:
 				return !pNode->m_pEntry;
 			case ROLE_SIZE:
 				return QVariant::fromValue<qulonglong>( pNode->m_nSize );
+			case ROLE_ENTRY:
+				return QVariant::fromValue( reinterpret_cast<quintptr>( pNode->m_pEntry ) );
 			case Qt::DecorationRole:
 				if ( index.column() == COLUMN_NAME )
 				{
@@ -388,6 +391,14 @@ CVpkEditor::CVpkEditor( std::unique_ptr<xv::vfs::CPackage> pPackage, CSoundPlaye
 	pBar->addWidget( m_pCount );
 	pBar->addWidget( pExportSelected );
 	pBar->addWidget( pExportAll );
+	if ( m_pPackage->GetBsp() )
+	{
+		auto *pParticles = new QPushButton( tr( "Particles Manifest…" ) );
+		pParticles->setObjectName( QStringLiteral( "mapParticlesManifest" ) );
+		pParticles->setToolTip( tr( "Make maps/%1_particles.txt with the particle files this map uses" ).arg( ToQString( m_pPackage->GetFile().stem() ) ) );
+		connect( pParticles, &QPushButton::clicked, this, &CVpkEditor::MapParticlesRequested );
+		pBar->addWidget( pParticles );
+	}
 
 	m_pTree = new QTreeView;
 	m_pTree->setModel( m_pFilter );
@@ -414,7 +425,7 @@ CVpkEditor::CVpkEditor( std::unique_ptr<xv::vfs::CPackage> pPackage, CSoundPlaye
 	connect( m_pTree->selectionModel(), &QItemSelectionModel::currentChanged, this, [ this ]( const QModelIndex &current ) {
 		if ( current.isValid() && !current.data( ROLE_IS_FOLDER ).toBool() )
 		{
-			Preview( current.siblingAtColumn( COLUMN_NAME ).data( ROLE_PATH ).toString() );
+			PreviewEntry( *reinterpret_cast<const xv::vfs::PackageEntry_t *>( current.siblingAtColumn( COLUMN_NAME ).data( ROLE_ENTRY ).value<quintptr>() ) );
 		}
 	} );
 
@@ -442,7 +453,9 @@ CVpkEditor::CVpkEditor( std::unique_ptr<xv::vfs::CPackage> pPackage, CSoundPlaye
 		auto *pTabs = new QTabWidget;
 		pTabs->setDocumentMode( true );
 		pTabs->addTab( pFiles, tr( "Packed Files (%1)" ).arg( m_pPackage->GetEntries().size() ) );
-		pTabs->addTab( new CEntityView( *pBsp ), tr( "Entities (%1)" ).arg( pBsp->GetEntities().size() ) );
+		m_pEntities = new CEntityView( *pBsp, m_pPackage->GetFile() );
+		connect( m_pEntities, &CEntityView::ConfigModifiedChanged, this, &CVpkEditor::ModifiedChanged );
+		pTabs->addTab( m_pEntities, tr( "Entities (%1)" ).arg( pBsp->GetEntities().size() ) );
 		pTabs->addTab( new CLumpView( *pBsp ), tr( "Lumps" ) );
 		pLayout->addWidget( pTabs );
 	}
@@ -464,6 +477,22 @@ CVpkEditor::CVpkEditor( std::unique_ptr<xv::vfs::CPackage> pPackage, CSoundPlaye
 // Purpose:
 //-----------------------------------------------------------------------------
 CVpkEditor::~CVpkEditor() = default;
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+bool CVpkEditor::IsModified() const
+{
+	return m_pEntities && m_pEntities->IsConfigModified();
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+bool CVpkEditor::Save()
+{
+	return m_pEntities && m_pEntities->SaveConfig();
+}
 
 //-----------------------------------------------------------------------------
 // Purpose:
@@ -537,17 +566,33 @@ void CVpkEditor::ApplySearch()
 //-----------------------------------------------------------------------------
 void CVpkEditor::Preview( const QString &szPath )
 {
-	const xv::vfs::PackageEntry_t *it = m_pPackage->Find( szPath.toStdString() );
-	const auto bytes = it ? m_pPackage->Read( it->m_szPath ) : std::nullopt;
+	if ( const xv::vfs::PackageEntry_t *pEntry = m_pPackage->Find( szPath.toStdString() ) )
+	{
+		PreviewEntry( *pEntry );
+		return;
+	}
+	emit StatusMessage( tr( "%1 isn't in %2" ).arg( szPath, GetFileName() ) );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: By entry rather than path, so each copy of a path packed twice shows its own data.
+//-----------------------------------------------------------------------------
+void CVpkEditor::PreviewEntry( const xv::vfs::PackageEntry_t &entry )
+{
+	const xv::vfs::PackageEntry_t *it = &entry;
+	const auto bytes = m_pPackage->Read( entry );
 	if ( !bytes )
 	{
-		emit StatusMessage( tr( "Could not read %1 from %2" ).arg( szPath, GetFileName() ) );
+		emit StatusMessage( tr( "Could not read %1 from %2" ).arg( QString::fromStdString( entry.m_szPath ), GetFileName() ) );
 		return;
 	}
 	m_szPreviewed = QString::fromStdString( it->m_szPath );
 
-	const QModelIndex proxy = m_pFilter->mapFromSource( m_pModel->IndexForPath( m_szPreviewed ) );
-	if ( proxy.isValid() && m_pTree->currentIndex().siblingAtColumn( COLUMN_NAME ) != proxy )
+	// Picked in the tree, unless it is already (or a copy of the same path is).
+	const QModelIndex current = m_pTree->currentIndex().siblingAtColumn( COLUMN_NAME );
+	const bool bShown = current.isValid() && current.data( ROLE_PATH ).toString().compare( m_szPreviewed, Qt::CaseInsensitive ) == 0;
+	const QModelIndex proxy = bShown ? QModelIndex{} : m_pFilter->mapFromSource( m_pModel->IndexForPath( m_szPreviewed ) );
+	if ( proxy.isValid() )
 	{
 		m_pTree->setCurrentIndex( proxy );
 		m_pTree->scrollTo( proxy );

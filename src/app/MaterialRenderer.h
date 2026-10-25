@@ -29,6 +29,8 @@ class QRhiResourceUpdateBatch;
 class QRhiSampler;
 class QRhiShaderResourceBindings;
 
+class CModelRenderer;
+
 class CMaterialRenderer : public IGpuRenderer
 {
 public:
@@ -56,6 +58,9 @@ public:
 	void Release() override;
 
 private:
+	friend class CModelRenderer;
+	void Prepare( const Frame_t &frame, QRhiRenderTarget *pTarget, QRhiResourceUpdateBatch *pUpdates );
+	QRhiBuffer *m_pMeshUniforms = nullptr;
 	// A texture made from an image (by its address), uploaded once and kept while it is used.
 	struct Cached_t
 	{

@@ -52,6 +52,8 @@ public:
 	void Initialize( QRhi *pRhi, QRhiRenderTarget *pTarget ) override;
 	void Render( QRhiCommandBuffer *pCommands, QRhiRenderTarget *pTarget ) override;
 	void Release() override;
+	// Adds another mesh pass before the overlay quads, sharing one update batch and depth buffer.
+	void RenderWith( QRhiCommandBuffer *pCommands, QRhiRenderTarget *pTarget, const std::function<void( QRhiResourceUpdateBatch * )> &pfnPrepare, const std::function<void()> &pfnDraw );
 
 private:
 	struct Texture_t

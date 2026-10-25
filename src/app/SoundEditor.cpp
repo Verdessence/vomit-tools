@@ -7,6 +7,7 @@
 #include "SoundEditor.h"
 
 #include <algorithm>
+#include <set>
 
 #include <QAction>
 #include <QApplication>
@@ -28,6 +29,7 @@
 #include "InterfaceMode.h"
 #include "KvClipboard.h"
 #include "KvCard.h"
+#include "ListenCanvas.h"
 #include "SoundDocument.h"
 #include "SoundIndex.h"
 #include "SoundPlayer.h"
@@ -97,6 +99,20 @@ CSoundEditor::CSoundEditor( CSoundDocument *pDocument, const CSoundIndex &index,
 	  m_pPlayer( pPlayer )
 {
 	const QString szNoun = Qs( m_pDocument->GetSchema().m_szEntryNoun );
+	if ( m_pPlayer )
+	{
+		// Whatever starts next replaces the soundscape; PlayedSoundscape comes after Started when
+		// it's this editor's soundscape again.
+		connect( m_pPlayer, &CSoundPlayer::Started, this, [ this ] { m_PlayingSoundscape.reset(); } );
+		connect( m_pPlayer, &CSoundPlayer::Stopped, this, [ this ] { m_PlayingSoundscape.reset(); } );
+		// A tick changed while its soundscape plays: it plays again without what's left out.
+		connect( m_pDocument, &CSoundDocument::SoloIgnoreChanged, this, [ this ]( std::size_t nRoot ) {
+			if ( m_PlayingSoundscape == nRoot && m_pPlayer->IsPlaying() && m_pCard && m_pCard->GetPath() == NodePath_t{ nRoot } )
+			{
+				m_pCard->Play();
+			}
+		} );
+	}
 
 	auto *pToolbar = new QToolBar;
 	pToolbar->setToolButtonStyle( Qt::ToolButtonTextOnly );
@@ -111,7 +127,7 @@ CSoundEditor::CSoundEditor( CSoundDocument *pDocument, const CSoundIndex &index,
 		pPlay->setShortcut( QKeySequence{ Qt::CTRL | Qt::Key_Return } );
 		pPlay->setShortcutContext( Qt::WidgetWithChildrenShortcut );
 		pPlay->setToolTip( m_pDocument->GetKind() == xv::sound::FileKind_t::FILE_KIND_SOUNDSCAPE
-				? tr( "Play the selected soundscape (%1). Positions, distance falloff and DSP aren't simulated." ).arg( pPlay->shortcut().toString( QKeySequence::NativeText ) )
+				? tr( "Play the selected soundscape (%1). Positions and distance falloff are heard with Listen on; DSP isn't simulated." ).arg( pPlay->shortcut().toString( QKeySequence::NativeText ) )
 				: tr( "Play the selected sound with its volume, pitch and random picks (%1)" ).arg( pPlay->shortcut().toString( QKeySequence::NativeText ) ) );
 		QAction *pStop = pToolbar->addAction( tr( "■ Stop" ), m_pPlayer, &CSoundPlayer::Stop );
 		pStop->setShortcut( QKeySequence{ Qt::CTRL | Qt::Key_Period } );
@@ -119,6 +135,13 @@ CSoundEditor::CSoundEditor( CSoundDocument *pDocument, const CSoundIndex &index,
 		pStop->setToolTip( tr( "Stop all sounds (%1)" ).arg( pStop->shortcut().toString( QKeySequence::NativeText ) ) );
 		addAction( pPlay );
 		addAction( pStop );
+		if ( m_pDocument->GetKind() == xv::sound::FileKind_t::FILE_KIND_SOUNDSCAPE )
+		{
+			m_pListenAction = pToolbar->addAction( tr( "Listen" ) );
+			m_pListenAction->setObjectName( QStringLiteral( "listenAction" ) );
+			m_pListenAction->setCheckable( true );
+			m_pListenAction->setToolTip( tr( "Hear sounds at positions 0–7 by distance and direction, from a listener you place" ) );
+		}
 		pToolbar->addSeparator();
 	}
 	pToolbar->addAction( tr( "New %1…" ).arg( szNoun ), this, &CSoundEditor::AddEntry );
@@ -154,6 +177,22 @@ CSoundEditor::CSoundEditor( CSoundDocument *pDocument, const CSoundIndex &index,
 	pTop->addWidget( m_pScroll );
 	pTop->setStretchFactor( 1, 3 );
 	pTop->setSizes( { 240, 760 } );
+	if ( m_pListenAction )
+	{
+		m_pListen = new CListenCanvas( m_pPlayer );
+		m_pListen->hide();
+		pTop->addWidget( m_pListen );
+		pTop->setStretchFactor( 2, 2 );
+		connect( m_pListenAction, &QAction::toggled, this, [ this, pTop ]( bool bOn ) {
+			m_pListen->setVisible( bOn );
+			m_pListen->SetListening( bOn );
+			if ( bOn )
+			{
+				pTop->setSizes( { 220, 560, 360 } );
+				ShowUsedPositions();
+			}
+		} );
+	}
 
 	m_pIssueList = new QListWidget;
 	m_pIssueList->setObjectName( QStringLiteral( "issueList" ) );
@@ -260,6 +299,32 @@ CSoundEditor::CSoundEditor( CSoundDocument *pDocument, const CSoundIndex &index,
 		}
 	}
 	Refresh();
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: The listening canvas brightens the positions the picked soundscape plays sounds at,
+//          nested soundscapes' (after their overrides) included.
+//-----------------------------------------------------------------------------
+void CSoundEditor::ShowUsedPositions()
+{
+	if ( !m_pListen || !m_pListen->isVisible() )
+	{
+		return;
+	}
+	std::set<int> used;
+	const auto &roots = m_pDocument->GetDocument().m_Roots;
+	if ( m_Current && *m_Current < roots.size() && roots[ *m_Current ].IsBlock() )
+	{
+		const auto lookup = [ this ]( std::string_view szName ) { return m_Index.FindSoundscape( szName, m_pDocument ); };
+		for ( const auto &rule : xv::sound::PlanSoundscape( roots[ *m_Current ], lookup ).m_Rules )
+		{
+			if ( rule.m_Position )
+			{
+				used.insert( *rule.m_Position );
+			}
+		}
+	}
+	m_pListen->SetUsed( std::move( used ) );
 }
 
 //-----------------------------------------------------------------------------
@@ -426,8 +491,10 @@ void CSoundEditor::ShowEntry()
 	{
 		m_pCard = new CKvCard( *m_pDocument, m_Index, m_pPlayer, { *m_Current } );
 		connect( m_pCard, &CKvCard::Added, this, [ this ]( const NodePath_t &path ) { m_PendingEdit = path; } );
+		connect( m_pCard, &CKvCard::PlayedSoundscape, this, [ this ]( std::size_t nRoot ) { m_PlayingSoundscape = nRoot; } );
 		m_pCard->ShowIssues( m_Issues );
 		pLayout->addWidget( m_pCard );
+		ShowUsedPositions();
 	}
 	else
 	{

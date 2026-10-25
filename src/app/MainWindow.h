@@ -15,6 +15,7 @@
 #include <QPointer>
 
 #include "ChoiceBoxes.h"
+#include "ManifestDialog.h"
 #include "ParticleEditor.h"
 #include "SoundIndex.h"
 #include "audio/Audio.h"
@@ -24,6 +25,7 @@
 #include "vfs/Steam.h"
 #include "vfs/Vfs.h"
 
+class CModelEditor;
 class CDetailDocument;
 class CDetailEditor;
 class CFolderBrowser;
@@ -46,6 +48,14 @@ class CMaterialEditor;
 class CTextureDocument;
 class CTextureEditor;
 class CVfsModel;
+namespace xv::bsp
+{
+class CBsp;
+}
+namespace xv::vfs
+{
+class CPackage;
+}
 class CVpkEditor;
 
 class CMainWindow : public QMainWindow
@@ -66,6 +76,7 @@ public:
 	bool OpenGame( const QString &szGameInfoPath );
 	void OpenFolder( const QString &szFolder );
 	void OpenDiskFile( const QString &szPath );
+	CModelEditor *OpenModelFile( const QString &szPath );
 	// Opens a soundscape or soundscript from the mounted game in an editor tab.
 	CDetailEditor *OpenDetailFile( const QString &szGamePath );
 	CDetailEditor *NewDetailFile();
@@ -90,6 +101,12 @@ public:
 	CMaterialEditor *MakeMaterialFor( CTextureEditor *pEditor );
 	// Opens an archive on disk (a VPK, GCF...) in a tab to browse, preview and export from.
 	CVpkEditor *OpenPackage( const QString &szPath );
+	// Game > Manifests: the window generating one manifest, not shown yet (null without a game). For
+	// a map's <map>_particles.txt szMap names the map; its entities and packed files (pMap,
+	// pPacked) tick the particle files it needs.
+	CManifestDialog *MakeManifestDialog( CManifestDialog::Format_t nFormat, const QString &szMap = {}, const xv::bsp::CBsp *pMap = nullptr, const xv::vfs::CPackage *pPacked = nullptr );
+	// Shows that window and writes the manifest when it's saved.
+	void GenerateManifest( CManifestDialog::Format_t nFormat, const QString &szMap = {}, const xv::bsp::CBsp *pMap = nullptr, const xv::vfs::CPackage *pPacked = nullptr );
 	// Opens a file of an archive tab in its editor as an unsaved copy; returns that editor's tab.
 	QWidget *OpenArchiveFile( CVpkEditor *pArchive, const QString &szPath );
 	// Shows the search over every particle system, with query typed in.
@@ -143,7 +160,10 @@ private:
 	void ChooseFiles();
 	void ChooseFolder();
 	void ChoosePackage();
+	// Asks which map, then generates its <map>_particles.txt.
+	void ChooseMapParticles();
 	void AutoMountFor( const QString &szPath );
+	CModelEditor *AddModelEditor( const QString &szPath, xv::material::Reader_t pfnRead, const QString &szOrigin = {} );
 	void PreviewFile( const QModelIndex &proxyIndex );
 	void PreviewGameFile( const QString &szPath, const QString &szSource );
 	void PreviewDiskFile( const QString &szPath );
@@ -186,6 +206,13 @@ private:
 	bool SaveAs( CMaterialEditor *pEditor );
 	bool WriteMaterial( CMaterialEditor *pEditor, const std::filesystem::path &target );
 	bool ConfirmClose( CMaterialEditor *pEditor );
+	bool ConfirmClose( CVpkEditor *pEditor );
+	bool ConfirmClose( CModelEditor *pEditor );
+	bool Save( CModelEditor *pEditor );
+	bool SaveAs( CModelEditor *pEditor );
+	// Writes the model's files: the changed ones where they came from, or all of them beside
+	// mdl (a Save As).
+	bool WriteModel( CModelEditor *pEditor, const std::filesystem::path &mdl, bool bAll );
 	// The surface properties the mounted game knows ($surfaceprop values), with what each is
 	// based on.
 	[[nodiscard]] std::vector<Choice_t> SurfaceProps() const;

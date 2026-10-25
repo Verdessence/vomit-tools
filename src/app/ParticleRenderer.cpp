@@ -211,6 +211,13 @@ CParticleRenderer::Texture_t &CParticleRenderer::TextureFor( const particles::Sp
 //-----------------------------------------------------------------------------
 void CParticleRenderer::Render( QRhiCommandBuffer *pCommands, QRhiRenderTarget *pTarget )
 {
+	RenderWith( pCommands, pTarget, {}, {} );
+}
+//-----------------------------------------------------------------------------
+// Purpose: Shares a single render pass with a caller's mesh renderer and its inspection layers.
+//-----------------------------------------------------------------------------
+void CParticleRenderer::RenderWith( QRhiCommandBuffer *pCommands, QRhiRenderTarget *pTarget, const std::function<void( QRhiResourceUpdateBatch * )> &pfnPrepare, const std::function<void()> &pfnDraw )
+{
 	const QSize size = pTarget->pixelSize();
 	std::vector<ParticlePicture_t> pictures;
 	std::array<float, 3> vecBackground{ 0.13f, 0.14f, 0.15f };
@@ -308,8 +315,12 @@ void CParticleRenderer::Render( QRhiCommandBuffer *pCommands, QRhiRenderTarget *
 		m_pSolid = MakePipeline( Pipeline_t::PIPELINE_SOLID, pTarget );
 	}
 
+	if ( pfnPrepare )
+		pfnPrepare( pUpdates );
 	pCommands->beginPass( pTarget, QColor::fromRgbF( vecBackground[ 0 ], vecBackground[ 1 ], vecBackground[ 2 ] ), { 1.0f, 0 }, pUpdates );
 	pCommands->setViewport( { 0, 0, static_cast<float>( size.width() ), static_cast<float>( size.height() ) } );
+	if ( pfnDraw )
+		pfnDraw();
 	if ( !meshRuns.empty() )
 	{
 		pCommands->setGraphicsPipeline( m_pSolid.get() );

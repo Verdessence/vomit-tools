@@ -3,6 +3,8 @@ add_library(vomit_tools_core STATIC
         audio/Audio.h
         bsp/Bsp.cpp
         bsp/Bsp.h
+        bsp/Stripper.cpp
+        bsp/Stripper.h
         detail/Detail.cpp
         detail/Detail.h
         detail/Scatter.cpp
@@ -17,6 +19,17 @@ add_library(vomit_tools_core STATIC
         material/Parameters.h
         material/Preview.cpp
         material/Preview.h
+        model/Anim.cpp
+        model/Anim.h
+        model/Binary.h
+        model/Edit.cpp
+        model/Edit.h
+        model/Mdl.cpp
+        model/Mdl.h
+        model/Phy.cpp
+        model/Phy.h
+        model/Transform.cpp
+        model/Transform.h
         model/Model.cpp
         model/Model.h
         particles/Builtin.cpp

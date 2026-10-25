@@ -18,6 +18,7 @@
 #include <vector>
 
 #include "particles/Simulation.h"
+#include "material/Preview.h"
 #include "texture/Image.h"
 #include "texture/Sheet.h"
 #include "util/Vec3.h"
@@ -117,12 +118,15 @@ struct ScreenVertex_t
 	std::array<float, 3> m_vecPosition{};
 	std::array<float, 2> m_Uv{};
 	std::array<float, 3> m_vecColor{ 1, 1, 1 };
+	material::MeshSample_t m_Surface{};
 };
 // The triangles of one texture (three vertices each); a null sprite is plain grey.
 struct ScreenMesh_t
 {
 	const Sprite_t *m_pSprite = nullptr;
 	std::vector<ScreenVertex_t> m_Vertices;
+	const material::Shading_t *m_pShading = nullptr;
+	material::PreviewOptions_t m_Options{};
 };
 // The simulation's model, if it has one, lit from over the camera's shoulder. Triangles reaching
 // behind the camera are left out.

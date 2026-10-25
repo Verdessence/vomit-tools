@@ -246,8 +246,24 @@ void CMaterialRenderer::Trim()
 void CMaterialRenderer::Render( QRhiCommandBuffer *pCommands, QRhiRenderTarget *pTarget )
 {
 	const Frame_t frame = m_pfnSource ? m_pfnSource() : Frame_t{};
-	m_nFrame++;
 	QRhiResourceUpdateBatch *pUpdates = m_pRhi->nextResourceUpdateBatch();
+	Prepare( frame, pTarget, pUpdates );
+	const QSize size = pTarget->pixelSize();
+	pCommands->beginPass( pTarget, frame.m_Background, { 1.0f, 0 }, pUpdates );
+	pCommands->setGraphicsPipeline( m_pPipeline.get() );
+	pCommands->setViewport( { 0, 0, static_cast<float>( size.width() ), static_cast<float>( size.height() ) } );
+	pCommands->setShaderResources( m_pBindings.get() );
+	pCommands->draw( 3 );
+	pCommands->endPass();
+	Trim();
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Prepares material bindings for either the square preview or a studio mesh pass.
+//-----------------------------------------------------------------------------
+void CMaterialRenderer::Prepare( const Frame_t &frame, QRhiRenderTarget *pTarget, QRhiResourceUpdateBatch *pUpdates )
+{
+	m_nFrame++;
 	if ( !m_pWhite )
 	{
 		QImage white( 1, 1, QImage::Format_RGBA8888 );
@@ -350,6 +366,8 @@ void CMaterialRenderer::Render( QRhiCommandBuffer *pCommands, QRhiRenderTarget *
 			bindings.append( QRhiShaderResourceBinding::sampledTexture( static_cast<int>( i ) + 1, QRhiShaderResourceBinding::FragmentStage, bound[ i ].first, bound[ i ].second ) );
 		}
 		m_pBindings.reset( m_pRhi->newShaderResourceBindings() );
+		if ( m_pMeshUniforms )
+			bindings.append( QRhiShaderResourceBinding::uniformBuffer( 12, QRhiShaderResourceBinding::VertexStage, m_pMeshUniforms ) );
 		m_pBindings->setBindings( bindings.begin(), bindings.end() );
 		m_pBindings->create();
 		m_Bound = bound;
@@ -359,23 +377,40 @@ void CMaterialRenderer::Render( QRhiCommandBuffer *pCommands, QRhiRenderTarget *
 		// Bindings made later have the same layout, so the pipeline takes them too.
 		m_pPipeline.reset( m_pRhi->newGraphicsPipeline() );
 		m_pPipeline->setShaderStages( {
-			{ QRhiShaderStage::Vertex, LoadShader( QStringLiteral( ":/shaders/fullscreen.vert.qsb" ) ) },
-			{ QRhiShaderStage::Fragment, LoadShader( QStringLiteral( ":/shaders/material.frag.qsb" ) ) },
+			{ QRhiShaderStage::Vertex, LoadShader( m_pMeshUniforms ? QStringLiteral( ":/shaders/model.vert.qsb" ) : QStringLiteral( ":/shaders/fullscreen.vert.qsb" ) ) },
+			{ QRhiShaderStage::Fragment, LoadShader( m_pMeshUniforms ? QStringLiteral( ":/shaders/model.frag.qsb" ) : QStringLiteral( ":/shaders/material.frag.qsb" ) ) },
 		} );
-		m_pPipeline->setVertexInputLayout( {} );
+		if ( m_pMeshUniforms )
+		{
+			QRhiVertexInputLayout layout;
+			layout.setBindings( { { 20 * sizeof( float ) } } );
+			layout.setAttributes( { { 0, 0, QRhiVertexInputAttribute::Float3, 0 }, { 0, 1, QRhiVertexInputAttribute::Float3, 3 * sizeof( float ) }, { 0, 2, QRhiVertexInputAttribute::Float2, 6 * sizeof( float ) }, { 0, 3, QRhiVertexInputAttribute::Float3, 8 * sizeof( float ) }, { 0, 4, QRhiVertexInputAttribute::Float3, 11 * sizeof( float ) }, { 0, 5, QRhiVertexInputAttribute::Float3, 14 * sizeof( float ) }, { 0, 6, QRhiVertexInputAttribute::Float3, 17 * sizeof( float ) } } );
+			m_pPipeline->setVertexInputLayout( layout );
+			m_pPipeline->setDepthTest( true );
+			m_pPipeline->setDepthOp( QRhiGraphicsPipeline::Less );
+			bool bBlend = false, bAdditive = false;
+			if ( frame.m_pMaterial && frame.m_pTextures )
+			{
+				const auto shading = material::ReadShading( *frame.m_pMaterial, *frame.m_pTextures, frame.m_Options );
+				bBlend = shading.m_bTranslucent;
+				bAdditive = shading.m_bAdditive;
+			}
+			m_pPipeline->setDepthWrite( !bBlend && !bAdditive );
+			QRhiGraphicsPipeline::TargetBlend blend;
+			blend.enable = bBlend || bAdditive;
+			blend.srcColor = QRhiGraphicsPipeline::SrcAlpha;
+			blend.dstColor = bAdditive ? QRhiGraphicsPipeline::One : QRhiGraphicsPipeline::OneMinusSrcAlpha;
+			blend.srcAlpha = QRhiGraphicsPipeline::One;
+			blend.dstAlpha = QRhiGraphicsPipeline::OneMinusSrcAlpha;
+			m_pPipeline->setTargetBlends( { blend } );
+		}
+		else
+			m_pPipeline->setVertexInputLayout( {} );
 		m_pPipeline->setSampleCount( pTarget->sampleCount() );
 		m_pPipeline->setShaderResourceBindings( m_pBindings.get() );
 		m_pPipeline->setRenderPassDescriptor( pTarget->renderPassDescriptor() );
 		m_pPipeline->create();
 	}
-
-	pCommands->beginPass( pTarget, frame.m_Background, { 1.0f, 0 }, pUpdates );
-	pCommands->setGraphicsPipeline( m_pPipeline.get() );
-	pCommands->setViewport( { 0, 0, static_cast<float>( size.width() ), static_cast<float>( size.height() ) } );
-	pCommands->setShaderResources( m_pBindings.get() );
-	pCommands->draw( 3 );
-	pCommands->endPass();
-	Trim();
 }
 
 #endif

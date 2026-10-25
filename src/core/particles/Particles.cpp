@@ -1507,4 +1507,125 @@ bool AddToManifest( kv1::CDocument &manifest, std::string_view szPath, bool bPre
 	return true;
 }
 
+namespace
+{
+
+//-----------------------------------------------------------------------------
+// Purpose: The manifest's "file" pairs naming path, as indices in its block.
+//-----------------------------------------------------------------------------
+std::vector<std::size_t> Listings( const kv1::CNode &block, std::string_view szPath )
+{
+	std::vector<std::size_t> found;
+	const std::string szWanted = vfs::NormalizePath( szPath );
+	for ( std::size_t i = 0; i < block.GetChildren().size(); i++ )
+	{
+		const kv1::CNode &child = block.GetChildren()[ i ];
+		if ( child.IsPair() && kv1::EqualsIgnoreCase( child.GetKey(), "file" ) )
+		{
+			const std::string szValue = child.GetValue();
+			if ( vfs::NormalizePath( std::string_view{ szValue }.substr( szValue.starts_with( '!' ) ? 1 : 0 ) ) == szWanted )
+			{
+				found.push_back( i );
+			}
+		}
+	}
+	return found;
+}
+
+} // namespace
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+bool RemoveFromManifest( kv1::CDocument &manifest, std::string_view szPath )
+{
+	const auto block = std::ranges::find_if( manifest.m_Roots, &kv1::CNode::IsBlock );
+	if ( block == manifest.m_Roots.end() )
+	{
+		return false;
+	}
+	const auto listings = Listings( *block, szPath );
+	for ( auto it = listings.rbegin(); it != listings.rend(); ++it )
+	{
+		block->RemoveChild( *it );
+	}
+	return !listings.empty();
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+bool IsPrecached( const kv1::CDocument &manifest, std::string_view szPath )
+{
+	const auto block = std::ranges::find_if( manifest.m_Roots, &kv1::CNode::IsBlock );
+	if ( block == manifest.m_Roots.end() )
+	{
+		return false;
+	}
+	const auto listings = Listings( *block, szPath );
+	return !listings.empty() && block->GetChildren()[ listings.front() ].GetValue().starts_with( '!' );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+bool SetPrecached( kv1::CDocument &manifest, std::string_view szPath, bool bPrecache )
+{
+	const auto block = std::ranges::find_if( manifest.m_Roots, &kv1::CNode::IsBlock );
+	if ( block == manifest.m_Roots.end() )
+	{
+		return false;
+	}
+	const auto listings = Listings( *block, szPath );
+	for ( std::size_t i : listings )
+	{
+		kv1::CNode &child = block->Child( i );
+		std::string szValue = child.GetValue();
+		const bool bHas = szValue.starts_with( '!' );
+		if ( bHas != bPrecache )
+		{
+			child.SetValue( bPrecache ? "!" + szValue : szValue.substr( 1 ) );
+		}
+	}
+	return !listings.empty();
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Children are followed once each, so systems spawning each other don't loop.
+//-----------------------------------------------------------------------------
+NeededFiles_t NeededFiles( const std::vector<SystemSummary_t> &summaries, const std::vector<std::string> &used )
+{
+	const auto lower = []( std::string sz ) {
+		std::ranges::transform( sz, sz.begin(), []( unsigned char ch ) { return static_cast<char>( std::tolower( ch ) ); } );
+		return sz;
+	};
+	std::map<std::string, const SystemSummary_t *> byName;
+	for ( const SystemSummary_t &summary : summaries )
+	{
+		byName.try_emplace( lower( summary.m_szName ), &summary );
+	}
+	NeededFiles_t needed;
+	std::set<std::string> seen;
+	std::vector<std::string> pending( used.begin(), used.end() );
+	while ( !pending.empty() )
+	{
+		const std::string szName = std::move( pending.back() );
+		pending.pop_back();
+		if ( szName.empty() || !seen.insert( lower( szName ) ).second )
+		{
+			continue;
+		}
+		const auto it = byName.find( lower( szName ) );
+		if ( it == byName.end() )
+		{
+			needed.m_Missing.push_back( szName );
+			continue;
+		}
+		needed.m_Files[ it->second->m_szFile ].push_back( it->second->m_szName );
+		pending.insert( pending.end(), it->second->m_Children.begin(), it->second->m_Children.end() );
+	}
+	std::ranges::sort( needed.m_Missing );
+	return needed;
+}
+
 } // namespace xv::particles

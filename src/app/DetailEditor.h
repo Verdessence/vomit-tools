@@ -65,6 +65,7 @@ public:
 signals:
 	void RefreshRequested();
 	void OpenTextureRequested( const QString &szPath );
+	void OpenModelRequested( const QString &szPath );
 	void PackedTexture( const QString &szMaterial, const std::vector<std::byte> &bytes );
 
 private:
