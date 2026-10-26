@@ -15,6 +15,10 @@ add_library(vomit_tools_core STATIC
         kv1/Kv1.h
         kv1/Lexer.cpp
         kv1/Lexer.h
+        map/Brushes.cpp
+        map/Brushes.h
+        map/Displacement.cpp
+        map/Displacement.h
         map/Geometry.cpp
         map/Geometry.h
         map/Io.cpp
