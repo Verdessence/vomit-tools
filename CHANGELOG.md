@@ -1,12 +1,40 @@
 # Changelog
 
-## Unreleased
+## 0.7.0 — The Model (2026-10-27)
 
-- Model editor: export VMF brushes from physics hulls, matching extruded cutout caps, or a
-  convex decomposition of a render mesh, with material choices, optional grid snapping and Hammer++ vertex data. Also
-  available as `vomit-tools-cli model vmf`; invalid hulls are omitted with reasons. Automatic
-  targets the visible mesh, with a surface voxel fallback for open character meshes. Hull vertex
-  counts respect the brush side budget; collision export remains an explicit choice.
+### Models (new)
+- **Model viewer:** open compiled models (`.mdl` with its `.vvd`, `.vtx`, `.phy` and `.ani`) in a
+  tab: bodies, skins, LODs, sequence playback and inspection, and editing the compiled files in
+  place.
+- **Model browser** (Browse Models): every model of the mounted game as a grid of pictures,
+  searchable by name, material, surface property or texture, with a details panel. Pictures are
+  cached on disk, so later visits only draw new or changed models.
+- Exports to exchange formats, editable source projects, glTF mesh import, and compiling and packing
+  into a map with the Source tools found on the system. Also in `vomit-tools-cli model`.
+- **Model to VMF:** export Hammer brushes from physics hulls, matching extruded cutout caps, or a
+  convex decomposition of a render mesh, with material choices, optional grid snapping and
+  Hammer++ vertex data. Also available as `vomit-tools-cli model vmf`; invalid hulls are omitted
+  with reasons. Automatic targets the visible mesh, with a surface voxel fallback for open
+  character meshes. Hull vertex counts respect the brush side budget; collision export remains an
+  explicit choice.
+
+### Archives and maps
+- Open VPKs and other archives (GCF, GMA, PAK, WAD, XZP, ZIP) in a tab of their own: their folders
+  and files, a path search, a preview of the picked file, and exporting files out.
+- Maps (`.bsp`) open the same way: their packed files, beside their entities with keyvalues and
+  the table of lumps.
+
+### Sounds and manifests
+- Listening from positions: a top-down plan with the listener and env_soundscape's eight position
+  targets, each draggable; sounds are heard by distance and direction.
+- Generate Manifest: soundscapes, soundscripts and particles manifests, or a map's
+  `<map>_particles.txt`, from the game's files. Entries that stay listed keep their place and comments.
+
+### Also
+- Open and save windows are the desktop's own file chooser on Linux, asked for through the XDG
+  desktop portal (so KDE's, GNOME's, or whichever one the desktop is set up with), and each one
+  starts in the folder the last one finished in. Qt's window is the fallback when no portal is
+  running; Preferences → Interface switches back to it.
 
 ## 0.6.6 - qol (2026-10-25)
 
