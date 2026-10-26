@@ -59,7 +59,10 @@ std::optional<Physics_t> ReadPhysics( std::span<const std::byte> bytes, std::str
 				solid.Array( nLedge + 16, nTriangles, 16 );
 				Convex_t convex;
 				convex.m_nSolid = i;
-				convex.m_nBone = solid.Int( nLedge + 4 ) - 1;
+				const int nBone = solid.Int( nLedge + 4 );
+				if ( nBone < 0 || nBone > 1024 )
+					throw std::runtime_error( "Invalid PHY bone index" );
+				convex.m_nBone = nBone - 1;
 				std::uint32_t nVertices = 0;
 				for ( int t = 0; t < nTriangles; t++ )
 					for ( int e = 0; e < 3; e++ )

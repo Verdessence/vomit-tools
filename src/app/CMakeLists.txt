@@ -65,6 +65,8 @@ add_library(vomit_tools_ui STATIC
         ModelImport.h
         ModelWorkflow.cpp
         ModelWorkflow.h
+        ModelVmfDialog.cpp
+        ModelVmfDialog.h
         ModelDetails.cpp
         ModelDetails.h
         ModelFlags.h

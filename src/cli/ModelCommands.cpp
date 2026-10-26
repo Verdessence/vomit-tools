@@ -5,6 +5,7 @@
 #include "model/Export.h"
 #include "model/Phy.h"
 #include "model/Transform.h"
+#include "model/Vmf.h"
 #include "vfs/Vfs.h"
 #include <algorithm>
 #include <charconv>
@@ -104,10 +105,10 @@ void Write( const std::map<fs::path, model::Bytes_t> &files )
 //-----------------------------------------------------------------------------
 // Purpose: Validates bounded integer switches before converting them to engine indices.
 //-----------------------------------------------------------------------------
-int Index( const std::string &text )
+int Index( const std::string &text, int nMaximum = 1000000 )
 {
 	const float f = Number( text );
-	if ( f < 0 || f > 1000000 || std::floor( f ) != f )
+	if ( f < 0 || f > nMaximum || std::floor( f ) != f )
 		throw std::runtime_error( "Invalid integer index: " + text );
 	return static_cast<int>( f );
 }
@@ -163,7 +164,7 @@ Input_t Input( const std::string &name, const fs::path &game )
 //-----------------------------------------------------------------------------
 int ModelCommand( int argc, char **argv )
 {
-	const char *usage = "model info <mdl...> [--game gameinfo.txt]\nmodel export <mdl> -o folder [--format obj|smd|gltf|qc|pack] [--game gameinfo.txt]\n  [--skin N --lod N --sequence N --first N --last N --fps N --base-blend]\nmodel set surfaceprop|mass|flags|contents <value> <mdl...> [-o folder] [--game gameinfo.txt]\nmodel scale <factor> <mdl...> [-o folder] [--game gameinfo.txt]\n";
+	const char *usage = "model info <mdl...> [--game gameinfo.txt]\nmodel export <mdl> -o folder [--format obj|smd|gltf|qc|pack] [--game gameinfo.txt]\n  [--skin N --lod N --sequence N --first N --last N --fps N --base-blend]\nmodel vmf <mdl> <out.vmf> [--game gameinfo.txt]\n  [--hulls auto|physics|decompose|cutout --texture nodraw|dev|model]\n  [--grid N --max-hulls N --max-sides N --max-vertices N --concavity N --voxel-resolution N]\n  [--offset X Y Z --world --no-reference --no-hammer-vertices --reuse-materials]\n  [--skin N --lod N --bodygroup INDEX MODEL (repeatable)]\nmodel set surfaceprop|mass|flags|contents <value> <mdl...> [-o folder] [--game gameinfo.txt]\nmodel scale <factor> <mdl...> [-o folder] [--game gameinfo.txt]\n";
 	if ( !argc || std::string_view( argv[ 0 ] ) == "--help" || std::string_view( argv[ 0 ] ) == "-h" )
 	{
 		std::printf( "%s", usage );
@@ -177,11 +178,72 @@ int ModelCommand( int argc, char **argv )
 		fs::path output, game;
 		model::Selection_t selection;
 		model::Clip_t clip;
+		model::VmfOptions_t vmfOptions;
 		for ( int i = 1; i < argc; i++ )
 		{
 			const std::string arg = argv[ i ];
 			const auto value = [ & ]() {if(i+1>=argc)throw std::runtime_error("Missing value for "+arg);return std::string(argv[++i]); };
-			if ( arg == "-o" || arg == "--output" )
+			if ( command == "vmf" && arg == "--hulls" )
+			{
+				const auto szSource = value();
+				if ( szSource == "auto" )
+					vmfOptions.m_nHullSource = model::VmfOptions_t::HullSource_t::HULL_SOURCE_AUTO;
+				else if ( szSource == "physics" )
+					vmfOptions.m_nHullSource = model::VmfOptions_t::HullSource_t::HULL_SOURCE_PHYSICS;
+				else if ( szSource == "decompose" )
+					vmfOptions.m_nHullSource = model::VmfOptions_t::HullSource_t::HULL_SOURCE_DECOMPOSE;
+				else if ( szSource == "cutout" )
+					vmfOptions.m_nHullSource = model::VmfOptions_t::HullSource_t::HULL_SOURCE_CUTOUT;
+				else
+					throw std::runtime_error( "Unknown hull source: " + szSource );
+			}
+			else if ( command == "vmf" && arg == "--texture" )
+			{
+				const auto szTexture = value();
+				if ( szTexture == "nodraw" )
+					vmfOptions.m_nTexturing = model::VmfOptions_t::Texturing_t::TEXTURING_NODRAW;
+				else if ( szTexture == "dev" )
+					vmfOptions.m_nTexturing = model::VmfOptions_t::Texturing_t::TEXTURING_DEV;
+				else if ( szTexture == "model" )
+					vmfOptions.m_nTexturing = model::VmfOptions_t::Texturing_t::TEXTURING_MODEL;
+				else
+					throw std::runtime_error( "Unknown VMF texture mode: " + szTexture );
+			}
+			else if ( command == "vmf" && arg == "--grid" )
+				vmfOptions.m_flGrid = Number( value() );
+			else if ( command == "vmf" && arg == "--concavity" )
+				vmfOptions.m_flConcavity = Number( value() );
+			else if ( command == "vmf" && arg == "--max-hulls" )
+				vmfOptions.m_nMaxHulls = Index( value() );
+			else if ( command == "vmf" && arg == "--max-sides" )
+				vmfOptions.m_nMaxSides = Index( value() );
+			else if ( command == "vmf" && arg == "--max-vertices" )
+				vmfOptions.m_nMaxVerticesPerHull = Index( value() );
+			else if ( command == "vmf" && arg == "--voxel-resolution" )
+				vmfOptions.m_nVoxelResolution = Index( value(), 8000000 );
+			else if ( command == "vmf" && arg == "--offset" )
+			{
+				vmfOptions.m_vecOffset.m_flX = Number( value() );
+				vmfOptions.m_vecOffset.m_flY = Number( value() );
+				vmfOptions.m_vecOffset.m_flZ = Number( value() );
+			}
+			else if ( command == "vmf" && arg == "--world" )
+				vmfOptions.m_bDetail = false;
+			else if ( command == "vmf" && arg == "--no-reference" )
+				vmfOptions.m_bReferenceProp = false;
+			else if ( command == "vmf" && arg == "--no-hammer-vertices" )
+				vmfOptions.m_bHammerPlusPlusVertices = false;
+			else if ( command == "vmf" && arg == "--reuse-materials" )
+				vmfOptions.m_bNodrawIncompatibleMaterials = false;
+			else if ( arg == "--bodygroup" )
+			{
+				const int nGroup = Index( value() ), nModel = Index( value() );
+				if ( nGroup > 1023 )
+					throw std::runtime_error( "Bodygroup index exceeds limit" );
+				selection.m_Bodygroups.resize( std::max( selection.m_Bodygroups.size(), static_cast<std::size_t>( nGroup + 1 ) ) );
+				selection.m_Bodygroups[ nGroup ] = nModel;
+			}
+			else if ( arg == "-o" || arg == "--output" )
 				output = vfs::FromUtf8( value() );
 			else if ( arg == "--game" )
 				game = vfs::FromUtf8( value() );
@@ -229,6 +291,18 @@ int ModelCommand( int argc, char **argv )
 		}
 		if ( args.empty() )
 			throw std::runtime_error( usage );
+		if ( command == "vmf" )
+		{
+			if ( args.size() != 2 || !output.empty() )
+				throw std::runtime_error( "model vmf needs one model and an output VMF path" );
+			const auto input = Input( args[ 0 ], game );
+			vmfOptions.m_Selection = selection;
+			const auto result = model::ExportVmf( input.m_szPath, input.m_pfnRead, vmfOptions );
+			Write( { { vfs::FromUtf8( args[ 1 ] ), result.m_Files.at( "model.vmf" ) } } );
+			for ( const auto &szNote : result.m_Notes )
+				std::fprintf( stderr, "%s\n", szNote.c_str() );
+			return 0;
+		}
 		if ( command == "export" && ( args.size() != 1 || output.empty() ) )
 			throw std::runtime_error( "model export needs one model and -o folder" );
 		int nFailed = 0;

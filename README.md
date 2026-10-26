@@ -274,6 +274,46 @@ default. They come from the data tables in the Source SDK 2013's particle librar
 client shares. Functions from other games' files (TF2's, or later editors') are learned from the
 mounted game's own particle files.
 
+## Model to VMF
+
+In the model editor, choose **Sources, Build and Export… → VMF (brushes)…**. Export the model's
+physics hulls, preserve an extruded cutout's render outline, or decompose its current render mesh
+into convex brushes. **Automatic targets the visible mesh**: exact cutout caps when recognized,
+CoACD for closed meshes, and surface voxel decomposition for open or overlapping meshes. Duplicate
+and degenerate triangles are removed before decomposition. Physics is an explicit collision-shape
+choice; Automatic uses it only when render companions are unavailable, with a note.
+
+Materials can be nodraw, a developer grid, or approximate model materials. Model mode can replace
+incompatible or missing materials with nodraw (enabled by default); it does not preserve model UVs.
+The options also include grid snapping, brush and decomposition limits, an offset, `func_detail`,
+a reference prop when the model supports `prop_static`, and Hammer++ vertex data. Fractional
+coordinates are preserved unless snapping is enabled. Invalid or over-budget hulls are omitted
+with reasons; exporting no brushes is an error. Detail exports need a sealed map around them.
+
+**Exact extruded cutout** joins adjacent cap triangles only when their union remains convex,
+then retains the model's existing thickness. It preserves holes and disconnected pieces without
+CoACD approximation. Use **Physics hulls** explicitly when you want the collision shape instead.
+Flat textured cards without thickness still need a separate silhouette-tracing workflow.
+
+The same export is available from the CLI:
+
+```sh
+vomit-tools-cli model vmf models/props_junk/wood_crate001a.mdl crate.vmf --game /path/to/cstrike
+vomit-tools-cli model vmf models/example.mdl visible.vmf --game /path/to/cstrike --hulls decompose --texture dev
+vomit-tools-cli model vmf models/cutout.mdl precise.vmf --game /path/to/cstrike --hulls cutout
+```
+
+Use `vomit-tools-cli model --help` for all flags. Raising `--max-sides` from its default of 64
+can retain more complex physics hulls, up to 128 sides per brush.
+Decomposition defaults to at most 128 hulls and 32 vertices per hull; vertex counts are capped
+further when necessary to fit the selected side budget. Closed-mesh concavity is normalized,
+in the range 0.01–1. Open-mesh voxel resolution defaults to 1,000,000 (range 100,000–8,000,000).
+Voxel output is an approximate shell: thin surfaces may thicken, and fine details may simplify.
+
+For a more detailed character export, try `--max-hulls 256 --voxel-resolution 4000000` with grid
+snapping off. This takes longer and produces more brushes. It approximates the reference pose,
+not an animated pose.
+
 ## Building
 
 You need CMake 3.25+, a C++20 compiler and Qt 6.5+ (Core, Widgets, Network, Test). With Qt 6.7+ and its
@@ -283,6 +323,9 @@ OpenGL, Direct3D or Metal); otherwise they draw in software.
 [stb](https://github.com/nothings/stb) are fetched at configure time; to build offline, point
 `FETCHCONTENT_SOURCE_DIR_SOURCEPP`, `FETCHCONTENT_SOURCE_DIR_MINIAUDIO` and `FETCHCONTENT_SOURCE_DIR_STB`
 at local copies.
+ Convex model export also fetches CoACD, CDT, spdlog and V-HACD;
+use `FETCHCONTENT_SOURCE_DIR_COACD`, `FETCHCONTENT_SOURCE_DIR_COACD_CDT`,
+`FETCHCONTENT_SOURCE_DIR_COACD_SPDLOG` and `FETCHCONTENT_SOURCE_DIR_VHACD` for offline copies.
 Vulkan builds use an installed Vulkan-Headers package or fetch pinned headers automatically;
 `FETCHCONTENT_SOURCE_DIR_VULKAN_HEADERS` can point at an offline copy. A Vulkan SDK is not needed.
 

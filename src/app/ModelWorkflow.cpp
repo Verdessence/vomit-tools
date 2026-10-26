@@ -1,9 +1,10 @@
 //===========================================================================//
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Purpose: See ModelWorkflow.h. All compilation and hull generation are performed by user tools.
+// Purpose: See ModelWorkflow.h. Source compilation is performed by user tools.
 //===========================================================================//
 #include "ModelWorkflow.h"
 #include "ModelImport.h"
+#include "ModelVmfDialog.h"
 #include "QtPaths.h"
 #include "bsp/Bsp.h"
 #include <QCheckBox>
@@ -84,6 +85,10 @@ CModelWorkflow::CModelWorkflow( QString szPath, xv::model::Reader_t pfnRead, xv:
 		pExchangeLayout->addWidget( p );
 		connect( p, &QPushButton::clicked, this, [ this, nFormat ] { Export( nFormat ); } );
 	}
+	auto *pVmf = new QPushButton( tr( "VMF (brushes)…" ) );
+	pVmf->setObjectName( QStringLiteral( "modelVmfButton" ) );
+	pExchangeLayout->addWidget( pVmf );
+	connect( pVmf, &QPushButton::clicked, this, [ this ] { CModelVmfDialog dialog( m_szPath, m_pfnRead, m_Model, m_Selection, this ); dialog.exec(); } );
 	pExchangeLayout->addStretch();
 	pTabs->addTab( pExchange, tr( "Export" ) );
 	auto *pAnimation = new QWidget;

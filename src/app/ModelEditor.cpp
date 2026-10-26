@@ -758,5 +758,7 @@ CModelWorkflow *CModelEditor::CreateWorkflow( std::optional<xv::vfs::CGameInfo> 
 				flValue = m_Parameters[ i ]->value();
 		clip.m_Parameters.push_back( flValue );
 	}
-	return new CModelWorkflow( m_szPath, m_pfnRead, *m_Model, source, clip, std::move( game ), this );
+	auto *pWorkflow = new CModelWorkflow( m_szPath, m_pfnRead, *m_Model, source, clip, std::move( game ), this );
+	pWorkflow->SetSelection( m_Selection );
+	return pWorkflow;
 }

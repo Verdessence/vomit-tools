@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- Model editor: export VMF brushes from physics hulls, matching extruded cutout caps, or a
+  convex decomposition of a render mesh, with material choices, optional grid snapping and Hammer++ vertex data. Also
+  available as `vomit-tools-cli model vmf`; invalid hulls are omitted with reasons. Automatic
+  targets the visible mesh, with a surface voxel fallback for open character meshes. Hull vertex
+  counts respect the brush side budget; collision export remains an explicit choice.
+
 ## 0.6.6 - qol (2026-10-25)
 
 - A program icon, and a splash screen that says what is loading.

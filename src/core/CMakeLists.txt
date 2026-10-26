@@ -32,6 +32,12 @@ add_library(vomit_tools_core STATIC
         model/Phy.h
         model/Transform.cpp
         model/Transform.h
+        model/Vmf.cpp
+        model/Vmf.h
+        model/Decompose.cpp
+        model/Cutout.cpp
+        model/Voxel.cpp
+        model/Voxel.h
         model/Model.cpp
         model/Model.h
         particles/Builtin.cpp
@@ -76,6 +82,8 @@ add_library(vomit_tools::core ALIAS vomit_tools_core)
 
 target_include_directories(vomit_tools_core PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
 target_link_libraries(vomit_tools_core PRIVATE sourcepp::vpkpp MINIZIP::minizip liblzma vomit_tools_miniaudio vomit_tools_stb Threads::Threads)
+target_link_libraries(vomit_tools_core PRIVATE vomit_tools_coacd)
+target_link_libraries(vomit_tools_core PRIVATE vomit_tools_vhacd)
 vomit_tools_set_warnings(vomit_tools_core)
 
 # stb's implementations (stb is fetched in cmake/Dependencies.cmake), built once and without our

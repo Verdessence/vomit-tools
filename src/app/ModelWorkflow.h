@@ -21,6 +21,7 @@ class CModelWorkflow : public QDialog
 public:
 	CModelWorkflow( QString szPath, xv::model::Reader_t pfnRead, xv::model::CModel model, xv::model::CStudioFile source, xv::model::Clip_t clip, std::optional<xv::vfs::CGameInfo> game, QWidget *pParent = nullptr );
 	~CModelWorkflow() override;
+	void SetSelection( const xv::model::Selection_t &selection ) { m_Selection = selection; }
 signals:
 	void OpenModelRequested( const QString &szPath );
 
@@ -40,6 +41,7 @@ private:
 	QString m_szPath, m_szSaved, m_szResultBsp;
 	xv::model::Reader_t m_pfnRead;
 	xv::model::CModel m_Model;
+	xv::model::Selection_t m_Selection;
 	xv::model::CStudioFile m_Source;
 	xv::model::Clip_t m_Clip;
 	std::optional<xv::vfs::CGameInfo> m_Game;
