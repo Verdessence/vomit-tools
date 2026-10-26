@@ -82,6 +82,10 @@ add_library(vomit_tools::core ALIAS vomit_tools_core)
 
 target_include_directories(vomit_tools_core PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
 target_link_libraries(vomit_tools_core PRIVATE sourcepp::vpkpp MINIZIP::minizip liblzma vomit_tools_miniaudio vomit_tools_stb Threads::Threads)
+# liblzma comes from minizip-ng's fetch of xz, whose target keeps its headers private. Without
+# this, lzma.h is only found on machines that have xz's development package installed.
+FetchContent_GetProperties(liblzma)
+target_include_directories(vomit_tools_core SYSTEM PRIVATE "${liblzma_SOURCE_DIR}/src/liblzma/api")
 target_link_libraries(vomit_tools_core PRIVATE vomit_tools_coacd)
 target_link_libraries(vomit_tools_core PRIVATE vomit_tools_vhacd)
 vomit_tools_set_warnings(vomit_tools_core)
