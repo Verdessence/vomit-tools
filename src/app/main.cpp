@@ -16,6 +16,7 @@
 #include "Language.h"
 #include "Graphics.h"
 #include "MainWindow.h"
+#include "PopupBlur.h"
 #include "Preferences.h"
 #include "PremiumDialog.h"
 #include "SingleInstance.h"
@@ -31,6 +32,8 @@ int main( int nArgc, char *argv[] )
 	QApplication::setOrganizationName( QStringLiteral( "vomit-tools" ) );
 	QApplication::setApplicationVersion( CAboutDialog::VersionText() );
 	QApplication::setWindowIcon( QIcon( QStringLiteral( ":/assets/vomit-tools.png" ) ) );
+	// Before any popup is made: Kvantum's menu blur crashes the app with KWindowSystem before 6.32.
+	InstallPopupBlurWorkaround( app );
 
 	QCommandLineParser parser;
 	parser.setApplicationDescription( QStringLiteral( "Soundscape, skybox and particle editors for Source engine games" ) );

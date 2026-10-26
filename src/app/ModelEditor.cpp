@@ -3,6 +3,7 @@
 // Purpose: See ModelEditor.h.
 //===========================================================================//
 #include "ModelEditor.h"
+#include "ModelWorkflow.h"
 #include "ModelDocument.h"
 #include "ModelView.h"
 #include "ImageFiles.h"
@@ -242,6 +243,10 @@ CModelEditor::CModelEditor( QString szPath, model::Reader_t pfnRead, QWidget *pP
 	auto *pScreenshot = new QPushButton( tr( "Save Screenshot…" ) );
 	pBodyForm->addRow( pScreenshot );
 	connect( pScreenshot, &QPushButton::clicked, this, [ this ] {const QString szFile=QFileDialog::getSaveFileName(this,tr("Save Model Screenshot"),{},tr("PNG image (*.png)"));if(!szFile.isEmpty()&&!m_pView->GetImage(m_pView->size()).save(szFile))m_pStatus->setText(tr("Could not save screenshot.")); } );
+	auto *pWorkflow = new QPushButton( tr( "Sources, Build and Export…" ) );
+	pWorkflow->setObjectName( QStringLiteral( "modelWorkflowButton" ) );
+	pBodyForm->addRow( pWorkflow );
+	connect( pWorkflow, &QPushButton::clicked, this, &CModelEditor::WorkflowRequested );
 	pTabs->addTab( pBody, tr( "Body" ) );
 	auto *pSequences = new QWidget;
 	auto *pSequenceLayout = new QVBoxLayout( pSequences );
@@ -364,16 +369,7 @@ void CModelEditor::ReloadMesh()
 	m_Sprites.clear();
 	m_Materials.clear();
 	if ( m_Model )
-		for ( const auto &szMaterial : m_Model->m_Materials )
-		{
-			m_Sprites.push_back( particles::LoadSprite( szMaterial, m_pfnRead ) );
-			ModelMaterial_t entry;
-			if ( auto bytes = m_pfnRead( "materials/" + szMaterial ) )
-				if ( auto material = material::ParseMaterial( std::string_view( reinterpret_cast<const char *>( bytes->data() ), bytes->size() ), m_pfnRead ) )
-					entry.m_Material = std::move( *material );
-			entry.m_Textures = material::CTextureSet::Load( entry.m_Material, m_pfnRead, 1024, 1 );
-			m_Materials.push_back( std::move( entry ) );
-		}
+		LoadModelMaterials( *m_Model, m_pfnRead, m_Sprites, m_Materials );
 	m_pView->SetResources( m_Model ? &*m_Model : nullptr, &m_Materials );
 	m_pStatus->setText( m_Model ? tr( "%1 vertices · %2 triangles" ).arg( m_Model->m_Vertices.size() ).arg( m_Model->GetTriangleCount() ) : QString::fromStdString( szError ) );
 	Sample();
@@ -742,4 +738,25 @@ std::optional<model::CStudioFile> CModelEditor::ReadOther( const QString &szPath
 	if ( !file )
 		*pError = tr( "Can't read %1: %2" ).arg( szPath, QString::fromStdString( szError ) );
 	return file;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Snapshots the current model and selected sequence for an external-source workflow.
+//-----------------------------------------------------------------------------
+CModelWorkflow *CModelEditor::CreateWorkflow( std::optional<xv::vfs::CGameInfo> game )
+{
+	if ( !m_Model )
+		return nullptr;
+	xv::model::Clip_t clip;
+	clip.m_nSequence = m_nSequence;
+	const auto &source = m_Files[ m_nSource ];
+	for ( const auto &parameter : source.m_Parameters )
+	{
+		float flValue = parameter.m_flStart;
+		for ( std::size_t i = 0; i < m_PoseControls.size(); i++ )
+			if ( m_PoseControls[ i ].m_szName == parameter.m_szName )
+				flValue = m_Parameters[ i ]->value();
+		clip.m_Parameters.push_back( flValue );
+	}
+	return new CModelWorkflow( m_szPath, m_pfnRead, *m_Model, source, clip, std::move( game ), this );
 }

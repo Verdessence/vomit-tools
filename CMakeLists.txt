@@ -22,6 +22,7 @@ if(WIN32)
 endif()
 
 include(cmake/Dependencies.cmake)
+include(cmake/ThirdPartyNotices.cmake)
 include(cmake/CompilerOptions.cmake)
 
 add_subdirectory(src/core)

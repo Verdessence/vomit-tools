@@ -10,6 +10,8 @@ struct ModelMaterial_t
 	xv::material::CMaterial m_Material;
 	xv::material::CTextureSet m_Textures;
 };
+// Shared material loading for the editor and the browser's smaller preview.
+void LoadModelMaterials( const xv::model::CModel &model, const xv::model::Reader_t &pfnRead, std::vector<xv::particles::Sprite_t> &sprites, std::vector<ModelMaterial_t> &materials, int nMaxSize = 1024 );
 #ifdef VOMIT_TOOLS_GPU
 #include "MaterialRenderer.h"
 #include "ParticleRenderer.h"

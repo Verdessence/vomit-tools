@@ -24,6 +24,8 @@
 #include "texture/Sheet.h"
 #include "texture/Vtf.h"
 
+int ModelCommand( int argc, char **argv );
+
 namespace fs = std::filesystem;
 using namespace xv::texture;
 
@@ -37,6 +39,7 @@ const char *const USAGE = R"(vomit-tools-cli: Valve texture (VTF) tools
   vomit-tools-cli extract <vtfs or folders...> [-o folder] [--type png] [--mip N]
   vomit-tools-cli info    <vtfs...> [--kv]
   vomit-tools-cli thumbnail <vtf> <out.png> [size]
+  vomit-tools-cli model --help
 
 create:
   --format F            DXT1, DXT5, BGRA8888... (default: DXT5 with alpha, else DXT1)
@@ -921,6 +924,8 @@ int Thumbnail( const Arguments_t &arguments )
 //-----------------------------------------------------------------------------
 int main( int argc, char **argv )
 {
+	if ( argc > 1 && std::string_view( argv[ 1 ] ) == "model" )
+		return ModelCommand( argc - 2, argv + 2 );
 	const Arguments_t arguments = Parse( argc, argv );
 	if ( arguments.m_szMode.empty() || arguments.Has( "--help" ) || arguments.Has( "-h" ) )
 	{

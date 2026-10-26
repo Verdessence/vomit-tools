@@ -55,8 +55,19 @@ add_library(vomit_tools_ui STATIC
         MaterialView.h
         ModelRenderer.cpp
         ModelRenderer.h
+        ModelBrowser.cpp
+        ModelBrowser.h
         ModelDocument.cpp
         ModelDocument.h
+        SourceTools.cpp
+        SourceTools.h
+        ModelImport.cpp
+        ModelImport.h
+        ModelWorkflow.cpp
+        ModelWorkflow.h
+        ModelDetails.cpp
+        ModelDetails.h
+        ModelFlags.h
         ModelEditor.cpp
         ModelEditor.h
         ModelEditorPanels.cpp
@@ -75,6 +86,8 @@ add_library(vomit_tools_ui STATIC
         ParticleSearch.cpp
         ParticleSearch.h
         DebugLog.cpp
+        PopupBlur.cpp
+        PopupBlur.h
         Preferences.cpp
         Preferences.h
         PreferencesDialog.cpp
@@ -173,6 +186,12 @@ qt_add_resources(vomit_tools_ui "vomit_tools_assets"
         PREFIX "/assets"
         BASE ../assets
         FILES ../assets/logo_wide.png ../assets/premium_character.gif ../assets/vomit-tools.png)
+# Our license and the third-party notices, for Help > About > Licenses.
+set_source_files_properties("${CMAKE_SOURCE_DIR}/LICENSE" PROPERTIES QT_RESOURCE_ALIAS LICENSE.txt)
+set_source_files_properties("${VOMIT_TOOLS_NOTICES}" PROPERTIES QT_RESOURCE_ALIAS THIRD-PARTY-NOTICES.txt)
+qt_add_resources(vomit_tools_ui "vomit_tools_licenses"
+        PREFIX "/licenses"
+        FILES "${CMAKE_SOURCE_DIR}/LICENSE" "${VOMIT_TOOLS_NOTICES}")
 target_link_libraries(vomit_tools_ui PUBLIC vomit_tools::core Qt6::Widgets Qt6::Network)
 if(WIN32)
     # Explorer's right-click menu in the file trees.
@@ -205,6 +224,13 @@ include(GNUInstallDirs)
 install(TARGETS vomit-tools
         BUNDLE DESTINATION .
         RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+# The license and notices go with every copy: beside the program on Windows, with the docs elsewhere.
+if(WIN32)
+    install(FILES "${CMAKE_SOURCE_DIR}/LICENSE" DESTINATION ${CMAKE_INSTALL_BINDIR} RENAME LICENSE.txt)
+    install(FILES "${VOMIT_TOOLS_NOTICES}" DESTINATION ${CMAKE_INSTALL_BINDIR})
+else()
+    install(FILES "${CMAKE_SOURCE_DIR}/LICENSE" "${VOMIT_TOOLS_NOTICES}" DESTINATION ${CMAKE_INSTALL_DOCDIR})
+endif()
 # Copies the Qt libraries and plugins next to the executable on Windows and macOS. Linux builds
 # use the system Qt (or linuxdeploy for the AppImage).
 if(WIN32 OR APPLE)

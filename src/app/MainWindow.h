@@ -25,6 +25,7 @@
 #include "vfs/Steam.h"
 #include "vfs/Vfs.h"
 
+class CModelBrowser;
 class CModelEditor;
 class CDetailDocument;
 class CDetailEditor;
@@ -77,6 +78,8 @@ public:
 	void OpenFolder( const QString &szFolder );
 	void OpenDiskFile( const QString &szPath );
 	CModelEditor *OpenModelFile( const QString &szPath );
+	// The tab of every model in the game; null without a game.
+	CModelBrowser *OpenModelBrowser();
 	// Opens a soundscape or soundscript from the mounted game in an editor tab.
 	CDetailEditor *OpenDetailFile( const QString &szGamePath );
 	CDetailEditor *NewDetailFile();
@@ -213,6 +216,8 @@ private:
 	// Writes the model's files: the changed ones where they came from, or all of them beside
 	// mdl (a Save As).
 	bool WriteModel( CModelEditor *pEditor, const std::filesystem::path &mdl, bool bAll );
+	// The mounted game's .mdl a model's other file (.vvd, .vtx, .phy, .ani) belongs to; empty when none.
+	[[nodiscard]] QString GameModelForCompanion( const QString &szPath ) const;
 	// The surface properties the mounted game knows ($surfaceprop values), with what each is
 	// based on.
 	[[nodiscard]] std::vector<Choice_t> SurfaceProps() const;

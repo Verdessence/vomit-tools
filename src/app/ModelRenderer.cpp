@@ -3,6 +3,32 @@
 // Purpose: See ModelRenderer.h.
 //===========================================================================//
 #include "ModelRenderer.h"
+//-----------------------------------------------------------------------------
+// Purpose: Resolves material patches and textures identically in every model preview.
+//-----------------------------------------------------------------------------
+void LoadModelMaterials( const xv::model::CModel &model, const xv::model::Reader_t &pfnRead, std::vector<xv::particles::Sprite_t> &sprites, std::vector<ModelMaterial_t> &materials, int nMaxSize )
+{
+	sprites.clear();
+	materials.clear();
+	for ( const auto &szMaterial : model.m_Materials )
+	{
+
+		ModelMaterial_t entry;
+		if ( auto bytes = pfnRead( "materials/" + szMaterial ) )
+			if ( auto material = xv::material::ParseMaterial( std::string_view( reinterpret_cast<const char *>( bytes->data() ), bytes->size() ), pfnRead ) )
+				entry.m_Material = std::move( *material );
+		entry.m_Textures = xv::material::CTextureSet::Load( entry.m_Material, pfnRead, nMaxSize, 1 );
+		auto sprite = xv::particles::FallbackSprite();
+		if ( const auto *pBase = entry.m_Textures.Find( "$basetexture" ); pBase && !pBase->m_Frames.empty() )
+		{
+			sprite.m_Mips = { pBase->m_Frames[ 0 ] };
+			while ( sprite.m_Mips.back().m_nWidth > 1 || sprite.m_Mips.back().m_nHeight > 1 )
+				sprite.m_Mips.push_back( xv::texture::HalfSize( sprite.m_Mips.back() ) );
+		}
+		sprites.push_back( std::move( sprite ) );
+		materials.push_back( std::move( entry ) );
+	}
+}
 #ifdef VOMIT_TOOLS_GPU
 #include <rhi/qrhi.h>
 #include <cmath>

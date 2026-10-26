@@ -6,6 +6,7 @@
 #pragma once
 #include <functional>
 #include <QWidget>
+#include "vfs/Vfs.h"
 #include <QElapsedTimer>
 #include "model/Edit.h"
 #include "model/Phy.h"
@@ -13,6 +14,7 @@
 #include "model/Mdl.h"
 #include "particles/Render.h"
 class CModelView;
+class CModelWorkflow;
 class CModelDocument;
 class QTableWidget;
 class QVBoxLayout;
@@ -46,9 +48,11 @@ public:
 	// panels.
 	bool Commit( const QString &szName, const std::function<void( xv::model::Files_t & )> &pfnEdit );
 	[[nodiscard]] QString GetStatus() const;
+	CModelWorkflow *CreateWorkflow( std::optional<xv::vfs::CGameInfo> game );
 signals:
 	void OpenMaterialRequested( const QString &szPath );
 	void ModifiedChanged( bool bModified );
+	void WorkflowRequested();
 
 private:
 	// The edit panels (ModelEditorPanels.cpp): each fills itself again through m_Refreshers.

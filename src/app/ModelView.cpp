@@ -414,3 +414,12 @@ QImage CModelView::GetGpuImage( QSize size )
 #endif
 	return {};
 }
+
+//-----------------------------------------------------------------------------
+// Purpose: Advances an automatic orbit while preserving the user's target, pitch and zoom.
+//-----------------------------------------------------------------------------
+void CModelView::Turn( float flDegrees )
+{
+	m_Camera.m_flYaw += flDegrees;
+	Redraw();
+}

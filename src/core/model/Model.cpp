@@ -10,6 +10,7 @@
 #include "Binary.h"
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <cstring>
 #include <span>
@@ -600,6 +601,8 @@ std::optional<CModel> LoadModel( std::string_view szMdlPath, const Reader_t &pfn
 			const auto nMaterialRef = mdl.Read<std::int32_t>( nMeshAt );
 			const std::size_t nMeshFirst = nModelFirst + static_cast<std::size_t>( std::max( 0, mdl.Read<std::int32_t>( nMeshAt + 12 ) ) );
 			Mesh_t mesh;
+			mesh.m_nBodygroup = nPart;
+			mesh.m_nBodyModel = nChoice;
 			if ( nMaterialRef >= 0 && static_cast<std::size_t>( nMaterialRef ) < skin.size() )
 			{
 				mesh.m_nMaterial = skin[ static_cast<std::size_t>( nMaterialRef ) ];
@@ -707,6 +710,32 @@ std::optional<CModel> LoadModel( std::string_view szMdlPath, const Reader_t &pfn
 		}
 	}
 	return model;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: The extension is matched without regard to case, longest first so "a.dx90.vtx" isn't
+//          taken for "a.dx90" + ".vtx"; any other ".something.vtx" is tried after.
+//-----------------------------------------------------------------------------
+std::vector<std::string> ModelPathsFor( std::string_view szPath )
+{
+	const auto endsWith = [ szPath ]( std::string_view szEnd ) {
+		return szPath.size() > szEnd.size() && std::equal( szEnd.begin(), szEnd.end(), szPath.end() - static_cast<std::ptrdiff_t>( szEnd.size() ), []( char chEnd, char ch ) { return std::tolower( static_cast<unsigned char>( ch ) ) == chEnd; } );
+	};
+	for ( std::string_view szKind : { ".dx90.vtx", ".dx80.vtx", ".xbox.vtx", ".sw.vtx", ".vtx", ".vvd", ".phy", ".ani" } )
+	{
+		if ( !endsWith( szKind ) )
+			continue;
+		std::string szStem{ szPath.substr( 0, szPath.size() - szKind.size() ) };
+		std::vector<std::string> paths{ szStem + ".mdl" };
+		constexpr std::string_view ANIMATIONS = "_animations";
+		if ( szKind == ".ani" && szStem.size() > ANIMATIONS.size() && szStem.ends_with( ANIMATIONS ) )
+			paths.push_back( szStem.substr( 0, szStem.size() - ANIMATIONS.size() ) + ".mdl" );
+		// Older builds' .vtx files carry other suffixes ("a.dx7_2bone.vtx").
+		if ( const std::size_t nDot = szStem.rfind( '.' ); szKind == ".vtx" && nDot != std::string::npos && nDot > szStem.find_last_of( "/\\" ) + 1 )
+			paths.push_back( szStem.substr( 0, nDot ) + ".mdl" );
+		return paths;
+	}
+	return {};
 }
 
 } // namespace xv::model

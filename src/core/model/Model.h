@@ -80,6 +80,7 @@ struct Mesh_t
 {
 	int m_nMaterial = -1;                // into CModel::m_Materials, after the default skin
 	std::vector<std::uint32_t> m_Indices; // three per triangle, into CModel::m_Vertices
+	int m_nBodygroup = 0, m_nBodyModel = 0;
 };
 
 class CModel
@@ -118,5 +119,10 @@ struct Selection_t
 // Reads models/<...>.mdl and its .vvd and .vtx. The files are untrusted: every count and offset is
 // checked, and nullopt (with the reason in error) comes back for anything that doesn't add up.
 [[nodiscard]] std::optional<CModel> LoadModel( std::string_view szMdlPath, const Reader_t &pfnRead, std::string *pError = nullptr, const Selection_t &selection = {} );
+
+// The .mdl a compiled model's other file belongs to ("models/a.dx90.vtx", "models/a.vvd",
+// "models/a.phy", "models/a.ani", "models/a_animations.ani" or "models/a.dx7_2bone.vtx"), best guess first; empty for any
+// other file. The caller keeps the first that exists.
+[[nodiscard]] std::vector<std::string> ModelPathsFor( std::string_view szPath );
 
 } // namespace xv::model

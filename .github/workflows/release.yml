@@ -56,6 +56,10 @@ jobs:
 
           cp src/assets/vomit-tools.png vomit-tools.png
 
+          # The license and third-party notices travel inside the AppImage.
+          mkdir -p AppDir/usr/share/doc/vomit-tools
+          cp LICENSE build/THIRD-PARTY-NOTICES.txt AppDir/usr/share/doc/vomit-tools/
+
           ./linuxdeploy-x86_64.AppImage --appdir AppDir \
             --executable build/src/app/vomit-tools \
             --executable build/src/cli/vomit-tools-cli \

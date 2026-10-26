@@ -27,6 +27,11 @@
 #include "Graphics.h"
 #include "InterfaceMode.h"
 #include "Preferences.h"
+#include "SourceTools.h"
+#include <QFileDialog>
+#include <QLineEdit>
+#include <QSettings>
+#include <QFileInfo>
 
 namespace
 {
@@ -81,6 +86,7 @@ CPreferencesDialog::CPreferencesDialog( QWidget *pParent )
 	AddPage( tr( "Graphics" ), BuildGraphicsPage() );
 	AddPage( tr( "Particles" ), BuildParticlesPage() );
 	AddPage( tr( "Materials" ), BuildMaterialsPage() );
+	AddPage( tr( "Source Tools" ), BuildSourceToolsPage() );
 	AddPage( tr( "Advanced" ), BuildAdvancedPage() );
 	for ( const auto &[ szTitle, pfnMake ] : LocalPages() )
 	{
@@ -295,11 +301,39 @@ QWidget *CPreferencesDialog::BuildAdvancedPage()
 	pLayout->addWidget( Hint( tr( "Prints what goes on in the background (mounting the game, opening and saving files, "
 								  "drawing previews, with how long each took) to the terminal, and writes it to %1, which "
 								  "starts afresh at each run." )
-								  .arg( QDir::toNativeSeparators( DebugLogPath() ) ) ) );
+			.arg( QDir::toNativeSeparators( DebugLogPath() ) ) ) );
 	auto *pRow = new QHBoxLayout;
 	pRow->addWidget( pShow );
 	pRow->addStretch();
 	pLayout->addLayout( pRow );
+	pLayout->addStretch();
+	return pPage;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Lets users supply stock tools, ++ replacements, or native wrapper executables.
+//-----------------------------------------------------------------------------
+QWidget *CPreferencesDialog::BuildSourceToolsPage()
+{
+	auto *pPage = new QWidget;
+	auto *pLayout = PageLayout( pPage );
+	pLayout->addWidget( Hint( tr( "Leave a path empty to discover tools beside the current game and in PATH. Tool folders named by gameinfo.txt are checked too. Use native executables for your operating system." ) ) );
+	for ( auto nTool : { SourceTool_t::SOURCE_TOOL_STUDIOMDL, SourceTool_t::SOURCE_TOOL_BSPZIP } )
+	{
+		const auto szKey = SourceToolSetting( nTool );
+		pLayout->addWidget( new QLabel( nTool == SourceTool_t::SOURCE_TOOL_STUDIOMDL ? tr( "studiomdl / StudioMDL++" ) : tr( "bspzip / BSPZIP++" ) ) );
+		auto *pRow = new QHBoxLayout;
+		auto *pPath = new QLineEdit( QSettings{}.value( szKey ).toString() );
+		pPath->setObjectName( nTool == SourceTool_t::SOURCE_TOOL_STUDIOMDL ? QStringLiteral( "studiomdlPath" ) : QStringLiteral( "bspzipPath" ) );
+		pPath->setPlaceholderText( tr( "Automatic discovery" ) );
+		auto *pBrowse = new QPushButton( tr( "Browse…" ) );
+		pRow->addWidget( pPath, 1 );
+		pRow->addWidget( pBrowse );
+		pLayout->addLayout( pRow );
+		connect( pPath, &QLineEdit::textChanged, pPage, [ szKey ]( const QString &szPath ) { QSettings{}.setValue( szKey, szPath.trimmed() ); } );
+		connect( pBrowse, &QPushButton::clicked, pPage, [ this, pPath ] {const auto szFile=QFileDialog::getOpenFileName(this,tr("Select Source Tool"),pPath->text());if(!szFile.isEmpty())pPath->setText(szFile); } );
+	}
+	pLayout->addWidget( Hint( tr( "Model builds run in a temporary game directory. The compiler is supplied by you; this application does not include or download Valve or community compilers." ) ) );
 	pLayout->addStretch();
 	return pPage;
 }

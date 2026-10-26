@@ -76,8 +76,10 @@
 #include "SoundEditor.h"
 #include "DetailEditor.h"
 #include "DetailPreview.h"
+#include "ModelBrowser.h"
 #include "ModelDocument.h"
 #include "ModelEditor.h"
+#include "ModelWorkflow.h"
 #include "MaterialForm.h"
 #include "SoundPlayer.h"
 #include "BatchConvertDialog.h"
@@ -93,6 +95,7 @@
 #include "particles/Particles.h"
 #include "sky/Sky.h"
 #include "sound/SoundLint.h"
+#include "model/Model.h"
 #include "vfs/Package.h"
 
 namespace fs = std::filesystem;
@@ -300,6 +303,33 @@ QString SkyNameFor( const QString &szGamePath )
 	return szBase.left( szBase.size() - 2 );
 }
 
+//-----------------------------------------------------------------------------
+// Purpose: The .mdl a model's other file (.vvd, .vtx, .phy, .ani) belongs to: the first guess
+//          pfnFind finds, as it gives it back. Empty for other files or when none is there.
+//-----------------------------------------------------------------------------
+QString ModelForCompanion( const QString &szPath, const std::function<QString( const QString & )> &pfnFind )
+{
+	for ( const std::string &szMdl : xv::model::ModelPathsFor( szPath.toStdString() ) )
+	{
+		if ( QString szFound = pfnFind( QString::fromStdString( szMdl ) ); !szFound.isEmpty() )
+		{
+			return szFound;
+		}
+	}
+	return {};
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: The same, beside a file on disk; the .mdl's case may differ from the file's.
+//-----------------------------------------------------------------------------
+QString DiskModelForCompanion( const QString &szPath )
+{
+	return ModelForCompanion( szPath, []( const QString &szMdl ) {
+		const QString szFound = ToQString( xv::vfs::FindCaseInsensitive( ToPath( szMdl ) ) );
+		return QFileInfo( szFound ).isFile() ? szFound : QString{};
+	} );
+}
+
 } // namespace
 
 //-----------------------------------------------------------------------------
@@ -323,6 +353,7 @@ CMainWindow::CMainWindow( QWidget *pParent, xv::audio::CEngine::Output_t nAudio 
 	m_pFilter->setFilterKeyColumn( CVfsModel::COLUMN_NAME_COLUMN );
 
 	auto *pSearch = new QLineEdit;
+	pSearch->setObjectName( QStringLiteral( "gameFileSearch" ) );
 	pSearch->setPlaceholderText( tr( "Filter files…" ) );
 	pSearch->setClearButtonEnabled( true );
 	connect( pSearch, &QLineEdit::textChanged, m_pFilter, &QSortFilterProxyModel::setFilterFixedString );
@@ -397,6 +428,10 @@ CMainWindow::CMainWindow( QWidget *pParent, xv::audio::CEngine::Output_t nAudio 
 		else if ( szPath.endsWith( u".mdl", Qt::CaseInsensitive ) )
 		{
 			OpenModelFile( szPath );
+		}
+		else if ( const QString szMdl = GameModelForCompanion( szPath ); !szMdl.isEmpty() )
+		{
+			OpenModelFile( szMdl );
 		}
 		else if ( IsParticlePath( szPath ) )
 		{
@@ -620,6 +655,8 @@ void CMainWindow::BuildMenus( QAction *pSearchPathsToggle )
 		}
 	} );
 	pGame->addSeparator();
+	QAction *pModelBrowser = pGame->addAction( tr( "Browse M&odels" ), QKeySequence( Qt::CTRL | Qt::SHIFT | Qt::Key_M ), this, &CMainWindow::OpenModelBrowser );
+	pModelBrowser->setObjectName( QStringLiteral( "modelBrowserAction" ) );
 	auto *pManifests = pGame->addMenu( tr( "Generate &Manifest" ) );
 	pManifests->addAction( tr( "&Soundscapes…" ), this, [ this ] { GenerateManifest( CManifestDialog::Format_t::FORMAT_SOUNDSCAPES ); } );
 	pManifests->addAction( tr( "Sound&scripts…" ), this, [ this ] { GenerateManifest( CManifestDialog::Format_t::FORMAT_SOUNDSCRIPTS ); } );
@@ -834,7 +871,7 @@ void CMainWindow::ChooseFiles()
 {
 	const QString szStart = m_pFolders->GetFolder().isEmpty() && m_Game ? ToQString( m_Game->m_GameDir ) : m_pFolders->GetFolder();
 	const QStringList files = QFileDialog::getOpenFileNames( this, tr( "Open File" ), szStart,
-		tr( "Soundscapes and soundscripts (*.txt);;Detail files (*.vbsp);;Sounds (*.wav *.mp3);;Textures (*.vtf);;Models (*.mdl);;Sky faces and textures (*.vmt *.vtf *.png *.tga *.jpg *.jpeg *.bmp *.psd *.hdr);;Particles (*.pcf *.dmx);;"
+		tr( "Soundscapes and soundscripts (*.txt);;Detail files (*.vbsp);;Sounds (*.wav *.mp3);;Textures (*.vtf);;Models (*.mdl *.vvd *.vtx *.phy *.ani);;Sky faces and textures (*.vmt *.vtf *.png *.tga *.jpg *.jpeg *.bmp *.psd *.hdr);;Particles (*.pcf *.dmx);;"
 			"KeyValues (*.txt *.vmt *.vdf *.res);;Archives and maps (*.vpk *.bsp *.gcf *.gma *.pak *.wad *.xzp *.zip);;Game info (gameinfo.txt);;All files (*)" ) );
 	OpenPaths( files );
 }
@@ -899,7 +936,7 @@ CVpkEditor *CMainWindow::OpenPackage( const QString &szPath )
 	auto *pEditor = new CVpkEditor( std::move( pPackage ), m_pPlayer, pfnGame );
 	connect( pEditor, &CVpkEditor::StatusMessage, this, [ this ]( const QString &szText ) { statusBar()->showMessage( szText, 5000 ); } );
 	pEditor->SetCanOpen( []( const QString &szFile ) {
-		return szFile.endsWith( u".mdl", Qt::CaseInsensitive ) || szFile.endsWith( u".vbsp", Qt::CaseInsensitive ) || szFile.endsWith( u".vtf", Qt::CaseInsensitive ) || szFile.endsWith( u".vmt", Qt::CaseInsensitive ) || IsParticlePath( szFile ) ||
+		return szFile.endsWith( u".mdl", Qt::CaseInsensitive ) || !xv::model::ModelPathsFor( szFile.toStdString() ).empty() || szFile.endsWith( u".vbsp", Qt::CaseInsensitive ) || szFile.endsWith( u".vtf", Qt::CaseInsensitive ) || szFile.endsWith( u".vmt", Qt::CaseInsensitive ) || IsParticlePath( szFile ) ||
 			xv::sound::FileKindForPath( xv::vfs::NormalizePath( szFile.toStdString() ) ) != FileKind_t::FILE_KIND_UNKNOWN;
 	} );
 	connect( pEditor, &CVpkEditor::OpenRequested, this, [ this, pEditor ]( const QString &szFile ) { OpenArchiveFile( pEditor, szFile ); } );
@@ -1109,6 +1146,15 @@ void CMainWindow::ChooseMapParticles()
 //-----------------------------------------------------------------------------
 QWidget *CMainWindow::OpenArchiveFile( CVpkEditor *pArchive, const QString &szPath )
 {
+	// A model's other file opens the model it belongs to, from the archive or else the game.
+	if ( const QString szMdl = ModelForCompanion( szPath, [ this, pArchive ]( const QString &szCandidate ) {
+			 const std::string szGamePath = xv::vfs::NormalizePath( szCandidate.toStdString() );
+			 return pArchive->GetPackage().Find( szGamePath ) || ( m_Game && m_pFileSystem->Resolve( szGamePath ) ) ? QString::fromStdString( szGamePath ) : QString{};
+		 } );
+		!szMdl.isEmpty() )
+	{
+		return OpenArchiveFile( pArchive, szMdl );
+	}
 	const auto bytes = pArchive->GetPackage().Read( szPath.toStdString() );
 	if ( !bytes )
 	{
@@ -1336,6 +1382,10 @@ void CMainWindow::Remount()
 		{
 			pParticles->SetGame( ParticleGame() );
 		}
+		else if ( auto *pBrowser = qobject_cast<CModelBrowser *>( m_pTabs->widget( i ) ) )
+		{
+			pBrowser->SetGame( *m_Game );
+		}
 	}
 	if ( !szSelected.isEmpty() )
 	{
@@ -1548,6 +1598,10 @@ void CMainWindow::PreviewGameFile( const QString &szPath, const QString &szSourc
 	{
 		pView = WithEditButton( pView, tr( "This is a model." ), tr( "Open Model Viewer" ), [ this, szPath ] { OpenModelFile( szPath ); } );
 	}
+	else if ( const QString szMdl = GameModelForCompanion( szPath ); !szMdl.isEmpty() )
+	{
+		pView = WithEditButton( pView, tr( "This is part of the model %1." ).arg( szMdl ), tr( "Open Model Viewer" ), [ this, szMdl ] { OpenModelFile( szMdl ); } );
+	}
 	else if ( szPath.endsWith( u".vbsp", Qt::CaseInsensitive ) )
 	{
 		pView = WithEditButton( pView, tr( "This is a detail file." ), tr( "Open in Details Editor" ), [ this, szPath ] { OpenDetailFile( szPath ); } );
@@ -1645,6 +1699,14 @@ void CMainWindow::PreviewDiskFile( const QString &szPath )
 	{
 		pView = WithEditButton( pView, tr( "This is a detail file." ), tr( "Open in Details Editor" ), [ this, szPath ] { OpenDiskFile( szPath ); } );
 	}
+	else if ( info.suffix().compare( u"mdl", Qt::CaseInsensitive ) == 0 )
+	{
+		pView = WithEditButton( pView, tr( "This is a model." ), tr( "Open Model Viewer" ), [ this, szPath ] { OpenModelFile( szPath ); } );
+	}
+	else if ( const QString szMdl = DiskModelForCompanion( szPath ); !szMdl.isEmpty() )
+	{
+		pView = WithEditButton( pView, tr( "This is part of the model %1." ).arg( QFileInfo( szMdl ).fileName() ), tr( "Open Model Viewer" ), [ this, szMdl ] { OpenModelFile( szMdl ); } );
+	}
 	else if ( info.suffix().compare( u"txt", Qt::CaseInsensitive ) == 0 )
 	{
 		const FileKind_t nKind = xv::sound::GuessFileKind( info.fileName().toStdString(), xv::kv1::Parse( data->toStdString() ).m_Document );
@@ -1700,6 +1762,11 @@ void CMainWindow::OpenDiskFile( const QString &szPath )
 	if ( info.suffix().compare( u"mdl", Qt::CaseInsensitive ) == 0 )
 	{
 		OpenModelFile( info.absoluteFilePath() );
+		return;
+	}
+	if ( const QString szMdl = DiskModelForCompanion( info.absoluteFilePath() ); !szMdl.isEmpty() )
+	{
+		OpenModelFile( szMdl );
 		return;
 	}
 	const fs::path file = ToPath( info.absoluteFilePath() );
@@ -2906,6 +2973,12 @@ bool CMainWindow::ConfirmClose( CParticleEditor *pEditor )
 //-----------------------------------------------------------------------------
 bool CMainWindow::CloseTab( int nIndex )
 {
+	if ( auto *pBrowser = qobject_cast<CModelBrowser *>( m_pTabs->widget( nIndex ) ) )
+	{
+		m_pTabs->removeTab( nIndex );
+		pBrowser->deleteLater();
+		return true;
+	}
 	if ( auto *pModel = qobject_cast<CModelEditor *>( m_pTabs->widget( nIndex ) ) )
 	{
 		if ( !ConfirmClose( pModel ) )
@@ -4516,6 +4589,7 @@ CModelEditor *CMainWindow::AddModelEditor( const QString &szPath, xv::material::
 		return nullptr;
 	}
 	pEditor->SetOrigin( szOrigin );
+	connect( pEditor, &CModelEditor::WorkflowRequested, this, [ this, pEditor ] {if(auto *p=pEditor->CreateWorkflow(m_Game)){p->setAttribute(Qt::WA_DeleteOnClose);p->setWindowModality(Qt::WindowModal);connect(p,&CModelWorkflow::OpenModelRequested,this,&CMainWindow::OpenModelFile);p->show();} } );
 	connect( pEditor, &CModelEditor::OpenMaterialRequested, this, [ this, pEditor ]( const QString &szMaterial ) {
 		if ( !pEditor->GetOrigin().isEmpty() && !QFileInfo( pEditor->GetOrigin() ).isAbsolute() )
 		{
@@ -4599,8 +4673,8 @@ bool CMainWindow::SaveAs( CModelEditor *pEditor )
 {
 	const QString &szOrigin = pEditor->GetOrigin();
 	const fs::path current = QFileInfo( szOrigin ).isAbsolute() ? ToPath( szOrigin )
-		: m_Game                                                 ? WriteTarget( pEditor->GetPath() )
-																 : ToPath( QDir::homePath() ) / xv::vfs::FromUtf8( QFileInfo( pEditor->GetPath() ).fileName().toStdString() );
+		: m_Game                                                ? WriteTarget( pEditor->GetPath() )
+																: ToPath( QDir::homePath() ) / xv::vfs::FromUtf8( QFileInfo( pEditor->GetPath() ).fileName().toStdString() );
 	const QString szFile = AskSavePath( current, tr( "Models (*.mdl)" ) );
 	if ( szFile.isEmpty() )
 	{
@@ -4696,6 +4770,52 @@ bool CMainWindow::WriteModel( CModelEditor *pEditor, const fs::path &mdl, bool b
 	FilesWritten( written );
 	return true;
 }
+//-----------------------------------------------------------------------------
+// Purpose: One browser for the game; asking again goes back to it.
+//-----------------------------------------------------------------------------
+CModelBrowser *CMainWindow::OpenModelBrowser()
+{
+	if ( !m_Game )
+	{
+		QMessageBox::information( this, tr( "Models" ), tr( "The model browser shows a game's models; open the game first." ) );
+		return nullptr;
+	}
+	for ( int i = 0; i < m_pTabs->count(); i++ )
+		if ( auto *p = qobject_cast<CModelBrowser *>( m_pTabs->widget( i ) ) )
+		{
+			m_pTabs->setCurrentWidget( p );
+			return p;
+		}
+	auto *pBrowser = new CModelBrowser( *m_Game );
+	pBrowser->SetDetailsReader( [ this ]( std::string_view szPath ) { return m_pFileSystem->Read( szPath ); }, [ this ]( std::string_view szPath ) {const auto *p=m_pFileSystem->Resolve(szPath);return p?ToQString(p->GetLocation()):QString{}; } );
+	connect( pBrowser, &CModelBrowser::OpenMaterialRequested, this, &CMainWindow::OpenMaterialFile );
+	connect( pBrowser, &CModelBrowser::ShowInGameBrowser, this, [ this ]( const QString &szPath ) {
+		if ( auto *pSearch = findChild<QLineEdit *>( QStringLiteral( "gameFileSearch" ) ) )
+			pSearch->clear();
+		const auto index = m_pFilter->mapFromSource( m_pModel->IndexForPath( szPath.toStdString() ) );
+		if ( index.isValid() )
+		{
+			m_pSides->setCurrentWidget( m_pGameBrowser );
+			m_pTree->setCurrentIndex( index );
+			m_pTree->scrollTo( index );
+		}
+	} );
+	connect( pBrowser, &CModelBrowser::OpenModelRequested, this, &CMainWindow::OpenModelFile );
+	m_pTabs->setCurrentIndex( m_pTabs->addTab( pBrowser, tr( "Models" ) ) );
+	return pBrowser;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: The mounted game's .mdl a model's other file belongs to; empty when it has none.
+//-----------------------------------------------------------------------------
+QString CMainWindow::GameModelForCompanion( const QString &szPath ) const
+{
+	return ModelForCompanion( szPath, [ this ]( const QString &szMdl ) {
+		const std::string szGamePath = xv::vfs::NormalizePath( szMdl.toStdString() );
+		return m_Game && m_pFileSystem->Resolve( szGamePath ) ? QString::fromStdString( szGamePath ) : QString{};
+	} );
+}
+
 //-----------------------------------------------------------------------------
 // Purpose: Resolves a studio model from the game or disk with its own companions taking priority.
 //-----------------------------------------------------------------------------

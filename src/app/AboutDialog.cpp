@@ -11,11 +11,16 @@
 #include <QApplication>
 #include <QClipboard>
 #include <QDialogButtonBox>
+#include <QEvent>
+#include <QFile>
+#include <QFontDatabase>
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QPixmap>
+#include <QPlainTextEdit>
 #include <QPushButton>
 #include <QSysInfo>
+#include <QTabWidget>
 #include <QVBoxLayout>
 
 #include "BuildInfo.h"
@@ -69,7 +74,8 @@ CAboutDialog::CAboutDialog( QWidget *pParent )
 		"Built on <a href=\"https://www.qt.io\">Qt</a> (LGPLv3), "
 		"<a href=\"https://github.com/craftablescience/sourcepp\">sourcepp</a> (MIT), "
 		"<a href=\"https://miniaud.io\">miniaudio</a> (public domain / MIT-0) and "
-		"<a href=\"https://github.com/nothings/stb\">stb</a> (public domain / MIT).</p>"
+		"<a href=\"https://github.com/nothings/stb\">stb</a> (public domain / MIT), with the compression "
+		"and hashing libraries sourcepp uses. <b>Licenses</b> has every one with its terms.</p>"
 		"<p>Not affiliated with Valve. Source and Counter-Strike are trademarks of Valve Corporation.</p>" )
 			.arg( QLatin1StringView{ REPOSITORY } ) );
 	pAbout->setWordWrap( true );
@@ -89,6 +95,10 @@ CAboutDialog::CAboutDialog( QWidget *pParent )
 		QApplication::clipboard()->setText( BuildDetails() );
 		pCopy->setText( tr( "Copied" ) );
 	} );
+	QPushButton *pLicenses = pButtons->addButton( tr( "Licenses" ), QDialogButtonBox::ActionRole );
+	pLicenses->setObjectName( QStringLiteral( "licenses" ) );
+	pLicenses->setToolTip( tr( "The GNU GPL and the licenses of the libraries vomit-tools is built with" ) );
+	connect( pLicenses, &QPushButton::clicked, this, [ this ] { ShowLicenses( this ); } );
 	QPushButton *pAboutQt = pButtons->addButton( tr( "About Qt" ), QDialogButtonBox::ActionRole );
 	connect( pAboutQt, &QPushButton::clicked, qApp, &QApplication::aboutQt );
 	connect( pButtons, &QDialogButtonBox::rejected, this, &QDialog::reject );
@@ -118,6 +128,37 @@ CAboutDialog::CAboutDialog( QWidget *pParent )
 	pLayout->addSpacing( 6 );
 	pLayout->addWidget( pButtons );
 	setFixedWidth( std::max( 560, sizeHint().width() ) );
+	FitHeight();
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Refits the height whenever the text's measurements can change.
+//-----------------------------------------------------------------------------
+bool CAboutDialog::event( QEvent *pEvent )
+{
+	switch ( pEvent->type() )
+	{
+		case QEvent::Show:
+		case QEvent::FontChange:
+		case QEvent::StyleChange:
+		case QEvent::DevicePixelRatioChange:
+			FitHeight();
+			break;
+		default:
+			break;
+	}
+	return QDialog::event( pEvent );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Makes the dialog exactly as tall as its wrapped text needs at its width. A window's own
+//          size doesn't follow heightForWidth, so the layout's guess, made at another width or
+//          before the window knew its screen and style, can leave the last lines cut off.
+//-----------------------------------------------------------------------------
+void CAboutDialog::FitHeight()
+{
+	layout()->activate();
+	setFixedHeight( layout()->totalHeightForWidth( width() ) );
 }
 
 //-----------------------------------------------------------------------------
@@ -149,4 +190,40 @@ QString CAboutDialog::BuildDetails()
 	}
 	return QStringLiteral( "vomit-tools %1\n%2\n%3 %4\n%5\n%6" )
 		.arg( VersionText(), szQt, QSysInfo::prettyProductName(), QSysInfo::currentCpuArchitecture(), CompilerName(), CGraphics::Instance().GetDescription() );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Built into the program, so every copy carries them.
+//-----------------------------------------------------------------------------
+QString CAboutDialog::LicenseText( const QString &szName )
+{
+	QFile file( QStringLiteral( ":/licenses/" ) + szName );
+	return file.open( QIODevice::ReadOnly ) ? QString::fromUtf8( file.readAll() ) : QString{};
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+void CAboutDialog::ShowLicenses( QWidget *pParent )
+{
+	QDialog dialog( pParent );
+	dialog.setObjectName( QStringLiteral( "licensesDialog" ) );
+	dialog.setWindowTitle( tr( "Licenses" ) );
+	dialog.resize( 720, 600 );
+	auto *pTabs = new QTabWidget;
+	const auto page = [ pTabs ]( const QString &szTitle, const QString &szName ) {
+		auto *pText = new QPlainTextEdit( LicenseText( szName ) );
+		pText->setObjectName( szName );
+		pText->setReadOnly( true );
+		pText->setFont( QFontDatabase::systemFont( QFontDatabase::FixedFont ) );
+		pTabs->addTab( pText, szTitle );
+	};
+	page( tr( "vomit-tools (GNU GPL 3)" ), QStringLiteral( "LICENSE.txt" ) );
+	page( tr( "Third-party libraries" ), QStringLiteral( "THIRD-PARTY-NOTICES.txt" ) );
+	auto *pButtons = new QDialogButtonBox( QDialogButtonBox::Close );
+	connect( pButtons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject );
+	auto *pLayout = new QVBoxLayout( &dialog );
+	pLayout->addWidget( pTabs );
+	pLayout->addWidget( pButtons );
+	dialog.exec();
 }

@@ -22,6 +22,8 @@ add_library(vomit_tools_core STATIC
         model/Anim.cpp
         model/Anim.h
         model/Binary.h
+        model/Export.cpp
+        model/Export.h
         model/Edit.cpp
         model/Edit.h
         model/Mdl.cpp

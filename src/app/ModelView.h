@@ -18,6 +18,7 @@ public:
 	void SetModel( const xv::model::CModel *pModel, const xv::model::CStudioFile *pStudio, const std::vector<xv::particles::Sprite_t> *pSprites );
 	void SetOverlays( bool bWire, bool bNormals, bool bBones, bool bHitboxes, bool bAttachments, bool bBounds, bool bPositions, bool bGrid );
 	void Frame();
+	void Turn( float flDegrees );
 	void SetPhysics( const xv::model::Physics_t *pPhysics, bool bShow );
 	// Drawn brighter whatever the overlays: a hitbox of the shown set and an attachment (-1: none).
 	void SetHighlight( int nHitbox, int nAttachment );
