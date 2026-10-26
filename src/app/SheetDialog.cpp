@@ -13,7 +13,6 @@
 #include <QDir>
 #include <QDoubleSpinBox>
 #include <QFile>
-#include <QFileDialog>
 #include <QFileInfo>
 #include <QFormLayout>
 #include <QHBoxLayout>
@@ -26,6 +25,7 @@
 #include <QTreeWidget>
 #include <QVBoxLayout>
 
+#include "FileDialogs.h"
 #include "ImageFiles.h"
 #include "TextureEditor.h"
 #include "TextureOptionsDialog.h"
@@ -173,7 +173,7 @@ CSheetDialog::CSheetDialog( const CVtf *pVtf, QWidget *pParent )
 		m_pTree->setCurrentItem( m_pTree->topLevelItem( m_pTree->topLevelItemCount() - 1 ) );
 	} );
 	connect( pAddFrames, &QPushButton::clicked, this, [ this ] {
-		const QStringList files = QFileDialog::getOpenFileNames( this, tr( "Frames" ), {}, PictureFilter( false ) );
+		const QStringList files = AskOpenFiles( this, tr( "Frames" ), {}, PictureFilter( false ) );
 		if ( !files.isEmpty() )
 		{
 			AddFrames( files );
@@ -225,14 +225,14 @@ CSheetDialog::CSheetDialog( const CVtf *pVtf, QWidget *pParent )
 	connect( pUp, &QPushButton::clicked, this, [ move ] { move( -1 ); } );
 	connect( pDown, &QPushButton::clicked, this, [ move ] { move( 1 ); } );
 	connect( pOpen, &QPushButton::clicked, this, [ this ] {
-		const QString szFile = QFileDialog::getOpenFileName( this, tr( "Open .mks" ), {}, tr( "mksheet files (*.mks);;All files (*)" ) );
+		const QString szFile = AskOpenFile( this, tr( "Open .mks" ), {}, tr( "mksheet files (*.mks);;All files (*)" ) );
 		if ( !szFile.isEmpty() )
 		{
 			LoadMks( szFile );
 		}
 	} );
 	connect( pSave, &QPushButton::clicked, this, [ this ] {
-		const QString szFile = QFileDialog::getSaveFileName( this, tr( "Save .mks" ), {}, tr( "mksheet files (*.mks)" ) );
+		const QString szFile = AskSaveFile( this, tr( "Save .mks" ), {}, tr( "mksheet files (*.mks)" ) );
 		if ( !szFile.isEmpty() && !SaveMks( szFile ) )
 		{
 			QMessageBox::warning( this, tr( "Sprite Sheet" ), tr( "Could not write %1." ).arg( szFile ) );

@@ -13,7 +13,6 @@
 #include <QDialogButtonBox>
 #include <QDir>
 #include <QDirIterator>
-#include <QFileDialog>
 #include <QFileInfo>
 #include <QFormLayout>
 #include <QHBoxLayout>
@@ -23,6 +22,7 @@
 #include <QSaveFile>
 #include <QVBoxLayout>
 
+#include "FileDialogs.h"
 #include "TextureEditor.h"
 #include "TextureOptionsDialog.h"
 
@@ -142,7 +142,7 @@ CBatchConvertDialog::CBatchConvertDialog( const QString &szStart, QWidget *pPare
 		auto *pRow = new QHBoxLayout;
 		auto *pBrowse = new QPushButton( tr( "Browse…" ) );
 		connect( pBrowse, &QPushButton::clicked, this, [ this, pEdit, szTitle ] {
-			const QString szFolder = QFileDialog::getExistingDirectory( this, szTitle, pEdit->text() );
+			const QString szFolder = AskFolder( this, szTitle, pEdit->text() );
 			if ( !szFolder.isEmpty() )
 			{
 				pEdit->setText( QDir::toNativeSeparators( szFolder ) );

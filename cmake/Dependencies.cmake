@@ -4,6 +4,10 @@ include(FetchContent)
 if(VOMIT_TOOLS_BUILD_APP OR VOMIT_TOOLS_BUILD_TESTS)
     find_package(Qt6 6.5 REQUIRED COMPONENTS Core Widgets Network Test)
     find_package(Qt6 QUIET OPTIONAL_COMPONENTS ShaderTools GuiPrivate)
+    # The desktop's file chooser portal is reached over D-Bus (Linux and other freedesktop systems).
+    if(UNIX AND NOT APPLE)
+        find_package(Qt6 QUIET OPTIONAL_COMPONENTS DBus)
+    endif()
     qt_standard_project_setup()
 endif()
 

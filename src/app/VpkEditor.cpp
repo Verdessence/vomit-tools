@@ -13,7 +13,6 @@
 #include <QApplication>
 #include <QClipboard>
 #include <QDir>
-#include <QFileDialog>
 #include <QFileInfo>
 #include <QHBoxLayout>
 #include <QHeaderView>
@@ -37,6 +36,7 @@
 
 #include "BspViews.h"
 #include "FileActions.h"
+#include "FileDialogs.h"
 #include "FileViews.h"
 #include "MaterialView.h"
 #include "QtPaths.h"
@@ -707,8 +707,8 @@ QStringList CVpkEditor::GetSelectedFiles() const
 QString CVpkEditor::AskExportFolder()
 {
 	QSettings settings;
-	const QString szStart = settings.value( QLatin1String( EXPORT_FOLDER_KEY ), QDir::homePath() ).toString();
-	const QString szFolder = QFileDialog::getExistingDirectory( this, tr( "Export To" ), szStart );
+	const QString szStart = settings.value( QLatin1String( EXPORT_FOLDER_KEY ) ).toString();
+	const QString szFolder = AskFolder( this, tr( "Export To" ), szStart );
 	if ( !szFolder.isEmpty() )
 	{
 		settings.setValue( QLatin1String( EXPORT_FOLDER_KEY ), szFolder );

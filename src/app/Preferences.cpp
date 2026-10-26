@@ -21,6 +21,7 @@ constexpr auto MANIFEST_REMINDER_KEY = "manifestReminder";
 constexpr auto REOPEN_SESSION_KEY = "reopenSession";
 constexpr auto DEBUG_LOG_KEY = "debugLog";
 constexpr auto MATERIAL_LIVE_KEY = "materialLivePreview";
+constexpr auto DESKTOP_FILE_CHOOSER_KEY = "desktopFileChooser";
 
 } // namespace
 
@@ -44,6 +45,7 @@ CPreferences::CPreferences()
 	  m_bMaterialLive( QSettings{}.value( MATERIAL_LIVE_KEY, true ).toBool() ),
 	  m_bManifestReminder( QSettings{}.value( MANIFEST_REMINDER_KEY, true ).toBool() ),
 	  m_bReopenSession( QSettings{}.value( REOPEN_SESSION_KEY, true ).toBool() ),
+	  m_bDesktopFileChooser( QSettings{}.value( DESKTOP_FILE_CHOOSER_KEY, true ).toBool() ),
 	  m_bDebugLog( QSettings{}.value( DEBUG_LOG_KEY, false ).toBool() )
 {
 }
@@ -124,6 +126,15 @@ void CPreferences::SetReopenSession( bool bReopen )
 {
 	m_bReopenSession = bReopen;
 	QSettings{}.setValue( REOPEN_SESSION_KEY, bReopen );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+void CPreferences::SetDesktopFileChooser( bool bDesktop )
+{
+	m_bDesktopFileChooser = bDesktop;
+	QSettings{}.setValue( DESKTOP_FILE_CHOOSER_KEY, bDesktop );
 }
 
 //-----------------------------------------------------------------------------

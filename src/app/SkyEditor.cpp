@@ -18,7 +18,6 @@
 #include <QDir>
 #include <QDragEnterEvent>
 #include <QDropEvent>
-#include <QFileDialog>
 #include <QFileInfo>
 #include <QGridLayout>
 #include <QHBoxLayout>
@@ -40,6 +39,7 @@
 #include <QTimer>
 #include <QVBoxLayout>
 
+#include "FileDialogs.h"
 #include "ImageFiles.h"
 #include "QtPaths.h"
 #include "SkyDocument.h"
@@ -622,7 +622,7 @@ void CSkyEditor::dropEvent( QDropEvent *pEvent )
 void CSkyEditor::BrowseFace( Face_t nFace )
 {
 	QSettings settings;
-	const QString szPath = QFileDialog::getOpenFileName( this, tr( "Image for %1 (%2)" ).arg( FaceName( nFace ), Direction( nFace ) ), settings.value( IMAGE_FOLDER_KEY ).toString(),
+	const QString szPath = AskOpenFile( this, tr( "Image for %1 (%2)" ).arg( FaceName( nFace ), Direction( nFace ) ), settings.value( IMAGE_FOLDER_KEY ).toString(),
 		tr( "Images (*.png *.jpg *.jpeg *.tga *.bmp *.psd *.hdr *.vtf);;All files (*)" ) );
 	if ( !szPath.isEmpty() )
 	{
@@ -637,7 +637,7 @@ void CSkyEditor::BrowseFace( Face_t nFace )
 void CSkyEditor::BrowseFiles()
 {
 	QSettings settings;
-	const QStringList paths = QFileDialog::getOpenFileNames( this, tr( "Load Faces (named …rt, …bk, …lf, …ft, …up, …dn)" ), settings.value( IMAGE_FOLDER_KEY ).toString(),
+	const QStringList paths = AskOpenFiles( this, tr( "Load Faces (named …rt, …bk, …lf, …ft, …up, …dn)" ), settings.value( IMAGE_FOLDER_KEY ).toString(),
 		tr( "Images (*.png *.jpg *.jpeg *.tga *.bmp *.psd *.hdr *.vtf);;All files (*)" ) );
 	if ( !paths.isEmpty() )
 	{

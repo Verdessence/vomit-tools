@@ -24,7 +24,6 @@
 #include <QSaveFile>
 #include <QSyntaxHighlighter>
 #include <QTimer>
-#include <QFileDialog>
 #include <QFileSystemWatcher>
 #include <QHBoxLayout>
 #include <QHeaderView>
@@ -37,6 +36,7 @@
 #include <QTreeWidget>
 #include <QVBoxLayout>
 
+#include "FileDialogs.h"
 #include "bsp/Bsp.h"
 #include "bsp/Stripper.h"
 #include "vfs/Vfs.h"
@@ -164,7 +164,7 @@ CEntityView::CEntityView( const xv::bsp::CBsp &bsp, const std::filesystem::path 
 	pChoose->setToolTip( tr( "Preview another Stripper config on this map" ) );
 	connect( pChoose, &QPushButton::clicked, this, [ this ] {
 		const QString szStart = m_Configs.empty() ? QString{} : QString::fromStdU16String( m_Configs.back().parent_path().u16string() );
-		const QString szFile = QFileDialog::getOpenFileName( this, tr( "Stripper Config" ), szStart, tr( "Stripper configs (*.cfg);;All files (*)" ) );
+		const QString szFile = AskOpenFile( this, tr( "Stripper Config" ), szStart, tr( "Stripper configs (*.cfg);;All files (*)" ) );
 		if ( !szFile.isEmpty() )
 		{
 			if ( m_bConfigModified && QMessageBox::question( this, tr( "Stripper Config" ), tr( "Drop the unsaved changes to %1?" ).arg( QString::fromStdU16String( m_ConfigPath.filename().u16string() ) ) ) != QMessageBox::Yes )

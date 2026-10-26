@@ -6,6 +6,7 @@
 #include "ModelWorkflow.h"
 #include "ModelDocument.h"
 #include "ModelView.h"
+#include "FileDialogs.h"
 #include "ImageFiles.h"
 #include "model/Anim.h"
 #include "model/Binary.h"
@@ -16,7 +17,6 @@
 #include <QComboBox>
 #include <QDoubleSpinBox>
 #include <QElapsedTimer>
-#include <QFileDialog>
 #include <QFormLayout>
 #include <QHBoxLayout>
 #include <QLabel>
@@ -242,7 +242,7 @@ CModelEditor::CModelEditor( QString szPath, model::Reader_t pfnRead, QWidget *pP
 	connect( pFrame, &QPushButton::clicked, m_pView, &CModelView::Frame );
 	auto *pScreenshot = new QPushButton( tr( "Save Screenshot…" ) );
 	pBodyForm->addRow( pScreenshot );
-	connect( pScreenshot, &QPushButton::clicked, this, [ this ] {const QString szFile=QFileDialog::getSaveFileName(this,tr("Save Model Screenshot"),{},tr("PNG image (*.png)"));if(!szFile.isEmpty()&&!m_pView->GetImage(m_pView->size()).save(szFile))m_pStatus->setText(tr("Could not save screenshot.")); } );
+	connect( pScreenshot, &QPushButton::clicked, this, [ this ] {const QString szFile=AskSaveFile(this,tr("Save Model Screenshot"),{},tr("PNG image (*.png)"));if(!szFile.isEmpty()&&!m_pView->GetImage(m_pView->size()).save(szFile))m_pStatus->setText(tr("Could not save screenshot.")); } );
 	auto *pWorkflow = new QPushButton( tr( "Sources, Build and Export…" ) );
 	pWorkflow->setObjectName( QStringLiteral( "modelWorkflowButton" ) );
 	pBodyForm->addRow( pWorkflow );

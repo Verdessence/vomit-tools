@@ -3,13 +3,13 @@
 // Purpose: Export current model geometry as VMF brushes without blocking the editor.
 //===========================================================================//
 #include "ModelVmfDialog.h"
+#include "FileDialogs.h"
 #include "model/Mdl.h"
 #include "material/Material.h"
 #include <QCheckBox>
 #include <QComboBox>
 #include <QDialogButtonBox>
 #include <QDoubleSpinBox>
-#include <QFileDialog>
 #include <QFileInfo>
 #include <QFormLayout>
 #include <QLabel>
@@ -145,7 +145,7 @@ void CModelVmfDialog::Export()
 	using namespace xv;
 	if ( m_pWorker )
 		return;
-	const auto szTarget = QFileDialog::getSaveFileName( this, tr( "Export VMF" ), QFileInfo( m_szPath ).completeBaseName() + ".vmf", tr( "Valve Maps (*.vmf)" ) );
+	const auto szTarget = AskSaveFile( this, tr( "Export VMF" ), QFileInfo( m_szPath ).completeBaseName() + ".vmf", tr( "Valve Maps (*.vmf)" ) );
 	if ( szTarget.isEmpty() )
 		return;
 	try

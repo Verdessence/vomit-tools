@@ -24,11 +24,11 @@
 
 #include "DebugLog.h"
 #include "FileActions.h"
+#include "FileDialogs.h"
 #include "Graphics.h"
 #include "InterfaceMode.h"
 #include "Preferences.h"
 #include "SourceTools.h"
-#include <QFileDialog>
 #include <QLineEdit>
 #include <QSettings>
 #include <QFileInfo>
@@ -179,6 +179,17 @@ QWidget *CPreferencesDialog::BuildInterfacePage()
 	pLayout->addWidget( pReopen );
 	pLayout->addWidget( Hint( tr( "At the next start, the tabs come back as they were left, with the folder browser's folder. "
 								  "Files opened from the command line or a file manager open instead." ) ) );
+#ifdef VOMIT_TOOLS_PORTAL
+	auto *pChooser = new QCheckBox( tr( "Use the desktop's file chooser" ) );
+	pChooser->setObjectName( QStringLiteral( "preferencesDesktopFileChooser" ) );
+	pChooser->setChecked( CPreferences::Instance().IsDesktopFileChooser() );
+	connect( pChooser, &QCheckBox::toggled, this, []( bool bOn ) { CPreferences::Instance().SetDesktopFileChooser( bOn ); } );
+	pLayout->addSpacing( 12 );
+	pLayout->addWidget( pChooser );
+	pLayout->addWidget( Hint( tr( "Open and save windows are the file chooser your desktop is set up with (KDE's, GNOME's, a "
+								  "terminal file manager's...), asked for through the XDG desktop portal. Off, or with no portal "
+								  "running: Qt's own window. Either way it starts in the folder the last one finished in." ) ) );
+#endif
 	pLayout->addStretch();
 	return pPage;
 }
@@ -331,7 +342,7 @@ QWidget *CPreferencesDialog::BuildSourceToolsPage()
 		pRow->addWidget( pBrowse );
 		pLayout->addLayout( pRow );
 		connect( pPath, &QLineEdit::textChanged, pPage, [ szKey ]( const QString &szPath ) { QSettings{}.setValue( szKey, szPath.trimmed() ); } );
-		connect( pBrowse, &QPushButton::clicked, pPage, [ this, pPath ] {const auto szFile=QFileDialog::getOpenFileName(this,tr("Select Source Tool"),pPath->text());if(!szFile.isEmpty())pPath->setText(szFile); } );
+		connect( pBrowse, &QPushButton::clicked, pPage, [ this, pPath ] {const auto szFile=AskOpenFile(this,tr("Select Source Tool"),pPath->text());if(!szFile.isEmpty())pPath->setText(szFile); } );
 	}
 	pLayout->addWidget( Hint( tr( "Model builds run in a temporary game directory. The compiler is supplied by you; this application does not include or download Valve or community compilers." ) ) );
 	pLayout->addStretch();

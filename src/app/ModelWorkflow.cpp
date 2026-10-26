@@ -3,6 +3,7 @@
 // Purpose: See ModelWorkflow.h. Source compilation is performed by user tools.
 //===========================================================================//
 #include "ModelWorkflow.h"
+#include "FileDialogs.h"
 #include "ModelImport.h"
 #include "ModelVmfDialog.h"
 #include "QtPaths.h"
@@ -12,7 +13,6 @@
 #include <QDir>
 #include <QDirIterator>
 #include <QFile>
-#include <QFileDialog>
 #include <QFileInfo>
 #include <QFormLayout>
 #include <QGroupBox>
@@ -51,7 +51,7 @@ QLineEdit *FileRow( QFormLayout *pForm, const QString &szLabel, const QString &s
 	pLayout->addWidget( pEdit, 1 );
 	pLayout->addWidget( pBrowse );
 	pForm->addRow( szLabel, pRow );
-	QObject::connect( pBrowse, &QPushButton::clicked, pParent, [ pParent, pEdit, szFilter ] {const auto path=QFileDialog::getOpenFileName(pParent,QObject::tr("Select File"),pEdit->text(),szFilter);if(!path.isEmpty()){pEdit->setText(path);emit pEdit->editingFinished();} } );
+	QObject::connect( pBrowse, &QPushButton::clicked, pParent, [ pParent, pEdit, szFilter ] {const auto path=AskOpenFile(pParent,QObject::tr("Select File"),pEdit->text(),szFilter);if(!path.isEmpty()){pEdit->setText(path);emit pEdit->editingFinished();} } );
 	return pEdit;
 }
 } // namespace
@@ -271,7 +271,7 @@ bool CModelWorkflow::Write( const xv::model::Export_t &files, const QString &szF
 //-----------------------------------------------------------------------------
 void CModelWorkflow::Export( int nFormat )
 {
-	const auto folder = QFileDialog::getExistingDirectory( this, tr( "Export Model" ) );
+	const auto folder = AskFolder( this, tr( "Export Model" ) );
 	if ( folder.isEmpty() )
 		return;
 	try
@@ -325,7 +325,7 @@ xv::model::Export_t CModelWorkflow::Sources()
 //-----------------------------------------------------------------------------
 void CModelWorkflow::ExportSources()
 {
-	const auto folder = QFileDialog::getExistingDirectory( this, tr( "Export Source Project" ) );
+	const auto folder = AskFolder( this, tr( "Export Source Project" ) );
 	if ( folder.isEmpty() )
 		return;
 	try
@@ -386,7 +386,7 @@ void CModelWorkflow::Pack()
 {
 	if ( m_Runner.IsRunning() )
 		return;
-	const auto output = QFileDialog::getSaveFileName( this, tr( "Save Packed Map" ), {}, tr( "BSP map (*.bsp)" ) );
+	const auto output = AskSaveFile( this, tr( "Save Packed Map" ), {}, tr( "BSP map (*.bsp)" ) );
 	if ( output.isEmpty() )
 		return;
 	try
@@ -490,7 +490,7 @@ void CModelWorkflow::Finished( bool bSuccess )
 //-----------------------------------------------------------------------------
 void CModelWorkflow::SaveBuild()
 {
-	const auto folder = QFileDialog::getExistingDirectory( this, tr( "Export Compiled Models" ) );
+	const auto folder = AskFolder( this, tr( "Export Compiled Models" ) );
 	if ( folder.isEmpty() )
 		return;
 	try

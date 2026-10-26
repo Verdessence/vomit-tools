@@ -32,7 +32,6 @@
 #include <QSaveFile>
 #include <QUrl>
 #include <QFile>
-#include <QFileDialog>
 #include <QFileInfo>
 #include <QHBoxLayout>
 #include <QHeaderView>
@@ -51,6 +50,7 @@
 #include <QVBoxLayout>
 #include <QWheelEvent>
 
+#include "FileDialogs.h"
 #include "ImageFiles.h"
 #include "MaterialEditor.h"
 #include "MaterialView.h"
@@ -236,7 +236,7 @@ CTextureEditor::CTextureEditor( CTextureDocument *pDocument, QWidget *pParent )
 	pToolbar->setToolButtonStyle( Qt::ToolButtonTextOnly );
 	QAction *pImport = pToolbar->addAction( tr( "Import…" ), this, [ this ] {
 		const QString szStart = m_pDocument->GetDiskPath().empty() ? QString{} : QFileInfo{ QString::fromStdString( m_pDocument->GetDiskPath().string() ) }.absolutePath();
-		const QStringList files = QFileDialog::getOpenFileNames( this, tr( "Import Pictures" ), szStart,
+		const QStringList files = AskOpenFiles( this, tr( "Import Pictures" ), szStart,
 			PictureFilter( true ) );
 		if ( !files.isEmpty() )
 		{
@@ -255,21 +255,23 @@ CTextureEditor::CTextureEditor( CTextureDocument *pDocument, QWidget *pParent )
 	auto *pExportMenu = new QMenu( pExport );
 	pExportMenu->addAction( tr( "This Image…" ), this, [ this ] {
 		const bool bHdr = IsFloatFormat( m_pDocument->GetVtf().m_Info.m_nFormat );
-		const QString szStart = QDir{ m_pDocument->GetDiskPath().empty() ? QDir::homePath() : QFileInfo{ QString::fromStdString( m_pDocument->GetDiskPath().string() ) }.absolutePath() }.filePath( BaseName() + ( bHdr ? QStringLiteral( ".hdr" ) : QStringLiteral( ".png" ) ) );
+		// A texture not on disk yet starts in the last folder used.
+		const QString szName = BaseName() + ( bHdr ? QStringLiteral( ".hdr" ) : QStringLiteral( ".png" ) );
+		const QString szStart = m_pDocument->GetDiskPath().empty() ? szName : QDir{ QFileInfo{ QString::fromStdString( m_pDocument->GetDiskPath().string() ) }.absolutePath() }.filePath( szName );
 		QStringList filters;
 		for ( const QString &szType : PictureTypesForSaving() )
 		{
 			filters << QStringLiteral( "%1 (*.%2)" ).arg( szType.toUpper(), szType );
 		}
 		QString szFilter = bHdr ? QStringLiteral( "HDR (*.hdr)" ) : QStringLiteral( "PNG (*.png)" );
-		const QString szFile = QFileDialog::getSaveFileName( this, tr( "Export Image" ), szStart, filters.join( QStringLiteral( ";;" ) ), &szFilter );
+		const QString szFile = AskSaveFile( this, tr( "Export Image" ), szStart, filters.join( QStringLiteral( ";;" ) ), &szFilter );
 		if ( !szFile.isEmpty() && !ExportCurrent( szFile ) )
 		{
 			QMessageBox::warning( this, tr( "Export" ), tr( "Could not write %1." ).arg( szFile ) );
 		}
 	} );
 	pExportMenu->addAction( tr( "All Images…" ), this, [ this ] {
-		const QString szFolder = QFileDialog::getExistingDirectory( this, tr( "Export Every Frame, Face and Slice To" ) );
+		const QString szFolder = AskFolder( this, tr( "Export Every Frame, Face and Slice To" ) );
 		if ( szFolder.isEmpty() )
 		{
 			return;

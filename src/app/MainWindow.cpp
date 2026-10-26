@@ -16,7 +16,6 @@
 #include <QDragEnterEvent>
 #include <QDropEvent>
 #include <QFile>
-#include <QFileDialog>
 #include <QFileInfo>
 #include <QHBoxLayout>
 #include <QHeaderView>
@@ -57,6 +56,7 @@
 #include "AboutDialog.h"
 #include "BuildInfo.h"
 #include "FileActions.h"
+#include "FileDialogs.h"
 #include "FileViews.h"
 #include "FolderBrowser.h"
 #include "ImageFiles.h"
@@ -398,7 +398,7 @@ CMainWindow::CMainWindow( QWidget *pParent, xv::audio::CEngine::Output_t nAudio 
 		if ( !bFolder )
 		{
 			menu.addAction( tr( "Save a Copy…" ), this, [ this, szPath, szGamePath ] {
-				const QString szFile = QFileDialog::getSaveFileName( this, tr( "Save a Copy" ), QDir{ QDir::homePath() }.filePath( QFileInfo{ szPath }.fileName() ) );
+				const QString szFile = AskSaveFile( this, tr( "Save a Copy" ), QFileInfo{ szPath }.fileName() );
 				const auto bytes = szFile.isEmpty() ? std::nullopt : m_pFileSystem->Read( szGamePath );
 				QSaveFile out( szFile );
 				if ( bytes && ( !out.open( QIODevice::WriteOnly ) || out.write( reinterpret_cast<const char *>( bytes->data() ), static_cast<qint64>( bytes->size() ) ) != static_cast<qint64>( bytes->size() ) || !out.commit() ) )
@@ -857,7 +857,7 @@ void CMainWindow::AddRecent( const QString &szPath )
 void CMainWindow::ChooseGameInfo()
 {
 	const QString szStart = QSettings{}.value( LAST_GAME_KEY ).toString();
-	const QString szFile = QFileDialog::getOpenFileName( this, tr( "Open gameinfo.txt" ), szStart, tr( "Game info (gameinfo.txt);;All files (*)" ) );
+	const QString szFile = AskOpenFile( this, tr( "Open gameinfo.txt" ), szStart, tr( "Game info (gameinfo.txt);;All files (*)" ) );
 	if ( !szFile.isEmpty() )
 	{
 		OpenGame( szFile );
@@ -869,8 +869,8 @@ void CMainWindow::ChooseGameInfo()
 //-----------------------------------------------------------------------------
 void CMainWindow::ChooseFiles()
 {
-	const QString szStart = m_pFolders->GetFolder().isEmpty() && m_Game ? ToQString( m_Game->m_GameDir ) : m_pFolders->GetFolder();
-	const QStringList files = QFileDialog::getOpenFileNames( this, tr( "Open File" ), szStart,
+	const QString szStart = LastFolderOr( m_pFolders->GetFolder().isEmpty() && m_Game ? ToQString( m_Game->m_GameDir ) : m_pFolders->GetFolder() );
+	const QStringList files = AskOpenFiles( this, tr( "Open File" ), szStart,
 		tr( "Soundscapes and soundscripts (*.txt);;Detail files (*.vbsp);;Sounds (*.wav *.mp3);;Textures (*.vtf);;Models (*.mdl *.vvd *.vtx *.phy *.ani);;Sky faces and textures (*.vmt *.vtf *.png *.tga *.jpg *.jpeg *.bmp *.psd *.hdr);;Particles (*.pcf *.dmx);;"
 			"KeyValues (*.txt *.vmt *.vdf *.res);;Archives and maps (*.vpk *.bsp *.gcf *.gma *.pak *.wad *.xzp *.zip);;Game info (gameinfo.txt);;All files (*)" ) );
 	OpenPaths( files );
@@ -881,9 +881,9 @@ void CMainWindow::ChooseFiles()
 //-----------------------------------------------------------------------------
 void CMainWindow::ChooseFolder()
 {
-	const QString szStart = !m_pFolders->GetFolder().isEmpty() ? m_pFolders->GetFolder() : m_Game ? ToQString( m_Game->m_GameDir )
-																								  : QDir::homePath();
-	const QString szFolder = QFileDialog::getExistingDirectory( this, tr( "Open Folder" ), szStart );
+	const QString szStart = LastFolderOr( !m_pFolders->GetFolder().isEmpty() ? m_pFolders->GetFolder() : m_Game ? ToQString( m_Game->m_GameDir )
+																												: QDir::homePath() );
+	const QString szFolder = AskFolder( this, tr( "Open Folder" ), szStart );
 	if ( !szFolder.isEmpty() )
 	{
 		OpenFolder( szFolder );
@@ -891,13 +891,14 @@ void CMainWindow::ChooseFolder()
 }
 
 //-----------------------------------------------------------------------------
-// Purpose: File > Open VPK, starting in the mounted game's folder, where its VPKs are.
+// Purpose: File > Open VPK, starting in the last folder used, else the mounted game's folder,
+//          where its VPKs are.
 //-----------------------------------------------------------------------------
 void CMainWindow::ChoosePackage()
 {
-	const QString szStart = m_Game ? ToQString( m_Game->m_GameDir ) : !m_pFolders->GetFolder().isEmpty() ? m_pFolders->GetFolder()
-																										 : QDir::homePath();
-	const QString szFile = QFileDialog::getOpenFileName( this, tr( "Open VPK" ), szStart,
+	const QString szStart = LastFolderOr( m_Game ? ToQString( m_Game->m_GameDir ) : !m_pFolders->GetFolder().isEmpty() ? m_pFolders->GetFolder()
+																													   : QDir::homePath() );
+	const QString szFile = AskOpenFile( this, tr( "Open VPK" ), szStart,
 		tr( "VPKs (*.vpk);;Maps (*.bsp);;All archives (*.vpk *.bsp *.gcf *.gma *.pak *.wad *.xzp *.zip);;All files (*)" ) );
 	if ( !szFile.isEmpty() )
 	{
@@ -2148,7 +2149,7 @@ bool CMainWindow::ExportSky( CSkyEditor *pEditor, bool bChooseFolder )
 	{
 		QSettings settings;
 		const QString szStart = settings.value( SKY_EXPORT_KEY, m_Game ? ToQString( GetWriteFolder() ) : QDir::homePath() ).toString();
-		const QString szPicked = QFileDialog::getExistingDirectory( this, tr( "Export Sky To (a game, mod or custom/ folder; files go under materials/skybox)" ), szStart );
+		const QString szPicked = AskFolder( this, tr( "Export Sky To (a game, mod or custom/ folder; files go under materials/skybox)" ), szStart );
 		if ( szPicked.isEmpty() )
 		{
 			return false;
@@ -2769,7 +2770,7 @@ void CMainWindow::ChooseWriteFolder()
 		QMessageBox::information( this, tr( "No game open" ), tr( "The write folder belongs to a game; open one first." ) );
 		return;
 	}
-	const QString szFolder = QFileDialog::getExistingDirectory( this, tr( "Write Folder" ), ToQString( GetWriteFolder() ) );
+	const QString szFolder = AskFolder( this, tr( "Write Folder" ), ToQString( GetWriteFolder() ) );
 	if ( szFolder.isEmpty() )
 	{
 		return;
@@ -3798,8 +3799,8 @@ QStringList CMainWindow::TextureNames() const
 //-----------------------------------------------------------------------------
 void CMainWindow::ChooseNewTexture()
 {
-	const QString szStart = m_pFolders->GetFolder().isEmpty() && m_Game ? ToQString( m_Game->m_GameDir ) : m_pFolders->GetFolder();
-	const QStringList files = QFileDialog::getOpenFileNames( this, tr( "Create VTF from Pictures" ), szStart,
+	const QString szStart = LastFolderOr( m_pFolders->GetFolder().isEmpty() && m_Game ? ToQString( m_Game->m_GameDir ) : m_pFolders->GetFolder() );
+	const QStringList files = AskOpenFiles( this, tr( "Create VTF from Pictures" ), szStart,
 		PictureFilter( true ) );
 	if ( !files.isEmpty() )
 	{
@@ -3953,7 +3954,8 @@ bool CMainWindow::ConfirmClose( CTextureEditor *pEditor )
 }
 
 //-----------------------------------------------------------------------------
-// Purpose: The Save As window, with the places files usually go in its side list.
+// Purpose: The Save As window. Qt's has the places files usually go in its side list; the
+//          desktop's chooser has the user's own places instead.
 //-----------------------------------------------------------------------------
 QString CMainWindow::AskSavePath( const fs::path &start, const QString &szFilters, QString *pFilter, const fs::path &extra )
 {
@@ -3975,15 +3977,14 @@ QString CMainWindow::AskSavePath( const fs::path &start, const QString &szFilter
 			from = name.empty() ? picked : picked / name;
 		}
 	}
-	QFileDialog dialog( this, tr( "Save As" ), ToQString( from ), szFilters );
-	dialog.setObjectName( QStringLiteral( "saveAsDialog" ) );
-	dialog.setAcceptMode( QFileDialog::AcceptSave );
-	dialog.setFileMode( QFileDialog::AnyFile );
-	if ( pFilter && !pFilter->isEmpty() )
-	{
-		dialog.selectNameFilter( *pFilter );
-	}
-	QList<QUrl> places;
+	FileDialog_t dialog;
+	dialog.m_nMode = FILE_DIALOG_MODE_SAVE;
+	dialog.m_szTitle = tr( "Save As" );
+	dialog.m_szStart = ToQString( from );
+	dialog.m_szFilters = szFilters;
+	dialog.m_szFilter = pFilter ? *pFilter : QString{};
+	dialog.m_szObjectName = QStringLiteral( "saveAsDialog" );
+	QList<QUrl> &places = dialog.m_Places;
 	const auto add = [ &places ]( const fs::path &folder ) {
 		std::error_code ec;
 		if ( !folder.empty() && fs::is_directory( folder, ec ) )
@@ -4015,10 +4016,10 @@ QString CMainWindow::AskSavePath( const fs::path &start, const QString &szFilter
 	add( ToPath( QDir::homePath() ) );
 	add( ToPath( QStandardPaths::writableLocation( QStandardPaths::PicturesLocation ) ) );
 	add( ToPath( QStandardPaths::writableLocation( QStandardPaths::DesktopLocation ) ) );
-	dialog.setSidebarUrls( places );
-	const bool bChosen = dialog.exec() == QDialog::Accepted && !dialog.selectedFiles().isEmpty();
+	const QStringList picked = AskForFiles( this, dialog );
+	const bool bChosen = !picked.isEmpty();
 	// Folders made only to start in go again unless the file goes in one of them.
-	const fs::path chosen = bChosen ? ToPath( dialog.selectedFiles().front() ).lexically_normal() : fs::path{};
+	const fs::path chosen = bChosen ? ToPath( picked.front() ).lexically_normal() : fs::path{};
 	for ( const fs::path &dir : made )
 	{
 		std::error_code ec;
@@ -4034,11 +4035,11 @@ QString CMainWindow::AskSavePath( const fs::path &start, const QString &szFilter
 	}
 	if ( pFilter )
 	{
-		*pFilter = dialog.selectedNameFilter();
+		*pFilter = dialog.m_szFilter;
 	}
 	// Names typed without an ending get the type's.
-	QString szFile = dialog.selectedFiles().front();
-	const QRegularExpressionMatch match = QRegularExpression( QStringLiteral( R"(\*\.(\w+))" ) ).match( dialog.selectedNameFilter() );
+	QString szFile = picked.front();
+	const QRegularExpressionMatch match = QRegularExpression( QStringLiteral( R"(\*\.(\w+))" ) ).match( dialog.m_szFilter );
 	if ( QFileInfo{ szFile }.suffix().isEmpty() && match.hasMatch() )
 	{
 		szFile += u'.' + match.captured( 1 );

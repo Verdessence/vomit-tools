@@ -40,6 +40,11 @@ public:
 	[[nodiscard]] bool IsReopenSession() const { return m_bReopenSession; }
 	void SetReopenSession( bool bReopen );
 
+	// Whether open and save windows are the desktop's own file chooser (the XDG portal's, on
+	// Linux) rather than Qt's.
+	[[nodiscard]] bool IsDesktopFileChooser() const { return m_bDesktopFileChooser; }
+	void SetDesktopFileChooser( bool bDesktop );
+
 	// Whether the debug log prints what goes on in the background (Advanced).
 	[[nodiscard]] bool IsDebugLog() const { return m_bDebugLog; }
 	void SetDebugLog( bool bOn );
@@ -65,5 +70,6 @@ private:
 	bool m_bMaterialLive = true;
 	bool m_bManifestReminder = true;
 	bool m_bReopenSession = true;
+	bool m_bDesktopFileChooser = true;
 	bool m_bDebugLog = false;
 };

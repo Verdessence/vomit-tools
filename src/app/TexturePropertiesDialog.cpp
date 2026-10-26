@@ -13,7 +13,6 @@
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QFile>
-#include <QFileDialog>
 #include <QInputDialog>
 #include <QLineEdit>
 #include <QListWidget>
@@ -24,6 +23,7 @@
 #include <QTreeWidget>
 #include <QVBoxLayout>
 
+#include "FileDialogs.h"
 #include "Language.h"
 #include "TextureOptionsDialog.h"
 #include "texture/Sheet.h"
@@ -138,7 +138,7 @@ CTexturePropertiesDialog::CTexturePropertiesDialog( const CVtf &vtf, QWidget *pP
 	pAddMenu->addAction( tr( "LOD Control…" ), this, [ this ] { EditResource( { 'L', 'O', 'D' } ); } );
 	pAddMenu->addAction( tr( "Extended Flags…" ), this, [ this ] { EditResource( { 'T', 'S', 'O' } ); } );
 	pAddMenu->addAction( tr( "Sprite Sheet from a .sht File…" ), this, [ this ] {
-		const QString szFile = QFileDialog::getOpenFileName( this, tr( "Sprite Sheet" ), {}, tr( "Sheets (*.sht);;All files (*)" ) );
+		const QString szFile = AskOpenFile( this, tr( "Sprite Sheet" ), {}, tr( "Sheets (*.sht);;All files (*)" ) );
 		QFile file{ szFile };
 		if ( szFile.isEmpty() || !file.open( QIODevice::ReadOnly ) )
 		{

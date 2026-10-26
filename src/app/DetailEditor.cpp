@@ -19,7 +19,6 @@
 #include <QCompleter>
 #include <QDoubleSpinBox>
 #include <QFile>
-#include <QFileDialog>
 #include <QFileInfo>
 #include <QFormLayout>
 #include <QGroupBox>
@@ -41,6 +40,7 @@
 #include <QToolButton>
 #include <QTreeWidget>
 #include <QVBoxLayout>
+#include "FileDialogs.h"
 #include "ImageFiles.h"
 #include "InterfaceMode.h"
 #include "SpinBoxes.h"
@@ -1987,7 +1987,7 @@ void CDetailEditor::ChoosePictures()
 		QMessageBox::information( this, tr( "Pack pictures" ), tr( "Select a group or an entry first." ) );
 		return;
 	}
-	const auto files = QFileDialog::getOpenFileNames( this, tr( "Pack detail pictures" ), {}, tr( "Pictures (*.png *.tga *.jpg *.bmp *.vtf);;All files (*)" ) );
+	const auto files = AskOpenFiles( this, tr( "Pack detail pictures" ), {}, tr( "Pictures (*.png *.tga *.jpg *.bmp *.vtf);;All files (*)" ) );
 	if ( files.isEmpty() )
 	{
 		return;

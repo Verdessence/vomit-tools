@@ -19,6 +19,8 @@ add_library(vomit_tools_ui STATIC
         TextureCanvas.h
         FileActions.cpp
         FileActions.h
+        FileDialogs.cpp
+        FileDialogs.h
         FileViews.cpp
         FileViews.h
         FolderBrowser.cpp
@@ -195,6 +197,12 @@ qt_add_resources(vomit_tools_ui "vomit_tools_licenses"
         PREFIX "/licenses"
         FILES "${CMAKE_SOURCE_DIR}/LICENSE" "${VOMIT_TOOLS_NOTICES}")
 target_link_libraries(vomit_tools_ui PUBLIC vomit_tools::core Qt6::Widgets Qt6::Network)
+# On Linux, open and save windows ask the desktop's file chooser through the XDG portal, over D-Bus.
+if(TARGET Qt6::DBus)
+    target_sources(vomit_tools_ui PRIVATE PortalFileChooser.cpp PortalFileChooser.h)
+    target_link_libraries(vomit_tools_ui PRIVATE Qt6::DBus)
+    target_compile_definitions(vomit_tools_ui PRIVATE VOMIT_TOOLS_PORTAL)
+endif()
 if(WIN32)
     # Explorer's right-click menu in the file trees.
     target_link_libraries(vomit_tools_ui PRIVATE shell32 ole32)
