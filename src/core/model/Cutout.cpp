@@ -3,6 +3,7 @@
 // Purpose: Preserve extruded cutout geometry as convex prisms without volumetric approximation.
 //===========================================================================//
 #include "Vmf.h"
+#include "map/Geometry.h"
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -14,35 +15,14 @@ namespace xv::model
 {
 namespace
 {
-using Point_t = std::array<double, 3>;
+using map::Point_t;
 using Polygon_t = std::vector<int>;
-//-----------------------------------------------------------------------------
-// Purpose: Projects in double precision so thin cap layers remain distinguishable.
-//-----------------------------------------------------------------------------
-double DotPoint( Point_t a, Point_t b )
-{
-	return a[ 0 ] * b[ 0 ] + a[ 1 ] * b[ 1 ] + a[ 2 ] * b[ 2 ];
-}
-//-----------------------------------------------------------------------------
-// Purpose: Measures cap triangle area independently of render winding.
-//-----------------------------------------------------------------------------
-Point_t CrossPoint( Point_t a, Point_t b )
-{
-	return { a[ 1 ] * b[ 2 ] - a[ 2 ] * b[ 1 ], a[ 2 ] * b[ 0 ] - a[ 0 ] * b[ 2 ], a[ 0 ] * b[ 1 ] - a[ 1 ] * b[ 0 ] };
-}
-//-----------------------------------------------------------------------------
-// Purpose: Forms a direction between two points.
-//-----------------------------------------------------------------------------
-Point_t Difference( Point_t a, Point_t b )
-{
-	return { a[ 0 ] - b[ 0 ], a[ 1 ] - b[ 1 ], a[ 2 ] - b[ 2 ] };
-}
 //-----------------------------------------------------------------------------
 // Purpose: Tests a turn in the cap plane, retaining concavities as separate brushes.
 //-----------------------------------------------------------------------------
 double Turn( Point_t a, Point_t b, Point_t c, Point_t vecNormal )
 {
-	return DotPoint( CrossPoint( Difference( b, a ), Difference( c, b ) ), vecNormal );
+	return map::Dot( map::Cross( map::Subtract( b, a ), map::Subtract( c, b ) ), vecNormal );
 }
 //-----------------------------------------------------------------------------
 // Purpose: Joins adjacent polygons only when their exact boundary remains simple and convex.
@@ -92,8 +72,8 @@ std::optional<std::vector<Convex_t>> ExtractCutoutHulls( const CModel &model, co
 						return pfnReject( "Cutout coordinates exceed export bounds" );
 				vertices.push_back( triangle[ j ] );
 			}
-			const auto vecArea = CrossPoint( Difference( triangle[ 1 ], triangle[ 0 ] ), Difference( triangle[ 2 ], triangle[ 0 ] ) );
-			const double flArea = DotPoint( vecArea, vecArea );
+			const auto vecArea = map::Cross( map::Subtract( triangle[ 1 ], triangle[ 0 ] ), map::Subtract( triangle[ 2 ], triangle[ 0 ] ) );
+			const double flArea = map::Dot( vecArea, vecArea );
 			if ( flArea < 1e-16 )
 				return pfnReject( "Cutout contains a zero-area triangle" );
 			if ( flArea > flLargest )
@@ -114,7 +94,7 @@ std::optional<std::vector<Convex_t>> ExtractCutoutHulls( const CModel &model, co
 	for ( auto &flComponent : vecNormal )
 		if ( std::abs( flComponent ) < 1e-6 )
 			flComponent = 0;
-	const double flLength = std::sqrt( DotPoint( vecNormal, vecNormal ) );
+	const double flLength = std::sqrt( map::Dot( vecNormal, vecNormal ) );
 	for ( auto &flComponent : vecNormal )
 		flComponent /= flLength;
 	const auto nAxis = static_cast<int>( std::max_element( vecNormal.begin(), vecNormal.end(), []( double a, double b ) { return std::abs( a ) < std::abs( b ); } ) - vecNormal.begin() );
@@ -124,7 +104,7 @@ std::optional<std::vector<Convex_t>> ExtractCutoutHulls( const CModel &model, co
 	double flMin = std::numeric_limits<double>::infinity(), flMax = -flMin;
 	for ( auto p : vertices )
 	{
-		const double flDistance = DotPoint( p, vecNormal );
+		const double flDistance = map::Dot( p, vecNormal );
 		flMin = std::min( flMin, flDistance );
 		flMax = std::max( flMax, flDistance );
 	}
@@ -133,7 +113,7 @@ std::optional<std::vector<Convex_t>> ExtractCutoutHulls( const CModel &model, co
 		return pfnReject( "Cutout has no usable thickness; flat image cards need silhouette tracing" );
 	for ( auto p : vertices )
 	{
-		const double flDistance = DotPoint( p, vecNormal );
+		const double flDistance = map::Dot( p, vecNormal );
 		if ( std::min( std::abs( flDistance - flMin ), std::abs( flDistance - flMax ) ) > flTolerance )
 			return pfnReject( "Mesh is not an extrusion between two parallel caps" );
 	}
@@ -150,7 +130,7 @@ std::optional<std::vector<Convex_t>> ExtractCutoutHulls( const CModel &model, co
 		for ( int j = 0; j < 3; j++ )
 		{
 			const auto p = triangle[ j ];
-			const double flDistance = DotPoint( p, vecNormal );
+			const double flDistance = map::Dot( p, vecNormal );
 			const int nLayer = std::abs( flDistance - flMin ) <= flTolerance ? 0 : 1;
 			if ( j == 0 )
 				nCap = nLayer;

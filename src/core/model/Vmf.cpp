@@ -5,6 +5,7 @@
 #include "Vmf.h"
 #include "Mdl.h"
 #include "kv1/Kv1.h"
+#include "map/Geometry.h"
 #include "material/Material.h"
 #include "vfs/Vfs.h"
 #include <algorithm>
@@ -21,17 +22,16 @@ namespace xv::model
 {
 namespace
 {
-using Point_t = std::array<double, 3>;
+using map::Add;
+using map::Point_t;
+using map::Scale;
+using map::Subtract;
+using Face_t = map::Polygon_t;
 struct Plane_t
 {
 	Point_t m_Normal;
 	double m_flDistance;
 	std::array<Point_t, 3> m_Points;
-};
-struct Face_t
-{
-	int m_nPlane;
-	std::vector<Point_t> m_Points;
 };
 constexpr double COORDINATE_LIMIT = 16384, EPSILON = 1e-7, PLANE_TOLERANCE = 0.01;
 //-----------------------------------------------------------------------------
@@ -40,41 +40,6 @@ constexpr double COORDINATE_LIMIT = 16384, EPSILON = 1e-7, PLANE_TOLERANCE = 0.0
 Point_t Point( CVec3 vec )
 {
 	return { vec.m_flX, vec.m_flY, vec.m_flZ };
-}
-//-----------------------------------------------------------------------------
-// Purpose: Adds positions or directions without reducing precision.
-//-----------------------------------------------------------------------------
-Point_t Add( Point_t a, Point_t b )
-{
-	return { a[ 0 ] + b[ 0 ], a[ 1 ] + b[ 1 ], a[ 2 ] + b[ 2 ] };
-}
-//-----------------------------------------------------------------------------
-// Purpose: Computes a displacement between two positions.
-//-----------------------------------------------------------------------------
-Point_t Subtract( Point_t a, Point_t b )
-{
-	return { a[ 0 ] - b[ 0 ], a[ 1 ] - b[ 1 ], a[ 2 ] - b[ 2 ] };
-}
-//-----------------------------------------------------------------------------
-// Purpose: Scales a direction in double precision.
-//-----------------------------------------------------------------------------
-Point_t Scale( Point_t a, double flScale )
-{
-	return { a[ 0 ] * flScale, a[ 1 ] * flScale, a[ 2 ] * flScale };
-}
-//-----------------------------------------------------------------------------
-// Purpose: Projects a vector onto another vector.
-//-----------------------------------------------------------------------------
-double DotProduct( Point_t a, Point_t b )
-{
-	return a[ 0 ] * b[ 0 ] + a[ 1 ] * b[ 1 ] + a[ 2 ] * b[ 2 ];
-}
-//-----------------------------------------------------------------------------
-// Purpose: Determines triangle orientation and area.
-//-----------------------------------------------------------------------------
-Point_t CrossProduct( Point_t a, Point_t b )
-{
-	return { a[ 1 ] * b[ 2 ] - a[ 2 ] * b[ 1 ], a[ 2 ] * b[ 0 ] - a[ 0 ] * b[ 2 ], a[ 0 ] * b[ 1 ] - a[ 1 ] * b[ 0 ] };
 }
 //-----------------------------------------------------------------------------
 // Purpose: Rejects unrepresentable positions before geometric operations.
@@ -116,13 +81,13 @@ std::string Text( Point_t p )
 //-----------------------------------------------------------------------------
 Plane_t Plane( std::array<Point_t, 3> points, Point_t vecInterior )
 {
-	auto vecNormal = CrossProduct( Subtract( points[ 1 ], points[ 0 ] ), Subtract( points[ 2 ], points[ 0 ] ) );
-	const double flLength = std::sqrt( DotProduct( vecNormal, vecNormal ) );
+	auto vecNormal = map::Cross( Subtract( points[ 1 ], points[ 0 ] ), Subtract( points[ 2 ], points[ 0 ] ) );
+	const double flLength = std::sqrt( map::Dot( vecNormal, vecNormal ) );
 	if ( flLength < EPSILON )
 		throw std::runtime_error( "degenerate plane" );
 	vecNormal = Scale( vecNormal, 1 / flLength );
-	double flDistance = DotProduct( vecNormal, points[ 0 ] );
-	if ( DotProduct( vecNormal, vecInterior ) > flDistance )
+	double flDistance = map::Dot( vecNormal, points[ 0 ] );
+	if ( map::Dot( vecNormal, vecInterior ) > flDistance )
 	{
 		vecNormal = Scale( vecNormal, -1 );
 		flDistance = -flDistance;
@@ -131,81 +96,18 @@ Plane_t Plane( std::array<Point_t, 3> points, Point_t vecInterior )
 	return { vecNormal, flDistance, points };
 }
 //-----------------------------------------------------------------------------
-// Purpose: Removes repeated clipping intersections without changing polygon order.
-//-----------------------------------------------------------------------------
-void AppendUnique( std::vector<Point_t> &points, Point_t p )
-{
-	if ( std::ranges::none_of( points, [ p ]( Point_t q ) { const auto d = Subtract( p, q ); return DotProduct( d, d ) < EPSILON * EPSILON; } ) )
-		points.push_back( p );
-}
-//-----------------------------------------------------------------------------
 // Purpose: Intersects supporting half-spaces by polygon clipping, detecting unbounded results.
 //-----------------------------------------------------------------------------
 std::vector<Face_t> Intersect( const std::vector<Plane_t> &planes )
 {
-	constexpr double flBound = COORDINATE_LIMIT * 2;
-	std::vector<Face_t> faces;
-	for ( int nAxis = 0; nAxis < 3; nAxis++ )
-		for ( int nSign : { -1, 1 } )
-		{
-			Face_t face{ -1, {} };
-			for ( const auto &corner : std::array<std::array<int, 2>, 4>{ { { -1, -1 }, { 1, -1 }, { 1, 1 }, { -1, 1 } } } )
-			{
-				Point_t p{};
-				p[ nAxis ] = flBound * nSign;
-				p[ ( nAxis + 1 ) % 3 ] = flBound * corner[ 0 ];
-				p[ ( nAxis + 2 ) % 3 ] = flBound * corner[ 1 ];
-				face.m_Points.push_back( p );
-			}
-			faces.push_back( std::move( face ) );
-		}
-	for ( std::size_t i = 0; i < planes.size(); i++ )
-	{
-		const auto &plane = planes[ i ];
-		std::vector<Face_t> clipped;
-		std::vector<Point_t> cut;
-		for ( const auto &face : faces )
-		{
-			Face_t next{ face.m_nPlane, {} };
-			for ( std::size_t j = 0; j < face.m_Points.size(); j++ )
-			{
-				const auto a = face.m_Points[ j ], b = face.m_Points[ ( j + 1 ) % face.m_Points.size() ];
-				const double flA = DotProduct( plane.m_Normal, a ) - plane.m_flDistance;
-				const double flB = DotProduct( plane.m_Normal, b ) - plane.m_flDistance;
-				if ( flA <= EPSILON )
-					AppendUnique( next.m_Points, a );
-				if ( ( flA < -EPSILON && flB > EPSILON ) || ( flB < -EPSILON && flA > EPSILON ) )
-				{
-					const auto p = Add( a, Scale( Subtract( b, a ), flA / ( flA - flB ) ) );
-					AppendUnique( next.m_Points, p );
-					AppendUnique( cut, p );
-				}
-				if ( std::abs( flA ) <= EPSILON )
-					AppendUnique( cut, a );
-			}
-			if ( next.m_Points.size() >= 3 )
-				clipped.push_back( std::move( next ) );
-		}
-		if ( cut.size() >= 3 )
-		{
-			Point_t vecCenter{};
-			for ( auto p : cut )
-				vecCenter = Add( vecCenter, Scale( p, 1.0 / cut.size() ) );
-			const auto vecU = Subtract( cut[ 0 ], vecCenter ), vecV = CrossProduct( plane.m_Normal, vecU );
-			std::ranges::sort( cut, [ & ]( Point_t a, Point_t b ) {
-				a = Subtract( a, vecCenter );
-				b = Subtract( b, vecCenter );
-				return std::atan2( DotProduct( a, vecV ), DotProduct( a, vecU ) ) < std::atan2( DotProduct( b, vecV ), DotProduct( b, vecU ) );
-			} );
-			clipped.push_back( { static_cast<int>( i ), std::move( cut ) } );
-		}
-		faces = std::move( clipped );
-		if ( faces.empty() )
-			throw std::runtime_error( "empty intersection" );
-	}
-	if ( faces.size() < 4 || std::ranges::any_of( faces, []( const auto &face ) { return face.m_nPlane < 0; } ) )
-		throw std::runtime_error( "open or degenerate hull" );
-	return faces;
+	std::vector<map::Plane_t> halfSpaces;
+	for ( const Plane_t &plane : planes )
+		halfSpaces.push_back( { plane.m_Normal, plane.m_flDistance } );
+	std::string szError;
+	auto faces = map::IntersectHalfSpaces( halfSpaces, COORDINATE_LIMIT * 2, EPSILON, &szError );
+	if ( !faces )
+		throw std::runtime_error( szError );
+	return std::move( *faces );
 }
 //-----------------------------------------------------------------------------
 // Purpose: Converts one hull into bounded supporting planes and validated face polygons.
@@ -239,14 +141,14 @@ std::pair<std::vector<Plane_t>, std::vector<Face_t>> Brush( const CModel &model,
 	for ( std::size_t i = 0; i < convex.m_Indices.size(); i += 3 )
 	{
 		std::array<Point_t, 3> points{ vertices.at( convex.m_Indices[ i ] ), vertices.at( convex.m_Indices[ i + 1 ] ), vertices.at( convex.m_Indices[ i + 2 ] ) };
-		const auto vecArea = CrossProduct( Subtract( points[ 1 ], points[ 0 ] ), Subtract( points[ 2 ], points[ 0 ] ) );
-		if ( DotProduct( vecArea, vecArea ) < EPSILON * EPSILON )
+		const auto vecArea = map::Cross( Subtract( points[ 1 ], points[ 0 ] ), Subtract( points[ 2 ], points[ 0 ] ) );
+		if ( map::Dot( vecArea, vecArea ) < EPSILON * EPSILON )
 			continue;
 		auto plane = Plane( points, vecCenter );
 		for ( const auto &[ nIndex, p ] : vertices )
-			if ( DotProduct( plane.m_Normal, p ) - plane.m_flDistance > PLANE_TOLERANCE )
+			if ( map::Dot( plane.m_Normal, p ) - plane.m_flDistance > PLANE_TOLERANCE )
 				throw std::runtime_error( "non-convex hull" );
-		if ( std::ranges::any_of( planes, [ & ]( const auto &other ) { return DotProduct( plane.m_Normal, other.m_Normal ) > 1 - 1e-8 && std::abs( plane.m_flDistance - other.m_flDistance ) < PLANE_TOLERANCE; } ) )
+		if ( std::ranges::any_of( planes, [ & ]( const auto &other ) { return map::Dot( plane.m_Normal, other.m_Normal ) > 1 - 1e-8 && std::abs( plane.m_flDistance - other.m_flDistance ) < PLANE_TOLERANCE; } ) )
 			continue;
 		planes.push_back( plane );
 		if ( planes.size() > static_cast<std::size_t>( options.m_nMaxSides ) )
@@ -266,7 +168,7 @@ std::pair<std::vector<Plane_t>, std::vector<Face_t>> Brush( const CModel &model,
 		}
 	std::vector<Plane_t> distinct;
 	for ( const auto &plane : planes )
-		if ( std::ranges::none_of( distinct, [ & ]( const auto &other ) { return DotProduct( plane.m_Normal, other.m_Normal ) > 1 - 1e-12 && std::abs( plane.m_flDistance - other.m_flDistance ) < EPSILON; } ) )
+		if ( std::ranges::none_of( distinct, [ & ]( const auto &other ) { return map::Dot( plane.m_Normal, other.m_Normal ) > 1 - 1e-12 && std::abs( plane.m_flDistance - other.m_flDistance ) < EPSILON; } ) )
 			distinct.push_back( plane );
 	planes = std::move( distinct );
 	auto faces = Intersect( planes );
@@ -279,18 +181,18 @@ std::pair<std::vector<Plane_t>, std::vector<Face_t>> Brush( const CModel &model,
 		for ( std::size_t i = 1; i + 1 < face.m_Points.size(); i++ )
 		{
 			const auto a = Subtract( face.m_Points[ i ], face.m_Points[ 0 ] ), b = Subtract( face.m_Points[ i + 1 ], face.m_Points[ 0 ] );
-			vecArea = Add( vecArea, CrossProduct( a, b ) );
-			flVolume += std::abs( DotProduct( Subtract( face.m_Points[ 0 ], vecCenter ), CrossProduct( a, b ) ) ) / 6;
+			vecArea = Add( vecArea, map::Cross( a, b ) );
+			flVolume += std::abs( map::Dot( Subtract( face.m_Points[ 0 ], vecCenter ), map::Cross( a, b ) ) ) / 6;
 		}
-		if ( DotProduct( vecArea, vecArea ) < 1e-10 )
+		if ( map::Dot( vecArea, vecArea ) < 1e-10 )
 			throw std::runtime_error( "zero-area face" );
 		double flWidth = 0;
 		for ( const auto &other : faces )
 			for ( auto p : other.m_Points )
 			{
 				CheckPoint( p );
-				flWidth = std::max( flWidth, plane.m_flDistance - DotProduct( plane.m_Normal, p ) );
-				if ( DotProduct( plane.m_Normal, p ) - plane.m_flDistance > PLANE_TOLERANCE )
+				flWidth = std::max( flWidth, plane.m_flDistance - map::Dot( plane.m_Normal, p ) );
+				if ( map::Dot( plane.m_Normal, p ) - plane.m_flDistance > PLANE_TOLERANCE )
 					throw std::runtime_error( "inconsistent half-spaces" );
 			}
 		const bool bFine = options.m_nHullSource == VmfOptions_t::HullSource_t::HULL_SOURCE_CUTOUT || options.m_nHullSource == VmfOptions_t::HullSource_t::HULL_SOURCE_DECOMPOSE;
@@ -298,12 +200,12 @@ std::pair<std::vector<Plane_t>, std::vector<Face_t>> Brush( const CModel &model,
 			throw std::runtime_error( bFine ? "too thin (below 0.001 unit)" : "too thin (below 1/8 unit)" );
 		for ( auto p : face.m_Points )
 			for ( const auto &other : original )
-				if ( DotProduct( other.m_Normal, p ) - other.m_flDistance > flError )
+				if ( map::Dot( other.m_Normal, p ) - other.m_flDistance > flError )
 					throw std::runtime_error( "excess reconstruction error" );
 	}
 	for ( const auto &[ nIndex, p ] : vertices )
 		for ( const auto &plane : planes )
-			if ( DotProduct( plane.m_Normal, p ) - plane.m_flDistance > flError )
+			if ( map::Dot( plane.m_Normal, p ) - plane.m_flDistance > flError )
 				throw std::runtime_error( "lost hull coverage" );
 	if ( flVolume < 1e-5 )
 		throw std::runtime_error( "zero-volume hull" );
@@ -335,8 +237,8 @@ std::vector<MaterialTriangle_t> MaterialTriangles( const CModel &model )
 				CheckPoint( p[ j ] );
 			}
 			// Source render indices are clockwise, as in the existing OBJ/glTF exporters.
-			const auto vecNormal = CrossProduct( Subtract( p[ 2 ], p[ 0 ] ), Subtract( p[ 1 ], p[ 0 ] ) );
-			const double flLength = std::sqrt( DotProduct( vecNormal, vecNormal ) );
+			const auto vecNormal = map::Cross( Subtract( p[ 2 ], p[ 0 ] ), Subtract( p[ 1 ], p[ 0 ] ) );
+			const double flLength = std::sqrt( map::Dot( vecNormal, vecNormal ) );
 			if ( flLength > EPSILON )
 				triangles.push_back( { Scale( vecNormal, 1 / flLength ), Scale( Add( Add( p[ 0 ], p[ 1 ] ), p[ 2 ] ), 1.0 / 3 ), mesh.m_nMaterial } );
 			if ( triangles.size() > 200000 )
@@ -447,10 +349,10 @@ Export_t ExportVmf( const CModel &model, std::span<const Convex_t> convexes, con
 				double flBest = std::numeric_limits<double>::infinity();
 				for ( const auto &triangle : triangles )
 				{
-					const double flAlignment = DotProduct( triangle.m_Normal, plane.m_Normal );
+					const double flAlignment = map::Dot( triangle.m_Normal, plane.m_Normal );
 					if ( flAlignment < 0.5 )
 						continue;
-					const double flScore = std::abs( DotProduct( plane.m_Normal, Add( triangle.m_Center, Point( options.m_vecOffset ) ) ) - plane.m_flDistance ) + ( 1 - flAlignment ) * 16;
+					const double flScore = std::abs( map::Dot( plane.m_Normal, Add( triangle.m_Center, Point( options.m_vecOffset ) ) ) - plane.m_flDistance ) + ( 1 - flAlignment ) * 16;
 					if ( flScore < flBest && triangle.m_nMaterial >= 0 && triangle.m_nMaterial < static_cast<int>( materials.size() ) )
 					{
 						flBest = flScore;

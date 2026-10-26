@@ -15,6 +15,8 @@ add_library(vomit_tools_core STATIC
         kv1/Kv1.h
         kv1/Lexer.cpp
         kv1/Lexer.h
+        map/Geometry.cpp
+        map/Geometry.h
         material/Material.cpp
         material/Material.h
         material/Parameters.cpp
