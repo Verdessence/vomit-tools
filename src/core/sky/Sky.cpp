@@ -22,6 +22,7 @@
 #include "kv1/Kv1.h"
 #include "material/Material.h"
 #include "util/Numbers.h"
+#include "util/Parallel.h"
 #include "vfs/Vfs.h"
 
 namespace xv::sky
@@ -161,32 +162,6 @@ float FaceDifference( const CCube &cube, Face_t nFace, const CImage *pReplacemen
 		}
 	}
 	return nCount ? flTotal / static_cast<float>( nCount ) : 0.0f;
-}
-
-//-----------------------------------------------------------------------------
-// Purpose: Runs body(begin, end) over rows split between the machine's cores. (std::thread rather
-//          than
-//          jthread: libc++ only has jthread from version 18.)
-//-----------------------------------------------------------------------------
-template <typename Body>
-void ParallelRows( int nRows, Body &&body )
-{
-	const int nThreads = std::clamp( static_cast<int>( std::thread::hardware_concurrency() ), 1, 32 );
-	if ( nThreads == 1 || nRows < 64 )
-	{
-		body( 0, nRows );
-		return;
-	}
-	std::vector<std::thread> workers;
-	const int nChunk = ( nRows + nThreads - 1 ) / nThreads;
-	for ( int nBegin = 0; nBegin < nRows; nBegin += nChunk )
-	{
-		workers.emplace_back( [ &body, nBegin, nEnd = std::min( nRows, nBegin + nChunk ) ] { body( nBegin, nEnd ); } );
-	}
-	for ( std::thread &worker : workers )
-	{
-		worker.join();
-	}
 }
 
 using Reader_t = std::function<std::optional<std::vector<std::byte>>( const std::string &szGamePath )>;
@@ -604,8 +579,8 @@ void Render( const CCube &cube, const CView &view, CImage &out, bool bEdges )
 	{
 		out = CImage{ view.m_nWidth, view.m_nHeight };
 	}
-	ParallelRows( view.m_nHeight, [ & ]( int nBegin, int nEnd ) {
-		for ( int y = nBegin; y < nEnd; y++ )
+	ParallelFor( static_cast<std::size_t>( view.m_nHeight ), 8, [ & ]( std::size_t nBegin, std::size_t nEnd ) {
+		for ( int y = static_cast<int>( nBegin ); y < static_cast<int>( nEnd ); y++ )
 		{
 			for ( int x = 0; x < view.m_nWidth; x++ )
 			{

@@ -13,6 +13,8 @@ add_library(vomit_tools_core STATIC
         dmx/Dmx.h
         kv1/Kv1.cpp
         kv1/Kv1.h
+        kv1/Lexer.cpp
+        kv1/Lexer.h
         material/Material.cpp
         material/Material.h
         material/Parameters.cpp
@@ -71,6 +73,9 @@ add_library(vomit_tools_core STATIC
         texture/Vtf.cpp
         texture/Vtf.h
         util/Numbers.h
+        util/Parallel.h
+        util/Scan.cpp
+        util/Scan.h
         util/Vec3.h
         vfs/Package.cpp
         vfs/Package.h
