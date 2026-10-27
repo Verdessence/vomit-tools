@@ -8,6 +8,7 @@
 #include "MapView3D.h"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 
 #include <QApplication>
@@ -389,13 +390,42 @@ void CMapView3D::PaintLabels( QPainter &painter )
 				lines << tr( "%1: %2 ms a repaint, %3 repaints" ).arg( CMapPane::TypeName( p2D->GetType() ) ).arg( p2D->GetLastPaintTime(), 0, 'f', 1 ).arg( p2D->GetPaintCount() );
 			}
 		}
+		const QString szText = lines.join( QLatin1Char( '\n' ) );
+		const QRect text = painter.fontMetrics().boundingRect( rect().adjusted( 0, 4, -8, 0 ), Qt::AlignRight | Qt::AlignTop, szText );
+		painter.fillRect( text.adjusted( -6, -3, 6, 3 ), mapstyle::OVERLAY_BACKING );
 		painter.setPen( Qt::white );
-		painter.drawText( rect().adjusted( 0, 4, -8, 0 ), Qt::AlignRight | Qt::AlignTop, lines.join( QLatin1Char( '\n' ) ) );
+		painter.drawText( rect().adjusted( 0, 4, -8, 0 ), Qt::AlignRight | Qt::AlignTop, szText );
 		if ( !m_LogClock.isValid() || m_LogClock.elapsed() > 1000 )
 		{
 			m_LogClock.start();
 			DebugLog() << "map 3D view:" << lines.join( QStringLiteral( "; " ) );
 		}
+	}
+	// The axes as the camera sees them, in the bottom left corner: which way is which.
+	{
+		const xv::map::Point_t right = m_Camera.GetRight();
+		const xv::map::Point_t up = m_Camera.GetUp();
+		const xv::map::Point_t forward = m_Camera.GetForward();
+		const QPointF centre{ static_cast<double>( mapstyle::GIZMO_MARGIN + mapstyle::GIZMO_SIZE ), static_cast<double>( height() - mapstyle::GIZMO_MARGIN - mapstyle::GIZMO_SIZE ) };
+		struct Axis_t
+		{
+			xv::map::Point_t m_Direction;
+			QColor m_Color;
+			QChar m_chName;
+		};
+		std::array<Axis_t, 3> axes{ { { { 1, 0, 0 }, mapstyle::AXIS_X, QLatin1Char( 'x' ) }, { { 0, 1, 0 }, mapstyle::AXIS_Y, QLatin1Char( 'y' ) }, { { 0, 0, 1 }, mapstyle::AXIS_Z, QLatin1Char( 'z' ) } } };
+		// The one pointing furthest away first, so the nearer ones lie over it.
+		std::ranges::sort( axes, [ & ]( const Axis_t &a, const Axis_t &b ) { return xv::map::Dot( a.m_Direction, forward ) > xv::map::Dot( b.m_Direction, forward ); } );
+		painter.setRenderHint( QPainter::Antialiasing, true );
+		for ( const Axis_t &axis : axes )
+		{
+			const QPointF tip = centre + QPointF{ xv::map::Dot( axis.m_Direction, right ), -xv::map::Dot( axis.m_Direction, up ) } * mapstyle::GIZMO_SIZE;
+			painter.setPen( QPen{ axis.m_Color, 2.0 } );
+			painter.drawLine( centre, tip );
+			const QPointF label = centre + ( tip - centre ) * 1.35;
+			painter.drawText( QRectF{ label.x() - 8.0, label.y() - 8.0, 16.0, 16.0 }, Qt::AlignCenter, QString( axis.m_chName ) );
+		}
+		painter.setRenderHint( QPainter::Antialiasing, false );
 	}
 	if ( hasFocus() )
 	{

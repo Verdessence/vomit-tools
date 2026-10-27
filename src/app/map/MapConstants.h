@@ -44,7 +44,7 @@ inline constexpr int HANDLE_SIZE = 5;          // [General] HandleSize, in pixel
 inline constexpr double HIDE_GRID_BELOW_PIXELS = 4.0; // HideSmallGrid; unconfirmed: the threshold
 inline constexpr int GRID_SMALLEST = 1;
 inline constexpr int GRID_LARGEST = 512;
-inline constexpr double WORLD_LIMIT = 16384.0;    // the scroll range, the @mapsize of Source games
+inline constexpr double WORLD_LIMIT = 16384.0;    // where the grid and scrolling stop without an FGD @mapsize (Source's own limit)
 inline constexpr double ZOOM_SMALLEST = 0.004;    // pixels per unit: the whole +/-16384 in about 130 pixels; unconfirmed
 inline constexpr double ZOOM_LARGEST = 256.0;     // unconfirmed
 inline constexpr double WHEEL_ZOOM_STEP = 1.2;    // per wheel notch; unconfirmed
@@ -58,6 +58,15 @@ inline constexpr int NAMES_FROM_PIXELS = 32;      // entity names shown at this 
 inline const QColor CAMERA{ 0, 255, 255 };        // unconfirmed
 inline constexpr int CAMERA_EYE_PIXELS = 4;       // the ring's radius; unconfirmed
 inline constexpr int CAMERA_LOOK_PIXELS = 32;     // the line when it looks across the view; unconfirmed
+
+// The 3D view's overlay: the axes gizmo in the corner (Hammer++ settings: GizmoCameraAxes=1) and
+// the statistics' backing.
+inline const QColor AXIS_X{ 255, 64, 64 };        // unconfirmed: Hammer++'s gizmo colours
+inline const QColor AXIS_Y{ 64, 255, 64 };
+inline const QColor AXIS_Z{ 64, 128, 255 };
+inline constexpr int GIZMO_SIZE = 28;             // the axes' length in pixels; unconfirmed
+inline constexpr int GIZMO_MARGIN = 14;           // from the bottom left corner; unconfirmed
+inline const QColor OVERLAY_BACKING{ 0, 0, 0, 150 };
 
 // 3D view (Hammer++ settings, [View3D]).
 inline constexpr float FOV = 90.0f;               // horizontal, in degrees; unconfirmed: horizontal or vertical

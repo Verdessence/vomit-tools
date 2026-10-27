@@ -45,6 +45,8 @@ public:
 	std::vector<PlacedInstance_t> m_Instances;
 	CMapMesh m_InstanceMesh;                 // every instance's solids, placed, as its func_instance
 	std::optional<Skybox3D_t> m_Skybox3D;   // the room around the sky_camera, if there is one
+	// How far the map may reach on each axis: the FGD's @mapsize (Source's 16384 without one).
+	double m_flWorldLimit = 16384.0;
 
 	[[nodiscard]] std::uint32_t GetObjectCount() const { return static_cast<std::uint32_t>( m_Solids.size() + m_Entities.size() ); }
 	[[nodiscard]] std::uint32_t EntityObject( std::size_t nEntity ) const { return static_cast<std::uint32_t>( m_Solids.size() + nEntity ); }

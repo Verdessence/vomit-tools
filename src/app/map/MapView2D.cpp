@@ -152,6 +152,10 @@ void CMapView2D::Rebuild()
 	}
 	m_pBuiltFor = pScene;
 	m_pProps = std::move( pProps );
+	for ( QScrollBar *pBar : { m_pHorizontal, m_pVertical } )
+	{
+		pBar->setRange( static_cast<int>( -GetWorldLimit() ), static_cast<int>( GetWorldLimit() ) );
+	}
 	m_Objects.clear();
 	m_Segments.clear();
 	m_ObjectIndex.clear();
@@ -306,7 +310,8 @@ void CMapView2D::Zoom( double flFactor, std::optional<QPointF> at )
 //-----------------------------------------------------------------------------
 void CMapView2D::SetCenter( QPointF center )
 {
-	m_Center = QPointF{ std::clamp( center.x(), -mapstyle::WORLD_LIMIT, mapstyle::WORLD_LIMIT ), std::clamp( center.y(), -mapstyle::WORLD_LIMIT, mapstyle::WORLD_LIMIT ) };
+	const double flLimit = GetWorldLimit();
+	m_Center = QPointF{ std::clamp( center.x(), -flLimit, flLimit ), std::clamp( center.y(), -flLimit, flLimit ) };
 	UpdateScrollBars();
 	update();
 }
@@ -401,24 +406,33 @@ QColor CMapView2D::ColorOf( const MapFlatObject_t &object ) const
 //-----------------------------------------------------------------------------
 // Purpose: Lines every so many units, from finest to coarsest, then the axes.
 //-----------------------------------------------------------------------------
-void CMapView2D::PaintGrid( QPainter &painter, const QRectF &visible ) const
+void CMapView2D::PaintGrid( QPainter &painter, const QRectF &all ) const
 {
 	const MapViewSettings_t &settings = m_Editor.GetSettings();
+	// The map can't reach past its limit, so neither does the grid: a line stops at the edge,
+	// and beyond it there is only the background.
+	const double flLimit = GetWorldLimit();
+	const QRectF visible = all.intersected( QRectF{ -flLimit, -flLimit, 2.0 * flLimit, 2.0 * flLimit } );
+	if ( visible.isEmpty() )
+	{
+		return;
+	}
+	const QRectF edge = QRectF{ ToWidget( visible.topLeft() ), ToWidget( visible.bottomRight() ) }.normalized();
 	auto lines = [ & ]( double flSpacing, const QColor &color ) {
 		if ( flSpacing <= 0.0 )
 		{
 			return;
 		}
 		std::vector<QLineF> found;
-		for ( double x = std::floor( visible.left() / flSpacing ) * flSpacing; x <= visible.right(); x += flSpacing )
+		for ( double x = std::ceil( visible.left() / flSpacing ) * flSpacing; x <= visible.right(); x += flSpacing )
 		{
 			const double flPixel = std::round( ToWidget( { x, 0 } ).x() ) + 0.5;
-			found.emplace_back( flPixel, 0.0, flPixel, static_cast<double>( height() ) );
+			found.emplace_back( flPixel, edge.top(), flPixel, edge.bottom() );
 		}
-		for ( double y = std::floor( visible.top() / flSpacing ) * flSpacing; y <= visible.bottom(); y += flSpacing )
+		for ( double y = std::ceil( visible.top() / flSpacing ) * flSpacing; y <= visible.bottom(); y += flSpacing )
 		{
 			const double flPixel = std::round( ToWidget( { 0, y } ).y() ) + 0.5;
-			found.emplace_back( 0.0, flPixel, static_cast<double>( width() ), flPixel );
+			found.emplace_back( edge.left(), flPixel, edge.right(), flPixel );
 		}
 		painter.setPen( QPen{ color, 0 } );
 		painter.drawLines( found.data(), static_cast<int>( found.size() ) );
@@ -436,8 +450,17 @@ void CMapView2D::PaintGrid( QPainter &painter, const QRectF &visible ) const
 	const QPointF origin = ToWidget( { 0, 0 } );
 	const double flX = std::round( origin.x() ) + 0.5;
 	const double flY = std::round( origin.y() ) + 0.5;
-	painter.drawLine( QLineF{ flX, 0.0, flX, static_cast<double>( height() ) } );
-	painter.drawLine( QLineF{ 0.0, flY, static_cast<double>( width() ), flY } );
+	painter.drawLine( QLineF{ flX, edge.top(), flX, edge.bottom() } );
+	painter.drawLine( QLineF{ edge.left(), flY, edge.right(), flY } );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+double CMapView2D::GetWorldLimit() const
+{
+	const xv::map::CScene *pScene = GetDocument().GetScene();
+	return pScene ? pScene->m_flWorldLimit : mapstyle::WORLD_LIMIT;
 }
 
 //-----------------------------------------------------------------------------

@@ -74,6 +74,10 @@ std::unique_ptr<CScene> BuildScene( CMap map, std::shared_ptr<const CFgd> pFgd, 
 	auto pScene = std::make_unique<CScene>();
 	pScene->m_Map = std::move( map );
 	pScene->m_pFgd = std::move( pFgd );
+	if ( const auto size = pScene->m_pFgd ? pScene->m_pFgd->GetMapSize() : std::nullopt )
+	{
+		pScene->m_flWorldLimit = std::max( std::abs( size->first ), std::abs( size->second ) );
+	}
 	if ( !progress( 20, "solids" ) )
 	{
 		return nullptr;

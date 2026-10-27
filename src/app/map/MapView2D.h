@@ -111,6 +111,7 @@ private:
 	void ReportCursor( QPointF at );
 	[[nodiscard]] QRectF GetVisible() const;
 	[[nodiscard]] int GetAxis( int nIndex ) const; // 0 or 1: which of x, y, z
+	[[nodiscard]] double GetWorldLimit() const;    // where the grid and the scrolling stop
 
 	MapViewType_t m_nType;
 	QPointF m_Center;
