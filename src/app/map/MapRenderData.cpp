@@ -62,10 +62,10 @@ xv::map::RasterScene_t MapFrame_t::MakeScene() const
 	xv::map::RasterScene_t scene;
 	if ( m_pScene )
 	{
-		scene.m_Meshes.push_back( &m_pScene->m_Mesh );
-		if ( !m_pScene->m_InstanceMesh.m_Vertices.empty() )
+		scene.m_Meshes.push_back( &m_pScene->GetMesh() );
+		if ( !m_pScene->GetInstanceMesh().m_Vertices.empty() )
 		{
-			scene.m_Meshes.push_back( &m_pScene->m_InstanceMesh );
+			scene.m_Meshes.push_back( &m_pScene->GetInstanceMesh() );
 		}
 	}
 	if ( m_pEntityMesh )

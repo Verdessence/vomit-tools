@@ -257,7 +257,7 @@ void CMapResources::Run( std::shared_ptr<const xv::map::CScene> pScene, xv::vfs:
 
 	// Most triangles first: what the views show most of arrives first.
 	std::vector<std::size_t> triangles( nMaterials, 0 );
-	for ( const xv::map::CMapMesh *pMesh : { &pScene->m_Mesh, &pScene->m_InstanceMesh } )
+	for ( const xv::map::CMapMesh *pMesh : { &pScene->GetMesh(), &pScene->GetInstanceMesh() } )
 	{
 		for ( const xv::map::MeshBatch_t &batch : pMesh->m_Batches )
 		{

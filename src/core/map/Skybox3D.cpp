@@ -107,7 +107,7 @@ std::vector<Box_t> ObjectBounds( const CScene &scene )
 	{
 		bounds[ placed.m_nObject ] = {};
 	}
-	for ( const MeshVertex_t &vertex : scene.m_InstanceMesh.m_Vertices )
+	for ( const MeshVertex_t &vertex : scene.GetInstanceMesh().m_Vertices )
 	{
 		if ( vertex.m_nObject < bounds.size() )
 		{
@@ -146,7 +146,7 @@ std::optional<Skybox3D_t> FindSkybox3D( const CScene &scene )
 	// wall's thickness. Only along that axis: a wall can be one side of a shell around the
 	// whole map.
 	const std::vector<Box_t> bounds = ObjectBounds( scene );
-	const std::array<const CMapMesh *, 2> meshes{ &scene.m_Mesh, &scene.m_InstanceMesh };
+	const std::array<const CMapMesh *, 2> meshes{ &scene.GetMesh(), &scene.GetInstanceMesh() };
 	sky->m_Room.Add( sky->m_Camera );
 	for ( std::size_t a = 0; a < 3; a++ )
 	{

@@ -183,7 +183,7 @@ void CMapView2D::Rebuild()
 		return;
 	}
 	m_ObjectIndex.assign( pScene->GetObjectCount(), NO_OBJECT );
-	const xv::map::CMapMesh &mesh = pScene->m_Mesh;
+	const xv::map::CMapMesh &mesh = pScene->GetMesh();
 	const auto a0 = static_cast<std::size_t>( GetAxis( 0 ) );
 	const auto a1 = static_cast<std::size_t>( GetAxis( 1 ) );
 	std::vector<std::array<std::int64_t, 4>> keys;
@@ -276,7 +276,7 @@ void CMapView2D::Rebuild()
 	{
 		lines( *m_pProps, false );
 	}
-	lines( pScene->m_InstanceMesh, true );
+	lines( pScene->GetInstanceMesh(), true );
 	update();
 }
 
@@ -582,7 +582,7 @@ void CMapView2D::PaintObjects( QPainter &painter, const QRectF &visible ) const
 		// An instance shows what it holds, at every size: in the func_instance's colour, or the
 		// preferences' own.
 		Batch_t &contents = !bSelected && look.m_bInstanceColor2D && object.m_nInstanceLineCount > 0 ? batchFor( look.m_Colors.m_Instance2D ) : batch;
-		const xv::map::CMapMesh &instances = pScene->m_InstanceMesh;
+		const xv::map::CMapMesh &instances = pScene->GetInstanceMesh();
 		for ( std::uint32_t k = 0; k < object.m_nInstanceLineCount; k++ )
 		{
 			const std::uint32_t nLine = ( object.m_nFirstInstanceLine + k ) * 2;

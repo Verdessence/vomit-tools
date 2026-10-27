@@ -135,7 +135,7 @@ using SideTriangles_t = std::unordered_map<int, std::vector<std::uint32_t>>;
 SideTriangles_t TrianglesBySide( const CScene &scene )
 {
 	SideTriangles_t triangles;
-	const CMapMesh &mesh = scene.m_Mesh;
+	const CMapMesh &mesh = scene.GetMesh();
 	for ( std::uint32_t t = 0; t < mesh.m_TriangleFaces.size(); t++ )
 	{
 		const MeshFace_t &face = mesh.m_Faces[ mesh.m_TriangleFaces[ t ] ];
@@ -152,7 +152,7 @@ SideTriangles_t TrianglesBySide( const CScene &scene )
 //-----------------------------------------------------------------------------
 void LayOnto( CMapMesh &out, const CScene &scene, std::span<const std::uint32_t> triangles, const Frame_t &frame, const OverlayMaterial_t &material, std::uint32_t nObject )
 {
-	const CMapMesh &mesh = scene.m_Mesh;
+	const CMapMesh &mesh = scene.GetMesh();
 	const std::vector<Point2_t> quad( frame.m_Corners.begin(), frame.m_Corners.end() );
 	for ( const std::uint32_t t : triangles )
 	{

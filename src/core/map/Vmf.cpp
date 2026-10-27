@@ -218,7 +218,7 @@ std::size_t CReader::ReadBody( std::size_t nOpen, int nDepth, OnPair &&onPair, O
 		onPair( key, token );
 	}
 	Report( nOpen, Severity_t::SEVERITY_ERROR, "block is never closed" );
-	return m_Map.m_Text.size();
+	return m_Map.GetText().size();
 }
 
 //-----------------------------------------------------------------------------
@@ -240,7 +240,7 @@ std::size_t CReader::SkipBody( std::size_t nOpen )
 		}
 	}
 	Report( nOpen, Severity_t::SEVERITY_ERROR, "block is never closed" );
-	return m_Map.m_Text.size();
+	return m_Map.GetText().size();
 }
 
 //-----------------------------------------------------------------------------
@@ -1114,7 +1114,7 @@ bool CMap::HasErrors() const
 //-----------------------------------------------------------------------------
 std::string_view CMap::Store( std::string szText )
 {
-	return m_Strings.emplace_back( std::move( szText ) );
+	return m_pStrings->emplace_back( std::move( szText ) );
 }
 
 //-----------------------------------------------------------------------------
@@ -1176,7 +1176,7 @@ std::optional<CMap> ReadVmf( std::vector<char> text, const ReadOptions_t &option
 		return std::nullopt;
 	}
 	CMap map;
-	map.m_Text = std::move( text );
+	map.m_pText = std::make_shared<const std::vector<char>>( std::move( text ) );
 	CReader{ map, options }.Read();
 	if ( map.m_TopBlocks.empty() )
 	{

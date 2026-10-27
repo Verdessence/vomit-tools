@@ -22,6 +22,7 @@
 
 #include "map/Geometry.h"
 #include "util/CopyPtr.h"
+#include "util/SharedVector.h"
 #include "util/Vec3.h"
 
 namespace xv::map
@@ -225,17 +226,12 @@ struct Diagnostic_t
 	std::string m_szMessage;
 };
 
+// Copies are cheap and safe to hand to other threads: they share the text, the string store and
+// every solid and entity until one of them changes (see CSharedVector).
 class CMap
 {
 public:
-	CMap() = default;
-	CMap( const CMap & ) = delete;
-	CMap &operator=( const CMap & ) = delete;
-	// Moving keeps the text's buffer, so the views into it stay valid.
-	CMap( CMap && ) = default;
-	CMap &operator=( CMap && ) = default;
-
-	[[nodiscard]] std::string_view GetText() const { return { m_Text.data(), m_Text.size() }; }
+	[[nodiscard]] std::string_view GetText() const { return m_pText ? std::string_view{ m_pText->data(), m_pText->size() } : std::string_view{}; }
 	[[nodiscard]] std::string_view GetSpanText( Span_t span ) const { return GetText().substr( span.m_nOffset, span.m_nLength ); }
 	// The entity that owns a solid, or the world.
 	[[nodiscard]] const Entity_t &GetOwner( const Solid_t &solid ) const { return solid.m_nEntity < 0 ? m_World : m_Entities[ static_cast<std::size_t>( solid.m_nEntity ) ]; }
@@ -247,13 +243,13 @@ public:
 	// The text's line ending ("\r\n" as Hammer writes, or "\n").
 	[[nodiscard]] std::string_view GetNewline() const;
 
-	std::vector<char> m_Text;
+	std::shared_ptr<const std::vector<char>> m_pText; // as read; views into it stay valid
 	VersionInfo_t m_VersionInfo;
 	ViewSettings_t m_ViewSettings;
 	std::vector<Visgroup_t> m_Visgroups;
 	Entity_t m_World;
-	std::vector<Entity_t> m_Entities;
-	std::vector<Solid_t> m_Solids;     // the world's and the entities' alike
+	CSharedVector<Entity_t> m_Entities;
+	CSharedVector<Solid_t> m_Solids;   // the world's and the entities' alike
 	std::vector<Group_t> m_Groups;
 	std::vector<Camera_t> m_Cameras;
 	int m_nActiveCamera = -1;
@@ -264,7 +260,9 @@ public:
 	std::vector<Span_t> m_TopBlocks;      // every top-level block, in file order
 	std::vector<Diagnostic_t> m_Diagnostics;
 	std::size_t m_nMoreDiagnostics = 0;   // problems past the cap, counted only
-	std::deque<std::string> m_Strings;    // what Store keeps (a deque: they never move)
+	// What Store keeps: a deque, so they never move, shared by every copy of the map and only ever
+	// added to (by the thread that edits).
+	std::shared_ptr<std::deque<std::string>> m_pStrings = std::make_shared<std::deque<std::string>>();
 };
 
 } // namespace xv::map

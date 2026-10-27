@@ -75,6 +75,7 @@ public:
 	std::vector<std::uint32_t> m_Lines;         // edges as vertex pairs, solid by solid
 	std::vector<MeshRange_t> m_SolidLines;      // per solid: its pairs in m_Lines
 	std::vector<MeshRange_t> m_SolidFaces;      // per solid: its faces in m_Faces
+	std::vector<std::uint32_t> m_SolidIndices;  // the solid each entry above is; empty: entry i is solid i
 	std::vector<std::string> m_Problems;        // displacements drawn flat, and why
 };
 
@@ -83,7 +84,18 @@ struct MeshOptions_t
 	double m_flChunkSize = 1024.0;
 };
 
-// solids lines up with map.m_Solids (see BuildSolids).
+// One solid to put in a mesh: which of the map's, the object its vertices are, and its shape.
+struct MeshSolid_t
+{
+	std::uint32_t m_nSolid = 0;
+	std::uint32_t m_nObject = 0;
+	const SolidGeometry_t *m_pShape = nullptr;
+};
+
+// The solids listed, in that order (m_SolidIndices says which they were).
+[[nodiscard]] CMapMesh BuildMesh( const CMap &map, std::span<const MeshSolid_t> solids, const MeshOptions_t &options = {} );
+// Every solid of the map: solids lines up with map.m_Solids (see BuildSolids), and solid i is
+// object i, as a scene numbers them when it is read.
 [[nodiscard]] CMapMesh BuildMesh( const CMap &map, std::span<const SolidGeometry_t> solids, const MeshOptions_t &options = {} );
 
 } // namespace xv::map

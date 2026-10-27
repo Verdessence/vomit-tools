@@ -29,25 +29,30 @@
 namespace xv::map
 {
 
+// A copy is a snapshot: copies share everything until one changes it (see CSharedVector), so an
+// edit makes a new scene for little, and threads go on reading the one they were given.
 class CScene
 {
 public:
 	CMap m_Map;
 	std::shared_ptr<const CFgd> m_pFgd;      // null without game data
-	std::vector<SolidGeometry_t> m_Solids;   // lines up with m_Map.m_Solids
-	std::vector<EntityVisual_t> m_Entities;  // lines up with m_Map.m_Entities
-	CMapMesh m_Mesh;
+	CSharedVector<SolidGeometry_t> m_Solids; // lines up with m_Map.m_Solids
+	CSharedVector<EntityVisual_t> m_Entities; // lines up with m_Map.m_Entities
+	std::shared_ptr<const CMapMesh> m_pMesh = std::make_shared<const CMapMesh>(); // every solid as read
 	Box_t m_Bounds;                          // everything drawn
 	AutoVisgroup_t m_AutoVisgroups;         // the Filter Control's Auto tab
 	// What the meshes' material indices name: the map's own materials, then those only its
 	// instances use.
 	std::vector<std::string> m_Materials;
 	std::vector<PlacedInstance_t> m_Instances;
-	CMapMesh m_InstanceMesh;                 // every instance's solids, placed, as its func_instance
+	std::shared_ptr<const CMapMesh> m_pInstanceMesh = std::make_shared<const CMapMesh>(); // every instance's solids, placed, as its func_instance
+	std::vector<std::string> m_Problems;    // with its instances, beside the mesh's own
 	std::optional<Skybox3D_t> m_Skybox3D;   // the room around the sky_camera, if there is one
 	// How far the map may reach on each axis: the FGD's @mapsize (Source's 16384 without one).
 	double m_flWorldLimit = 16384.0;
 
+	[[nodiscard]] const CMapMesh &GetMesh() const { return *m_pMesh; }
+	[[nodiscard]] const CMapMesh &GetInstanceMesh() const { return *m_pInstanceMesh; }
 	[[nodiscard]] std::uint32_t GetObjectCount() const { return static_cast<std::uint32_t>( m_Solids.size() + m_Entities.size() ); }
 	[[nodiscard]] std::uint32_t EntityObject( std::size_t nEntity ) const { return static_cast<std::uint32_t>( m_Solids.size() + nEntity ); }
 	[[nodiscard]] bool IsSolidObject( std::uint32_t nObject ) const { return nObject < m_Solids.size(); }

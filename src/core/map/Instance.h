@@ -80,7 +80,7 @@ void AppendPlaced( CMapMesh &out, const CMapMesh &in, const Transform_t &transfo
 
 // Builds the scene's func_instances (and theirs) into scene.m_Instances, adds the materials only
 // they use to scene.m_Materials, and lays every instance's solids, placed, into
-// scene.m_InstanceMesh as its func_instance's object. Problems go in scene.m_Mesh.m_Problems.
+// scene.m_InstanceMesh as its func_instance's object. Problems go in scene.m_Problems.
 void LoadInstances( CScene &scene, const SceneOptions_t &options );
 
 } // namespace xv::map

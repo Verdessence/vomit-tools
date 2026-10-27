@@ -128,6 +128,7 @@ add_library(vomit_tools_core STATIC
         util/Parallel.h
         util/Scan.cpp
         util/Scan.h
+        util/SharedVector.h
         util/Vec3.h
         vfs/Package.cpp
         vfs/Package.h

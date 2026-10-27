@@ -58,7 +58,7 @@ MeshVertex_t MakeVertex( Point_t position, Point_t normal, Point_t textured, con
 // Purpose: A solid's faces, added to its run's part: polygons fanned into triangles, or
 //          displacement grids.
 //-----------------------------------------------------------------------------
-void BuildPart( const Solid_t &solid, const SolidGeometry_t &geometry, std::uint32_t nSolid, SolidPart_t &part )
+void BuildPart( const Solid_t &solid, const SolidGeometry_t &geometry, std::uint32_t nSolid, std::uint32_t nObject, SolidPart_t &part )
 {
 	part.m_Solids.push_back( { static_cast<std::uint32_t>( part.m_Faces.size() ), static_cast<std::uint32_t>( part.m_Lines.size() ) } );
 	for ( const FaceGeometry_t &face : geometry.m_Faces )
@@ -88,7 +88,7 @@ void BuildPart( const Solid_t &solid, const SolidGeometry_t &geometry, std::uint
 			meshFace.m_bDisplacement = true;
 			for ( std::size_t i = 0; i < disp->m_Points.size(); i++ )
 			{
-				part.m_Vertices.push_back( MakeVertex( disp->m_Points[ i ], disp->m_Normals[ i ], disp->m_Flat[ i ], side, disp->m_Alphas[ i ], nSolid ) );
+				part.m_Vertices.push_back( MakeVertex( disp->m_Points[ i ], disp->m_Normals[ i ], disp->m_Flat[ i ], side, disp->m_Alphas[ i ], nObject ) );
 				centre = Add( centre, Scale( disp->m_Points[ i ], 1.0 / static_cast<double>( disp->m_Points.size() ) ) );
 			}
 			std::vector<std::pair<std::uint32_t, std::uint32_t>> &edges = part.m_Edges;
@@ -117,7 +117,7 @@ void BuildPart( const Solid_t &solid, const SolidGeometry_t &geometry, std::uint
 		{
 			for ( const Point_t &p : face.m_Points )
 			{
-				part.m_Vertices.push_back( MakeVertex( p, face.m_Plane.m_Normal, p, side, 0.0f, nSolid ) );
+				part.m_Vertices.push_back( MakeVertex( p, face.m_Plane.m_Normal, p, side, 0.0f, nObject ) );
 				centre = Add( centre, Scale( p, 1.0 / static_cast<double>( face.m_Points.size() ) ) );
 			}
 			const auto nCount = static_cast<std::uint32_t>( face.m_Points.size() );
@@ -144,7 +144,22 @@ void BuildPart( const Solid_t &solid, const SolidGeometry_t &geometry, std::uint
 //-----------------------------------------------------------------------------
 CMapMesh BuildMesh( const CMap &map, std::span<const SolidGeometry_t> solids, const MeshOptions_t &options )
 {
-	const std::size_t nSolids = std::min( map.m_Solids.size(), solids.size() );
+	std::vector<MeshSolid_t> all( std::min( map.m_Solids.size(), solids.size() ) );
+	for ( std::size_t i = 0; i < all.size(); i++ )
+	{
+		all[ i ] = { static_cast<std::uint32_t>( i ), static_cast<std::uint32_t>( i ), &solids[ i ] };
+	}
+	CMapMesh mesh = BuildMesh( map, std::span<const MeshSolid_t>{ all }, options );
+	mesh.m_SolidIndices.clear();
+	return mesh;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+CMapMesh BuildMesh( const CMap &map, std::span<const MeshSolid_t> solids, const MeshOptions_t &options )
+{
+	const std::size_t nSolids = solids.size();
 	constexpr std::size_t GRAIN = 128;
 	std::vector<SolidPart_t> parts( ( nSolids + GRAIN - 1 ) / GRAIN );
 	ParallelFor( nSolids, GRAIN, [ & ]( std::size_t nBegin, std::size_t nEnd ) {
@@ -152,7 +167,8 @@ CMapMesh BuildMesh( const CMap &map, std::span<const SolidGeometry_t> solids, co
 		part.m_nFirstSolid = nBegin;
 		for ( std::size_t i = nBegin; i < nEnd; i++ )
 		{
-			BuildPart( map.m_Solids[ i ], solids[ i ], static_cast<std::uint32_t>( i ), part );
+			const MeshSolid_t &solid = solids[ i ];
+			BuildPart( map.m_Solids[ solid.m_nSolid ], *solid.m_pShape, solid.m_nSolid, solid.m_nObject, part );
 		}
 	} );
 
@@ -173,6 +189,11 @@ CMapMesh BuildMesh( const CMap &map, std::span<const SolidGeometry_t> solids, co
 	mesh.m_Faces.reserve( nFaces );
 	mesh.m_SolidLines.resize( nSolids );
 	mesh.m_SolidFaces.resize( nSolids );
+	mesh.m_SolidIndices.resize( nSolids );
+	for ( std::size_t i = 0; i < nSolids; i++ )
+	{
+		mesh.m_SolidIndices[ i ] = solids[ i ].m_nSolid;
+	}
 
 	// Each face goes to the area its centre is in.
 	std::unordered_map<std::uint64_t, std::uint32_t> chunkOf;

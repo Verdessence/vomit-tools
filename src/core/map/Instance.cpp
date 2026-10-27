@@ -114,7 +114,7 @@ void BuildInstanceMesh( CScene &scene )
 		std::array<std::uint32_t, 3> m_Indices{};
 	};
 	std::vector<Triangle_t> triangles;
-	CMapMesh &out = scene.m_InstanceMesh;
+	CMapMesh out;
 	for ( const PlacedInstance_t &placed : scene.m_Instances )
 	{
 		const CScene &inner = *placed.m_pScene;
@@ -128,7 +128,7 @@ void BuildInstanceMesh( CScene &scene )
 			}
 			remap[ i ] = it->second;
 		}
-		for ( const CMapMesh *pMesh : { &inner.m_Mesh, &inner.m_InstanceMesh } )
+		for ( const CMapMesh *pMesh : { &inner.GetMesh(), &inner.GetInstanceMesh() } )
 		{
 			const auto nBase = static_cast<std::uint32_t>( out.m_Vertices.size() );
 			const auto nChunkBase = static_cast<std::uint32_t>( out.m_Chunks.size() );
@@ -172,6 +172,7 @@ void BuildInstanceMesh( CScene &scene )
 		out.m_Indices.insert( out.m_Indices.end(), triangle.m_Indices.begin(), triangle.m_Indices.end() );
 		out.m_Batches.back().m_nIndexCount += 3;
 	}
+	scene.m_pInstanceMesh = std::make_shared<const CMapMesh>( std::move( out ) );
 }
 
 } // namespace
@@ -354,7 +355,7 @@ void LoadInstances( CScene &scene, const SceneOptions_t &options )
 	const std::filesystem::path self = std::filesystem::weakly_canonical( instances.m_MapFile, error );
 	pCache->m_Reading.push_back( error ? instances.m_MapFile : self );
 	auto problem = [ & ]( const Entity_t &entity, const std::string &szWhat ) {
-		scene.m_Mesh.m_Problems.push_back( "func_instance " + std::to_string( entity.m_nId ) + ": " + szWhat );
+		scene.m_Problems.push_back( "func_instance " + std::to_string( entity.m_nId ) + ": " + szWhat );
 	};
 	for ( std::size_t e = 0; e < scene.m_Map.m_Entities.size(); e++ )
 	{
@@ -433,9 +434,12 @@ void LoadInstances( CScene &scene, const SceneOptions_t &options )
 				break; // cancelled
 			}
 			// What went wrong inside the file shows with the map's own problems, once.
-			for ( const std::string &szProblem : pInner->m_Mesh.m_Problems )
+			for ( const std::vector<std::string> *pProblems : { &pInner->GetMesh().m_Problems, &pInner->m_Problems } )
 			{
-				scene.m_Mesh.m_Problems.push_back( std::string{ szFile } + ": " + szProblem );
+				for ( const std::string &szProblem : *pProblems )
+				{
+					scene.m_Problems.push_back( std::string{ szFile } + ": " + szProblem );
+				}
 			}
 			found = pCache->m_Scenes.emplace( key, std::move( pInner ) ).first;
 		}

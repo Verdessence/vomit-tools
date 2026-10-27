@@ -82,7 +82,7 @@ std::unique_ptr<CScene> BuildScene( CMap map, std::shared_ptr<const CFgd> pFgd, 
 	{
 		return nullptr;
 	}
-	pScene->m_Solids = BuildSolids( pScene->m_Map );
+	pScene->m_Solids = CSharedVector<SolidGeometry_t>{ BuildSolids( pScene->m_Map ) };
 	if ( !progress( 50, "entities" ) )
 	{
 		return nullptr;
@@ -96,7 +96,16 @@ std::unique_ptr<CScene> BuildScene( CMap map, std::shared_ptr<const CFgd> pFgd, 
 	{
 		return nullptr;
 	}
-	pScene->m_Mesh = BuildMesh( pScene->m_Map, pScene->m_Solids );
+	{
+		std::vector<MeshSolid_t> solids( pScene->m_Solids.size() );
+		for ( std::size_t i = 0; i < solids.size(); i++ )
+		{
+			solids[ i ] = { static_cast<std::uint32_t>( i ), static_cast<std::uint32_t>( i ), &std::as_const( pScene->m_Solids )[ i ] };
+		}
+		CMapMesh mesh = BuildMesh( std::as_const( pScene->m_Map ), std::span<const MeshSolid_t>{ solids } );
+		mesh.m_SolidIndices.clear();
+		pScene->m_pMesh = std::make_shared<const CMapMesh>( std::move( mesh ) );
+	}
 	pScene->m_Materials = pScene->m_Map.m_Materials;
 	if ( !progress( 80, "instances" ) )
 	{
@@ -115,7 +124,7 @@ std::unique_ptr<CScene> BuildScene( CMap map, std::shared_ptr<const CFgd> pFgd, 
 			pScene->m_Bounds.Add( pScene->GetEntityBox( i ) );
 		}
 	}
-	for ( const MeshChunk_t &chunk : pScene->m_InstanceMesh.m_Chunks )
+	for ( const MeshChunk_t &chunk : pScene->GetInstanceMesh().m_Chunks )
 	{
 		pScene->m_Bounds.Add( chunk.m_Bounds );
 	}
