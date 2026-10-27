@@ -66,6 +66,8 @@ public:
 	// Whether a visgroup's members are all shown (Qt::Checked), none (Qt::Unchecked) or some.
 	[[nodiscard]] int GetVisgroupState( int nVisgroupId ) const;
 	void SetVisgroupShown( int nVisgroupId, bool bShown );
+	// The same for objects of an automatic visgroup.
+	[[nodiscard]] int GetAutoState( const std::vector<std::uint32_t> &objects ) const;
 	void SetAutoShown( const std::vector<std::uint32_t> &objects, bool bShown );
 	void QuickHide( const std::vector<std::uint32_t> &objects );
 	void QuickHideAllBut( const std::vector<std::uint32_t> &objects );

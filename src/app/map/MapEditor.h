@@ -20,11 +20,14 @@
 #include "map/MapRenderData.h"
 #include "map/MapView.h"
 
+class CMapFilterControl;
 class CMapPane;
+class CMapProperties;
 class CMapResources;
 class CMapQuadSplitter;
 class QActionGroup;
 class QLabel;
+class QSplitter;
 class QToolBar;
 class QVBoxLayout;
 
@@ -49,6 +52,8 @@ public:
 	[[nodiscard]] CMapView *GetActiveView() const { return m_pActiveView; }
 	[[nodiscard]] CMapRenderData &GetRenderData() { return *m_pRenderData; }
 	[[nodiscard]] CMapResources &GetResources() { return *m_pResources; }
+	[[nodiscard]] CMapFilterControl &GetFilterControl() { return *m_pFilter; }
+	[[nodiscard]] CMapProperties &GetProperties() { return *m_pProperties; }
 	// Where the 3D camera is, for the 2D views to draw it (the first 3D pane's).
 	[[nodiscard]] std::optional<xv::map::CViewCamera> GetCamera() const;
 
@@ -78,6 +83,7 @@ private:
 	void UpdateGameStatus();
 	void ResourcesArrived();
 	void GoToBrush();
+	void ShowProperties();
 	[[nodiscard]] CMapPane *PaneOf( const CMapView *pView ) const;
 
 	CMapDocument *m_pDocument = nullptr;
@@ -91,7 +97,9 @@ private:
 
 	std::array<CMapPane *, 4> m_Panes{};
 	CMapQuadSplitter *m_pSplitter = nullptr;
-	QWidget *m_pSidePanel = nullptr;
+	QSplitter *m_pSidePanel = nullptr;
+	CMapFilterControl *m_pFilter = nullptr;
+	CMapProperties *m_pProperties = nullptr;
 	QLabel *m_pLoading = nullptr;
 	QActionGroup *m_pTools = nullptr;
 	QActionGroup *m_pModes = nullptr;

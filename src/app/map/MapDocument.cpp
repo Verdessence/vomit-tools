@@ -258,6 +258,19 @@ void CMapDocument::SetVisgroupShown( int nVisgroupId, bool bShown )
 //-----------------------------------------------------------------------------
 // Purpose:
 //-----------------------------------------------------------------------------
+int CMapDocument::GetAutoState( const std::vector<std::uint32_t> &objects ) const
+{
+	const auto nShown = std::ranges::count_if( objects, [ this ]( std::uint32_t n ) { return n < m_AutoShown.size() && m_AutoShown[ n ] != 0; } );
+	if ( nShown == static_cast<std::ptrdiff_t>( objects.size() ) )
+	{
+		return Qt::Checked;
+	}
+	return nShown == 0 ? Qt::Unchecked : Qt::PartiallyChecked;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
 void CMapDocument::SetAutoShown( const std::vector<std::uint32_t> &objects, bool bShown )
 {
 	for ( const std::uint32_t n : objects )

@@ -23,7 +23,9 @@
 #include <QVBoxLayout>
 
 #include "map/MapConstants.h"
+#include "map/MapFilterControl.h"
 #include "map/MapPanes.h"
+#include "map/MapProperties.h"
 #include "map/MapResources.h"
 #include "map/MapView2D.h"
 #include "map/MapView3D.h"
@@ -125,11 +127,30 @@ CMapEditor::CMapEditor( const QString &szPath, bool bFromGame, QWidget *pParent 
 	m_pLoading->setAlignment( Qt::AlignCenter );
 	m_pLoading->setStyleSheet( QStringLiteral( "QLabel { color: white; background: rgba(0, 0, 0, 160); padding: 12px; border-radius: 4px; }" ) );
 
-	m_pSidePanel = new QWidget;
+	// Hammer docks the Filter Control at the side and opens Object Properties as a window of
+	// its own; here both share the side, so the selection's keys are always in view.
+	m_pSidePanel = new QSplitter( Qt::Vertical );
 	m_pSidePanel->setObjectName( QStringLiteral( "mapSidePanel" ) );
 	m_pSidePanel->setMinimumWidth( 260 );
-	auto *pSideLayout = new QVBoxLayout( m_pSidePanel );
-	pSideLayout->setContentsMargins( 4, 4, 4, 4 );
+	m_pSidePanel->setChildrenCollapsible( false );
+	auto section = [ this ]( const QString &szTitle, QWidget *pContent ) {
+		auto *pBox = new QWidget;
+		auto *pBoxLayout = new QVBoxLayout( pBox );
+		pBoxLayout->setContentsMargins( 4, 4, 4, 4 );
+		auto *pTitle = new QLabel( szTitle );
+		QFont font = pTitle->font();
+		font.setBold( true );
+		pTitle->setFont( font );
+		pBoxLayout->addWidget( pTitle );
+		pBoxLayout->addWidget( pContent, 1 );
+		m_pSidePanel->addWidget( pBox );
+	};
+	m_pFilter = new CMapFilterControl( *m_pDocument );
+	m_pProperties = new CMapProperties( *m_pDocument );
+	section( tr( "Filter Control" ), m_pFilter );
+	section( tr( "Object Properties" ), m_pProperties );
+	m_pSidePanel->setStretchFactor( 0, 2 );
+	m_pSidePanel->setStretchFactor( 1, 3 );
 
 	auto *pMiddle = new QSplitter( Qt::Horizontal );
 	pMiddle->addWidget( m_pSplitter );
@@ -191,6 +212,10 @@ CMapEditor::CMapEditor( const QString &szPath, bool bFromGame, QWidget *pParent 
 	m_pStatusZoom = label( "mapStatusZoom", 90 );
 	m_pStatusGrid = label( "mapStatusGrid", 160 );
 	m_pStatusGame = label( "mapStatusGame", 0 );
+	// The two that stretch share what room is left and cut their text short rather than widen
+	// the window past the screen; their tool tips hold all of it.
+	m_pStatusSelection->setSizePolicy( QSizePolicy::Ignored, QSizePolicy::Preferred );
+	m_pStatusGame->setSizePolicy( QSizePolicy::Ignored, QSizePolicy::Preferred );
 	pStatusLayout->addWidget( m_pStatusSelection, 1 );
 	pStatusLayout->addWidget( m_pStatusGame, 1 );
 	pStatusLayout->addWidget( m_pStatusSize );
@@ -481,6 +506,7 @@ void CMapEditor::UpdateStatus()
 	{
 		m_pStatusSelection->setText( tr( "%n object(s) selected", nullptr, static_cast<int>( selection.size() ) ) );
 	}
+	m_pStatusSelection->setToolTip( m_pStatusSelection->text() );
 	const xv::map::Box_t bounds = m_pDocument->GetSelectionBounds();
 	if ( !bounds.IsEmpty() )
 	{
@@ -632,6 +658,9 @@ bool CMapEditor::RunAction( MapAction_t nAction, CMapView *pFrom )
 		case MapAction_t::MAP_ACTION_GO_TO_BRUSH:
 			GoToBrush();
 			return true;
+		case MapAction_t::MAP_ACTION_PROPERTIES:
+			ShowProperties();
+			return true;
 		case MapAction_t::MAP_ACTION_TOOL_SELECT:
 			SetTool( MapTool_t::MAP_TOOL_SELECT );
 			return true;
@@ -726,6 +755,24 @@ void CMapEditor::UpdateGameStatus()
 		szText += tr( "; textures %1 of %2" ).arg( m_pResources->GetLoaded() ).arg( m_pResources->GetTotal() );
 	}
 	m_pStatusGame->setText( szText );
+	m_pStatusGame->setToolTip( szText );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Alt+Enter: Object Properties, brought out if the side was dragged shut.
+//-----------------------------------------------------------------------------
+void CMapEditor::ShowProperties()
+{
+	if ( auto *pMiddle = qobject_cast<QSplitter *>( m_pSidePanel->parentWidget() ) )
+	{
+		QList<int> sizes = pMiddle->sizes();
+		if ( sizes.size() == 2 && sizes[ 1 ] == 0 )
+		{
+			const int nSide = std::max( m_pSidePanel->minimumWidth(), 280 );
+			pMiddle->setSizes( { std::max( sizes[ 0 ] - nSide, 0 ), nSide } );
+		}
+	}
+	m_pProperties->FocusKeys();
 }
 
 //-----------------------------------------------------------------------------

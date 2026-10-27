@@ -52,6 +52,11 @@ inline constexpr int SCROLL_STEP_PIXELS = 64;     // arrow keys; unconfirmed
 inline constexpr int VERTEX_SIZE = 2;             // DrawVertices dots, in pixels; unconfirmed
 inline constexpr int MODELS_FROM_PIXELS = 24;     // models drawn in 2D when at least this big; unconfirmed
 inline constexpr int NAMES_FROM_PIXELS = 32;      // entity names shown at this zoom; unconfirmed
+// The 3D view's camera, drawn in the 2D views (Hammer++ settings: CameraFrustum=0, so without
+// its frustum): a ring at the eye and a line the way it looks.
+inline const QColor CAMERA{ 0, 255, 255 };        // unconfirmed
+inline constexpr int CAMERA_EYE_PIXELS = 4;       // the ring's radius; unconfirmed
+inline constexpr int CAMERA_LOOK_PIXELS = 32;     // the line when it looks across the view; unconfirmed
 
 // 3D view (Hammer++ settings, [View3D]).
 inline constexpr float FOV = 90.0f;               // horizontal, in degrees; unconfirmed: horizontal or vertical

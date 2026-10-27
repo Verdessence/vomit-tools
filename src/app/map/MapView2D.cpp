@@ -598,6 +598,28 @@ void CMapView2D::PaintSelection( QPainter &painter ) const
 }
 
 //-----------------------------------------------------------------------------
+// Purpose: Where the 3D view's camera is and which way it looks, seen from this axis.
+//-----------------------------------------------------------------------------
+void CMapView2D::PaintCamera( QPainter &painter ) const
+{
+	const std::optional<xv::map::CViewCamera> camera = m_Editor.GetCamera();
+	if ( !camera )
+	{
+		return;
+	}
+	const xv::map::Point_t forward = camera->GetForward();
+	const double flLength = mapstyle::CAMERA_LOOK_PIXELS / std::max( m_flZoom, 1e-9 );
+	const QPointF eye = ToWidget( Flatten( camera->m_Eye ) );
+	const QPointF look = ToWidget( Flatten( xv::map::Add( camera->m_Eye, xv::map::Scale( forward, flLength ) ) ) );
+	painter.setRenderHint( QPainter::Antialiasing, true );
+	painter.setPen( QPen{ mapstyle::CAMERA, 0 } );
+	painter.setBrush( Qt::NoBrush );
+	painter.drawEllipse( eye, mapstyle::CAMERA_EYE_PIXELS, mapstyle::CAMERA_EYE_PIXELS );
+	painter.drawLine( eye, look );
+	painter.setRenderHint( QPainter::Antialiasing, false );
+}
+
+//-----------------------------------------------------------------------------
 // Purpose:
 //-----------------------------------------------------------------------------
 void CMapView2D::paintEvent( QPaintEvent * )
@@ -610,6 +632,7 @@ void CMapView2D::paintEvent( QPaintEvent * )
 	const QRectF visible = GetVisible();
 	PaintGrid( painter, visible );
 	PaintObjects( painter, visible );
+	PaintCamera( painter );
 	PaintSelection( painter );
 	if ( hasFocus() )
 	{

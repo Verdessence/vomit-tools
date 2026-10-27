@@ -146,10 +146,14 @@ add_library(vomit_tools_ui STATIC
         map/MapDocument.h
         map/MapEditor.cpp
         map/MapEditor.h
+        map/MapFilterControl.cpp
+        map/MapFilterControl.h
         map/MapKeys.cpp
         map/MapKeys.h
         map/MapPanes.cpp
         map/MapPanes.h
+        map/MapProperties.cpp
+        map/MapProperties.h
         map/MapRenderData.cpp
         map/MapRenderData.h
         map/MapRenderer.cpp

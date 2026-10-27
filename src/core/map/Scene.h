@@ -21,6 +21,7 @@
 #include "map/Fgd.h"
 #include "map/Map.h"
 #include "map/Mesh.h"
+#include "map/Visgroups.h"
 
 namespace xv::map
 {
@@ -34,6 +35,7 @@ public:
 	std::vector<EntityVisual_t> m_Entities;  // lines up with m_Map.m_Entities
 	CMapMesh m_Mesh;
 	Box_t m_Bounds;                          // everything drawn
+	AutoVisgroup_t m_AutoVisgroups;         // the Filter Control's Auto tab
 
 	[[nodiscard]] std::uint32_t GetObjectCount() const { return static_cast<std::uint32_t>( m_Solids.size() + m_Entities.size() ); }
 	[[nodiscard]] std::uint32_t EntityObject( std::size_t nEntity ) const { return static_cast<std::uint32_t>( m_Solids.size() + nEntity ); }

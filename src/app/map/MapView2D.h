@@ -92,6 +92,7 @@ private:
 	void PaintGrid( class QPainter &painter, const QRectF &visible ) const;
 	void PaintObjects( QPainter &painter, const QRectF &visible ) const;
 	void PaintSelection( QPainter &painter ) const;
+	void PaintCamera( QPainter &painter ) const;
 	[[nodiscard]] QColor ColorOf( const MapFlatObject_t &object ) const;
 	void UpdateScrollBars();
 	void ReportCursor( QPointF at );

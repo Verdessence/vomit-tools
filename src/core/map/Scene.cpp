@@ -104,6 +104,7 @@ std::unique_ptr<CScene> BuildScene( CMap map, std::shared_ptr<const CFgd> pFgd, 
 			pScene->m_Bounds.Add( pScene->GetEntityBox( i ) );
 		}
 	}
+	pScene->m_AutoVisgroups = BuildAutoVisgroups( *pScene );
 	progress( 100, "done" );
 	return pScene;
 }
