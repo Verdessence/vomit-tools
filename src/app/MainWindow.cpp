@@ -4959,6 +4959,11 @@ CMapEditor *CMainWindow::OpenMapFile( const QString &szPath )
 		source.m_Text.assign( reinterpret_cast<const char *>( bytes->data() ), reinterpret_cast<const char *>( bytes->data() + bytes->size() ) );
 	}
 	source.m_Game = m_Game;
+	// Preferences > Maps can name the game data in place of the game's Hammer configuration.
+	for ( const QString &szFgd : CPreferences::Instance().GetMapPreferences().m_Fgds )
+	{
+		source.m_Fgds.push_back( ToPath( szFgd ) );
+	}
 	auto *pEditor = new CMapEditor( szOrigin, !bDisk );
 	connect( pEditor, &CMapEditor::StatusMessage, this, [ this ]( const QString &szText ) { statusBar()->showMessage( szText, 8000 ); } );
 	const int nIndex = m_pTabs->addTab( pEditor, pEditor->GetTabTitle() );

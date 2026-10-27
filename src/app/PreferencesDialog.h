@@ -35,6 +35,7 @@ private:
 	[[nodiscard]] QWidget *BuildGraphicsPage();
 	[[nodiscard]] QWidget *BuildParticlesPage();
 	[[nodiscard]] QWidget *BuildMaterialsPage();
+	[[nodiscard]] QWidget *BuildMapsPage();
 	[[nodiscard]] QWidget *BuildAdvancedPage();
 	QWidget *BuildSourceToolsPage();
 

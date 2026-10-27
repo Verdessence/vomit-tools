@@ -19,6 +19,7 @@
 #include <QTimer>
 #include <QWheelEvent>
 
+#include "Preferences.h"
 #include "map/MapConstants.h"
 #include "map/MapDocument.h"
 #include "map/MapEditor.h"
@@ -73,9 +74,10 @@ CMapView3D::CMapView3D( CMapEditor &editor, MapViewType_t nType, QWidget *pParen
 {
 	setAttribute( Qt::WA_OpaquePaintEvent );
 	setMouseTracking( true );
-	m_Camera.m_flFov = mapstyle::FOV;
 	m_Camera.m_flNear = mapstyle::NEAR_PLANE;
-	m_Camera.m_flFar = mapstyle::FAR_PLANE;
+	// Not ApplyPreferences: that tells the editor, which is still making its panes.
+	m_Camera.m_flFov = CPreferences::Instance().GetMapPreferences().m_flFov;
+	m_Camera.m_flFar = CPreferences::Instance().GetMapPreferences().m_flRenderDistance;
 	m_pTick = new QTimer( this );
 	m_pTick->setInterval( TICK_MS );
 	connect( m_pTick, &QTimer::timeout, this, &CMapView3D::Tick );
@@ -409,7 +411,7 @@ void CMapView3D::mouseMoveEvent( QMouseEvent *pEvent )
 		m_bMoved = true;
 	}
 	const bool bCameraTool = m_Editor.GetTool() == MapTool_t::MAP_TOOL_CAMERA;
-	const double flSensitivity = mapstyle::MOUSE_SENSITIVITY;
+	const double flSensitivity = CPreferences::Instance().GetMapPreferences().m_flSensitivity;
 	auto look = [ & ] {
 		m_Camera.m_flYaw -= delta.x() * flSensitivity;
 		m_Camera.m_flPitch = std::clamp( m_Camera.m_flPitch + delta.y() * flSensitivity, -89.0, 89.0 );
@@ -589,11 +591,24 @@ void CMapView3D::focusOutEvent( QFocusEvent *pEvent )
 }
 
 //-----------------------------------------------------------------------------
-// Purpose: Speed builds up to Hammer++'s top speed over its ramp time, as long as keys are held.
+// Purpose: The field of view and render distance Preferences > Maps gives.
+//-----------------------------------------------------------------------------
+void CMapView3D::ApplyPreferences()
+{
+	const MapPreferences_t &preferences = CPreferences::Instance().GetMapPreferences();
+	m_Camera.m_flFov = preferences.m_flFov;
+	m_Camera.m_flFar = preferences.m_flRenderDistance;
+	Changed();
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Speed builds up to the top speed (Hammer++'s by default) over its ramp time, as long
+//          as keys are held.
 //-----------------------------------------------------------------------------
 void CMapView3D::Fly( double flSeconds )
 {
-	m_flSpeed = std::min<double>( mapstyle::MAX_FORWARD_SPEED, m_flSpeed + mapstyle::MAX_FORWARD_SPEED / mapstyle::MAX_SPEED_TIME * flSeconds );
+	const double flTopSpeed = CPreferences::Instance().GetMapPreferences().m_flForwardSpeed;
+	m_flSpeed = std::min<double>( flTopSpeed, m_flSpeed + flTopSpeed / mapstyle::MAX_SPEED_TIME * flSeconds );
 	xv::map::Point_t vecMove{};
 	auto add = [ & ]( const xv::map::Point_t &vecDirection, double flSign ) { vecMove = xv::map::Add( vecMove, xv::map::Scale( vecDirection, flSign ) ); };
 	for ( const MapAction_t nAction : m_Held )
@@ -663,7 +678,7 @@ bool CMapView3D::Run( MapAction_t nAction )
 			Changed();
 			return true;
 		case MapAction_t::MAP_ACTION_RENDER_FURTHER:
-			m_Camera.m_flFar = std::min<double>( mapstyle::FAR_PLANE * 2.0, m_Camera.m_flFar * mapstyle::FAR_PLANE_STEP );
+			m_Camera.m_flFar = std::min<double>( CPreferences::Instance().GetMapPreferences().m_flRenderDistance * 2.0, m_Camera.m_flFar * mapstyle::FAR_PLANE_STEP );
 			Changed();
 			return true;
 		case MapAction_t::MAP_ACTION_STATISTICS:

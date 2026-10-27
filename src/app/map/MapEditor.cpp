@@ -22,6 +22,7 @@
 #include <QToolBar>
 #include <QVBoxLayout>
 
+#include "Preferences.h"
 #include "map/MapConstants.h"
 #include "map/MapFilterControl.h"
 #include "map/MapPanes.h"
@@ -107,6 +108,8 @@ CMapEditor::CMapEditor( const QString &szPath, bool bFromGame, QWidget *pParent 
 	m_pResources = new CMapResources( this );
 	connect( m_pResources, &CMapResources::Arrived, this, &CMapEditor::ResourcesArrived );
 	connect( m_pResources, &CMapResources::Finished, this, &CMapEditor::UpdateGameStatus );
+	TakePreferences();
+	connect( &CPreferences::Instance(), &CPreferences::MapPreferencesChanged, this, &CMapEditor::PreferencesChanged );
 
 	auto *pLayout = new QVBoxLayout( this );
 	pLayout->setContentsMargins( 0, 0, 0, 0 );
@@ -305,13 +308,19 @@ void CMapEditor::BuildToolBars( QVBoxLayout *pLayout )
 	};
 	command( tr( "Smaller Grid" ), MapAction_t::MAP_ACTION_GRID_SMALLER );
 	command( tr( "Bigger Grid" ), MapAction_t::MAP_ACTION_GRID_LARGER );
-	command( tr( "Grid" ), MapAction_t::MAP_ACTION_TOGGLE_GRID, true, m_Settings.m_bShowGrid )->setObjectName( QStringLiteral( "mapToggleGrid" ) );
+	// Toggles keep their buttons in step with the settings, however they are changed.
+	auto toggle = [ & ]( const QString &szName, MapAction_t nAction, const bool &bSetting ) {
+		QAction *pAction = command( szName, nAction, true, bSetting );
+		m_SettingActions.emplace_back( pAction, &bSetting );
+		return pAction;
+	};
+	toggle( tr( "Grid" ), MapAction_t::MAP_ACTION_TOGGLE_GRID, m_Settings.m_bShowGrid )->setObjectName( QStringLiteral( "mapToggleGrid" ) );
 	pBar->addSeparator();
-	command( tr( "Models in 2D" ), MapAction_t::MAP_ACTION_TOGGLE_MODELS_2D, true, m_Settings.m_bModels2D );
-	command( tr( "Entity Names" ), MapAction_t::MAP_ACTION_TOGGLE_NAMES, true, m_Settings.m_bNames );
-	command( tr( "Helpers" ), MapAction_t::MAP_ACTION_TOGGLE_HELPERS, true, m_Settings.m_bHelpers );
-	command( tr( "Tool Textures" ), MapAction_t::MAP_ACTION_TOGGLE_TOOL_TEXTURES, true, m_Settings.m_bToolTextures );
-	command( tr( "3D Skybox" ), MapAction_t::MAP_ACTION_TOGGLE_SKYBOX_3D, true, m_Settings.m_bSkybox3D );
+	toggle( tr( "Models in 2D" ), MapAction_t::MAP_ACTION_TOGGLE_MODELS_2D, m_Settings.m_bModels2D )->setObjectName( QStringLiteral( "mapToggleModels2D" ) );
+	toggle( tr( "Entity Names" ), MapAction_t::MAP_ACTION_TOGGLE_NAMES, m_Settings.m_bNames );
+	toggle( tr( "Helpers" ), MapAction_t::MAP_ACTION_TOGGLE_HELPERS, m_Settings.m_bHelpers );
+	toggle( tr( "Tool Textures" ), MapAction_t::MAP_ACTION_TOGGLE_TOOL_TEXTURES, m_Settings.m_bToolTextures );
+	toggle( tr( "3D Skybox" ), MapAction_t::MAP_ACTION_TOGGLE_SKYBOX_3D, m_Settings.m_bSkybox3D )->setObjectName( QStringLiteral( "mapToggleSkybox3D" ) );
 	pBar->addSeparator();
 	command( tr( "Center on Selection" ), MapAction_t::MAP_ACTION_CENTER_2D );
 	command( tr( "Go to Brush…" ), MapAction_t::MAP_ACTION_GO_TO_BRUSH );
@@ -356,7 +365,7 @@ void CMapEditor::Loaded()
 	{
 		pGrid->setChecked( m_Settings.m_bShowGrid );
 	}
-	m_pResources->Start( m_pDocument->GetSharedScene(), m_pDocument->GetGame(), 1024 );
+	m_pResources->Start( m_pDocument->GetSharedScene(), m_pDocument->GetGame(), m_nTextureSize );
 	UpdateGameStatus();
 	std::size_t nErrors = 0;
 	for ( const xv::map::Diagnostic_t &diagnostic : scene.m_Map.m_Diagnostics )
@@ -520,6 +529,10 @@ void CMapEditor::UpdateStatus()
 //-----------------------------------------------------------------------------
 void CMapEditor::SettingsChanged()
 {
+	for ( const auto &[ pAction, pSetting ] : m_SettingActions )
+	{
+		pAction->setChecked( *pSetting );
+	}
 	for ( CMapView *pView : GetViews() )
 	{
 		if ( auto *p3D = qobject_cast<CMapView3D *>( pView ) )
@@ -529,6 +542,43 @@ void CMapEditor::SettingsChanged()
 		pView->update();
 	}
 	UpdateStatus();
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Preferences > Maps: the 2D views' options and the 3D skybox (the views' own toggles
+//          start over from them), and how big textures are read.
+//-----------------------------------------------------------------------------
+void CMapEditor::TakePreferences()
+{
+	const MapPreferences_t &preferences = CPreferences::Instance().GetMapPreferences();
+	m_Settings.m_bDrawVertices = preferences.m_bDrawVertices;
+	m_Settings.m_bModels2D = preferences.m_bModels2D;
+	m_Settings.m_bUseGroupColors = preferences.m_bGroupColors;
+	m_Settings.m_bSkybox3D = preferences.m_bSkybox3D;
+	m_Settings.m_bHideSmallGrid = preferences.m_bHideSmallGrid;
+	m_Settings.m_nHighlightEvery = preferences.m_nHighlightEvery;
+	m_nTextureSize = preferences.m_nTextureSize;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: The preferences changed while the map is open.
+//-----------------------------------------------------------------------------
+void CMapEditor::PreferencesChanged()
+{
+	const int nTextureSize = m_nTextureSize;
+	TakePreferences();
+	for ( CMapView *pView : GetViews() )
+	{
+		if ( auto *p3D = qobject_cast<CMapView3D *>( pView ) )
+		{
+			p3D->ApplyPreferences();
+		}
+	}
+	if ( nTextureSize != m_nTextureSize && m_pDocument->IsLoaded() )
+	{
+		m_pResources->Start( m_pDocument->GetSharedScene(), m_pDocument->GetGame(), m_nTextureSize );
+	}
+	SettingsChanged();
 }
 
 //-----------------------------------------------------------------------------
@@ -718,7 +768,7 @@ void CMapEditor::GameChanged( const xv::vfs::CGameInfo *pGame )
 	m_pDocument->SetGame( pGame ? std::optional<xv::vfs::CGameInfo>{ *pGame } : std::nullopt );
 	if ( m_pDocument->IsLoaded() )
 	{
-		m_pResources->Start( m_pDocument->GetSharedScene(), m_pDocument->GetGame(), 1024 );
+		m_pResources->Start( m_pDocument->GetSharedScene(), m_pDocument->GetGame(), m_nTextureSize );
 	}
 }
 

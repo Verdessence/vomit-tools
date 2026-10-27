@@ -25,6 +25,7 @@ class CMapPane;
 class CMapProperties;
 class CMapResources;
 class CMapQuadSplitter;
+class QAction;
 class QActionGroup;
 class QLabel;
 class QSplitter;
@@ -84,6 +85,8 @@ private:
 	void ResourcesArrived();
 	void GoToBrush();
 	void ShowProperties();
+	void TakePreferences();
+	void PreferencesChanged();
 	[[nodiscard]] CMapPane *PaneOf( const CMapView *pView ) const;
 
 	CMapDocument *m_pDocument = nullptr;
@@ -97,6 +100,8 @@ private:
 
 	std::array<CMapPane *, 4> m_Panes{};
 	CMapQuadSplitter *m_pSplitter = nullptr;
+	std::vector<std::pair<QAction *, const bool *>> m_SettingActions; // toggles and what they show
+	int m_nTextureSize = 1024;
 	QSplitter *m_pSidePanel = nullptr;
 	CMapFilterControl *m_pFilter = nullptr;
 	CMapProperties *m_pProperties = nullptr;

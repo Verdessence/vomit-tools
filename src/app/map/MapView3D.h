@@ -61,6 +61,7 @@ public:
 	void SetCamera( const xv::map::CViewCamera &camera );
 	// The map's state changed (selection, visibility, settings): draw it again.
 	void Redraw() { RequestRender(); }
+	void ApplyPreferences();
 	// The map was loaded: the camera starts at the map's active camera, as in Hammer.
 	void ResetCamera();
 	// What a click at a widget point would hit, nearest first.

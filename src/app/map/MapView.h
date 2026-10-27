@@ -56,6 +56,8 @@ struct MapViewSettings_t
 	bool m_bUseGroupColors = true;
 	bool m_bDrawVertices = true;
 	bool m_bCenterHandles = true;
+	bool m_bHideSmallGrid = true;  // grid lines closer than a few pixels left out
+	int m_nHighlightEvery = 8;     // every this many lines brighter (GridHighSpec)
 };
 
 class CMapView : public QWidget

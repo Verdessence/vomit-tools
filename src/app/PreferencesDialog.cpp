@@ -11,6 +11,9 @@
 
 #include <QButtonGroup>
 #include <QCheckBox>
+#include <QSpinBox>
+#include <QDoubleSpinBox>
+#include <QComboBox>
 #include <QDialogButtonBox>
 #include <QPushButton>
 #include <QDir>
@@ -86,6 +89,7 @@ CPreferencesDialog::CPreferencesDialog( QWidget *pParent )
 	AddPage( tr( "Graphics" ), BuildGraphicsPage() );
 	AddPage( tr( "Particles" ), BuildParticlesPage() );
 	AddPage( tr( "Materials" ), BuildMaterialsPage() );
+	AddPage( tr( "Maps" ), BuildMapsPage() );
 	AddPage( tr( "Source Tools" ), BuildSourceToolsPage() );
 	AddPage( tr( "Advanced" ), BuildAdvancedPage() );
 	for ( const auto &[ szTitle, pfnMake ] : LocalPages() )
@@ -290,6 +294,130 @@ QWidget *CPreferencesDialog::BuildMaterialsPage()
 	pLayout->addWidget( pLive );
 	pLayout->addWidget( Hint( tr( "Off: the preview waits for Refresh, for heavy materials. Typing in the text always redraws "
 								  "it after a pause." ) ) );
+	pLayout->addStretch();
+	return pPage;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: The map viewer: where entities' game data comes from, the 3D views' camera, and the
+//          2D views' grid and drawing. Every change applies at once.
+//-----------------------------------------------------------------------------
+QWidget *CPreferencesDialog::BuildMapsPage()
+{
+	auto *pPage = new QWidget;
+	const MapPreferences_t &current = CPreferences::Instance().GetMapPreferences();
+	auto change = []( auto pfnEdit ) {
+		MapPreferences_t preferences = CPreferences::Instance().GetMapPreferences();
+		pfnEdit( preferences );
+		CPreferences::Instance().SetMapPreferences( preferences );
+	};
+
+	// Game data: a list of FGDs, in the order they are read.
+	auto *pFgds = new QListWidget;
+	pFgds->setObjectName( QStringLiteral( "preferencesMapFgds" ) );
+	pFgds->addItems( current.m_Fgds );
+	pFgds->setMaximumHeight( 110 );
+	auto storeFgds = [ pFgds, change ] {
+		QStringList fgds;
+		for ( int i = 0; i < pFgds->count(); i++ )
+		{
+			fgds << pFgds->item( i )->text();
+		}
+		change( [ & ]( MapPreferences_t &preferences ) { preferences.m_Fgds = fgds; } );
+	};
+	auto *pAdd = new QPushButton( tr( "Add…" ) );
+	pAdd->setObjectName( QStringLiteral( "preferencesMapFgdAdd" ) );
+	auto *pRemove = new QPushButton( tr( "Remove" ) );
+	pRemove->setObjectName( QStringLiteral( "preferencesMapFgdRemove" ) );
+	auto *pUp = new QPushButton( tr( "Up" ) );
+	auto *pDown = new QPushButton( tr( "Down" ) );
+	connect( pAdd, &QPushButton::clicked, this, [ this, pFgds, storeFgds ] {
+		for ( const QString &szFile : AskOpenFiles( this, tr( "Add Game Data" ), {}, tr( "Game data (*.fgd)" ) ) )
+		{
+			pFgds->addItem( QDir::toNativeSeparators( szFile ) );
+		}
+		storeFgds();
+	} );
+	connect( pRemove, &QPushButton::clicked, this, [ pFgds, storeFgds ] {
+		delete pFgds->currentItem();
+		storeFgds();
+	} );
+	auto move = [ pFgds, storeFgds ]( int nBy ) {
+		const int nRow = pFgds->currentRow();
+		if ( nRow < 0 || nRow + nBy < 0 || nRow + nBy >= pFgds->count() )
+		{
+			return;
+		}
+		QListWidgetItem *pItem = pFgds->takeItem( nRow );
+		pFgds->insertItem( nRow + nBy, pItem );
+		pFgds->setCurrentItem( pItem );
+		storeFgds();
+	};
+	connect( pUp, &QPushButton::clicked, this, [ move ] { move( -1 ); } );
+	connect( pDown, &QPushButton::clicked, this, [ move ] { move( 1 ); } );
+	auto *pFgdButtons = new QHBoxLayout;
+	for ( QPushButton *pButton : { pAdd, pRemove, pUp, pDown } )
+	{
+		pFgdButtons->addWidget( pButton );
+	}
+	pFgdButtons->addStretch();
+
+	// The 3D views.
+	auto spin = [ & ]( const QString &szName, double flValue, double flLowest, double flHighest, double flStep, int nDecimals, auto pfnStore ) {
+		auto *pSpin = new QDoubleSpinBox;
+		pSpin->setObjectName( szName );
+		pSpin->setRange( flLowest, flHighest );
+		pSpin->setSingleStep( flStep );
+		pSpin->setDecimals( nDecimals );
+		pSpin->setValue( flValue );
+		connect( pSpin, &QDoubleSpinBox::valueChanged, this, [ change, pfnStore ]( double flNew ) { change( [ & ]( MapPreferences_t &preferences ) { pfnStore( preferences, flNew ); } ); } );
+		return pSpin;
+	};
+	auto *pForm = new QFormLayout;
+	pForm->addRow( tr( "Field of view" ), spin( QStringLiteral( "preferencesMapFov" ), current.m_flFov, 30, 150, 5, 0, []( MapPreferences_t &p, double fl ) { p.m_flFov = fl; } ) );
+	pForm->addRow( tr( "Mouse look speed" ), spin( QStringLiteral( "preferencesMapSensitivity" ), current.m_flSensitivity, 0.05, 5, 0.05, 2, []( MapPreferences_t &p, double fl ) { p.m_flSensitivity = fl; } ) );
+	pForm->addRow( tr( "Flying speed (units a second)" ), spin( QStringLiteral( "preferencesMapSpeed" ), current.m_flForwardSpeed, 100, 10000, 100, 0, []( MapPreferences_t &p, double fl ) { p.m_flForwardSpeed = fl; } ) );
+	pForm->addRow( tr( "Render distance" ), spin( QStringLiteral( "preferencesMapDistance" ), current.m_flRenderDistance, 1024, 131072, 1024, 0, []( MapPreferences_t &p, double fl ) { p.m_flRenderDistance = fl; } ) );
+	auto *pTextures = new QComboBox;
+	pTextures->setObjectName( QStringLiteral( "preferencesMapTextureSize" ) );
+	for ( const int nSize : { 256, 512, 1024, 2048, 4096 } )
+	{
+		pTextures->addItem( QString::number( nSize ), nSize );
+	}
+	pTextures->setCurrentIndex( std::max( 0, pTextures->findData( current.m_nTextureSize ) ) );
+	connect( pTextures, &QComboBox::currentIndexChanged, this, [ pTextures, change ] { change( [ & ]( MapPreferences_t &preferences ) { preferences.m_nTextureSize = pTextures->currentData().toInt(); } ); } );
+	pForm->addRow( tr( "Largest texture size" ), pTextures );
+
+	// The 2D views, and what a map opens with.
+	auto check = [ & ]( const QString &szName, const QString &szText, bool bValue, auto pfnStore ) {
+		auto *pCheck = new QCheckBox( szText );
+		pCheck->setObjectName( szName );
+		pCheck->setChecked( bValue );
+		connect( pCheck, &QCheckBox::toggled, this, [ change, pfnStore ]( bool bOn ) { change( [ & ]( MapPreferences_t &preferences ) { pfnStore( preferences, bOn ); } ); } );
+		return pCheck;
+	};
+	auto *pHighlight = new QSpinBox;
+	pHighlight->setObjectName( QStringLiteral( "preferencesMapHighlight" ) );
+	pHighlight->setRange( 2, 64 );
+	pHighlight->setValue( current.m_nHighlightEvery );
+	connect( pHighlight, &QSpinBox::valueChanged, this, [ change ]( int nEvery ) { change( [ & ]( MapPreferences_t &preferences ) { preferences.m_nHighlightEvery = nEvery; } ); } );
+	pForm->addRow( tr( "Brighter grid line every" ), pHighlight );
+
+	QVBoxLayout *pLayout = PageLayout( pPage );
+	pLayout->addWidget( new QLabel( tr( "Game data (FGD files), read in this order:" ) ) );
+	pLayout->addWidget( pFgds );
+	pLayout->addLayout( pFgdButtons );
+	pLayout->addWidget( Hint( tr( "Empty: the files the game's Hammer or Hammer++ configuration names. They are read again when a "
+								  "map is opened." ) ) );
+	pLayout->addSpacing( 12 );
+	pLayout->addLayout( pForm );
+	pLayout->addWidget( check( QStringLiteral( "preferencesMapHideSmallGrid" ), tr( "Hide grid lines that come too close together" ), current.m_bHideSmallGrid, []( MapPreferences_t &p, bool b ) { p.m_bHideSmallGrid = b; } ) );
+	pLayout->addWidget( check( QStringLiteral( "preferencesMapVertices" ), tr( "Draw brushes' corners in the 2D views" ), current.m_bDrawVertices, []( MapPreferences_t &p, bool b ) { p.m_bDrawVertices = b; } ) );
+	pLayout->addWidget( check( QStringLiteral( "preferencesMapModels2D" ), tr( "Draw models in the 2D views" ), current.m_bModels2D, []( MapPreferences_t &p, bool b ) { p.m_bModels2D = b; } ) );
+	pLayout->addWidget( check( QStringLiteral( "preferencesMapGroupColors" ), tr( "Draw objects in their visgroup's colour" ), current.m_bGroupColors, []( MapPreferences_t &p, bool b ) { p.m_bGroupColors = b; } ) );
+	pLayout->addWidget( check( QStringLiteral( "preferencesMapSkybox3D" ), tr( "Draw the 3D skybox" ), current.m_bSkybox3D, []( MapPreferences_t &p, bool b ) { p.m_bSkybox3D = b; } ) );
+	pLayout->addWidget( Hint( tr( "Hammer++'s own settings are the defaults. The views' toolbar buttons change these for one map until "
+								  "this page changes again." ) ) );
 	pLayout->addStretch();
 	return pPage;
 }

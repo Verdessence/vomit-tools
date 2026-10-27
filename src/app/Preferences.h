@@ -8,8 +8,29 @@
 #pragma once
 
 #include <QObject>
+#include <QStringList>
 
 #include "Graphics.h"
+#include "map/MapConstants.h"
+
+// The map viewer's settings (Preferences > Maps). The defaults are Hammer++'s own.
+struct MapPreferences_t
+{
+	QStringList m_Fgds;                                   // game data, in order; empty: the game's Hammer configuration's
+	double m_flFov = mapstyle::FOV;                       // horizontal, in degrees
+	double m_flSensitivity = mapstyle::MOUSE_SENSITIVITY; // mouse look
+	double m_flForwardSpeed = mapstyle::MAX_FORWARD_SPEED;
+	double m_flRenderDistance = mapstyle::FAR_PLANE;
+	int m_nTextureSize = 1024;                            // a texture's largest side, as read
+	bool m_bHideSmallGrid = true;
+	int m_nHighlightEvery = mapstyle::GRID_HIGHLIGHT_EVERY;
+	bool m_bDrawVertices = true;
+	bool m_bModels2D = true;
+	bool m_bGroupColors = true;
+	bool m_bSkybox3D = true;
+
+	friend bool operator==( const MapPreferences_t &, const MapPreferences_t & ) = default;
+};
 
 class CPreferences : public QObject
 {
@@ -49,6 +70,10 @@ public:
 	[[nodiscard]] bool IsDebugLog() const { return m_bDebugLog; }
 	void SetDebugLog( bool bOn );
 
+	// The map viewer's: open maps take a change at once (their own toggles start over).
+	[[nodiscard]] const MapPreferences_t &GetMapPreferences() const { return m_Map; }
+	void SetMapPreferences( const MapPreferences_t &map );
+
 	// Whether materials are edited as a list of parameters (else as their text).
 	[[nodiscard]] bool IsMaterialVisual() const { return m_bMaterialVisual; }
 	void SetMaterialVisual( bool bVisual );
@@ -59,6 +84,7 @@ public:
 signals:
 	void GridAnimationChanged( bool bAll );
 	void MaterialEditingChanged();
+	void MapPreferencesChanged();
 
 private:
 	CPreferences();
@@ -72,4 +98,5 @@ private:
 	bool m_bReopenSession = true;
 	bool m_bDesktopFileChooser = true;
 	bool m_bDebugLog = false;
+	MapPreferences_t m_Map;
 };

@@ -59,14 +59,16 @@ double DistanceToSegment( QPointF p, QPointF a, QPointF b )
 // Purpose: Each kind of line is left out once it would come closer than Hammer++'s smallest
 //          spacing in pixels.
 //-----------------------------------------------------------------------------
-GridPlan_t PlanGrid( double flPixelsPerUnit, int nGridSize )
+GridPlan_t PlanGrid( double flPixelsPerUnit, int nGridSize, int nHighlightEvery, bool bHideSmall )
 {
-	auto shown = [ flPixelsPerUnit ]( double flSpacing ) {
-		return flSpacing * flPixelsPerUnit >= mapstyle::HIDE_GRID_BELOW_PIXELS ? flSpacing : 0.0;
+	// Without HideSmallGrid lines still stop where they would be closer than a pixel.
+	const double flHideBelow = bHideSmall ? mapstyle::HIDE_GRID_BELOW_PIXELS : 1.0;
+	auto shown = [ flPixelsPerUnit, flHideBelow ]( double flSpacing ) {
+		return flSpacing * flPixelsPerUnit >= flHideBelow ? flSpacing : 0.0;
 	};
 	GridPlan_t plan;
 	plan.m_flBase = shown( nGridSize );
-	plan.m_flHighlight = shown( static_cast<double>( nGridSize ) * mapstyle::GRID_HIGHLIGHT_EVERY );
+	plan.m_flHighlight = shown( static_cast<double>( nGridSize ) * std::max( nHighlightEvery, 1 ) );
 	// "Highlight every 64 units" only adds lines while the grid is finer than 64.
 	plan.m_flSixtyFour = nGridSize < 64 ? shown( 64.0 ) : 0.0;
 	plan.m_fl1024 = shown( 1024.0 );
@@ -423,7 +425,7 @@ void CMapView2D::PaintGrid( QPainter &painter, const QRectF &visible ) const
 	};
 	if ( settings.m_bShowGrid )
 	{
-		const GridPlan_t plan = PlanGrid( m_flZoom, settings.m_nGridSize );
+		const GridPlan_t plan = PlanGrid( m_flZoom, settings.m_nGridSize, settings.m_nHighlightEvery, settings.m_bHideSmallGrid );
 		lines( plan.m_flBase, mapstyle::GRID );
 		lines( plan.m_flSixtyFour, mapstyle::GRID_10 );
 		lines( plan.m_flHighlight, mapstyle::GRID_10 );
