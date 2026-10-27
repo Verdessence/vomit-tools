@@ -117,6 +117,8 @@ add_library(vomit_tools_core STATIC
         texture/Sheet.h
         texture/Vtf.cpp
         texture/Vtf.h
+        util/Memory.cpp
+        util/Memory.h
         util/Numbers.h
         util/Parallel.h
         util/Scan.cpp

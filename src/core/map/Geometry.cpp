@@ -105,6 +105,16 @@ std::optional<Plane_t> PlaneFromPoints( const std::array<Point_t, 3> &points )
 //-----------------------------------------------------------------------------
 std::vector<Point_t> BaseWinding( const Plane_t &plane, double flExtent )
 {
+	std::vector<Point_t> points;
+	BaseWinding( plane, flExtent, points );
+	return points;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+void BaseWinding( const Plane_t &plane, double flExtent, std::vector<Point_t> &out )
+{
 	// The world axis least like the normal gives a well-conditioned direction across the plane.
 	std::size_t nAxis = 0;
 	for ( std::size_t i = 1; i < 3; i++ )
@@ -122,7 +132,7 @@ std::vector<Point_t> BaseWinding( const Plane_t &plane, double flExtent )
 	const Point_t u = Scale( vecU, flExtent );
 	const Point_t v = Scale( vecV, flExtent );
 	// Anticlockwise seen from in front would be (-u-v, +u-v, +u+v, -u+v); this is the reverse.
-	return { Subtract( Add( vecCenter, v ), u ), Add( Add( vecCenter, u ), v ), Subtract( Add( vecCenter, u ), v ), Subtract( Subtract( vecCenter, u ), v ) };
+	out.assign( { Subtract( Add( vecCenter, v ), u ), Add( Add( vecCenter, u ), v ), Subtract( Add( vecCenter, u ), v ), Subtract( Subtract( vecCenter, u ), v ) } );
 }
 
 //-----------------------------------------------------------------------------
@@ -132,6 +142,16 @@ std::vector<Point_t> ClipPolygon( std::span<const Point_t> polygon, const Plane_
 {
 	std::vector<Point_t> kept;
 	kept.reserve( polygon.size() + 1 );
+	ClipPolygon( polygon, plane, flEpsilon, kept );
+	return kept;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+void ClipPolygon( std::span<const Point_t> polygon, const Plane_t &plane, double flEpsilon, std::vector<Point_t> &kept )
+{
+	kept.clear();
 	for ( std::size_t i = 0; i < polygon.size(); i++ )
 	{
 		const Point_t a = polygon[ i ];
@@ -148,7 +168,6 @@ std::vector<Point_t> ClipPolygon( std::span<const Point_t> polygon, const Plane_
 			kept.push_back( Lerp( a, b, flA / ( flA - flB ) ) );
 		}
 	}
-	return kept;
 }
 
 //-----------------------------------------------------------------------------

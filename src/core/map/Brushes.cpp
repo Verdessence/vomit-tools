@@ -7,6 +7,7 @@
 #include "Brushes.h"
 
 #include <algorithm>
+#include <iterator>
 #include <optional>
 
 #include "util/Parallel.h"
@@ -22,6 +23,28 @@ namespace
 constexpr double WINDING_EXTENT = 131072.0;
 constexpr double COORDINATE_LIMIT = 16384.0;
 
+// What building a solid uses over and over, kept on each thread between solids: cutting faces
+// then allocates nothing once these have grown, and only the finished faces are allocated (at
+// their size). A big map's solids otherwise make millions of short-lived polygons on every
+// core, which leaves the heap in pieces long after the map is gone.
+struct BrushScratch_t
+{
+	std::vector<std::optional<Plane_t>> m_Planes;
+	std::vector<Point_t> m_Points;
+	std::vector<Point_t> m_Clipped;
+	std::vector<Point_t> m_Plus;
+	std::vector<FaceGeometry_t> m_Faces;
+};
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+BrushScratch_t &Scratch()
+{
+	thread_local BrushScratch_t scratch;
+	return scratch;
+}
+
 //-----------------------------------------------------------------------------
 // Purpose: Whether two planes are the same one.
 //-----------------------------------------------------------------------------
@@ -34,11 +57,12 @@ bool IsSamePlane( const Plane_t &a, const Plane_t &b, double flEpsilon )
 // Purpose: Hammer++'s polygon for side nSide, wound clockwise from outside, when it agrees with
 //          the planes: every corner on the side's own plane and behind all the others, within
 //          flTolerance. Hammer writes plane points rounded, so where off-grid planes meet they
-//          can leave slivers of edge that Hammer++'s exact corners don't have.
+//          can leave slivers of edge that Hammer++'s exact corners don't have. The polygon goes
+//          into points.
 //-----------------------------------------------------------------------------
-std::optional<std::vector<Point_t>> UsablePlusVertices( const std::vector<Point_t> &plus, std::size_t nSide, const std::vector<std::optional<Plane_t>> &planes, double flTolerance )
+bool UsablePlusVertices( const std::vector<Point_t> &plus, std::size_t nSide, const std::vector<std::optional<Plane_t>> &planes, double flTolerance, std::vector<Point_t> &points )
 {
-	std::vector<Point_t> points;
+	points.clear();
 	for ( const Point_t &p : plus )
 	{
 		if ( points.empty() || Length( Subtract( p, points.back() ) ) > 1e-6 )
@@ -52,20 +76,20 @@ std::optional<std::vector<Point_t>> UsablePlusVertices( const std::vector<Point_
 	}
 	if ( points.size() < 3 )
 	{
-		return std::nullopt;
+		return false;
 	}
 	const Plane_t &own = *planes[ nSide ];
 	for ( const Point_t &p : points )
 	{
 		if ( std::abs( own.Distance( p ) ) > flTolerance )
 		{
-			return std::nullopt;
+			return false;
 		}
 		for ( std::size_t j = 0; j < planes.size(); j++ )
 		{
 			if ( j != nSide && planes[ j ] && planes[ j ]->Distance( p ) > flTolerance )
 			{
-				return std::nullopt;
+				return false;
 			}
 		}
 	}
@@ -77,13 +101,13 @@ std::optional<std::vector<Point_t>> UsablePlusVertices( const std::vector<Point_
 	const double flTurn = Dot( vecArea, own.m_Normal );
 	if ( flTurn == 0.0 )
 	{
-		return std::nullopt;
+		return false;
 	}
 	if ( flTurn > 0.0 )
 	{
 		std::ranges::reverse( points );
 	}
-	return points;
+	return true;
 }
 
 //-----------------------------------------------------------------------------
@@ -92,26 +116,25 @@ std::optional<std::vector<Point_t>> UsablePlusVertices( const std::vector<Point_
 //-----------------------------------------------------------------------------
 void RemoveRepeats( std::vector<Point_t> &points, double flEpsilon )
 {
-	std::vector<Point_t> kept;
-	kept.reserve( points.size() );
-	for ( const Point_t &p : points )
+	std::size_t nKept = 0;
+	for ( std::size_t i = 0; i < points.size(); i++ )
 	{
-		const Point_t d = kept.empty() ? Point_t{ 1e30, 0, 0 } : Subtract( p, kept.back() );
+		const Point_t d = nKept == 0 ? Point_t{ 1e30, 0, 0 } : Subtract( points[ i ], points[ nKept - 1 ] );
 		if ( Dot( d, d ) > flEpsilon * flEpsilon )
 		{
-			kept.push_back( p );
+			points[ nKept++ ] = points[ i ];
 		}
 	}
-	while ( kept.size() > 1 )
+	points.resize( nKept );
+	while ( points.size() > 1 )
 	{
-		const Point_t d = Subtract( kept.front(), kept.back() );
+		const Point_t d = Subtract( points.front(), points.back() );
 		if ( Dot( d, d ) > flEpsilon * flEpsilon )
 		{
 			break;
 		}
-		kept.pop_back();
+		points.pop_back();
 	}
-	points = std::move( kept );
 }
 
 } // namespace
@@ -131,7 +154,9 @@ const FaceGeometry_t *SolidGeometry_t::FindFace( std::uint32_t nSide ) const
 SolidGeometry_t BuildSolid( const Solid_t &solid, const BrushOptions_t &options )
 {
 	SolidGeometry_t geometry;
-	std::vector<std::optional<Plane_t>> planes( solid.m_Sides.size() );
+	BrushScratch_t &scratch = Scratch();
+	std::vector<std::optional<Plane_t>> &planes = scratch.m_Planes;
+	planes.assign( solid.m_Sides.size(), std::nullopt );
 	for ( std::size_t i = 0; i < solid.m_Sides.size(); i++ )
 	{
 		const Side_t &side = solid.m_Sides[ i ];
@@ -167,12 +192,14 @@ SolidGeometry_t BuildSolid( const Solid_t &solid, const BrushOptions_t &options 
 		{
 			continue;
 		}
-		std::vector<Point_t> points = BaseWinding( *planes[ i ], WINDING_EXTENT );
+		std::vector<Point_t> &points = scratch.m_Points;
+		BaseWinding( *planes[ i ], WINDING_EXTENT, points );
 		for ( std::size_t j = 0; j < planes.size() && points.size() >= 3; j++ )
 		{
 			if ( j != i && planes[ j ] )
 			{
-				points = ClipPolygon( points, *planes[ j ], options.m_flEpsilon );
+				ClipPolygon( points, *planes[ j ], options.m_flEpsilon, scratch.m_Clipped );
+				std::swap( points, scratch.m_Clipped );
 			}
 		}
 		RemoveRepeats( points, options.m_flEpsilon );
@@ -184,21 +211,18 @@ SolidGeometry_t BuildSolid( const Solid_t &solid, const BrushOptions_t &options 
 		FaceGeometry_t face;
 		face.m_nSide = static_cast<std::uint32_t>( i );
 		face.m_Plane = *planes[ i ];
-		if ( auto plus = UsablePlusVertices( solid.m_Sides[ i ].m_PlusVertices, i, planes, options.m_flPlusTolerance ) )
-		{
-			face.m_Points = std::move( *plus );
-			face.m_bPlusVertices = true;
-		}
-		else
-		{
-			face.m_Points = std::move( points );
-		}
+		face.m_bPlusVertices = UsablePlusVertices( solid.m_Sides[ i ].m_PlusVertices, i, planes, options.m_flPlusTolerance, scratch.m_Plus );
+		const std::vector<Point_t> &corners = face.m_bPlusVertices ? scratch.m_Plus : points;
+		face.m_Points.assign( corners.begin(), corners.end() );
 		for ( const Point_t &p : face.m_Points )
 		{
 			geometry.m_Bounds.Add( p );
 		}
-		geometry.m_Faces.push_back( std::move( face ) );
+		scratch.m_Faces.push_back( std::move( face ) );
 	}
+	geometry.m_Faces.reserve( scratch.m_Faces.size() );
+	std::ranges::move( scratch.m_Faces, std::back_inserter( geometry.m_Faces ) );
+	scratch.m_Faces.clear();
 
 	if ( geometry.m_Faces.empty() )
 	{

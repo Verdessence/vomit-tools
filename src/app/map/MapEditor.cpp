@@ -23,6 +23,8 @@
 #include <QPainterPath>
 #include <QSplitter>
 #include <QToolBar>
+#include <QCoreApplication>
+#include <QTimer>
 #include <QVBoxLayout>
 
 #include "Preferences.h"
@@ -33,6 +35,7 @@
 #include "map/MapResources.h"
 #include "map/MapView2D.h"
 #include "map/MapView3D.h"
+#include "util/Memory.h"
 
 namespace
 {
@@ -111,6 +114,8 @@ CMapEditor::CMapEditor( const QString &szPath, bool bFromGame, QWidget *pParent 
 	m_pResources = new CMapResources( this );
 	connect( m_pResources, &CMapResources::Arrived, this, &CMapEditor::ResourcesArrived );
 	connect( m_pResources, &CMapResources::Finished, this, &CMapEditor::UpdateGameStatus );
+	// Reading textures and models frees as much as it keeps.
+	connect( m_pResources, &CMapResources::Finished, this, [] { QTimer::singleShot( 0, QCoreApplication::instance(), [] { xv::ReleaseFreedMemory(); } ); } );
 	TakePreferences();
 	connect( &CPreferences::Instance(), &CPreferences::MapPreferencesChanged, this, &CMapEditor::PreferencesChanged );
 
@@ -268,6 +273,9 @@ CMapEditor::~CMapEditor()
 	m_pSplitter = nullptr;
 	m_Panes = {};
 	m_pActiveView = nullptr;
+	// Once the map itself is gone (with the tab's children, after this), the memory it took goes
+	// back to the system rather than staying with the process.
+	QTimer::singleShot( 0, QCoreApplication::instance(), [] { xv::ReleaseFreedMemory(); } );
 }
 
 //-----------------------------------------------------------------------------

@@ -113,9 +113,14 @@ struct Polygon_t
 // A square of half-width flExtent on plane, centred on the point nearest the origin, wound
 // clockwise seen from in front (the order brush faces are drawn in).
 [[nodiscard]] std::vector<Point_t> BaseWinding( const Plane_t &plane, double flExtent );
+// The same into out, reusing its room.
+void BaseWinding( const Plane_t &plane, double flExtent, std::vector<Point_t> &out );
 
 // The part of a convex polygon behind plane (or within flEpsilon of it), keeping the winding.
 [[nodiscard]] std::vector<Point_t> ClipPolygon( std::span<const Point_t> polygon, const Plane_t &plane, double flEpsilon );
+// The same into out (not polygon itself), reusing its room: cutting many faces allocates nothing
+// once it has grown.
+void ClipPolygon( std::span<const Point_t> polygon, const Plane_t &plane, double flEpsilon, std::vector<Point_t> &out );
 
 // The convex solid behind every plane, as one polygon per plane that touches it (wound
 // anticlockwise seen from outside), found by cutting a box of half-width flBound. nullopt when

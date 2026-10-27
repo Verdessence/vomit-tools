@@ -21,12 +21,14 @@
 #include "PremiumDialog.h"
 #include "SingleInstance.h"
 #include "Splash.h"
+#include "util/Memory.h"
 
 //-----------------------------------------------------------------------------
 // Purpose:
 //-----------------------------------------------------------------------------
 int main( int nArgc, char *argv[] )
 {
+	xv::TuneAllocator();
 	QApplication app{ nArgc, argv };
 	QApplication::setApplicationName( QStringLiteral( "vomit-tools" ) );
 	QApplication::setOrganizationName( QStringLiteral( "vomit-tools" ) );

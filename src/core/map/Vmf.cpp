@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <cmath>
 #include <fstream>
+#include <iterator>
 #include <limits>
 #include <tuple>
 #include <unordered_map>
@@ -261,6 +262,8 @@ private:
 	std::unordered_map<std::string_view, std::uint32_t> m_Spellings;
 	std::unordered_map<std::string, std::uint32_t> m_MaterialIndex;
 	std::vector<double> m_Numbers; // reused for rows
+	std::vector<Side_t> m_Sides;           // the solid being read's, reused
+	std::vector<Point_t> m_PlusVertices;   // the side being read's Hammer++ vertices, reused
 };
 
 //-----------------------------------------------------------------------------
@@ -690,13 +693,13 @@ std::size_t CReader::ReadSolid( const Token_t &key, int nDepth, int nEntity, boo
 			const std::string_view szName = name.GetText();
 			if ( Is( szName, "side" ) )
 			{
-				if ( solid.m_Sides.size() >= MAX_SIDES )
+				if ( m_Sides.size() >= MAX_SIDES )
 				{
 					bTooMany = true;
 					return SkipBody( m_Lexer.GetOffset() - 1 );
 				}
-				solid.m_Sides.emplace_back();
-				return ReadSide( name, nInner, solid.m_Sides.back() );
+				m_Sides.emplace_back();
+				return ReadSide( name, nInner, m_Sides.back() );
 			}
 			if ( Is( szName, "editor" ) )
 			{
@@ -704,6 +707,11 @@ std::size_t CReader::ReadSolid( const Token_t &key, int nDepth, int nEntity, boo
 			}
 			return SkipBody( m_Lexer.GetOffset() - 1 );
 		} );
+	// Read into the reader's own list, then moved over at their number: each solid's sides are
+	// one allocation of the size they need.
+	solid.m_Sides.reserve( m_Sides.size() );
+	std::ranges::move( m_Sides, std::back_inserter( solid.m_Sides ) );
+	m_Sides.clear();
 	solid.m_Span = SpanOf( key.m_nOffset, nEnd );
 	if ( bTooMany )
 	{
@@ -781,7 +789,8 @@ std::size_t CReader::ReadSide( const Token_t &key, int nDepth, Side_t &side )
 			if ( Is( szName, "vertices_plus" ) )
 			{
 				bool bBad = false;
-				std::vector<Point_t> points;
+				std::vector<Point_t> &points = m_PlusVertices;
+				points.clear();
 				const std::size_t nPlusEnd = ReadBody(
 					m_Lexer.GetOffset() - 1, nInner,
 					[ & ]( const Token_t &vertex, const Token_t &value ) {
@@ -804,7 +813,7 @@ std::size_t CReader::ReadSide( const Token_t &key, int nDepth, Side_t &side )
 				}
 				else
 				{
-					side.m_PlusVertices = std::move( points );
+					side.m_PlusVertices.assign( points.begin(), points.end() );
 				}
 				return nPlusEnd;
 			}

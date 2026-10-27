@@ -8,7 +8,6 @@
 
 #include <algorithm>
 #include <cmath>
-#include <set>
 #include <string>
 #include <unordered_map>
 
@@ -21,7 +20,8 @@ namespace xv::map
 namespace
 {
 
-// One solid's share, built on its own so solids can be built in parallel.
+// A run of solids' share, built on its own so runs can be built in parallel (a part per run
+// rather than per solid keeps a big map from making hundreds of thousands of small lists).
 struct SolidPart_t
 {
 	std::vector<MeshVertex_t> m_Vertices;
@@ -31,6 +31,9 @@ struct SolidPart_t
 	std::vector<Point_t> m_Centres;                        // per face, for choosing its chunk
 	std::vector<std::uint32_t> m_Lines;
 	std::vector<std::string> m_Problems;
+	std::size_t m_nFirstSolid = 0;
+	std::vector<std::array<std::uint32_t, 2>> m_Solids;    // per solid: where its faces and its lines start
+	std::vector<std::pair<std::uint32_t, std::uint32_t>> m_Edges; // a displacement's, while it is built
 };
 
 //-----------------------------------------------------------------------------
@@ -52,11 +55,12 @@ MeshVertex_t MakeVertex( Point_t position, Point_t normal, Point_t textured, con
 }
 
 //-----------------------------------------------------------------------------
-// Purpose: A solid's faces: polygons fanned into triangles, or displacement grids.
+// Purpose: A solid's faces, added to its run's part: polygons fanned into triangles, or
+//          displacement grids.
 //-----------------------------------------------------------------------------
-SolidPart_t BuildPart( const Solid_t &solid, const SolidGeometry_t &geometry, std::uint32_t nSolid )
+void BuildPart( const Solid_t &solid, const SolidGeometry_t &geometry, std::uint32_t nSolid, SolidPart_t &part )
 {
-	SolidPart_t part;
+	part.m_Solids.push_back( { static_cast<std::uint32_t>( part.m_Faces.size() ), static_cast<std::uint32_t>( part.m_Lines.size() ) } );
 	for ( const FaceGeometry_t &face : geometry.m_Faces )
 	{
 		const Side_t &side = solid.m_Sides[ face.m_nSide ];
@@ -87,7 +91,8 @@ SolidPart_t BuildPart( const Solid_t &solid, const SolidGeometry_t &geometry, st
 				part.m_Vertices.push_back( MakeVertex( disp->m_Points[ i ], disp->m_Normals[ i ], disp->m_Flat[ i ], side, disp->m_Alphas[ i ], nSolid ) );
 				centre = Add( centre, Scale( disp->m_Points[ i ], 1.0 / static_cast<double>( disp->m_Points.size() ) ) );
 			}
-			std::set<std::pair<std::uint32_t, std::uint32_t>> edges;
+			std::vector<std::pair<std::uint32_t, std::uint32_t>> &edges = part.m_Edges;
+			edges.clear();
 			for ( std::size_t i = 0; i < disp->m_Indices.size(); i += 3 )
 			{
 				const std::array<std::uint32_t, 3> triangle = { nBase + disp->m_Indices[ i ], nBase + disp->m_Indices[ i + 1 ], nBase + disp->m_Indices[ i + 2 ] };
@@ -97,9 +102,12 @@ SolidPart_t BuildPart( const Solid_t &solid, const SolidGeometry_t &geometry, st
 				{
 					const std::uint32_t a = triangle[ k ];
 					const std::uint32_t b = triangle[ ( k + 1 ) % 3 ];
-					edges.insert( { std::min( a, b ), std::max( a, b ) } );
+					edges.emplace_back( std::min( a, b ), std::max( a, b ) );
 				}
 			}
+			// Each edge once, in order (the triangles share theirs).
+			std::ranges::sort( edges );
+			edges.erase( std::unique( edges.begin(), edges.end() ), edges.end() );
 			for ( const auto &[ a, b ] : edges )
 			{
 				part.m_Lines.insert( part.m_Lines.end(), { a, b } );
@@ -127,7 +135,6 @@ SolidPart_t BuildPart( const Solid_t &solid, const SolidGeometry_t &geometry, st
 		part.m_Faces.push_back( meshFace );
 		part.m_Centres.push_back( centre );
 	}
-	return part;
 }
 
 } // namespace
@@ -138,11 +145,14 @@ SolidPart_t BuildPart( const Solid_t &solid, const SolidGeometry_t &geometry, st
 CMapMesh BuildMesh( const CMap &map, std::span<const SolidGeometry_t> solids, const MeshOptions_t &options )
 {
 	const std::size_t nSolids = std::min( map.m_Solids.size(), solids.size() );
-	std::vector<SolidPart_t> parts( nSolids );
-	ParallelFor( nSolids, 128, [ & ]( std::size_t nBegin, std::size_t nEnd ) {
+	constexpr std::size_t GRAIN = 128;
+	std::vector<SolidPart_t> parts( ( nSolids + GRAIN - 1 ) / GRAIN );
+	ParallelFor( nSolids, GRAIN, [ & ]( std::size_t nBegin, std::size_t nEnd ) {
+		SolidPart_t &part = parts[ nBegin / GRAIN ];
+		part.m_nFirstSolid = nBegin;
 		for ( std::size_t i = nBegin; i < nEnd; i++ )
 		{
-			parts[ i ] = BuildPart( map.m_Solids[ i ], solids[ i ], static_cast<std::uint32_t>( i ) );
+			BuildPart( map.m_Solids[ i ], solids[ i ], static_cast<std::uint32_t>( i ), part );
 		}
 	} );
 
@@ -174,9 +184,8 @@ CMapMesh BuildMesh( const CMap &map, std::span<const SolidGeometry_t> solids, co
 	};
 	std::vector<Triangle_t> triangles;
 	triangles.reserve( nTriangles );
-	for ( std::size_t i = 0; i < nSolids; i++ )
+	for ( SolidPart_t &part : parts )
 	{
-		SolidPart_t &part = parts[ i ];
 		const auto nVertexBase = static_cast<std::uint32_t>( mesh.m_Vertices.size() );
 		const auto nFaceBase = static_cast<std::uint32_t>( mesh.m_Faces.size() );
 		std::vector<std::uint32_t> faceChunks( part.m_Faces.size() );
@@ -209,12 +218,21 @@ CMapMesh BuildMesh( const CMap &map, std::span<const SolidGeometry_t> solids, co
 			const auto &corners = part.m_Triangles[ t ];
 			triangles.push_back( { nKey, { nVertexBase + corners[ 0 ], nVertexBase + corners[ 1 ], nVertexBase + corners[ 2 ] }, nFaceBase + nFace } );
 		}
-		mesh.m_SolidLines[ i ] = { static_cast<std::uint32_t>( mesh.m_Lines.size() / 2 ), static_cast<std::uint32_t>( part.m_Lines.size() / 2 ) };
+		// Each solid's faces and lines run from where it starts to where the next one does.
+		const auto nLineBase = static_cast<std::uint32_t>( mesh.m_Lines.size() );
+		for ( std::size_t k = 0; k < part.m_Solids.size(); k++ )
+		{
+			const bool bLast = k + 1 == part.m_Solids.size();
+			const std::uint32_t nFaceEnd = bLast ? static_cast<std::uint32_t>( part.m_Faces.size() ) : part.m_Solids[ k + 1 ][ 0 ];
+			const std::uint32_t nLineEnd = bLast ? static_cast<std::uint32_t>( part.m_Lines.size() ) : part.m_Solids[ k + 1 ][ 1 ];
+			const std::size_t i = part.m_nFirstSolid + k;
+			mesh.m_SolidFaces[ i ] = { nFaceBase + part.m_Solids[ k ][ 0 ], nFaceEnd - part.m_Solids[ k ][ 0 ] };
+			mesh.m_SolidLines[ i ] = { ( nLineBase + part.m_Solids[ k ][ 1 ] ) / 2, ( nLineEnd - part.m_Solids[ k ][ 1 ] ) / 2 };
+		}
 		for ( const std::uint32_t nIndex : part.m_Lines )
 		{
 			mesh.m_Lines.push_back( nVertexBase + nIndex );
 		}
-		mesh.m_SolidFaces[ i ] = { nFaceBase, static_cast<std::uint32_t>( part.m_Faces.size() ) };
 		mesh.m_Vertices.insert( mesh.m_Vertices.end(), part.m_Vertices.begin(), part.m_Vertices.end() );
 		for ( std::string &szProblem : part.m_Problems )
 		{
