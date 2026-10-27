@@ -18,6 +18,7 @@
 #include "kv1/Kv1.h"
 #include "kv1/Lexer.h"
 #include "map/Io.h"
+#include "map/VmfValues.h"
 #include "util/Numbers.h"
 #include "util/Scan.h"
 
@@ -60,138 +61,6 @@ bool Is( std::string_view szText, std::string_view szLowerName )
 		}
 	}
 	return true;
-}
-
-//-----------------------------------------------------------------------------
-// Purpose: "x y z", with or without brackets or parentheses around it.
-//-----------------------------------------------------------------------------
-std::optional<Point_t> ParsePoint( std::string_view szText )
-{
-	CScanner scanner{ szText };
-	const bool bBracket = scanner.Skip( '[' );
-	const bool bParen = !bBracket && scanner.Skip( '(' );
-	Point_t p{};
-	for ( double &flValue : p )
-	{
-		const auto value = scanner.Double();
-		if ( !value )
-		{
-			return std::nullopt;
-		}
-		flValue = *value;
-	}
-	if ( ( bBracket && !scanner.Skip( ']' ) ) || ( bParen && !scanner.Skip( ')' ) ) || !scanner.IsAtEnd() )
-	{
-		return std::nullopt;
-	}
-	return p;
-}
-
-//-----------------------------------------------------------------------------
-// Purpose: A side's plane: "(x y z) (x y z) (x y z)".
-//-----------------------------------------------------------------------------
-std::optional<std::array<Point_t, 3>> ParsePlane( std::string_view szText )
-{
-	CScanner scanner{ szText };
-	std::array<Point_t, 3> points{};
-	for ( Point_t &p : points )
-	{
-		if ( !scanner.Skip( '(' ) )
-		{
-			return std::nullopt;
-		}
-		for ( double &flValue : p )
-		{
-			const auto value = scanner.Double();
-			if ( !value )
-			{
-				return std::nullopt;
-			}
-			flValue = *value;
-		}
-		if ( !scanner.Skip( ')' ) )
-		{
-			return std::nullopt;
-		}
-	}
-	if ( !scanner.IsAtEnd() )
-	{
-		return std::nullopt;
-	}
-	return points;
-}
-
-//-----------------------------------------------------------------------------
-// Purpose: A texture axis: "[x y z shift] scale".
-//-----------------------------------------------------------------------------
-std::optional<TextureAxis_t> ParseAxis( std::string_view szText )
-{
-	CScanner scanner{ szText };
-	TextureAxis_t axis;
-	if ( !scanner.Skip( '[' ) )
-	{
-		return std::nullopt;
-	}
-	for ( double &flValue : axis.m_Axis )
-	{
-		const auto value = scanner.Double();
-		if ( !value )
-		{
-			return std::nullopt;
-		}
-		flValue = *value;
-	}
-	const auto flShift = scanner.Double();
-	if ( !flShift || !scanner.Skip( ']' ) )
-	{
-		return std::nullopt;
-	}
-	const auto flScale = scanner.Double();
-	if ( !flScale || !scanner.IsAtEnd() )
-	{
-		return std::nullopt;
-	}
-	axis.m_flShift = *flShift;
-	axis.m_flScale = *flScale;
-	return axis;
-}
-
-//-----------------------------------------------------------------------------
-// Purpose: "r g b" (anything after the third number, such as a brightness, is ignored).
-//-----------------------------------------------------------------------------
-std::optional<Color_t> ParseColor( std::string_view szText )
-{
-	CScanner scanner{ szText };
-	std::array<double, 3> values{};
-	for ( double &flValue : values )
-	{
-		const auto value = scanner.Double();
-		if ( !value || !std::isfinite( *value ) )
-		{
-			return std::nullopt;
-		}
-		flValue = std::clamp( *value, 0.0, 255.0 );
-	}
-	return Color_t{ static_cast<std::uint8_t>( values[ 0 ] ), static_cast<std::uint8_t>( values[ 1 ] ), static_cast<std::uint8_t>( values[ 2 ] ) };
-}
-
-//-----------------------------------------------------------------------------
-// Purpose: Exactly nCount numbers, or nullopt.
-//-----------------------------------------------------------------------------
-bool ParseNumbers( std::string_view szText, std::size_t nCount, std::vector<double> &out )
-{
-	out.clear();
-	CScanner scanner{ szText };
-	for ( std::size_t i = 0; i < nCount; i++ )
-	{
-		const auto value = scanner.Double();
-		if ( !value )
-		{
-			return false;
-		}
-		out.push_back( *value );
-	}
-	return scanner.IsAtEnd();
 }
 
 //-----------------------------------------------------------------------------
@@ -612,7 +481,8 @@ std::size_t CReader::ReadEntity( const Token_t &key, int nDepth, bool bWorld, bo
 			}
 			if ( Is( szName, "connections" ) )
 			{
-				return ReadBody(
+				const std::size_t nConnectionsAt = name.m_nOffset;
+				const std::size_t nConnectionsEnd = ReadBody(
 					m_Lexer.GetOffset() - 1, nInner,
 					[ & ]( const Token_t &output, const Token_t &value ) {
 						Connection_t connection = ParseConnection( output.GetText(), value.GetText() );
@@ -624,6 +494,8 @@ std::size_t CReader::ReadEntity( const Token_t &key, int nDepth, bool bWorld, bo
 						entity().m_Connections.push_back( connection );
 					},
 					[ & ]( const Token_t &, int ) { return SkipBody( m_Lexer.GetOffset() - 1 ); } );
+				entity().m_ConnectionsSpan = SpanOf( nConnectionsAt, nConnectionsEnd );
+				return nConnectionsEnd;
 			}
 			if ( Is( szName, "editor" ) )
 			{
@@ -755,6 +627,7 @@ std::size_t CReader::ReadSide( const Token_t &key, int nDepth, Side_t &side )
 			else if ( Is( szKey, "material" ) )
 			{
 				side.m_nMaterial = Intern( szValue );
+				side.m_szMaterial = szValue;
 				bHasMaterial = true;
 			}
 			else if ( Is( szKey, "uaxis" ) || Is( szKey, "vaxis" ) )
@@ -1212,7 +1085,7 @@ std::string_view Entity_t::GetValue( std::string_view szKey ) const
 {
 	for ( auto it = m_Keys.rbegin(); it != m_Keys.rend(); ++it )
 	{
-		if ( kv1::EqualsIgnoreCase( it->m_szKey, szKey ) )
+		if ( !it->m_bDeleted && kv1::EqualsIgnoreCase( it->m_szKey, szKey ) )
 		{
 			return it->m_szValue;
 		}
@@ -1225,7 +1098,7 @@ std::string_view Entity_t::GetValue( std::string_view szKey ) const
 //-----------------------------------------------------------------------------
 bool Entity_t::HasKey( std::string_view szKey ) const
 {
-	return std::ranges::any_of( m_Keys, [ szKey ]( const EntityKey_t &key ) { return kv1::EqualsIgnoreCase( key.m_szKey, szKey ); } );
+	return std::ranges::any_of( m_Keys, [ szKey ]( const EntityKey_t &key ) { return !key.m_bDeleted && kv1::EqualsIgnoreCase( key.m_szKey, szKey ); } );
 }
 
 //-----------------------------------------------------------------------------
@@ -1234,6 +1107,39 @@ bool Entity_t::HasKey( std::string_view szKey ) const
 bool CMap::HasErrors() const
 {
 	return std::ranges::any_of( m_Diagnostics, []( const Diagnostic_t &diagnostic ) { return diagnostic.m_nSeverity == Diagnostic_t::Severity_t::SEVERITY_ERROR; } );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+std::string_view CMap::Store( std::string szText )
+{
+	return m_Strings.emplace_back( std::move( szText ) );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+std::uint32_t CMap::FindMaterial( std::string_view szName )
+{
+	std::string szNormal = NormalizeMaterial( szName );
+	const auto it = std::ranges::find( m_Materials, szNormal );
+	if ( it != m_Materials.end() )
+	{
+		return static_cast<std::uint32_t>( it - m_Materials.begin() );
+	}
+	m_Materials.push_back( std::move( szNormal ) );
+	return static_cast<std::uint32_t>( m_Materials.size() - 1 );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: The first line's ending; Hammer's own when there's no text yet.
+//-----------------------------------------------------------------------------
+std::string_view CMap::GetNewline() const
+{
+	const std::string_view szText = GetText();
+	const std::size_t nAt = szText.find( '\n' );
+	return nAt == std::string_view::npos || ( nAt > 0 && szText[ nAt - 1 ] == '\r' ) ? std::string_view{ "\r\n" } : std::string_view{ "\n" };
 }
 
 //-----------------------------------------------------------------------------

@@ -60,6 +60,10 @@ add_library(vomit_tools_core STATIC
         map/Visgroups.h
         map/Vmf.cpp
         map/Vmf.h
+        map/VmfValues.cpp
+        map/VmfValues.h
+        map/Write.cpp
+        map/Write.h
         material/Material.cpp
         material/Material.h
         material/Parameters.cpp
@@ -117,6 +121,7 @@ add_library(vomit_tools_core STATIC
         texture/Sheet.h
         texture/Vtf.cpp
         texture/Vtf.h
+        util/CopyPtr.h
         util/Memory.cpp
         util/Memory.h
         util/Numbers.h

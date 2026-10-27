@@ -496,7 +496,7 @@ MapFrame_t CMapRenderData::Snapshot( const xv::map::CViewCamera &camera, const x
 	}
 	if ( pScene )
 	{
-		GetLineColors( settings );
+		static_cast<void>( GetLineColors( settings ) );
 		if ( CPreferences::Instance().GetMapPreferences().m_bSprites != m_bSpritesShown )
 		{
 			ApplySprites();

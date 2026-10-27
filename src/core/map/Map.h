@@ -5,6 +5,8 @@
 //          their keys and outputs, and the editor's groups, visgroups, cameras and cordons.
 //          Strings are views into the file's text, which the map keeps, and every block records
 //          the bytes it came from, so the parts nobody changes can be written back as they were.
+//          Edits mark what they change (and keep new strings in the map's own store), and
+//          map::WriteVmf patches the text as read with them.
 //
 //===========================================================================//
 #pragma once
@@ -12,12 +14,14 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <deque>
 #include <memory>
 #include <string>
 #include <string_view>
 #include <vector>
 
 #include "map/Geometry.h"
+#include "util/CopyPtr.h"
 #include "util/Vec3.h"
 
 namespace xv::map
@@ -50,6 +54,7 @@ struct EditorInfo_t
 	bool m_bAutoShown = true;
 	std::string_view m_szComments;
 	Span_t m_Span;
+	bool m_bChanged = false; // written again when saved
 };
 
 // A displacement on a four-sided face. Grids are (2^power + 1) points a side, row by row from
@@ -80,13 +85,14 @@ struct Side_t
 	std::array<Point_t, 3> m_Plane{};
 	bool m_bPlaneRead = false;         // the plane's text held three points
 	std::uint32_t m_nMaterial = 0;     // index into CMap::m_Materials
+	std::string_view m_szMaterial;     // as written, which is how it is written back
 	TextureAxis_t m_UAxis;
 	TextureAxis_t m_VAxis;
 	double m_flRotation = 0.0;
 	int m_nLightmapScale = 16;
 	std::uint32_t m_nSmoothingGroups = 0;
 	std::vector<Point_t> m_PlusVertices; // Hammer++'s exact polygon, when it wrote one
-	std::unique_ptr<DispInfo_t> m_pDisp;
+	CCopyPtr<DispInfo_t> m_pDisp;
 	Span_t m_Span;
 };
 
@@ -97,7 +103,11 @@ struct Solid_t
 	std::vector<Side_t> m_Sides;
 	EditorInfo_t m_Editor;
 	bool m_bInHidden = false;          // stored in a "hidden" block
-	Span_t m_Span;
+	Span_t m_Span;                     // empty for one made since the map was read
+	bool m_bChanged = false;           // its sides or editor notes were edited
+	bool m_bDeleted = false;
+
+	[[nodiscard]] bool IsNew() const { return m_Span.m_nLength == 0; }
 };
 
 // One output: when m_szOutput fires, send m_szInput to m_szTarget.
@@ -118,7 +128,11 @@ struct EntityKey_t
 {
 	std::string_view m_szKey;
 	std::string_view m_szValue;
-	Span_t m_Span;
+	Span_t m_Span;                     // empty for a key added since the map was read
+	bool m_bChanged = false;
+	bool m_bDeleted = false;           // kept in place so the others keep their order
+
+	[[nodiscard]] bool IsNew() const { return m_Span.m_nLength == 0; }
 };
 
 struct Entity_t
@@ -129,8 +143,12 @@ struct Entity_t
 	std::vector<std::uint32_t> m_Solids; // indices into CMap::m_Solids
 	EditorInfo_t m_Editor;
 	bool m_bInHidden = false;
-	Span_t m_Span;
+	Span_t m_Span;                     // empty for one made since the map was read
+	Span_t m_ConnectionsSpan;          // its "connections" block, if it had one
+	bool m_bConnectionsChanged = false;
+	bool m_bDeleted = false;
 
+	[[nodiscard]] bool IsNew() const { return m_Span.m_nLength == 0; }
 	// A key's value, ignoring case; the last one wins when a key is repeated, as in Hammer.
 	[[nodiscard]] std::string_view GetValue( std::string_view szKey ) const;
 	[[nodiscard]] bool HasKey( std::string_view szKey ) const;
@@ -222,6 +240,12 @@ public:
 	// The entity that owns a solid, or the world.
 	[[nodiscard]] const Entity_t &GetOwner( const Solid_t &solid ) const { return solid.m_nEntity < 0 ? m_World : m_Entities[ static_cast<std::size_t>( solid.m_nEntity ) ]; }
 	[[nodiscard]] bool HasErrors() const;
+	// Keeps a string for as long as the map lives (edited keys and materials point into it).
+	[[nodiscard]] std::string_view Store( std::string szText );
+	// A material's index in m_Materials, added if it is new.
+	[[nodiscard]] std::uint32_t FindMaterial( std::string_view szName );
+	// The text's line ending ("\r\n" as Hammer writes, or "\n").
+	[[nodiscard]] std::string_view GetNewline() const;
 
 	std::vector<char> m_Text;
 	VersionInfo_t m_VersionInfo;
@@ -240,6 +264,7 @@ public:
 	std::vector<Span_t> m_TopBlocks;      // every top-level block, in file order
 	std::vector<Diagnostic_t> m_Diagnostics;
 	std::size_t m_nMoreDiagnostics = 0;   // problems past the cap, counted only
+	std::deque<std::string> m_Strings;    // what Store keeps (a deque: they never move)
 };
 
 } // namespace xv::map
