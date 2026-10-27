@@ -28,6 +28,7 @@ struct MapFrame_t
 	std::shared_ptr<const xv::map::CMapMesh> m_pEntityMesh;
 	std::shared_ptr<const std::vector<xv::map::RasterMaterial_t>> m_pMaterials;
 	std::shared_ptr<const void> m_pTextures; // keeps the materials' textures alive
+	std::shared_ptr<const xv::sky::CCube> m_pSky;
 	std::shared_ptr<const std::vector<std::uint8_t>> m_pFlags;
 	std::shared_ptr<const std::vector<std::array<std::uint8_t, 3>>> m_pFlatColors;
 	std::shared_ptr<const std::vector<std::array<std::uint8_t, 3>>> m_pLineColors;
@@ -50,9 +51,12 @@ public:
 
 	// The frame for a camera, from what the document shows now.
 	[[nodiscard]] MapFrame_t Snapshot( const xv::map::CViewCamera &camera, const xv::map::RasterOptions_t &options, const MapViewSettings_t &settings );
-	// The materials changed (textures arrived): later frames use these.
+	// The materials changed (textures arrived): later frames use these, one per material of
+	// the map; the entity boxes' own is added after them.
 	void SetMaterials( std::shared_ptr<const std::vector<xv::map::RasterMaterial_t>> pMaterials, std::shared_ptr<const void> pTextures );
 	[[nodiscard]] std::uint32_t GetEntityMaterial() const;
+	// The map's sky, drawn on its sky faces.
+	void SetSky( std::shared_ptr<const xv::sky::CCube> pSky );
 
 private:
 	void Rebuild();

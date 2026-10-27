@@ -21,6 +21,7 @@
 #include "map/MapView.h"
 
 class CMapPane;
+class CMapResources;
 class CMapQuadSplitter;
 class QActionGroup;
 class QLabel;
@@ -47,6 +48,7 @@ public:
 	[[nodiscard]] std::vector<CMapView *> GetViews() const;
 	[[nodiscard]] CMapView *GetActiveView() const { return m_pActiveView; }
 	[[nodiscard]] CMapRenderData &GetRenderData() { return *m_pRenderData; }
+	[[nodiscard]] CMapResources &GetResources() { return *m_pResources; }
 	// Where the 3D camera is, for the 2D views to draw it (the first 3D pane's).
 	[[nodiscard]] std::optional<xv::map::CViewCamera> GetCamera() const;
 
@@ -73,11 +75,14 @@ private:
 	void Loaded();
 	void SettingsChanged();
 	void UpdateStatus();
+	void UpdateGameStatus();
+	void ResourcesArrived();
 	void GoToBrush();
 	[[nodiscard]] CMapPane *PaneOf( const CMapView *pView ) const;
 
 	CMapDocument *m_pDocument = nullptr;
 	std::unique_ptr<CMapRenderData> m_pRenderData;
+	CMapResources *m_pResources = nullptr;
 	QString m_szPath;
 	bool m_bFromGame = false;
 	MapViewSettings_t m_Settings;

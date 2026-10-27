@@ -37,6 +37,16 @@ struct MaterialUniforms_t
 	float m_Options[ 4 ];
 	float m_Size[ 4 ];
 	float m_Kind[ 4 ];
+	float m_Extra[ 4 ];
+};
+
+// map.frag's sky block, as sky.frag's.
+struct SkyUniforms_t
+{
+	float m_FaceRight[ 6 ][ 4 ];
+	float m_FaceUp[ 6 ][ 4 ];
+	float m_Transform[ 6 ][ 4 ];
+	float m_Translate[ 6 ][ 4 ];
 };
 
 static_assert( sizeof( xv::map::MeshVertex_t ) == 48, "map.vert reads the vertex layout as it is" );
@@ -65,6 +75,7 @@ MaterialUniforms_t MaterialUniforms( const xv::map::RasterMaterial_t *pMaterial,
 	u.m_Kind[ 1 ] = shade.m_pBase && !shade.m_pBase->m_Mips.empty() ? 1.0f : 0.0f;
 	u.m_Kind[ 2 ] = shade.m_pBase2 && !shade.m_pBase2->m_Mips.empty() ? 1.0f : 0.0f;
 	u.m_Kind[ 3 ] = bSelectionOnly ? 1.0f : 0.0f;
+	u.m_Extra[ 0 ] = shade.m_bSky ? 1.0f : 0.0f;
 	return u;
 }
 
@@ -108,6 +119,16 @@ void CMapRenderer::Release()
 	m_pState.reset();
 	m_pLineColors.reset();
 	m_pWhite.reset();
+	m_pSkyUniforms.reset();
+	for ( auto &pFace : m_SkyFaces )
+	{
+		pFace.reset();
+	}
+	m_pSkyFor = nullptr;
+	for ( auto &pSampler : m_TopSamplers )
+	{
+		pSampler.reset();
+	}
 	for ( auto &pSampler : m_Samplers )
 	{
 		pSampler.reset();
@@ -141,6 +162,8 @@ void CMapRenderer::Initialize( QRhi *pRhi, QRhiRenderTarget * )
 			const auto t = ( i & 2 ) != 0 ? QRhiSampler::ClampToEdge : QRhiSampler::Repeat;
 			m_Samplers[ i ].reset( m_pRhi->newSampler( QRhiSampler::Linear, QRhiSampler::Linear, QRhiSampler::Linear, s, t ) );
 			m_Samplers[ i ]->create();
+			m_TopSamplers[ i ].reset( m_pRhi->newSampler( QRhiSampler::Linear, QRhiSampler::Linear, QRhiSampler::None, s, t ) );
+			m_TopSamplers[ i ]->create();
 		}
 		m_pNearest.reset( m_pRhi->newSampler( QRhiSampler::Nearest, QRhiSampler::Nearest, QRhiSampler::None, QRhiSampler::ClampToEdge, QRhiSampler::ClampToEdge ) );
 		m_pNearest->create();
@@ -217,7 +240,7 @@ void CMapRenderer::UploadState( const MapFrame_t &frame, QRhiResourceUpdateBatch
 			p[ 0 ] = color[ 0 ];
 			p[ 1 ] = color[ 1 ];
 			p[ 2 ] = color[ 2 ];
-			p[ 3 ] = frame.m_pFlags && n < frame.m_pFlags->size() ? ( *frame.m_pFlags )[ n ] : xv::map::RASTER_OBJECT_SHOWN;
+			p[ 3 ] = frame.m_pFlags && n < frame.m_pFlags->size() ? ( *frame.m_pFlags )[ n ] : static_cast<std::uint8_t>( xv::map::RASTER_OBJECT_SHOWN );
 		}
 		pUpdates->uploadTexture( m_pState.get(), image );
 	}
@@ -248,17 +271,12 @@ QRhiTexture *CMapRenderer::Upload( const xv::map::RasterTexture_t &texture, std:
 		return m_pWhite.get();
 	}
 	const xv::texture::CImage &top = texture.m_Mips.front();
-	// A full chain halves down to 1 by 1; anything less is drawn from its top level only.
-	int nFull = 1;
-	for ( int w = top.m_nWidth, h = top.m_nHeight; w > 1 || h > 1; w = std::max( 1, w / 2 ), h = std::max( 1, h / 2 ) )
-	{
-		nFull++;
-	}
-	const bool bMips = static_cast<int>( texture.m_Mips.size() ) >= nFull;
+	const bool bMips = xv::map::HasMipChain( texture );
 	pTexture.reset( m_pRhi->newTexture( QRhiTexture::RGBA8, { top.m_nWidth, top.m_nHeight }, 1, bMips ? QRhiTexture::MipMapped : QRhiTexture::Flags{} ) );
 	pTexture->create();
+	const int nLevels = bMips ? m_pRhi->mipLevelsForSize( { top.m_nWidth, top.m_nHeight } ) : 1;
 	QList<QRhiTextureUploadEntry> entries;
-	for ( int nLevel = 0; nLevel < ( bMips ? nFull : 1 ); nLevel++ )
+	for ( int nLevel = 0; nLevel < nLevels; nLevel++ )
 	{
 		const xv::texture::CImage &image = texture.m_Mips[ static_cast<std::size_t>( nLevel ) ];
 		QRhiTextureSubresourceUploadDescription description( image.m_Pixels.data(), static_cast<quint32>( image.m_Pixels.size() ) );
@@ -277,25 +295,98 @@ QRhiTexture *CMapRenderer::Upload( const xv::map::RasterTexture_t &texture, std:
 QRhiSampler *CMapRenderer::SamplerFor( const xv::map::RasterTexture_t *pTexture ) const
 {
 	const std::size_t nIndex = pTexture ? ( pTexture->m_bClampS ? 1u : 0u ) + ( pTexture->m_bClampT ? 2u : 0u ) : 0u;
-	return m_Samplers[ nIndex ].get();
+	return pTexture && !xv::map::HasMipChain( *pTexture ) ? m_TopSamplers[ nIndex ].get() : m_Samplers[ nIndex ].get();
 }
 
 //-----------------------------------------------------------------------------
 // Purpose: Every binding every pipeline declares, so one pipeline draws with any material's.
 //-----------------------------------------------------------------------------
-void CMapRenderer::MakeBindings( Material_t &material, QRhiTexture *pBase, QRhiTexture *pBase2, const xv::map::RasterTexture_t *pTexture )
+void CMapRenderer::MakeBindings( Material_t &material, QRhiTexture *pBase, QRhiTexture *pBase2, const xv::map::RasterTexture_t *pBaseTexture, const xv::map::RasterTexture_t *pBase2Texture )
 {
 	const auto both = QRhiShaderResourceBinding::VertexStage | QRhiShaderResourceBinding::FragmentStage;
 	material.m_pBindings.reset( m_pRhi->newShaderResourceBindings() );
 	material.m_pBindings->setBindings( {
 		QRhiShaderResourceBinding::uniformBuffer( 0, both, m_pFrame.get() ),
 		QRhiShaderResourceBinding::uniformBuffer( 1, both, material.m_pUniforms.get() ),
-		QRhiShaderResourceBinding::sampledTexture( 2, QRhiShaderResourceBinding::FragmentStage, pBase, SamplerFor( pTexture ) ),
-		QRhiShaderResourceBinding::sampledTexture( 3, QRhiShaderResourceBinding::FragmentStage, pBase2, m_Samplers[ 0 ].get() ),
+		QRhiShaderResourceBinding::sampledTexture( 2, QRhiShaderResourceBinding::FragmentStage, pBase, SamplerFor( pBaseTexture ) ),
+		QRhiShaderResourceBinding::sampledTexture( 3, QRhiShaderResourceBinding::FragmentStage, pBase2, SamplerFor( pBase2Texture ) ),
 		QRhiShaderResourceBinding::sampledTexture( 4, both, m_pState.get(), m_pNearest.get() ),
 		QRhiShaderResourceBinding::sampledTexture( 5, QRhiShaderResourceBinding::VertexStage, m_pLineColors.get(), m_pNearest.get() ),
+		QRhiShaderResourceBinding::uniformBuffer( 6, QRhiShaderResourceBinding::FragmentStage, m_pSkyUniforms.get() ),
+		QRhiShaderResourceBinding::sampledTexture( 7, QRhiShaderResourceBinding::FragmentStage, SkyFace( 0 ), SkySampler( 0 ) ),
+		QRhiShaderResourceBinding::sampledTexture( 8, QRhiShaderResourceBinding::FragmentStage, SkyFace( 1 ), SkySampler( 1 ) ),
+		QRhiShaderResourceBinding::sampledTexture( 9, QRhiShaderResourceBinding::FragmentStage, SkyFace( 2 ), SkySampler( 2 ) ),
+		QRhiShaderResourceBinding::sampledTexture( 10, QRhiShaderResourceBinding::FragmentStage, SkyFace( 3 ), SkySampler( 3 ) ),
+		QRhiShaderResourceBinding::sampledTexture( 11, QRhiShaderResourceBinding::FragmentStage, SkyFace( 4 ), SkySampler( 4 ) ),
+		QRhiShaderResourceBinding::sampledTexture( 12, QRhiShaderResourceBinding::FragmentStage, SkyFace( 5 ), SkySampler( 5 ) ),
 	} );
 	material.m_pBindings->create();
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: A sky face's texture, or white where there's none.
+//-----------------------------------------------------------------------------
+QRhiTexture *CMapRenderer::SkyFace( std::size_t nFace ) const
+{
+	return m_SkyFaces[ nFace ] ? m_SkyFaces[ nFace ].get() : m_pWhite.get();
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Repeating or clamped as the face's transform says, like the sky editor's view.
+//-----------------------------------------------------------------------------
+QRhiSampler *CMapRenderer::SkySampler( std::size_t nFace ) const
+{
+	const xv::sky::CUvTransform transform = m_pSkyFor ? m_pSkyFor->m_Transforms[ nFace ] : xv::sky::CUvTransform{};
+	return m_TopSamplers[ ( transform.m_bRepeatU ? 0u : 1u ) + ( transform.m_bRepeatV ? 0u : 2u ) ].get();
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: The map's sky faces and their layout, when the sky changes. Returns whether it did
+//          (the materials' bindings then need making again).
+//-----------------------------------------------------------------------------
+bool CMapRenderer::UploadSky( const MapFrame_t &frame, QRhiResourceUpdateBatch *pUpdates )
+{
+	if ( m_pSkyUniforms && frame.m_pSky.get() == m_pSkyFor )
+	{
+		return false;
+	}
+	m_pSkyFor = frame.m_pSky.get();
+	if ( !m_pSkyUniforms )
+	{
+		m_pSkyUniforms.reset( m_pRhi->newBuffer( QRhiBuffer::Dynamic, QRhiBuffer::UniformBuffer, sizeof( SkyUniforms_t ) ) );
+		m_pSkyUniforms->create();
+	}
+	SkyUniforms_t uniforms{};
+	for ( const xv::sky::Face_t nFace : xv::sky::FACES )
+	{
+		const std::size_t i = xv::sky::IndexOf( nFace );
+		const xv::sky::FaceBasis_t &basis = xv::sky::Basis( nFace );
+		uniforms.m_FaceRight[ i ][ 0 ] = basis.m_vecRight.m_flX;
+		uniforms.m_FaceRight[ i ][ 1 ] = basis.m_vecRight.m_flY;
+		uniforms.m_FaceRight[ i ][ 2 ] = basis.m_vecRight.m_flZ;
+		uniforms.m_FaceUp[ i ][ 0 ] = basis.m_vecUp.m_flX;
+		uniforms.m_FaceUp[ i ][ 1 ] = basis.m_vecUp.m_flY;
+		uniforms.m_FaceUp[ i ][ 2 ] = basis.m_vecUp.m_flZ;
+		m_SkyFaces[ i ].reset();
+		const xv::sky::CUvTransform t = m_pSkyFor ? m_pSkyFor->m_Transforms[ i ] : xv::sky::CUvTransform{};
+		uniforms.m_Transform[ i ][ 0 ] = t.m_flA;
+		uniforms.m_Transform[ i ][ 1 ] = t.m_flB;
+		uniforms.m_Transform[ i ][ 2 ] = t.m_flC;
+		uniforms.m_Transform[ i ][ 3 ] = t.m_flD;
+		uniforms.m_Translate[ i ][ 0 ] = t.m_flTx;
+		uniforms.m_Translate[ i ][ 1 ] = t.m_flTy;
+		const xv::texture::CImage *pImage = m_pSkyFor ? &m_pSkyFor->m_Faces[ i ] : nullptr;
+		if ( pImage && !pImage->Empty() )
+		{
+			m_SkyFaces[ i ].reset( m_pRhi->newTexture( QRhiTexture::RGBA8, { pImage->m_nWidth, pImage->m_nHeight } ) );
+			m_SkyFaces[ i ]->create();
+			pUpdates->uploadTexture( m_SkyFaces[ i ].get(), QImage( pImage->m_Pixels.data(), pImage->m_nWidth, pImage->m_nHeight, pImage->m_nWidth * 4, QImage::Format_RGBA8888 ) );
+			uniforms.m_Translate[ i ][ 2 ] = 1.0f;
+		}
+	}
+	uniforms.m_Translate[ 0 ][ 3 ] = m_pSkyFor ? 1.0f : 0.0f;
+	pUpdates->updateDynamicBuffer( m_pSkyUniforms.get(), 0, sizeof uniforms, &uniforms );
+	return true;
 }
 
 //-----------------------------------------------------------------------------
@@ -319,12 +410,19 @@ void CMapRenderer::UploadMaterials( const MapFrame_t &frame, QRhiResourceUpdateB
 		}
 		pUpdates->updateDynamicBuffer( material.m_pUniforms.get(), 0, sizeof values, &values );
 	};
+	if ( UploadSky( frame, pUpdates ) )
+	{
+		// Everything binds the sky's faces.
+		m_LinesAll.m_pBindings.reset();
+		m_LinesSelected.m_pBindings.reset();
+		m_pMaterialsFor = nullptr;
+	}
 	if ( !m_LinesAll.m_pBindings )
 	{
 		uniforms( m_LinesAll, MaterialUniforms( nullptr, false ) );
-		MakeBindings( m_LinesAll, m_pWhite.get(), m_pWhite.get(), nullptr );
+		MakeBindings( m_LinesAll, m_pWhite.get(), m_pWhite.get(), nullptr, nullptr );
 		uniforms( m_LinesSelected, MaterialUniforms( nullptr, true ) );
-		MakeBindings( m_LinesSelected, m_pWhite.get(), m_pWhite.get(), nullptr );
+		MakeBindings( m_LinesSelected, m_pWhite.get(), m_pWhite.get(), nullptr, nullptr );
 	}
 	if ( frame.m_pMaterials.get() == m_pMaterialsFor )
 	{
@@ -351,7 +449,7 @@ void CMapRenderer::UploadMaterials( const MapFrame_t &frame, QRhiResourceUpdateB
 		}
 		material.m_pBaseFor = source.m_Shade.m_pBase;
 		material.m_pBase2For = source.m_Shade.m_pBase2;
-		MakeBindings( material, pBase, pBase2, source.m_Shade.m_pBase );
+		MakeBindings( material, pBase, pBase2, source.m_Shade.m_pBase, source.m_Shade.m_pBase2 );
 	}
 }
 

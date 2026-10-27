@@ -24,6 +24,7 @@
 
 #include "map/MapConstants.h"
 #include "map/MapPanes.h"
+#include "map/MapResources.h"
 #include "map/MapView2D.h"
 #include "map/MapView3D.h"
 
@@ -101,6 +102,9 @@ CMapEditor::CMapEditor( const QString &szPath, bool bFromGame, QWidget *pParent 
 	setObjectName( QStringLiteral( "mapEditor" ) );
 	m_pDocument = new CMapDocument( this );
 	m_pRenderData = std::make_unique<CMapRenderData>( *m_pDocument );
+	m_pResources = new CMapResources( this );
+	connect( m_pResources, &CMapResources::Arrived, this, &CMapEditor::ResourcesArrived );
+	connect( m_pResources, &CMapResources::Finished, this, &CMapEditor::UpdateGameStatus );
 
 	auto *pLayout = new QVBoxLayout( this );
 	pLayout->setContentsMargins( 0, 0, 0, 0 );
@@ -327,8 +331,8 @@ void CMapEditor::Loaded()
 	{
 		pGrid->setChecked( m_Settings.m_bShowGrid );
 	}
-	const QString szFgd = m_pDocument->GetFgdSource();
-	m_pStatusGame->setText( szFgd.isEmpty() ? tr( "No game data: entities show as boxes" ) : tr( "Entities from %1" ).arg( szFgd ) );
+	m_pResources->Start( m_pDocument->GetSharedScene(), m_pDocument->GetGame(), 1024 );
+	UpdateGameStatus();
 	std::size_t nErrors = 0;
 	for ( const xv::map::Diagnostic_t &diagnostic : scene.m_Map.m_Diagnostics )
 	{
@@ -674,6 +678,7 @@ QString CMapEditor::GetSessionEntry() const
 void CMapEditor::StopWork()
 {
 	m_pDocument->Stop();
+	m_pResources->Stop();
 }
 
 //-----------------------------------------------------------------------------
@@ -682,6 +687,45 @@ void CMapEditor::StopWork()
 void CMapEditor::GameChanged( const xv::vfs::CGameInfo *pGame )
 {
 	m_pDocument->SetGame( pGame ? std::optional<xv::vfs::CGameInfo>{ *pGame } : std::nullopt );
+	if ( m_pDocument->IsLoaded() )
+	{
+		m_pResources->Start( m_pDocument->GetSharedScene(), m_pDocument->GetGame(), 1024 );
+	}
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: More textures: the 3D views draw with them.
+//-----------------------------------------------------------------------------
+void CMapEditor::ResourcesArrived()
+{
+	m_pRenderData->SetMaterials( m_pResources->GetMaterials(), m_pResources->GetTextures() );
+	m_pRenderData->SetSky( m_pResources->GetSky() );
+	for ( CMapView *pView : GetViews() )
+	{
+		if ( auto *p3D = qobject_cast<CMapView3D *>( pView ) )
+		{
+			p3D->Redraw();
+		}
+	}
+	UpdateGameStatus();
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Where entities' looks come from, and how far the textures have got.
+//-----------------------------------------------------------------------------
+void CMapEditor::UpdateGameStatus()
+{
+	const QString szFgd = m_pDocument->GetFgdSource();
+	QString szText = szFgd.isEmpty() ? tr( "No game data: entities show as boxes" ) : tr( "Entities from %1" ).arg( szFgd );
+	if ( !m_pDocument->GetGame() )
+	{
+		szText += tr( "; open the game to see textures" );
+	}
+	else if ( !m_pResources->IsFinished() )
+	{
+		szText += tr( "; textures %1 of %2" ).arg( m_pResources->GetLoaded() ).arg( m_pResources->GetTotal() );
+	}
+	m_pStatusGame->setText( szText );
 }
 
 //-----------------------------------------------------------------------------

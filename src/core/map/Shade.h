@@ -12,6 +12,7 @@
 #include <optional>
 #include <vector>
 
+#include "sky/Sky.h"
 #include "texture/Image.h"
 #include "util/Vec3.h"
 
@@ -38,12 +39,17 @@ struct RasterTexture_t
 	bool m_bClampT = false;
 };
 
+// Whether a texture's mips run from its top level down to 1 by 1. Those that stop short (NOMIP
+// VTFs keep only the top) are drawn from their top level alone, as Source draws NOMIP textures.
+[[nodiscard]] bool HasMipChain( const RasterTexture_t &texture );
+
 // What shading needs of a material.
 struct ShadeMaterial_t
 {
 	const RasterTexture_t *m_pBase = nullptr;  // null: drawn white (or the missing checker)
 	const RasterTexture_t *m_pBase2 = nullptr;
 	bool m_bMissing = false;                   // the VMT wasn't found: Source's checker
+	bool m_bSky = false;                       // toolsskybox and its kind: the map's sky shows
 	bool m_bBlend = false;
 	bool m_bAlphaTest = false;
 	bool m_bTranslucent = false;
@@ -63,6 +69,7 @@ struct ShadeInput_t
 	CVec3 m_vecNormal{ 0, 0, 1 };
 	float m_flLod = 0.0f;                      // mip level, fractional
 	CVec3 m_vecObjectColor{ 1, 1, 1 };         // the flat colour (Hammer's editor colour), 0-1
+	CVec3 m_vecDirection{ 1, 0, 0 };           // from the eye to the point (for the sky)
 	bool m_bSelected = false;
 };
 
@@ -73,6 +80,7 @@ struct ShadeOptions_t
 	float m_flSelectionTint = 0.5f;
 	CVec3 m_vecFaceShade{ 0.65f, 0.8f, 1.0f }; // brightness of faces facing along x, y and z
 	float m_flLuxelShade = 0.75f;              // the lightmap grid's darker squares
+	const sky::CCube *m_pSky = nullptr;        // Hammer++'s 2D skybox on sky faces; null: none
 };
 
 // Bilinear between texels, trilinear between mips; u and v in texture widths (wrapping).

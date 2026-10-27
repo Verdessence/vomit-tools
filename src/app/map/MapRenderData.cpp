@@ -139,7 +139,9 @@ void CMapRenderData::Rebuild()
 	m_nStateFor = ~0ull;
 	m_nSettingsFor = ~0ull;
 	m_nGeneration++;
+	std::shared_ptr<const xv::sky::CCube> pSky = std::move( m_Frame.m_pSky );
 	m_Frame = {};
+	m_Frame.m_pSky = std::move( pSky );
 	if ( !pScene )
 	{
 		return;
@@ -186,9 +188,34 @@ void CMapRenderData::Rebuild()
 //-----------------------------------------------------------------------------
 void CMapRenderData::SetMaterials( std::shared_ptr<const std::vector<xv::map::RasterMaterial_t>> pMaterials, std::shared_ptr<const void> pTextures )
 {
-	m_Frame.m_pMaterials = std::move( pMaterials );
+	if ( m_Document.GetScene() != m_pBuiltFor )
+	{
+		Rebuild();
+	}
+	// The map's materials, then the one entity boxes are drawn with.
+	auto pAll = std::make_shared<std::vector<xv::map::RasterMaterial_t>>( pMaterials ? *pMaterials : std::vector<xv::map::RasterMaterial_t>{} );
+	if ( const xv::map::CScene *pScene = m_Document.GetScene() )
+	{
+		pAll->resize( pScene->m_Map.m_Materials.size() );
+	}
+	xv::map::RasterMaterial_t entity;
+	entity.m_bObjectColor = true;
+	pAll->push_back( entity );
+	m_Frame.m_pMaterials = std::move( pAll );
 	m_Frame.m_pTextures = std::move( pTextures );
 	m_nGeneration++;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+void CMapRenderData::SetSky( std::shared_ptr<const xv::sky::CCube> pSky )
+{
+	if ( pSky != m_Frame.m_pSky )
+	{
+		m_Frame.m_pSky = std::move( pSky );
+		m_nGeneration++;
+	}
 }
 
 //-----------------------------------------------------------------------------
@@ -232,6 +259,7 @@ MapFrame_t CMapRenderData::Snapshot( const xv::map::CViewCamera &camera, const x
 	frame.m_Camera = camera;
 	frame.m_Options = options;
 	frame.m_Options.m_bToolTextures = settings.m_bToolTextures;
+	frame.m_Options.m_Shade.m_pSky = frame.m_pSky.get();
 	frame.m_nGeneration = m_nGeneration;
 	return frame;
 }

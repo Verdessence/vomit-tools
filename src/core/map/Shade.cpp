@@ -67,6 +67,23 @@ std::array<float, 4> MissingChecker( float u, float v )
 //-----------------------------------------------------------------------------
 // Purpose:
 //-----------------------------------------------------------------------------
+bool HasMipChain( const RasterTexture_t &texture )
+{
+	if ( texture.m_Mips.empty() )
+	{
+		return false;
+	}
+	std::size_t nLevels = 1;
+	for ( int w = texture.m_Mips.front().m_nWidth, h = texture.m_Mips.front().m_nHeight; w > 1 || h > 1; w = std::max( 1, w / 2 ), h = std::max( 1, h / 2 ) )
+	{
+		nLevels++;
+	}
+	return texture.m_Mips.size() >= nLevels;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
 std::array<float, 4> SampleTexture( const RasterTexture_t &texture, float u, float v, float flLod )
 {
 	if ( texture.m_Mips.empty() )
@@ -75,7 +92,7 @@ std::array<float, 4> SampleTexture( const RasterTexture_t &texture, float u, flo
 	}
 	// The mips kept may start below the texture's own size; lod 0 is the full size.
 	const float flSkipped = std::log2( static_cast<float>( std::max( texture.m_nWidth, 1 ) ) / static_cast<float>( std::max( texture.m_Mips.front().m_nWidth, 1 ) ) );
-	const float flLevel = std::clamp( flLod - flSkipped, 0.0f, static_cast<float>( texture.m_Mips.size() - 1 ) );
+	const float flLevel = HasMipChain( texture ) ? std::clamp( flLod - flSkipped, 0.0f, static_cast<float>( texture.m_Mips.size() - 1 ) ) : 0.0f;
 	const auto nLow = static_cast<std::size_t>( flLevel );
 	const std::size_t nHigh = std::min( nLow + 1, texture.m_Mips.size() - 1 );
 	const float t = flLevel - static_cast<float>( nLow );
@@ -107,7 +124,14 @@ float FaceShade( CVec3 vecNormal, CVec3 vecShade )
 std::optional<std::array<float, 4>> ShadeFragment( const ShadeMaterial_t &material, const ShadeInput_t &input, const ShadeOptions_t &options )
 {
 	std::array<float, 4> color{ input.m_vecObjectColor.m_flX, input.m_vecObjectColor.m_flY, input.m_vecObjectColor.m_flZ, 1.0f };
-	if ( options.m_nMode != RasterMode_t::RASTER_MODE_FLAT && options.m_nMode != RasterMode_t::RASTER_MODE_WIREFRAME )
+	const bool bTextured = options.m_nMode != RasterMode_t::RASTER_MODE_FLAT && options.m_nMode != RasterMode_t::RASTER_MODE_WIREFRAME;
+	if ( bTextured && material.m_bSky && options.m_pSky )
+	{
+		// Hammer++ shows the map's sky where its sky faces are, the way the game does.
+		const std::array<float, 3> sky = sky::Sample( *options.m_pSky, input.m_vecDirection );
+		color = { sky[ 0 ] / 255.0f, sky[ 1 ] / 255.0f, sky[ 2 ] / 255.0f, 1.0f };
+	}
+	else if ( bTextured )
 	{
 		const int nWidth = material.m_pBase ? material.m_pBase->m_nWidth : material.m_nWidth;
 		const int nHeight = material.m_pBase ? material.m_pBase->m_nHeight : material.m_nHeight;

@@ -16,6 +16,7 @@ layout(location = 1) out vec2 v_luxel;
 layout(location = 2) out float v_blend;
 layout(location = 3) out vec3 v_normal;
 layout(location = 4) flat out vec4 v_state; // flat colour, and the flags in alpha
+layout(location = 5) out vec3 v_world;
 
 layout(std140, binding = 0) uniform Frame {
 	mat4 viewProjection;
@@ -38,6 +39,7 @@ void main() {
 	v_luxel = luxel;
 	v_blend = blend;
 	v_normal = normal;
+	v_world = position;
 	// Not shown: outside every clip plane, so the triangle is dropped.
 	gl_Position = (flags & 1) != 0 ? frame.viewProjection * vec4(position, 1.0) : vec4(2.0, 2.0, 2.0, 1.0);
 }

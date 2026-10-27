@@ -26,6 +26,7 @@ struct ClipVertex_t
 	std::array<float, 2> m_Luxel{};
 	float m_flBlend = 0.0f;
 	CVec3 m_vecNormal;
+	CVec3 m_vecWorld;
 };
 
 // A corner on screen: pixels, depth 0-1, and its values divided by w for perspective.
@@ -35,7 +36,7 @@ struct ScreenVertex_t
 	double m_flY = 0.0;
 	double m_flZ = 0.0;
 	double m_flInvW = 0.0;
-	std::array<double, 8> m_Over{}; // texel u, v, luxel u, v, blend, normal x, y, z; each over w
+	std::array<double, 11> m_Over{}; // texel u, v, luxel u, v, blend, normal x, y, z, world x, y, z; each over w
 };
 
 // A triangle to draw: which mesh and which of its triangles, and how far away it is.
@@ -78,6 +79,7 @@ ClipVertex_t Lerp( const ClipVertex_t &a, const ClipVertex_t &b, double t )
 	}
 	v.m_flBlend = a.m_flBlend + ( b.m_flBlend - a.m_flBlend ) * ft;
 	v.m_vecNormal = a.m_vecNormal + ( b.m_vecNormal - a.m_vecNormal ) * ft;
+	v.m_vecWorld = a.m_vecWorld + ( b.m_vecWorld - a.m_vecWorld ) * ft;
 	return v;
 }
 
@@ -116,8 +118,8 @@ ScreenVertex_t ToScreen( const ClipVertex_t &v, int nWidth, int nHeight )
 	s.m_flY = ( 1.0 - v.m_Clip[ 1 ] * flInvW ) * 0.5 * nHeight;
 	s.m_flZ = v.m_Clip[ 2 ] * flInvW * 0.5 + 0.5;
 	s.m_flInvW = flInvW;
-	const std::array<double, 8> values{ v.m_Texel[ 0 ], v.m_Texel[ 1 ], v.m_Luxel[ 0 ], v.m_Luxel[ 1 ], v.m_flBlend, v.m_vecNormal.m_flX, v.m_vecNormal.m_flY, v.m_vecNormal.m_flZ };
-	for ( std::size_t i = 0; i < 8; i++ )
+	const std::array<double, 11> values{ v.m_Texel[ 0 ], v.m_Texel[ 1 ], v.m_Luxel[ 0 ], v.m_Luxel[ 1 ], v.m_flBlend, v.m_vecNormal.m_flX, v.m_vecNormal.m_flY, v.m_vecNormal.m_flZ, v.m_vecWorld.m_flX, v.m_vecWorld.m_flY, v.m_vecWorld.m_flZ };
+	for ( std::size_t i = 0; i < values.size(); i++ )
 	{
 		s.m_Over[ i ] = values[ i ] * flInvW;
 	}
@@ -190,6 +192,7 @@ bool CRasterizer::Corners( const TriangleRef_t &ref, std::array<ClipVertex_t, 3>
 		corners[ k ].m_Luxel = vertex.m_Luxel;
 		corners[ k ].m_flBlend = vertex.m_flAlpha;
 		corners[ k ].m_vecNormal = vertex.m_vecNormal;
+		corners[ k ].m_vecWorld = vertex.m_vecPosition;
 	}
 	const RasterMaterial_t *pMaterial = MaterialOf( ref.m_nMaterial );
 	if ( pMaterial && pMaterial->m_bNoCull )
@@ -385,11 +388,26 @@ void CRasterizer::FillTriangle( const ScreenVertex_t &a, const ScreenVertex_t &b
 	{
 		shade.m_nMode = RasterMode_t::RASTER_MODE_FLAT;
 	}
-	// One mip level for the whole triangle: texels covered over pixels covered.
-	{
-		const double flTexels = std::abs( ( b.m_Over[ 0 ] / b.m_flInvW - a.m_Over[ 0 ] / a.m_flInvW ) * ( c.m_Over[ 1 ] / c.m_flInvW - a.m_Over[ 1 ] / a.m_flInvW ) - ( c.m_Over[ 0 ] / c.m_flInvW - a.m_Over[ 0 ] / a.m_flInvW ) * ( b.m_Over[ 1 ] / b.m_flInvW - a.m_Over[ 1 ] / a.m_flInvW ) );
-		input.m_flLod = flTexels > 0.0 ? static_cast<float>( std::max( 0.0, 0.5 * std::log2( flTexels / flArea ) ) ) : 0.0f;
-	}
+	// The mip level is picked per pixel, as a graphics card picks it: from how fast the texel
+	// coordinates change across the screen, in the faster of the two directions. Texel over w
+	// and 1/w change by the same amounts at every pixel of the triangle.
+	const bool bMips = material.m_pBase && shade.m_nMode != RasterMode_t::RASTER_MODE_FLAT && shade.m_nMode != RasterMode_t::RASTER_MODE_WIREFRAME;
+	const auto step = [ flArea ]( const ScreenVertex_t &from, const ScreenVertex_t &to, double dx, double dy ) {
+		return ( Edge( from, to, dx, dy ) - Edge( from, to, 0.0, 0.0 ) ) / flArea;
+	};
+	const std::array<double, 3> stepX{ step( b, c, 1.0, 0.0 ), step( c, a, 1.0, 0.0 ), step( a, b, 1.0, 0.0 ) };
+	const std::array<double, 3> stepY{ step( b, c, 0.0, 1.0 ), step( c, a, 0.0, 1.0 ), step( a, b, 0.0, 1.0 ) };
+	const auto change = [ &a, &b, &c ]( const std::array<double, 3> &weights, auto pfnValue ) {
+		return weights[ 0 ] * pfnValue( a ) + weights[ 1 ] * pfnValue( b ) + weights[ 2 ] * pfnValue( c );
+	};
+	const auto over = []( std::size_t i ) { return [ i ]( const ScreenVertex_t &v ) { return v.m_Over[ i ]; }; };
+	const auto invW = []( const ScreenVertex_t &v ) { return v.m_flInvW; };
+	const double flUx = change( stepX, over( 0 ) );
+	const double flVx = change( stepX, over( 1 ) );
+	const double flWx = change( stepX, invW );
+	const double flUy = change( stepY, over( 0 ) );
+	const double flVy = change( stepY, over( 1 ) );
+	const double flWy = change( stepY, invW );
 	for ( int y = nY0; y <= nY1; y++ )
 	{
 		const double flY = y + 0.5;
@@ -413,15 +431,21 @@ void CRasterizer::FillTriangle( const ScreenVertex_t &a, const ScreenVertex_t &b
 				continue;
 			}
 			const double flInvW = l0 * a.m_flInvW + l1 * b.m_flInvW + l2 * c.m_flInvW;
-			std::array<double, 8> values{};
-			for ( std::size_t i = 0; i < 8; i++ )
+			std::array<double, 11> values{};
+			for ( std::size_t i = 0; i < values.size(); i++ )
 			{
 				values[ i ] = ( l0 * a.m_Over[ i ] + l1 * b.m_Over[ i ] + l2 * c.m_Over[ i ] ) / flInvW;
 			}
 			input.m_Texel = { static_cast<float>( values[ 0 ] ), static_cast<float>( values[ 1 ] ) };
+			if ( bMips )
+			{
+				const double flRho = std::max( std::hypot( ( flUx - values[ 0 ] * flWx ) / flInvW, ( flVx - values[ 1 ] * flWx ) / flInvW ), std::hypot( ( flUy - values[ 0 ] * flWy ) / flInvW, ( flVy - values[ 1 ] * flWy ) / flInvW ) );
+				input.m_flLod = flRho > 1.0 ? static_cast<float>( std::log2( flRho ) ) : 0.0f;
+			}
 			input.m_Luxel = { static_cast<float>( values[ 2 ] ), static_cast<float>( values[ 3 ] ) };
 			input.m_flBlend = static_cast<float>( values[ 4 ] );
 			input.m_vecNormal = Normalized( CVec3{ static_cast<float>( values[ 5 ] ), static_cast<float>( values[ 6 ] ), static_cast<float>( values[ 7 ] ) } );
+			input.m_vecDirection = CVec3{ static_cast<float>( values[ 8 ] - m_Camera.m_Eye[ 0 ] ), static_cast<float>( values[ 9 ] - m_Camera.m_Eye[ 1 ] ), static_cast<float>( values[ 10 ] - m_Camera.m_Eye[ 2 ] ) };
 			const std::optional<std::array<float, 4>> color = ShadeFragment( material, input, shade );
 			if ( !color )
 			{

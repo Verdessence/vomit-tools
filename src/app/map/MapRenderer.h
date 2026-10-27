@@ -11,6 +11,7 @@
 
 #ifdef VOMIT_TOOLS_GPU
 
+#include <array>
 #include <functional>
 #include <memory>
 #include <vector>
@@ -65,8 +66,11 @@ private:
 	void UploadMaterials( const MapFrame_t &frame, QRhiResourceUpdateBatch *pUpdates );
 	[[nodiscard]] QRhiTexture *Upload( const xv::map::RasterTexture_t &texture, std::unique_ptr<QRhiTexture> &pTexture, QRhiResourceUpdateBatch *pUpdates );
 	[[nodiscard]] QRhiSampler *SamplerFor( const xv::map::RasterTexture_t *pTexture ) const;
-	void MakeBindings( Material_t &material, QRhiTexture *pBase, QRhiTexture *pBase2, const xv::map::RasterTexture_t *pTexture );
+	void MakeBindings( Material_t &material, QRhiTexture *pBase, QRhiTexture *pBase2, const xv::map::RasterTexture_t *pBaseTexture, const xv::map::RasterTexture_t *pBase2Texture );
 	void MakePipelines( QRhiRenderTarget *pTarget );
+	bool UploadSky( const MapFrame_t &frame, QRhiResourceUpdateBatch *pUpdates );
+	[[nodiscard]] QRhiTexture *SkyFace( std::size_t nFace ) const;
+	[[nodiscard]] QRhiSampler *SkySampler( std::size_t nFace ) const;
 
 	Source_t m_pfnSource;
 	QRhi *m_pRhi = nullptr;
@@ -79,7 +83,11 @@ private:
 	std::unique_ptr<QRhiTexture> m_pState;
 	std::unique_ptr<QRhiTexture> m_pLineColors;
 	std::unique_ptr<QRhiTexture> m_pWhite;
+	std::unique_ptr<QRhiBuffer> m_pSkyUniforms;
+	std::array<std::unique_ptr<QRhiTexture>, 6> m_SkyFaces;
+	const xv::sky::CCube *m_pSkyFor = nullptr;
 	std::array<std::unique_ptr<QRhiSampler>, 4> m_Samplers; // repeat or clamp in s and t
+	std::array<std::unique_ptr<QRhiSampler>, 4> m_TopSamplers; // the same, top level only: OpenGL reads a texture without mips as black through a mip filter
 	std::unique_ptr<QRhiSampler> m_pNearest;
 	const void *m_pStateFlags = nullptr;
 	const void *m_pStateColors = nullptr;
