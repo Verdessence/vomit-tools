@@ -58,6 +58,8 @@ struct MapViewSettings_t
 	bool m_bCenterHandles = true;
 	bool m_bHideSmallGrid = true;  // grid lines closer than a few pixels left out
 	int m_nHighlightEvery = 8;     // every this many lines brighter (GridHighSpec)
+
+	friend bool operator==( const MapViewSettings_t &, const MapViewSettings_t & ) = default;
 };
 
 class CMapView : public QWidget

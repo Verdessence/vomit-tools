@@ -701,16 +701,46 @@ void CMapView2D::PaintCamera( QPainter &painter ) const
 //-----------------------------------------------------------------------------
 // Purpose:
 //-----------------------------------------------------------------------------
+void CMapView2D::PaintLayer()
+{
+	LayerKey_t key;
+	key.m_pScene = m_pBuiltFor;
+	key.m_pProps = m_pProps.get();
+	key.m_nState = GetDocument().GetStateGeneration();
+	key.m_Settings = m_Editor.GetSettings();
+	key.m_Center = m_Center;
+	key.m_flZoom = m_flZoom;
+	key.m_Size = size();
+	key.m_flRatio = devicePixelRatioF();
+	if ( key == m_LayerKey && !m_Layer.isNull() )
+	{
+		return;
+	}
+	m_LayerKey = key;
+	m_nLayerPaints++;
+	if ( m_Layer.size() != size() * key.m_flRatio )
+	{
+		m_Layer = QPixmap( size() * key.m_flRatio );
+		m_Layer.setDevicePixelRatio( key.m_flRatio );
+	}
+	m_Layer.fill( mapstyle::BACKGROUND );
+	QPainter painter( &m_Layer );
+	const QRectF visible = GetVisible();
+	PaintGrid( painter, visible );
+	PaintObjects( painter, visible );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
 void CMapView2D::paintEvent( QPaintEvent * )
 {
 	QElapsedTimer timer;
 	timer.start();
 	Rebuild();
+	PaintLayer();
 	QPainter painter( this );
-	painter.fillRect( rect(), mapstyle::BACKGROUND );
-	const QRectF visible = GetVisible();
-	PaintGrid( painter, visible );
-	PaintObjects( painter, visible );
+	painter.drawPixmap( 0, 0, m_Layer );
 	PaintCamera( painter );
 	PaintSelection( painter );
 	if ( hasFocus() )
@@ -721,6 +751,7 @@ void CMapView2D::paintEvent( QPaintEvent * )
 		painter.drawRect( rect().adjusted( 0, 0, -1 - SCROLLBAR_SIZE, -1 - SCROLLBAR_SIZE ) );
 	}
 	m_flPaintMs = static_cast<double>( timer.nsecsElapsed() ) / 1e6;
+	m_nPaints++;
 }
 
 //-----------------------------------------------------------------------------

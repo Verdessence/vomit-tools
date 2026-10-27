@@ -15,7 +15,9 @@
 #include <vector>
 
 #include <QPointF>
+#include <QPixmap>
 #include <QRectF>
+#include <QSize>
 
 #include "map/MapView.h"
 #include "map/Mesh.h"
@@ -82,6 +84,8 @@ public:
 	[[nodiscard]] std::optional<QRectF> GetPendingBox() const { return m_PendingBox; }
 	// Milliseconds the last full repaint took.
 	[[nodiscard]] double GetLastPaintTime() const { return m_flPaintMs; }
+	[[nodiscard]] int GetPaintCount() const { return m_nPaints; }
+	[[nodiscard]] int GetLayerPaintCount() const { return m_nLayerPaints; }
 
 protected:
 	void paintEvent( QPaintEvent *pEvent ) override;
@@ -95,6 +99,9 @@ protected:
 	void leaveEvent( QEvent *pEvent ) override;
 
 private:
+	// The grid and the objects, kept as a picture between repaints: a camera move or a drag
+	// only draws over it. Made again when what it shows changes.
+	void PaintLayer();
 	void PaintGrid( class QPainter &painter, const QRectF &visible ) const;
 	void PaintObjects( QPainter &painter, const QRectF &visible ) const;
 	void PaintSelection( QPainter &painter ) const;
@@ -124,4 +131,22 @@ private:
 	std::optional<QRectF> m_PendingBox; // dragged and waiting for Enter
 	QPoint m_PressAt;
 	double m_flPaintMs = 0.0;
+	int m_nPaints = 0;
+	int m_nLayerPaints = 0;      // how many of those drew the layer again
+
+	// What the layer was drawn for.
+	struct LayerKey_t
+	{
+		const void *m_pScene = nullptr;
+		const void *m_pProps = nullptr;
+		std::uint64_t m_nState = ~0ull;
+		MapViewSettings_t m_Settings;
+		QPointF m_Center;
+		double m_flZoom = 0.0;
+		QSize m_Size;
+		qreal m_flRatio = 1.0;
+		friend bool operator==( const LayerKey_t &, const LayerKey_t & ) = default;
+	};
+	QPixmap m_Layer;
+	LayerKey_t m_LayerKey;
 };
