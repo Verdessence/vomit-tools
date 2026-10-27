@@ -23,7 +23,9 @@
 #include <QPainterPath>
 #include <QSplitter>
 #include <QToolBar>
+#include <QClipboard>
 #include <QCoreApplication>
+#include <QGuiApplication>
 #include <QDir>
 #include <QMessageBox>
 #include <QTimer>
@@ -331,6 +333,8 @@ void CMapEditor::BuildToolBars( QVBoxLayout *pLayout )
 		return pAction;
 	};
 	toggle( tr( "Grid" ), MapAction_t::MAP_ACTION_TOGGLE_GRID, m_Settings.m_bShowGrid )->setObjectName( QStringLiteral( "mapToggleGrid" ) );
+	toggle( tr( "Snap to Grid" ), MapAction_t::MAP_ACTION_TOGGLE_SNAP, m_Settings.m_bSnapToGrid )->setObjectName( QStringLiteral( "mapToggleSnap" ) );
+	toggle( tr( "Texture Lock" ), MapAction_t::MAP_ACTION_TOGGLE_TEXTURE_LOCK, m_Settings.m_bTextureLock )->setObjectName( QStringLiteral( "mapToggleTextureLock" ) );
 	pBar->addSeparator();
 	toggle( tr( "Models in 2D" ), MapAction_t::MAP_ACTION_TOGGLE_MODELS_2D, m_Settings.m_bModels2D )->setObjectName( QStringLiteral( "mapToggleModels2D" ) );
 	toggle( tr( "Entity Names" ), MapAction_t::MAP_ACTION_TOGGLE_NAMES, m_Settings.m_bNames );
@@ -570,6 +574,7 @@ void CMapEditor::TakePreferences()
 	const MapPreferences_t &preferences = CPreferences::Instance().GetMapPreferences();
 	m_Settings.m_bDrawVertices = preferences.m_bDrawVertices;
 	m_Settings.m_bCenterHandles = preferences.m_bCenterHandles;
+	m_Settings.m_bTextureLock = preferences.m_bTextureLock;
 	m_Settings.m_bModels2D = preferences.m_bModels2D;
 	m_Settings.m_bUseGroupColors = preferences.m_bGroupColors;
 	m_Settings.m_bSkybox3D = preferences.m_bSkybox3D;
@@ -718,6 +723,44 @@ bool CMapEditor::RunAction( MapAction_t nAction, CMapView *pFrom )
 		case MapAction_t::MAP_ACTION_QUICK_UNHIDE:
 			m_pDocument->QuickUnhideAll();
 			return true;
+		case MapAction_t::MAP_ACTION_TOGGLE_SNAP: return toggle( m_Settings.m_bSnapToGrid );
+		case MapAction_t::MAP_ACTION_TOGGLE_TEXTURE_LOCK: return toggle( m_Settings.m_bTextureLock );
+		case MapAction_t::MAP_ACTION_DELETE:
+			if ( !selection.empty() && m_pDocument->GetScene() )
+			{
+				m_pDocument->Edit( xv::map::DeleteObjects( *m_pDocument->GetScene(), selection ), tr( "Delete" ), std::vector<std::uint32_t>{} );
+			}
+			return true;
+		case MapAction_t::MAP_ACTION_COPY:
+		case MapAction_t::MAP_ACTION_CUT:
+			if ( !selection.empty() && m_pDocument->GetScene() )
+			{
+				QGuiApplication::clipboard()->setText( QString::fromStdString( xv::map::ObjectsToText( *m_pDocument->GetScene(), selection ) ) );
+				if ( nAction == MapAction_t::MAP_ACTION_CUT )
+				{
+					m_pDocument->Edit( xv::map::DeleteObjects( *m_pDocument->GetScene(), selection ), tr( "Cut" ), std::vector<std::uint32_t>{} );
+				}
+			}
+			return true;
+		case MapAction_t::MAP_ACTION_PASTE:
+			Paste( pFrom );
+			return true;
+		case MapAction_t::MAP_ACTION_SELECT_ALL:
+		{
+			std::vector<std::uint32_t> all;
+			for ( std::uint32_t n = 0; m_pDocument->GetScene() && n < m_pDocument->GetScene()->GetObjectCount(); n++ )
+			{
+				if ( m_pDocument->IsShown( n ) )
+				{
+					all.push_back( n );
+				}
+			}
+			m_pDocument->SetSelection( std::move( all ) );
+			return true;
+		}
+		case MapAction_t::MAP_ACTION_SNAP_SELECTION:
+			SnapSelection();
+			return true;
 		case MapAction_t::MAP_ACTION_TOGGLE_HELPERS: return toggle( m_Settings.m_bHelpers );
 		case MapAction_t::MAP_ACTION_TOGGLE_MODELS_2D: return toggle( m_Settings.m_bModels2D );
 		case MapAction_t::MAP_ACTION_TOGGLE_NAMES: return toggle( m_Settings.m_bNames );
@@ -750,6 +793,78 @@ bool CMapEditor::RunAction( MapAction_t nAction, CMapView *pFrom )
 			return true;
 		default:
 			return false;
+	}
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: The selection moved (or copied, the copies selected) by offset, with the texture lock.
+//-----------------------------------------------------------------------------
+void CMapEditor::MoveSelection( xv::map::Point_t offset, bool bClone )
+{
+	const xv::map::CScene *pScene = m_pDocument->GetScene();
+	const std::vector<std::uint32_t> &selection = m_pDocument->GetSelection();
+	if ( !pScene || selection.empty() )
+	{
+		return;
+	}
+	xv::map::Transform_t move;
+	move.m_Offset = offset;
+	if ( bClone )
+	{
+		std::vector<std::uint32_t> added;
+		xv::map::MapEdit_t edit = xv::map::CopyObjects( *pScene, selection, move, m_Settings.m_bTextureLock, &added );
+		m_pDocument->Edit( std::move( edit ), tr( "Clone" ), std::move( added ) );
+		return;
+	}
+	m_pDocument->Edit( xv::map::TransformObjects( *pScene, selection, move, m_Settings.m_bTextureLock ), tr( "Move" ), selection );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: What Edit > Copy put on the clipboard (or VMF text from anywhere, Hammer's too), a grid
+//          step along the view's axes from where it was, selected.
+//-----------------------------------------------------------------------------
+void CMapEditor::Paste( CMapView *pFrom )
+{
+	const xv::map::CScene *pScene = m_pDocument->GetScene();
+	const std::string szText = QGuiApplication::clipboard()->text().toStdString();
+	if ( !pScene || szText.empty() )
+	{
+		return;
+	}
+	xv::map::Transform_t move;
+	const auto nGrid = static_cast<double>( m_Settings.m_nGridSize );
+	const auto *p2D = qobject_cast<CMapView2D *>( pFrom );
+	move.m_Offset[ p2D ? static_cast<std::size_t>( p2D->GetAxisIndex( 0 ) ) : 0 ] = nGrid;
+	move.m_Offset[ p2D ? static_cast<std::size_t>( p2D->GetAxisIndex( 1 ) ) : 1 ] = nGrid;
+	std::vector<std::uint32_t> added;
+	xv::map::MapEdit_t edit = xv::map::ObjectsFromText( *pScene, szText, move, &added );
+	if ( edit.IsEmpty() )
+	{
+		emit StatusMessage( tr( "Nothing on the clipboard to paste into a map" ) );
+		return;
+	}
+	m_pDocument->Edit( std::move( edit ), tr( "Paste" ), std::move( added ) );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Ctrl+B: the selection moved so its box's lowest corner is on the grid.
+//-----------------------------------------------------------------------------
+void CMapEditor::SnapSelection()
+{
+	const xv::map::Box_t bounds = m_pDocument->GetSelectionBounds();
+	if ( bounds.IsEmpty() )
+	{
+		return;
+	}
+	const auto nGrid = static_cast<double>( m_Settings.m_nGridSize );
+	xv::map::Point_t offset{};
+	for ( std::size_t a = 0; a < 3; a++ )
+	{
+		offset[ a ] = std::round( bounds.m_Mins[ a ] / nGrid ) * nGrid - bounds.m_Mins[ a ];
+	}
+	if ( offset != xv::map::Point_t{} )
+	{
+		MoveSelection( offset, false );
 	}
 }
 

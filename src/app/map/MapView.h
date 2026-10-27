@@ -47,7 +47,8 @@ struct MapViewSettings_t
 {
 	int m_nGridSize = 64;
 	bool m_bShowGrid = true;
-	bool m_bSnapToGrid = true;
+	bool m_bSnapToGrid = true;    // Shift+W
+	bool m_bTextureLock = true;   // textures move with the faces
 	bool m_bModels2D = true;      // Shift+M
 	bool m_bNames = true;         // Ctrl+Shift+N
 	bool m_bHelpers = true;       // Ctrl+Shift+H

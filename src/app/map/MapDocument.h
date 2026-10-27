@@ -73,6 +73,12 @@ public:
 	bool Save( const std::filesystem::path &path, QString *pError );
 	// An edit's scene, now (the undo stack's commands call it).
 	void ApplyEditNow( const xv::map::MapEdit_t &edit );
+	// While a drag goes on: edit shown on the scene as it was when the drag began, outside the undo
+	// stack. EndPreview puts that scene back (before the drag's edit goes through Edit, or when
+	// it is cancelled).
+	void Preview( const xv::map::MapEdit_t &edit );
+	void EndPreview();
+	[[nodiscard]] bool IsPreviewing() const { return m_pPreviewBase != nullptr; }
 
 	// Visibility, per object: hidden by its visgroups (or Hammer's own flags in the file), by
 	// an automatic group, or quick-hidden.
@@ -125,6 +131,7 @@ private:
 
 	std::shared_ptr<const xv::map::CScene> m_pScene;
 	QUndoStack *m_pUndo = nullptr;
+	std::shared_ptr<const xv::map::CScene> m_pPreviewBase; // the scene before the drag
 	std::optional<xv::vfs::CGameInfo> m_Game;
 	QString m_szFgdSource;
 

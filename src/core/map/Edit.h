@@ -15,6 +15,8 @@
 
 #include <cstdint>
 #include <memory>
+#include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -55,6 +57,30 @@ inline constexpr std::uint32_t NEW_MATERIAL = ~0u;
 [[nodiscard]] Entity_t TransformEntity( const CMap &map, const Entity_t &entity, const Transform_t &transform );
 // Source's angles (pitch, yaw, roll) of a rotation.
 [[nodiscard]] std::array<double, 3> AnglesOf( const Transform_t &transform );
+
+// The objects a selection acts on: the solids (those of selected entities too, as they move with
+// them) and the entities, by index.
+struct ObjectSet_t
+{
+	std::vector<std::uint32_t> m_Solids;
+	std::vector<std::uint32_t> m_Entities;
+};
+[[nodiscard]] ObjectSet_t ObjectsOf( const CScene &scene, const std::vector<std::uint32_t> &objects );
+
+// Deletes the objects (an entity with its solids).
+[[nodiscard]] MapEdit_t DeleteObjects( const CScene &scene, const std::vector<std::uint32_t> &objects );
+// Moves, turns or scales the objects: solids by TransformSolid, entities by TransformEntity.
+[[nodiscard]] MapEdit_t TransformObjects( const CScene &scene, const std::vector<std::uint32_t> &objects, const Transform_t &transform, bool bTextureLock );
+// Copies of the objects, transformed, with ids of their own; pAdded gets the object numbers they
+// will have once the edit is made (the copies of entities first, then of solids).
+[[nodiscard]] MapEdit_t CopyObjects( const CScene &scene, const std::vector<std::uint32_t> &objects, const Transform_t &transform, bool bTextureLock, std::vector<std::uint32_t> *pAdded );
+
+// The objects as VMF text, for the clipboard: the world's solids in a world block, entities with
+// theirs. What other editors (and Hammer) read too.
+[[nodiscard]] std::string ObjectsToText( const CScene &scene, const std::vector<std::uint32_t> &objects );
+// What ObjectsToText wrote (or any VMF's objects), added to the scene moved by transform, with ids
+// of their own; pAdded as for CopyObjects. Empty when the text holds nothing.
+[[nodiscard]] MapEdit_t ObjectsFromText( const CScene &scene, std::string_view szText, const Transform_t &transform, std::vector<std::uint32_t> *pAdded );
 
 // Sets an entity's key (adding it if it has none), keeping the value in map's store.
 void SetKeyValue( const CMap &map, Entity_t &entity, std::string_view szKey, std::string_view szValue );

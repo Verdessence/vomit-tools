@@ -89,6 +89,10 @@ struct MapPreferences_t
 	bool m_bSprites = true;          // iconsprites and env_sprites drawn as such (else as boxes)
 	bool m_bWireframeModels = true;  // props' edges in the wireframe view
 
+	// Editing.
+	bool m_bArrowsNudge = true;      // arrow keys move the selection (Hammer++'s Nudge)
+	bool m_bTextureLock = true;      // what a map opens with (Hammer++'s LockTextures)
+
 	// The 2D views.
 	bool m_bHideSmallGrid = true;
 	double m_flHideGridBelow = mapstyle::HIDE_GRID_BELOW_PIXELS;

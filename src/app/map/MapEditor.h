@@ -68,6 +68,8 @@ public:
 	void ShowCursor( const QString &szAt );
 	void ShowZoom( double flZoom );
 	void CameraMoved( CMapView *pView );
+	// The selection moved by offset (units), or copied there (bClone); one step to undo.
+	void MoveSelection( xv::map::Point_t offset, bool bClone );
 	// A 3D view changed how it draws (the card's drawing failed): software needs the textures decoded.
 	void RendererChanged();
 
@@ -97,6 +99,8 @@ private:
 	// An edit made a new scene: the views follow, and materials it brought in are read.
 	void SceneEdited( const std::vector<std::uint32_t> &changed );
 	void GoToBrush();
+	void Paste( CMapView *pFrom );
+	void SnapSelection();
 	void ShowProperties();
 	void TakePreferences();
 	[[nodiscard]] bool NeedsDecodedTextures() const;

@@ -50,16 +50,28 @@ enum class MapAction_t
 	MAP_ACTION_PREVIOUS_HIT,         // Page Up
 	MAP_ACTION_ENTER,                // Enter
 	MAP_ACTION_ESCAPE,               // Esc
+	MAP_ACTION_DELETE,               // Delete
+	MAP_ACTION_COPY,                 // Ctrl+C
+	MAP_ACTION_CUT,                  // Ctrl+X
+	MAP_ACTION_PASTE,                // Ctrl+V
+	MAP_ACTION_SELECT_ALL,           // Ctrl+Shift+A
+	MAP_ACTION_TOGGLE_SNAP,          // Shift+W
+	MAP_ACTION_SNAP_SELECTION,       // Ctrl+B
+	MAP_ACTION_TOGGLE_TEXTURE_LOCK,  // the tool bar's button (Hammer++ has no key for it)
 	// 2D views.
 	MAP_ACTION_NEXT_AXIS,            // Tab
 	MAP_ACTION_ZOOM_IN,              // keypad +
 	MAP_ACTION_ZOOM_OUT,             // keypad -
 	MAP_ACTION_ZOOM_IN_ALL,          // Ctrl+keypad +
 	MAP_ACTION_ZOOM_OUT_ALL,         // Ctrl+keypad -
-	MAP_ACTION_SCROLL_UP,            // arrows
+	MAP_ACTION_SCROLL_UP,            // arrows: they nudge the selection when there is one
 	MAP_ACTION_SCROLL_DOWN,
 	MAP_ACTION_SCROLL_LEFT,
 	MAP_ACTION_SCROLL_RIGHT,
+	MAP_ACTION_CLONE_UP,             // Shift+arrows: a copy a grid step along
+	MAP_ACTION_CLONE_DOWN,
+	MAP_ACTION_CLONE_LEFT,
+	MAP_ACTION_CLONE_RIGHT,
 	// 3D views.
 	MAP_ACTION_MOUSELOOK,            // Z
 	MAP_ACTION_MOVE_FORWARD,         // W

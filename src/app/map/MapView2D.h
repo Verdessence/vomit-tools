@@ -77,6 +77,8 @@ public:
 	// Map units on the view's axes for a point in the widget, and back.
 	[[nodiscard]] QPointF ToMap( QPointF at ) const;
 	[[nodiscard]] QPointF ToWidget( QPointF map ) const;
+	// Which of x, y and z the view's horizontal (0) and vertical (1) axes are.
+	[[nodiscard]] int GetAxisIndex( int nIndex ) const { return GetAxis( nIndex ); }
 	// The view's two axes of a map point (x/y, y/z or x/z).
 	[[nodiscard]] QPointF Flatten( const xv::map::Point_t &p ) const;
 	// What a click at a widget point would pick: the nearest object whose edge or centre
@@ -120,6 +122,9 @@ private:
 	void Place( MapFlatObject_t object );
 	void Patch( const xv::map::CScene &scene );
 	void UpdateScrollBars();
+	[[nodiscard]] xv::map::Point_t DragOffset( QPointF at, Qt::KeyboardModifiers modifiers ) const;
+	void PreviewMove( QPointF at, Qt::KeyboardModifiers modifiers );
+	void CancelMove();
 	void ReportCursor( QPointF at );
 	[[nodiscard]] QRectF GetVisible() const;
 	[[nodiscard]] int GetAxis( int nIndex ) const; // 0 or 1: which of x, y, z
@@ -146,6 +151,12 @@ private:
 	std::optional<QPoint> m_PanFrom;
 	std::optional<QPointF> m_BoxFrom;  // a box selection being dragged, in map units
 	std::optional<QRectF> m_PendingBox; // dragged and waiting for Enter
+	// Moving the selection by dragging inside its box: where the drag began (map units), the
+	// box's lowest corner then, and (once it moves) the scene and selection it moves from.
+	std::optional<QPointF> m_MoveFrom;
+	QPointF m_MoveCorner;
+	std::shared_ptr<const xv::map::CScene> m_pMoveScene;
+	std::vector<std::uint32_t> m_MoveSelection;
 	QPoint m_PressAt;
 	double m_flPaintMs = 0.0;
 	int m_nPaints = 0;

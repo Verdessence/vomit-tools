@@ -19,6 +19,7 @@
 #include "map/Vmf.h"
 #include "map/VmfValues.h"
 #include "map/Visgroups.h"
+#include "map/Write.h"
 
 namespace xv::map
 {
@@ -308,6 +309,311 @@ std::array<double, 3> AnglesOf( const Transform_t &transform )
 		return flRounded == 0.0 ? 0.0 : flRounded;
 	};
 	return { tidy( flPitch ), tidy( flYaw ), tidy( flRoll ) };
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+ObjectSet_t ObjectsOf( const CScene &scene, const std::vector<std::uint32_t> &objects )
+{
+	ObjectSet_t set;
+	for ( const std::uint32_t n : objects )
+	{
+		if ( n >= scene.GetObjectCount() || scene.IsDeleted( n ) )
+		{
+			continue;
+		}
+		const std::uint32_t nIndex = scene.GetIndex( n );
+		if ( scene.IsSolidObject( n ) )
+		{
+			set.m_Solids.push_back( nIndex );
+			continue;
+		}
+		set.m_Entities.push_back( nIndex );
+		for ( const std::uint32_t nSolid : scene.m_Map.m_Entities[ nIndex ].m_Solids )
+		{
+			if ( !scene.m_Map.m_Solids[ nSolid ].m_bDeleted )
+			{
+				set.m_Solids.push_back( nSolid );
+			}
+		}
+	}
+	for ( std::vector<std::uint32_t> *pList : { &set.m_Solids, &set.m_Entities } )
+	{
+		std::ranges::sort( *pList );
+		pList->erase( std::unique( pList->begin(), pList->end() ), pList->end() );
+	}
+	return set;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+MapEdit_t DeleteObjects( const CScene &scene, const std::vector<std::uint32_t> &objects )
+{
+	const ObjectSet_t set = ObjectsOf( scene, objects );
+	MapEdit_t edit;
+	for ( const std::uint32_t nSolid : set.m_Solids )
+	{
+		Solid_t solid = scene.m_Map.m_Solids[ nSolid ];
+		solid.m_bDeleted = true;
+		edit.m_Solids.emplace_back( nSolid, std::move( solid ) );
+	}
+	for ( const std::uint32_t nEntity : set.m_Entities )
+	{
+		Entity_t entity = scene.m_Map.m_Entities[ nEntity ];
+		entity.m_bDeleted = true;
+		edit.m_Entities.emplace_back( nEntity, std::move( entity ) );
+	}
+	return edit;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+MapEdit_t TransformObjects( const CScene &scene, const std::vector<std::uint32_t> &objects, const Transform_t &transform, bool bTextureLock )
+{
+	const ObjectSet_t set = ObjectsOf( scene, objects );
+	MapEdit_t edit;
+	for ( const std::uint32_t nSolid : set.m_Solids )
+	{
+		edit.m_Solids.emplace_back( nSolid, TransformSolid( scene.m_Map.m_Solids[ nSolid ], transform, bTextureLock ) );
+	}
+	for ( const std::uint32_t nEntity : set.m_Entities )
+	{
+		const Entity_t &entity = scene.m_Map.m_Entities[ nEntity ];
+		if ( entity.HasKey( "origin" ) || entity.HasKey( "angles" ) )
+		{
+			edit.m_Entities.emplace_back( nEntity, TransformEntity( scene.m_Map, entity, transform ) );
+		}
+	}
+	return edit;
+}
+
+namespace
+{
+
+// Objects coming into a map: from its own solids and entities, or another map's (the clipboard).
+struct Incoming_t
+{
+	std::vector<Solid_t> m_Solids;    // m_nEntity: an index into m_Entities, or -1 (the world, or kept)
+	std::vector<Entity_t> m_Entities;
+	std::vector<int> m_OwnersKept;    // per solid: an entity of the map it stays in, or -1
+};
+
+//-----------------------------------------------------------------------------
+// Purpose: Strings into map's store, and spans cleared: the object is new to the map.
+//-----------------------------------------------------------------------------
+void Adopt( const CMap &map, Solid_t &solid, bool bForeign )
+{
+	solid.m_Span = {};
+	solid.m_bChanged = false;
+	solid.m_bDeleted = false;
+	solid.m_bInHidden = false;
+	solid.m_Editor.m_Span = {};
+	for ( Side_t &side : solid.m_Sides )
+	{
+		side.m_Span = {};
+		if ( side.m_pDisp )
+		{
+			side.m_pDisp->m_Span = {};
+		}
+		if ( bForeign )
+		{
+			side.m_szMaterial = map.Store( std::string{ side.m_szMaterial } );
+			side.m_nMaterial = NEW_MATERIAL;
+		}
+	}
+	if ( bForeign && !solid.m_Editor.m_szComments.empty() )
+	{
+		solid.m_Editor.m_szComments = map.Store( std::string{ solid.m_Editor.m_szComments } );
+	}
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+void Adopt( const CMap &map, Entity_t &entity, bool bForeign )
+{
+	entity.m_Span = {};
+	entity.m_ConnectionsSpan = {};
+	entity.m_bConnectionsChanged = false;
+	entity.m_bDeleted = false;
+	entity.m_bInHidden = false;
+	entity.m_Editor.m_Span = {};
+	entity.m_Solids.clear();
+	std::erase_if( entity.m_Keys, []( const EntityKey_t &key ) { return key.m_bDeleted; } );
+	for ( EntityKey_t &key : entity.m_Keys )
+	{
+		key.m_Span = {};
+		key.m_bChanged = false;
+		if ( bForeign )
+		{
+			key.m_szKey = map.Store( std::string{ key.m_szKey } );
+			key.m_szValue = map.Store( std::string{ key.m_szValue } );
+		}
+	}
+	for ( Connection_t &connection : entity.m_Connections )
+	{
+		connection.m_Span = {};
+		if ( bForeign )
+		{
+			for ( std::string_view *pText : { &connection.m_szOutput, &connection.m_szTarget, &connection.m_szInput, &connection.m_szParameter } )
+			{
+				*pText = map.Store( std::string{ *pText } );
+			}
+		}
+	}
+	if ( bForeign && !entity.m_Editor.m_szComments.empty() )
+	{
+		entity.m_Editor.m_szComments = map.Store( std::string{ entity.m_Editor.m_szComments } );
+	}
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: The incoming objects added after the map's own, moved by transform, with ids of their
+//          own; their object numbers (as ApplyEdit gives them: entities, then solids) into pAdded.
+//-----------------------------------------------------------------------------
+MapEdit_t AddIncoming( const CScene &scene, Incoming_t incoming, const Transform_t &transform, bool bTextureLock, std::vector<std::uint32_t> *pAdded )
+{
+	const CMap &map = scene.m_Map;
+	MapEdit_t edit;
+	int nNextId = scene.m_nNextObjectId;
+	int nNextSide = scene.m_nNextSideId;
+	const auto nFirstEntity = static_cast<std::uint32_t>( map.m_Entities.size() );
+	const auto nFirstSolid = static_cast<std::uint32_t>( map.m_Solids.size() );
+	std::uint32_t nObject = scene.GetObjectCount();
+	std::vector<Entity_t> entities = std::move( incoming.m_Entities );
+	for ( Entity_t &entity : entities )
+	{
+		entity = TransformEntity( map, entity, transform );
+		entity.m_nId = nNextId++;
+		if ( pAdded )
+		{
+			pAdded->push_back( nObject++ );
+		}
+	}
+	for ( std::size_t i = 0; i < incoming.m_Solids.size(); i++ )
+	{
+		Solid_t solid = TransformSolid( incoming.m_Solids[ i ], transform, bTextureLock );
+		solid.m_bChanged = false;
+		solid.m_nId = nNextId++;
+		for ( Side_t &side : solid.m_Sides )
+		{
+			side.m_nId = nNextSide++;
+		}
+		const std::uint32_t nIndex = nFirstSolid + static_cast<std::uint32_t>( i );
+		if ( solid.m_nEntity >= 0 )
+		{
+			entities[ static_cast<std::size_t>( solid.m_nEntity ) ].m_Solids.push_back( nIndex );
+			solid.m_nEntity = static_cast<int>( nFirstEntity ) + solid.m_nEntity;
+		}
+		else
+		{
+			solid.m_nEntity = incoming.m_OwnersKept.empty() ? -1 : incoming.m_OwnersKept[ i ];
+		}
+		edit.m_Solids.emplace_back( nIndex, std::move( solid ) );
+	}
+	for ( std::size_t i = 0; i < entities.size(); i++ )
+	{
+		edit.m_Entities.emplace_back( nFirstEntity + static_cast<std::uint32_t>( i ), std::move( entities[ i ] ) );
+	}
+	for ( std::size_t i = 0; pAdded && i < incoming.m_Solids.size(); i++ )
+	{
+		pAdded->push_back( nObject++ );
+	}
+	return edit;
+}
+
+} // namespace
+
+//-----------------------------------------------------------------------------
+// Purpose: A solid of an entity that isn't copied with it stays with that entity (a brush picked
+//          out of a brush entity).
+//-----------------------------------------------------------------------------
+MapEdit_t CopyObjects( const CScene &scene, const std::vector<std::uint32_t> &objects, const Transform_t &transform, bool bTextureLock, std::vector<std::uint32_t> *pAdded )
+{
+	const ObjectSet_t set = ObjectsOf( scene, objects );
+	const CMap &map = scene.m_Map;
+	Incoming_t incoming;
+	for ( const std::uint32_t nEntity : set.m_Entities )
+	{
+		Entity_t entity = map.m_Entities[ nEntity ];
+		Adopt( map, entity, false );
+		incoming.m_Entities.push_back( std::move( entity ) );
+	}
+	for ( const std::uint32_t nSolid : set.m_Solids )
+	{
+		Solid_t solid = map.m_Solids[ nSolid ];
+		Adopt( map, solid, false );
+		const auto it = std::ranges::find( set.m_Entities, static_cast<std::uint32_t>( solid.m_nEntity ) );
+		const bool bWithEntity = solid.m_nEntity >= 0 && it != set.m_Entities.end();
+		incoming.m_OwnersKept.push_back( bWithEntity ? -1 : solid.m_nEntity );
+		solid.m_nEntity = bWithEntity ? static_cast<int>( it - set.m_Entities.begin() ) : -1;
+		incoming.m_Solids.push_back( std::move( solid ) );
+	}
+	return AddIncoming( scene, std::move( incoming ), transform, bTextureLock, pAdded );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+std::string ObjectsToText( const CScene &scene, const std::vector<std::uint32_t> &objects )
+{
+	const ObjectSet_t set = ObjectsOf( scene, objects );
+	const CMap &map = scene.m_Map;
+	const std::string szNewline{ map.GetNewline() };
+	std::string szText;
+	std::string szWorld;
+	for ( const std::uint32_t nSolid : set.m_Solids )
+	{
+		const Solid_t &solid = map.m_Solids[ nSolid ];
+		if ( solid.m_nEntity < 0 || std::ranges::find( set.m_Entities, static_cast<std::uint32_t>( solid.m_nEntity ) ) == set.m_Entities.end() )
+		{
+			szWorld += '\t' + WriteSolid( map, solid, "\t" ) + szNewline;
+		}
+	}
+	if ( !szWorld.empty() )
+	{
+		szText += "world" + szNewline + "{" + szNewline + "\t\"id\" \"1\"" + szNewline + "\t\"classname\" \"worldspawn\"" + szNewline + szWorld + "}" + szNewline;
+	}
+	for ( const std::uint32_t nEntity : set.m_Entities )
+	{
+		szText += WriteEntity( map, map.m_Entities[ nEntity ], {} ) + szNewline;
+	}
+	return szText;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Everything the text holds but its world's keys: the world's solids and the entities.
+//-----------------------------------------------------------------------------
+MapEdit_t ObjectsFromText( const CScene &scene, std::string_view szText, const Transform_t &transform, std::vector<std::uint32_t> *pAdded )
+{
+	const std::optional<CMap> clip = ReadVmf( std::vector<char>( szText.begin(), szText.end() ) );
+	if ( !clip )
+	{
+		return {};
+	}
+	const CMap &map = scene.m_Map;
+	Incoming_t incoming;
+	for ( const Entity_t &source : clip->m_Entities )
+	{
+		Entity_t entity = source;
+		Adopt( map, entity, true );
+		incoming.m_Entities.push_back( std::move( entity ) );
+	}
+	for ( const Solid_t &source : clip->m_Solids )
+	{
+		Solid_t solid = source;
+		Adopt( map, solid, true );
+		incoming.m_Solids.push_back( std::move( solid ) );
+	}
+	if ( incoming.m_Solids.empty() && incoming.m_Entities.empty() )
+	{
+		return {};
+	}
+	// Anything the clipboard map's names point at must outlive it.
+	return AddIncoming( scene, std::move( incoming ), transform, true, pAdded );
 }
 
 //-----------------------------------------------------------------------------

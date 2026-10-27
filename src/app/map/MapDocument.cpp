@@ -154,6 +154,38 @@ void CMapDocument::ApplyEditNow( const xv::map::MapEdit_t &edit )
 }
 
 //-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+void CMapDocument::Preview( const xv::map::MapEdit_t &edit )
+{
+	if ( !m_pScene )
+	{
+		return;
+	}
+	if ( !m_pPreviewBase )
+	{
+		m_pPreviewBase = m_pScene;
+	}
+	m_pScene = m_pPreviewBase;
+	ApplyEditNow( edit );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: The objects the preview changed are drawn again as they were.
+//-----------------------------------------------------------------------------
+void CMapDocument::EndPreview()
+{
+	if ( !m_pPreviewBase )
+	{
+		return;
+	}
+	const std::vector<std::uint32_t> changed = m_pScene->m_Changed;
+	m_pScene = std::move( m_pPreviewBase );
+	m_nStateGeneration++;
+	emit SceneEdited( changed );
+}
+
+//-----------------------------------------------------------------------------
 // Purpose: Through a temporary file, so a failed write leaves the map as it was.
 //-----------------------------------------------------------------------------
 bool CMapDocument::Save( const std::filesystem::path &path, QString *pError )

@@ -478,6 +478,9 @@ QWidget *CPreferencesDialog::BuildMapsPage()
 		pLayout->addWidget( check( QStringLiteral( "preferencesMapSkybox3D" ), tr( "Draw the 3D skybox" ), current.m_bSkybox3D, []( MapPreferences_t &p, bool b ) { p.m_bSkybox3D = b; } ) );
 		pLayout->addWidget( check( QStringLiteral( "preferencesMapSprites" ), tr( "Draw sprites (else entities' boxes)" ), current.m_bSprites, []( MapPreferences_t &p, bool b ) { p.m_bSprites = b; } ) );
 		pLayout->addWidget( check( QStringLiteral( "preferencesMapWireframeModels" ), tr( "Draw models' edges in the wireframe view" ), current.m_bWireframeModels, []( MapPreferences_t &p, bool b ) { p.m_bWireframeModels = b; } ) );
+		pLayout->addSpacing( 12 );
+		pLayout->addWidget( check( QStringLiteral( "preferencesMapArrowsNudge" ), tr( "Arrow keys move the selection (in the 2D views)" ), current.m_bArrowsNudge, []( MapPreferences_t &p, bool b ) { p.m_bArrowsNudge = b; } ) );
+		pLayout->addWidget( check( QStringLiteral( "preferencesMapTextureLock" ), tr( "Texture lock on when a map opens" ), current.m_bTextureLock, []( MapPreferences_t &p, bool b ) { p.m_bTextureLock = b; } ) );
 		pLayout->addStretch();
 	}
 

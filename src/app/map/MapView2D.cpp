@@ -891,7 +891,7 @@ void CMapView2D::PaintSelection( QPainter &painter ) const
 			painter.drawText( QPointF{ box.left() - metrics.horizontalAdvance( szHeight ) - 10.0, box.center().y() + metrics.ascent() / 2.0 }, szHeight );
 		}
 	}
-	if ( m_BoxFrom && m_PressAt != QPoint{} )
+	if ( m_BoxFrom && m_PressAt != QPoint{} && !m_pMoveScene )
 	{
 		const QPointF now = mapFromGlobal( QCursor::pos() );
 		dotted( QRectF{ ToWidget( *m_BoxFrom ), now }.normalized() );
@@ -1105,7 +1105,70 @@ void CMapView2D::mousePressEvent( QMouseEvent *pEvent )
 	{
 		m_PressAt = pEvent->position().toPoint();
 		m_BoxFrom = ToMap( at );
+		// Inside the selection's box: a drag moves the selection (Hammer's selection tool).
+		const xv::map::Box_t bounds = GetDocument().GetSelectionBounds();
+		if ( !bounds.IsEmpty() && nTool == MapTool_t::MAP_TOOL_SELECT )
+		{
+			const double flSlack = 2.0 / m_flZoom;
+			const QRectF box = QRectF{ Flatten( bounds.m_Mins ), Flatten( bounds.m_Maxs ) }.normalized().adjusted( -flSlack, -flSlack, flSlack, flSlack );
+			if ( box.contains( ToMap( at ) ) )
+			{
+				m_MoveFrom = ToMap( at );
+				m_MoveCorner = Flatten( bounds.m_Mins );
+			}
+		}
 	}
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: How far a drag that began at m_MoveFrom moves the selection: snapped so the selection's
+//          lowest corner lands on the grid (Alt moves freely), along the view's two axes.
+//-----------------------------------------------------------------------------
+xv::map::Point_t CMapView2D::DragOffset( QPointF at, Qt::KeyboardModifiers modifiers ) const
+{
+	QPointF delta = ToMap( at ) - *m_MoveFrom;
+	const MapViewSettings_t &settings = m_Editor.GetSettings();
+	if ( settings.m_bSnapToGrid && !modifiers.testFlag( Qt::AltModifier ) )
+	{
+		const auto flGrid = static_cast<double>( settings.m_nGridSize );
+		const QPointF corner = m_MoveCorner + delta;
+		delta = QPointF{ std::round( corner.x() / flGrid ) * flGrid, std::round( corner.y() / flGrid ) * flGrid } - m_MoveCorner;
+	}
+	xv::map::Point_t offset{};
+	offset[ static_cast<std::size_t>( GetAxis( 0 ) ) ] = delta.x();
+	offset[ static_cast<std::size_t>( GetAxis( 1 ) ) ] = delta.y();
+	return offset;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: The drag's move shown as it goes: the selection itself, or with Shift a copy of it.
+//-----------------------------------------------------------------------------
+void CMapView2D::PreviewMove( QPointF at, Qt::KeyboardModifiers modifiers )
+{
+	CMapDocument &document = GetDocument();
+	if ( !m_pMoveScene )
+	{
+		m_pMoveScene = document.GetSharedScene();
+		m_MoveSelection = document.GetSelection();
+	}
+	xv::map::Transform_t move;
+	move.m_Offset = DragOffset( at, modifiers );
+	const bool bLock = m_Editor.GetSettings().m_bTextureLock;
+	document.Preview( modifiers.testFlag( Qt::ShiftModifier ) ? xv::map::CopyObjects( *m_pMoveScene, m_MoveSelection, move, bLock, nullptr ) : xv::map::TransformObjects( *m_pMoveScene, m_MoveSelection, move, bLock ) );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: A drag's move given up (Esc): the scene as it was.
+//-----------------------------------------------------------------------------
+void CMapView2D::CancelMove()
+{
+	if ( m_pMoveScene )
+	{
+		GetDocument().EndPreview();
+	}
+	m_pMoveScene.reset();
+	m_MoveSelection.clear();
+	m_MoveFrom.reset();
 }
 
 //-----------------------------------------------------------------------------
@@ -1119,6 +1182,11 @@ void CMapView2D::mouseMoveEvent( QMouseEvent *pEvent )
 		const QPoint delta = pEvent->position().toPoint() - *m_PanFrom;
 		m_PanFrom = pEvent->position().toPoint();
 		SetCenter( m_Center + QPointF{ -delta.x() / m_flZoom, delta.y() / m_flZoom } );
+		return;
+	}
+	if ( m_MoveFrom && ( pEvent->buttons() & Qt::LeftButton ) && ( m_pMoveScene || ( pEvent->position().toPoint() - m_PressAt ).manhattanLength() >= DRAG_THRESHOLD ) )
+	{
+		PreviewMove( pEvent->position(), pEvent->modifiers() );
 		return;
 	}
 	if ( m_BoxFrom )
@@ -1142,6 +1210,21 @@ void CMapView2D::mouseReleaseEvent( QMouseEvent *pEvent )
 	{
 		return;
 	}
+	if ( m_pMoveScene )
+	{
+		// The drag's move, as one step to undo; Shift held as it ends makes it a copy.
+		const xv::map::Point_t offset = DragOffset( pEvent->position(), pEvent->modifiers() );
+		CancelMove();
+		if ( offset != xv::map::Point_t{} )
+		{
+			m_Editor.MoveSelection( offset, pEvent->modifiers().testFlag( Qt::ShiftModifier ) );
+		}
+		m_BoxFrom.reset();
+		m_PressAt = {};
+		update();
+		return;
+	}
+	m_MoveFrom.reset();
 	CMapDocument &document = GetDocument();
 	const QPoint moved = pEvent->position().toPoint() - m_PressAt;
 	const bool bControl = pEvent->modifiers().testFlag( Qt::ControlModifier );
@@ -1245,6 +1328,49 @@ void CMapView2D::ReportCursor( QPointF at )
 bool CMapView2D::Run( MapAction_t nAction )
 {
 	const double flStep = Look().m_nScrollStep / m_flZoom;
+	// The arrows nudge the selection a grid step along the view's axes (with Shift, a copy).
+	auto nudge = [ this ]( int nRight, int nUp, bool bClone ) {
+		const auto flGrid = static_cast<double>( m_Editor.GetSettings().m_nGridSize );
+		xv::map::Point_t offset{};
+		offset[ static_cast<std::size_t>( GetAxis( 0 ) ) ] = nRight * flGrid;
+		offset[ static_cast<std::size_t>( GetAxis( 1 ) ) ] = nUp * flGrid;
+		m_Editor.MoveSelection( offset, bClone );
+		return true;
+	};
+	const bool bNudge = Look().m_bArrowsNudge && !GetDocument().GetSelection().empty();
+	switch ( nAction )
+	{
+		case MapAction_t::MAP_ACTION_SCROLL_UP:
+			if ( bNudge )
+			{
+				return nudge( 0, 1, false );
+			}
+			break;
+		case MapAction_t::MAP_ACTION_SCROLL_DOWN:
+			if ( bNudge )
+			{
+				return nudge( 0, -1, false );
+			}
+			break;
+		case MapAction_t::MAP_ACTION_SCROLL_LEFT:
+			if ( bNudge )
+			{
+				return nudge( -1, 0, false );
+			}
+			break;
+		case MapAction_t::MAP_ACTION_SCROLL_RIGHT:
+			if ( bNudge )
+			{
+				return nudge( 1, 0, false );
+			}
+			break;
+		case MapAction_t::MAP_ACTION_CLONE_UP: return nudge( 0, 1, true );
+		case MapAction_t::MAP_ACTION_CLONE_DOWN: return nudge( 0, -1, true );
+		case MapAction_t::MAP_ACTION_CLONE_LEFT: return nudge( -1, 0, true );
+		case MapAction_t::MAP_ACTION_CLONE_RIGHT: return nudge( 1, 0, true );
+		default:
+			break;
+	}
 	switch ( nAction )
 	{
 		case MapAction_t::MAP_ACTION_NEXT_AXIS:
@@ -1281,6 +1407,13 @@ bool CMapView2D::Run( MapAction_t nAction )
 			}
 			return false;
 		case MapAction_t::MAP_ACTION_ESCAPE:
+			if ( m_pMoveScene )
+			{
+				CancelMove();
+				m_BoxFrom.reset();
+				update();
+				return true;
+			}
 			if ( m_PendingBox || m_BoxFrom )
 			{
 				m_PendingBox.reset();
