@@ -396,6 +396,7 @@ void CRasterizer::FillTriangle( const ScreenVertex_t &a, const ScreenVertex_t &b
 	ShadeInput_t input;
 	input.m_bSelected = ( nFlags & RASTER_OBJECT_SELECTED ) != 0;
 	input.m_bInstance = ( nFlags & RASTER_OBJECT_INSTANCE ) != 0;
+	input.m_bInvalid = ( nFlags & RASTER_OBJECT_INVALID ) != 0;
 	if ( nObject < m_Scene.m_ObjectColors.size() )
 	{
 		const auto &color = m_Scene.m_ObjectColors[ nObject ];
@@ -691,8 +692,9 @@ void CRasterizer::Run()
 			{
 				continue;
 			}
-			const bool bSelected = ( nFlags & RASTER_OBJECT_SELECTED ) != 0;
-			if ( bWireframe && !bSelected )
+			// Selected and broken solids' edges come later, over everything.
+			const bool bLater = ( nFlags & RASTER_OBJECT_INVALID ) != 0 || ( m_Options.m_bSelectionEdges && ( nFlags & RASTER_OBJECT_SELECTED ) != 0 );
+			if ( bWireframe && !bLater )
 			{
 				const std::array<std::uint8_t, 3> color = a.m_nObject < m_Scene.m_LineColors.size() ? m_Scene.m_LineColors[ a.m_nObject ] : std::array<std::uint8_t, 3>{ 255, 255, 255 };
 				AddLine( ToPoint( a.m_vecPosition ), ToPoint( b.m_vecPosition ), color, true );
@@ -706,7 +708,21 @@ void CRasterizer::Run()
 			AddLine( line.m_From, line.m_To, line.m_Color, false );
 		}
 	}
-	// The selection's edges, over everything (Hammer++'s SelectionNoZ).
+	// Broken solids' edges, then the selection's, over everything (Hammer++'s DrawInvalidSolid
+	// and SelectionNoZ).
+	for ( const CMapMesh *pMesh : m_Scene.m_Meshes )
+	{
+		for ( std::size_t i = 0; i + 1 < pMesh->m_Lines.size(); i += 2 )
+		{
+			const MeshVertex_t &a = pMesh->m_Vertices[ pMesh->m_Lines[ i ] ];
+			const std::uint8_t nFlags = FlagsOf( a.m_nObject );
+			const bool bSelected = m_Options.m_bSelectionEdges && ( nFlags & RASTER_OBJECT_SELECTED ) != 0;
+			if ( ( nFlags & RASTER_OBJECT_SHOWN ) != 0 && ( nFlags & RASTER_OBJECT_INVALID ) != 0 && !bSelected )
+			{
+				AddLine( ToPoint( a.m_vecPosition ), ToPoint( pMesh->m_Vertices[ pMesh->m_Lines[ i + 1 ] ].m_vecPosition ), m_Options.m_InvalidEdge, true );
+			}
+		}
+	}
 	for ( const CMapMesh *pMesh : m_Scene.m_Meshes )
 	{
 		for ( std::size_t i = 0; m_Options.m_bSelectionEdges && i + 1 < pMesh->m_Lines.size(); i += 2 )

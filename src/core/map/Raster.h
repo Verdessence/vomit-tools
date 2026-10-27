@@ -68,6 +68,7 @@ struct RasterOptions_t
 	bool m_bToolTextures = true;
 	bool m_bSelectionEdges = true;
 	std::array<std::uint8_t, 3> m_SelectionEdge{ 255, 255, 0 };
+	std::array<std::uint8_t, 3> m_InvalidEdge{ 255, 0, 0 }; // broken solids' edges, over everything
 	// The 3D skybox, drawn first from here (map::SkyboxCamera): its objects behind everything,
 	// showing where the world's sky faces are, as the game shows it. Textured views only.
 	std::optional<CViewCamera> m_SkyboxCamera;

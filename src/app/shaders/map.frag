@@ -15,13 +15,14 @@ layout(location = 0) out vec4 fragColor;
 layout(std140, binding = 0) uniform Frame {
 	mat4 viewProjection;
 	vec4 eye;
-	vec4 mode;          // draw mode, selection tint, darker luxels, lines: 1 for the selection only
+	vec4 mode;          // draw mode, selection tint, darker luxels, 1 when the selection's edges show
 	vec4 selection;     // rgb
 	vec4 selectionEdge; // rgb
 	vec4 faceShade;     // xyz
 	vec4 state;         // the state texture's width
 	vec4 instance;      // rgb, and how much of it func_instances' contents take
 	vec4 pass;          // 1: the 3D skybox, drawn from its own camera first
+	vec4 invalid;       // rgb, and how much of it broken solids' faces take
 } frame;
 
 layout(std140, binding = 1) uniform Material {
@@ -135,6 +136,9 @@ void main() {
 	int flags = int(v_state.a * 255.0 + 0.5);
 	if ((flags & 8) != 0) {
 		color.rgb = mix(color.rgb, frame.instance.rgb, frame.instance.a);
+	}
+	if ((flags & 4) != 0) {
+		color.rgb = mix(color.rgb, frame.invalid.rgb, frame.invalid.a);
 	}
 	if ((flags & 2) != 0) {
 		color.rgb = mix(color.rgb, frame.selection.rgb, frame.mode.y);

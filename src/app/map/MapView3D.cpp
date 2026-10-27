@@ -245,6 +245,9 @@ MapFrame_t CMapView3D::MakeFrame( QSize size )
 	options.m_Shade.m_flInstanceTint = static_cast<float>( preferences.m_flInstanceTint );
 	options.m_Background = bytes( colors.m_Background3D );
 	options.m_SelectionEdge = bytes( colors.m_SelectionEdge3D );
+	options.m_Shade.m_vecInvalid = vector( colors.m_Invalid );
+	options.m_Shade.m_flInvalidTint = static_cast<float>( preferences.m_flInvalidTint );
+	options.m_InvalidEdge = bytes( colors.m_Invalid );
 	MapFrame_t frame = m_Editor.GetRenderData().Snapshot( camera, options, m_Editor.GetSettings() );
 	frame.m_bModelEdges = preferences.m_bWireframeModels;
 	return frame;

@@ -32,6 +32,7 @@ struct FrameUniforms_t
 	float m_State[ 4 ];
 	float m_Instance[ 4 ];
 	float m_Pass[ 4 ];
+	float m_Invalid[ 4 ];
 };
 
 struct MaterialUniforms_t
@@ -620,6 +621,7 @@ void CMapRenderer::Render( QRhiCommandBuffer *pCommands, QRhiRenderTarget *pTarg
 		uniforms.m_Mode[ 0 ] = static_cast<float>( static_cast<int>( shade.m_nMode ) );
 		uniforms.m_Mode[ 1 ] = shade.m_flSelectionTint;
 		uniforms.m_Mode[ 2 ] = shade.m_flLuxelShade;
+		uniforms.m_Mode[ 3 ] = frame.m_Options.m_bSelectionEdges ? 1.0f : 0.0f;
 		uniforms.m_Selection[ 0 ] = shade.m_vecSelection.m_flX;
 		uniforms.m_Selection[ 1 ] = shade.m_vecSelection.m_flY;
 		uniforms.m_Selection[ 2 ] = shade.m_vecSelection.m_flZ;
@@ -636,6 +638,10 @@ void CMapRenderer::Render( QRhiCommandBuffer *pCommands, QRhiRenderTarget *pTarg
 		uniforms.m_Instance[ 2 ] = shade.m_vecInstance.m_flZ;
 		uniforms.m_Instance[ 3 ] = shade.m_flInstanceTint;
 		uniforms.m_Pass[ 0 ] = bSkyPass ? 1.0f : 0.0f;
+		uniforms.m_Invalid[ 0 ] = shade.m_vecInvalid.m_flX;
+		uniforms.m_Invalid[ 1 ] = shade.m_vecInvalid.m_flY;
+		uniforms.m_Invalid[ 2 ] = shade.m_vecInvalid.m_flZ;
+		uniforms.m_Invalid[ 3 ] = shade.m_flInvalidTint;
 		return uniforms;
 	};
 	const FrameUniforms_t world = uniformsFor( frame.m_Camera, false );
@@ -744,7 +750,7 @@ void CMapRenderer::Render( QRhiCommandBuffer *pCommands, QRhiRenderTarget *pTarg
 	{
 		faces( frame.m_Camera, false );
 	}
-	// Edges: the wireframe's, then the selection's over everything.
+	// Edges: the wireframe's, then broken solids' and the selection's over everything.
 	auto edges = [ & ]( Material_t &material, bool bWireframe ) {
 		pCommands->setGraphicsPipeline( m_pLines.get() );
 		bind( material.m_pBindings.get() );
@@ -765,10 +771,7 @@ void CMapRenderer::Render( QRhiCommandBuffer *pCommands, QRhiRenderTarget *pTarg
 	{
 		edges( m_LinesAll, true );
 	}
-	if ( frame.m_Options.m_bSelectionEdges )
-	{
-		edges( m_LinesSelected, false );
-	}
+	edges( m_LinesSelected, false );
 	if ( bSky )
 	{
 		pCommands->setGraphicsPipeline( m_pAlpha.get() );

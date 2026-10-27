@@ -21,13 +21,14 @@ layout(location = 5) out vec3 v_world;
 layout(std140, binding = 0) uniform Frame {
 	mat4 viewProjection;
 	vec4 eye;
-	vec4 mode;          // draw mode, selection tint, darker luxels, lines: 1 for the selection only
+	vec4 mode;          // draw mode, selection tint, darker luxels, 1 when the selection's edges show
 	vec4 selection;     // rgb
 	vec4 selectionEdge; // rgb
 	vec4 faceShade;     // xyz
 	vec4 state;         // the state texture's width
 	vec4 instance;      // rgb, and how much of it func_instances' contents take
 	vec4 pass;          // 1: the 3D skybox, drawn from its own camera first
+	vec4 invalid;       // rgb, and how much of it broken solids' faces take
 } frame;
 
 layout(binding = 4) uniform sampler2D stateTexture;

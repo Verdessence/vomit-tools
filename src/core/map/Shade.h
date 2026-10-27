@@ -95,6 +95,7 @@ struct ShadeInput_t
 	CVec3 m_vecDirection{ 1, 0, 0 };           // from the eye to the point (for the sky)
 	bool m_bSelected = false;
 	bool m_bInstance = false;                  // a func_instance's: tinted
+	bool m_bInvalid = false;                   // a broken solid's: tinted
 };
 
 struct ShadeOptions_t
@@ -104,6 +105,8 @@ struct ShadeOptions_t
 	float m_flSelectionTint = 0.5f;
 	CVec3 m_vecInstance{ 1.0f, 140.0f / 255.0f, 0.0f }; // the Func_instance article's orange tint
 	float m_flInstanceTint = 0.35f;
+	CVec3 m_vecInvalid{ 1.0f, 0.0f, 0.0f };    // broken solids' faces go this far toward red (Hammer++)
+	float m_flInvalidTint = 0.5f;
 	CVec3 m_vecFaceShade{ 0.65f, 0.8f, 1.0f }; // brightness of faces facing along x, y and z
 	float m_flLuxelShade = 0.75f;              // the lightmap grid's darker squares
 	const sky::CCube *m_pSky = nullptr;        // Hammer++'s 2D skybox on sky faces; null: none
