@@ -25,6 +25,7 @@
 #include "map/MapConstants.h"
 #include "map/MapPanes.h"
 #include "map/MapView2D.h"
+#include "map/MapView3D.h"
 
 namespace
 {
@@ -99,6 +100,7 @@ CMapEditor::CMapEditor( const QString &szPath, bool bFromGame, QWidget *pParent 
 {
 	setObjectName( QStringLiteral( "mapEditor" ) );
 	m_pDocument = new CMapDocument( this );
+	m_pRenderData = std::make_unique<CMapRenderData>( *m_pDocument );
 
 	auto *pLayout = new QVBoxLayout( this );
 	pLayout->setContentsMargins( 0, 0, 0, 0 );
@@ -207,6 +209,10 @@ CMapEditor::CMapEditor( const QString &szPath, bool bFromGame, QWidget *pParent 
 	auto repaint = [ this ] {
 		for ( CMapView *pView : GetViews() )
 		{
+			if ( auto *p3D = qobject_cast<CMapView3D *>( pView ) )
+			{
+				p3D->Redraw();
+			}
 			pView->update();
 		}
 		UpdateStatus();
@@ -222,6 +228,11 @@ CMapEditor::CMapEditor( const QString &szPath, bool bFromGame, QWidget *pParent 
 CMapEditor::~CMapEditor()
 {
 	StopWork();
+	// The views first, while everything they report to is still here.
+	delete m_pSplitter;
+	m_pSplitter = nullptr;
+	m_Panes = {};
+	m_pActiveView = nullptr;
 }
 
 //-----------------------------------------------------------------------------
@@ -305,6 +316,10 @@ void CMapEditor::Loaded()
 		{
 			p2D->Rebuild();
 			p2D->Fit();
+		}
+		else if ( auto *p3D = qobject_cast<CMapView3D *>( pView ) )
+		{
+			p3D->ResetCamera();
 		}
 		pView->update();
 	}
@@ -477,6 +492,10 @@ void CMapEditor::SettingsChanged()
 {
 	for ( CMapView *pView : GetViews() )
 	{
+		if ( auto *p3D = qobject_cast<CMapView3D *>( pView ) )
+		{
+			p3D->Redraw();
+		}
 		pView->update();
 	}
 	UpdateStatus();
@@ -663,4 +682,33 @@ void CMapEditor::StopWork()
 void CMapEditor::GameChanged( const xv::vfs::CGameInfo *pGame )
 {
 	m_pDocument->SetGame( pGame ? std::optional<xv::vfs::CGameInfo>{ *pGame } : std::nullopt );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+std::optional<xv::map::CViewCamera> CMapEditor::GetCamera() const
+{
+	for ( CMapView *pView : GetViews() )
+	{
+		if ( const auto *p3D = qobject_cast<const CMapView3D *>( pView ) )
+		{
+			return p3D->GetCamera();
+		}
+	}
+	return std::nullopt;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: The 2D views draw the camera, so they follow it.
+//-----------------------------------------------------------------------------
+void CMapEditor::CameraMoved( CMapView *pView )
+{
+	for ( CMapView *pOther : GetViews() )
+	{
+		if ( pOther != pView && Is2DView( pOther->GetType() ) )
+		{
+			pOther->update();
+		}
+	}
 }

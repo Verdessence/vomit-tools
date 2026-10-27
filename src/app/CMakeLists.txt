@@ -150,6 +150,8 @@ add_library(vomit_tools_ui STATIC
         map/MapKeys.h
         map/MapPanes.cpp
         map/MapPanes.h
+        map/MapRenderData.cpp
+        map/MapRenderData.h
         map/MapView.cpp
         map/MapView.h
         map/MapView2D.cpp

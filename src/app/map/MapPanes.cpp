@@ -82,7 +82,9 @@ void CMapPane::SetType( MapViewType_t nType )
 	}
 	else
 	{
+		// Cleared first: a new view's constructor already asks the editor for the panes' views.
 		delete m_pView;
+		m_pView = nullptr;
 		m_pView = Is2DView( nType ) ? static_cast<CMapView *>( new CMapView2D( m_Editor, nType, this ) ) : static_cast<CMapView *>( new CMapView3D( m_Editor, nType, this ) );
 		m_pView->setGeometry( rect() );
 		m_pView->show();

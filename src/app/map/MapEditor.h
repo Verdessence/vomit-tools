@@ -9,12 +9,15 @@
 #pragma once
 
 #include <array>
+#include <memory>
+#include <optional>
 #include <vector>
 
 #include <QWidget>
 
 #include "EditorTab.h"
 #include "map/MapDocument.h"
+#include "map/MapRenderData.h"
 #include "map/MapView.h"
 
 class CMapPane;
@@ -43,6 +46,9 @@ public:
 	[[nodiscard]] CMapPane *GetPane( int nIndex ) const;
 	[[nodiscard]] std::vector<CMapView *> GetViews() const;
 	[[nodiscard]] CMapView *GetActiveView() const { return m_pActiveView; }
+	[[nodiscard]] CMapRenderData &GetRenderData() { return *m_pRenderData; }
+	// Where the 3D camera is, for the 2D views to draw it (the first 3D pane's).
+	[[nodiscard]] std::optional<xv::map::CViewCamera> GetCamera() const;
 
 	// What the views report and ask for.
 	bool RunAction( MapAction_t nAction, CMapView *pFrom );
@@ -50,6 +56,7 @@ public:
 	void ViewTypeChanged( CMapView *pView );
 	void ShowCursor( const QString &szAt );
 	void ShowZoom( double flZoom );
+	void CameraMoved( CMapView *pView );
 
 	// IEditorTab
 	[[nodiscard]] QString GetTabTitle() const override;
@@ -70,6 +77,7 @@ private:
 	[[nodiscard]] CMapPane *PaneOf( const CMapView *pView ) const;
 
 	CMapDocument *m_pDocument = nullptr;
+	std::unique_ptr<CMapRenderData> m_pRenderData;
 	QString m_szPath;
 	bool m_bFromGame = false;
 	MapViewSettings_t m_Settings;

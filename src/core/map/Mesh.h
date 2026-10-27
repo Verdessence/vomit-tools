@@ -27,6 +27,7 @@ struct MeshVertex_t
 	CVec3 m_vecPosition;
 	CVec3 m_vecNormal;
 	std::array<float, 2> m_Texel{}; // texture position in texels; divide by the texture's size
+	std::array<float, 2> m_Luxel{}; // lightmap position in luxels (the side's lightmap scale)
 	float m_flAlpha = 0.0f;         // displacements: how much of the second texture shows
 	std::uint32_t m_nObject = 0;    // the solid it belongs to
 };

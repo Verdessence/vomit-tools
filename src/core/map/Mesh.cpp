@@ -43,6 +43,9 @@ MeshVertex_t MakeVertex( Point_t position, Point_t normal, Point_t textured, con
 	vertex.m_vecNormal = ToVec3( normal );
 	const std::array<double, 2> texel = TexelCoord( textured, side.m_UAxis, side.m_VAxis );
 	vertex.m_Texel = { static_cast<float>( texel[ 0 ] ), static_cast<float>( texel[ 1 ] ) };
+	// Lightmaps run along the texture's axes, a luxel every lightmapscale units.
+	const double flScale = std::max( side.m_nLightmapScale, 1 );
+	vertex.m_Luxel = { static_cast<float>( Dot( textured, Normalized( side.m_UAxis.m_Axis ) ) / flScale ), static_cast<float>( Dot( textured, Normalized( side.m_VAxis.m_Axis ) ) / flScale ) };
 	vertex.m_flAlpha = flAlpha;
 	vertex.m_nObject = nObject;
 	return vertex;
