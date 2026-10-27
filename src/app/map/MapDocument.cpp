@@ -11,9 +11,14 @@
 #include <set>
 #include <unordered_map>
 
+#include <QFile>
+#include <QSaveFile>
+#include <QUndoStack>
+
 #include "kv1/Kv1.h"
 #include "map/GameConfig.h"
 #include "map/Vmf.h"
+#include "map/Write.h"
 
 namespace
 {
@@ -52,14 +57,133 @@ std::optional<std::filesystem::path> InstancePath( const xv::vfs::CGameInfo &gam
 	return game.m_GameDir / std::filesystem::path{ pPath->GetValue() };
 }
 
+// One edit on the undo stack: the objects as the edit makes them, and as they were.
+class CMapEditCommand : public QUndoCommand
+{
+public:
+	CMapEditCommand( CMapDocument &document, xv::map::MapEdit_t forward, xv::map::MapEdit_t back, std::vector<std::uint32_t> selectionBefore, std::optional<std::vector<std::uint32_t>> selectionAfter, const QString &szName )
+		: QUndoCommand( szName ),
+		  m_Document( document ),
+		  m_Forward( std::move( forward ) ),
+		  m_Back( std::move( back ) ),
+		  m_SelectionBefore( std::move( selectionBefore ) ),
+		  m_SelectionAfter( std::move( selectionAfter ) )
+	{
+	}
+
+	void redo() override
+	{
+		m_Document.ApplyEditNow( m_Forward );
+		if ( m_SelectionAfter )
+		{
+			m_Document.SetSelection( *m_SelectionAfter );
+		}
+	}
+
+	void undo() override
+	{
+		m_Document.ApplyEditNow( m_Back );
+		m_Document.SetSelection( m_SelectionBefore );
+	}
+
+private:
+	CMapDocument &m_Document;
+	xv::map::MapEdit_t m_Forward;
+	xv::map::MapEdit_t m_Back;
+	std::vector<std::uint32_t> m_SelectionBefore;
+	std::optional<std::vector<std::uint32_t>> m_SelectionAfter;
+};
+
 } // namespace
 
 //-----------------------------------------------------------------------------
 // Purpose:
 //-----------------------------------------------------------------------------
 CMapDocument::CMapDocument( QObject *pParent )
-	: QObject( pParent )
+	: QObject( pParent ),
+	  m_pUndo( new QUndoStack( this ) )
 {
+	connect( m_pUndo, &QUndoStack::cleanChanged, this, [ this ]( bool bClean ) { emit ModifiedChanged( !bClean ); } );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+bool CMapDocument::IsModified() const
+{
+	return !m_pUndo->isClean();
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+void CMapDocument::Edit( xv::map::MapEdit_t edit, const QString &szName, std::optional<std::vector<std::uint32_t>> selectAfter )
+{
+	if ( !m_pScene || edit.IsEmpty() )
+	{
+		return;
+	}
+	xv::map::MapEdit_t back = xv::map::InverseOf( *m_pScene, edit );
+	m_pUndo->push( new CMapEditCommand( *this, std::move( edit ), std::move( back ), m_Selection, std::move( selectAfter ), szName ) );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: The new snapshot, and the views' state for the objects it adds (shown, as new
+//          objects are) or deletes (no longer selected).
+//-----------------------------------------------------------------------------
+void CMapDocument::ApplyEditNow( const xv::map::MapEdit_t &edit )
+{
+	if ( !m_pScene )
+	{
+		return;
+	}
+	std::shared_ptr<const xv::map::CScene> pScene = xv::map::ApplyEdit( *m_pScene, edit );
+	const std::uint32_t nObjects = pScene->GetObjectCount();
+	for ( std::uint32_t n = static_cast<std::uint32_t>( m_UserShown.size() ); n < nObjects; n++ )
+	{
+		const xv::map::EditorInfo_t &editor = pScene->GetObjectEditor( n );
+		m_UserShown.push_back( editor.m_bVisgroupShown ? 1 : 0 );
+		m_AutoShown.push_back( editor.m_bAutoShown ? 1 : 0 );
+		m_QuickHidden.push_back( 0 );
+	}
+	m_pScene = std::move( pScene );
+	std::erase_if( m_Selection, [ this ]( std::uint32_t n ) { return m_pScene->IsDeleted( n ); } );
+	m_nStateGeneration++;
+	emit SceneEdited( m_pScene->m_Changed );
+	emit SelectionChanged();
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Through a temporary file, so a failed write leaves the map as it was.
+//-----------------------------------------------------------------------------
+bool CMapDocument::Save( const std::filesystem::path &path, QString *pError )
+{
+	if ( !m_pScene )
+	{
+		return false;
+	}
+	const std::string szText = xv::map::WriteVmf( m_pScene->m_Map );
+	const QString szPath = QString::fromStdString( path.string() );
+	if ( QFile::exists( szPath ) )
+	{
+		// Hammer's backup of the map as it was before this save.
+		std::filesystem::path backup = path;
+		backup.replace_extension( ".vmx" );
+		const QString szBackup = QString::fromStdString( backup.string() );
+		QFile::remove( szBackup );
+		QFile::copy( szPath, szBackup );
+	}
+	QSaveFile file( szPath );
+	if ( !file.open( QIODevice::WriteOnly ) || file.write( szText.data(), static_cast<qint64>( szText.size() ) ) != static_cast<qint64>( szText.size() ) || !file.commit() )
+	{
+		if ( pError )
+		{
+			*pError = file.errorString();
+		}
+		return false;
+	}
+	m_pUndo->setClean();
+	return true;
 }
 
 //-----------------------------------------------------------------------------
@@ -180,6 +304,7 @@ void CMapDocument::Finish( std::shared_ptr<xv::map::CScene> pScene, QString szFg
 		m_AutoShown[ i ] = editor.m_bAutoShown ? 1 : 0;
 	}
 	m_Selection.clear();
+	m_pUndo->clear();
 	m_pScene = std::move( pScene );
 	m_nStateGeneration++;
 	emit Loaded();

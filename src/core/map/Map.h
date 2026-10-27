@@ -236,8 +236,9 @@ public:
 	// The entity that owns a solid, or the world.
 	[[nodiscard]] const Entity_t &GetOwner( const Solid_t &solid ) const { return solid.m_nEntity < 0 ? m_World : m_Entities[ static_cast<std::size_t>( solid.m_nEntity ) ]; }
 	[[nodiscard]] bool HasErrors() const;
-	// Keeps a string for as long as the map lives (edited keys and materials point into it).
-	[[nodiscard]] std::string_view Store( std::string szText );
+	// Keeps a string for as long as the map lives (edited keys and materials point into it). The
+	// store is every copy's, so a const copy can add to it (only the thread that edits does).
+	[[nodiscard]] std::string_view Store( std::string szText ) const;
 	// A material's index in m_Materials, added if it is new.
 	[[nodiscard]] std::uint32_t FindMaterial( std::string_view szName );
 	// The text's line ending ("\r\n" as Hammer writes, or "\n").

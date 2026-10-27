@@ -114,7 +114,7 @@ std::vector<TraceHit_t> TraceScene( const RasterScene_t &scene, bool bToolTextur
 			for ( std::uint32_t i = batch.m_nFirstIndex; i < batch.m_nFirstIndex + batch.m_nIndexCount; i += 3 )
 			{
 				const MeshVertex_t &a = mesh.m_Vertices[ mesh.m_Indices[ i ] ];
-				if ( a.m_nObject < scene.m_ObjectFlags.size() && ( scene.m_ObjectFlags[ a.m_nObject ] & RASTER_OBJECT_SHOWN ) == 0 )
+				if ( a.m_nObject < scene.m_ObjectFlags.size() && !IsDrawn( scene, &mesh, scene.m_ObjectFlags[ a.m_nObject ] ) )
 				{
 					continue;
 				}

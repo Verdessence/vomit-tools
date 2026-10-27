@@ -62,11 +62,24 @@ public:
 	// How far the map may reach on each axis: the FGD's @mapsize (Source's 16384 without one).
 	double m_flWorldLimit = 16384.0;
 	std::vector<ObjectRef_t> m_Objects;         // by object number
+	// Edits (map/Edit.h): the solids drawn from the edit mesh rather than the mesh as read (sorted
+	// solid indices), how many edits made this snapshot, and the objects the last one changed.
+	std::shared_ptr<const CMapMesh> m_pEditMesh = std::make_shared<const CMapMesh>();
+	std::vector<std::uint32_t> m_EditedSolids;
+	std::uint64_t m_nRevision = 0;
+	std::vector<std::uint32_t> m_Changed;
+	// Ids for new objects: Hammer numbers solids and entities (and groups) from one count, sides
+	// from another.
+	int m_nNextObjectId = 1;
+	int m_nNextSideId = 1;
 	std::vector<std::uint32_t> m_SolidObjects;  // by solid: its object number
 	std::vector<std::uint32_t> m_EntityObjects; // by entity: its object number
 
 	[[nodiscard]] const CMapMesh &GetMesh() const { return *m_pMesh; }
 	[[nodiscard]] const CMapMesh &GetInstanceMesh() const { return *m_pInstanceMesh; }
+	[[nodiscard]] const CMapMesh &GetEditMesh() const { return *m_pEditMesh; }
+	// Whether a solid is drawn from the edit mesh (so not from the mesh as read).
+	[[nodiscard]] bool IsEditedSolid( std::uint32_t nSolid ) const;
 	[[nodiscard]] std::uint32_t GetObjectCount() const { return static_cast<std::uint32_t>( m_Objects.size() ); }
 	[[nodiscard]] std::uint32_t EntityObject( std::size_t nEntity ) const { return m_EntityObjects[ nEntity ]; }
 	[[nodiscard]] std::uint32_t SolidObject( std::size_t nSolid ) const { return m_SolidObjects[ nSolid ]; }

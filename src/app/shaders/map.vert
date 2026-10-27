@@ -27,7 +27,7 @@ layout(std140, binding = 0) uniform Frame {
 	vec4 faceShade;     // xyz
 	vec4 state;         // the state texture's width, and the most samples anisotropic filtering takes
 	vec4 instance;      // rgb, and how much of it func_instances' contents take
-	vec4 pass;          // 1: the 3D skybox, drawn from its own camera first
+	vec4 pass;          // x 1: the 3D skybox, drawn from its own camera first; y 1: a mesh as read
 	vec4 invalid;       // rgb, and how much of it broken solids' faces take
 	vec4 eyeLow;        // what float precision leaves of the eye after eye
 } frame;
@@ -54,6 +54,7 @@ void main() {
 	v_world = position;
 	// Not shown (or, while the 3D skybox is drawn, not in its room): outside every clip plane, so
 	// the triangle is dropped.
-	bool shown = (flags & 1) != 0 && (frame.pass.x < 0.5 || (flags & 16) != 0);
+	// A mesh as read (pass.y) leaves out the old shapes of objects edits have changed.
+	bool shown = (flags & 1) != 0 && (frame.pass.x < 0.5 || (flags & 16) != 0) && (frame.pass.y < 0.5 || (flags & 32) == 0);
 	gl_Position = shown ? frame.viewProjection * vec4(eyeRelative(position), 1.0) : vec4(2.0, 2.0, 2.0, 1.0);
 }

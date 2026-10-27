@@ -19,6 +19,8 @@ add_library(vomit_tools_core STATIC
         map/Brushes.h
         map/Displacement.cpp
         map/Displacement.h
+        map/Edit.cpp
+        map/Edit.h
         map/Entities.cpp
         map/Entities.h
         map/Fgd.cpp

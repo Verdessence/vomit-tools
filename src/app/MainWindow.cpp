@@ -594,6 +594,10 @@ void CMainWindow::BuildMenus( QAction *pSearchPathsToggle )
 		{
 			Save( pModel );
 		}
+		else if ( IEditorTab *pTab = AsEditorTab( m_pTabs->currentWidget() ) )
+		{
+			pTab->Save();
+		}
 	} );
 	pFile->addAction( tr( "Save &As…" ), QKeySequence::SaveAs, this, [ this ] {
 		if ( CDetailEditor *pDetails = GetCurrentDetails() )
@@ -623,6 +627,10 @@ void CMainWindow::BuildMenus( QAction *pSearchPathsToggle )
 		else if ( auto *pModel = qobject_cast<CModelEditor *>( m_pTabs->currentWidget() ) )
 		{
 			SaveAs( pModel );
+		}
+		else if ( IEditorTab *pTab = AsEditorTab( m_pTabs->currentWidget() ) )
+		{
+			pTab->SaveAs();
 		}
 	} );
 	pFile->addAction( tr( "&Close Tab" ), QKeySequence::Close, this, [ this ] {
@@ -4966,6 +4974,14 @@ CMapEditor *CMainWindow::OpenMapFile( const QString &szPath )
 	}
 	auto *pEditor = new CMapEditor( szOrigin, !bDisk );
 	connect( pEditor, &CMapEditor::StatusMessage, this, [ this ]( const QString &szText ) { statusBar()->showMessage( szText, 8000 ); } );
+	m_pUndoGroup->addStack( pEditor->GetUndoStack() );
+	connect( pEditor, &CMapEditor::TitleChanged, this, [ this, pEditor ] {
+		const int nTab = m_pTabs->indexOf( pEditor );
+		m_pTabs->setTabText( nTab, pEditor->GetTabTitle() );
+		m_pTabs->setTabToolTip( nTab, pEditor->IsFromGame() ? pEditor->GetPath() : QDir::toNativeSeparators( pEditor->GetPath() ) );
+		UpdateTitle();
+		SaveSession();
+	} );
 	const int nIndex = m_pTabs->addTab( pEditor, pEditor->GetTabTitle() );
 	m_pTabs->setTabToolTip( nIndex, bDisk ? QDir::toNativeSeparators( szOrigin ) : szOrigin );
 	m_pTabs->setCurrentIndex( nIndex );

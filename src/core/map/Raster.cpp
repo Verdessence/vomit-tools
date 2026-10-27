@@ -247,7 +247,7 @@ void CRasterizer::Gather()
 			{
 				const MeshVertex_t &first = mesh.m_Vertices[ mesh.m_Indices[ i ] ];
 				const std::uint8_t nFlags = FlagsOf( first.m_nObject );
-				if ( ( nFlags & RASTER_OBJECT_SHOWN ) == 0 || ( m_bSkyPass && ( nFlags & RASTER_OBJECT_SKYBOX ) == 0 ) )
+				if ( !IsDrawn( m_Scene, &mesh, nFlags ) || ( m_bSkyPass && ( nFlags & RASTER_OBJECT_SKYBOX ) == 0 ) )
 				{
 					continue;
 				}
@@ -694,7 +694,7 @@ void CRasterizer::Run()
 			const MeshVertex_t &a = pMesh->m_Vertices[ pMesh->m_Lines[ i ] ];
 			const MeshVertex_t &b = pMesh->m_Vertices[ pMesh->m_Lines[ i + 1 ] ];
 			const std::uint8_t nFlags = FlagsOf( a.m_nObject );
-			if ( ( nFlags & RASTER_OBJECT_SHOWN ) == 0 )
+			if ( !IsDrawn( m_Scene, pMesh, nFlags ) )
 			{
 				continue;
 			}
@@ -723,7 +723,7 @@ void CRasterizer::Run()
 			const MeshVertex_t &a = pMesh->m_Vertices[ pMesh->m_Lines[ i ] ];
 			const std::uint8_t nFlags = FlagsOf( a.m_nObject );
 			const bool bSelected = m_Options.m_bSelectionEdges && ( nFlags & RASTER_OBJECT_SELECTED ) != 0;
-			if ( ( nFlags & RASTER_OBJECT_SHOWN ) != 0 && ( nFlags & RASTER_OBJECT_INVALID ) != 0 && !bSelected )
+			if ( IsDrawn( m_Scene, pMesh, nFlags ) && ( nFlags & RASTER_OBJECT_INVALID ) != 0 && !bSelected )
 			{
 				AddLine( ToPoint( a.m_vecPosition ), ToPoint( pMesh->m_Vertices[ pMesh->m_Lines[ i + 1 ] ].m_vecPosition ), m_Options.m_InvalidEdge, true );
 			}
@@ -735,7 +735,7 @@ void CRasterizer::Run()
 		{
 			const MeshVertex_t &a = pMesh->m_Vertices[ pMesh->m_Lines[ i ] ];
 			const std::uint8_t nFlags = FlagsOf( a.m_nObject );
-			if ( ( nFlags & RASTER_OBJECT_SHOWN ) != 0 && ( nFlags & RASTER_OBJECT_SELECTED ) != 0 )
+			if ( IsDrawn( m_Scene, pMesh, nFlags ) && ( nFlags & RASTER_OBJECT_SELECTED ) != 0 )
 			{
 				AddLine( ToPoint( a.m_vecPosition ), ToPoint( pMesh->m_Vertices[ pMesh->m_Lines[ i + 1 ] ].m_vecPosition ), bWireframe ? std::array<std::uint8_t, 3>{ 255, 0, 0 } : m_Options.m_SelectionEdge, true );
 			}

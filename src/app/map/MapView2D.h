@@ -21,6 +21,7 @@
 
 #include "map/MapView.h"
 #include "map/Mesh.h"
+#include "map/Scene.h"
 
 class QScrollBar;
 
@@ -62,8 +63,10 @@ public:
 	bool Run( MapAction_t nAction ) override;
 	void CenterOn( const xv::map::Box_t &box ) override;
 
-	// The scene changed (loaded, or another one): projects it again.
+	// The scene changed (loaded, or another one): projects it again; after edits (ObjectsChanged
+	// says which objects), only those.
 	void Rebuild();
+	void ObjectsChanged( const std::vector<std::uint32_t> &objects );
 	// Fits the whole map in the view.
 	void Fit();
 	void Zoom( double flFactor, std::optional<QPointF> at = std::nullopt );
@@ -111,6 +114,11 @@ private:
 	void PaintSelection( QPainter &painter ) const;
 	void PaintCamera( QPainter &painter ) const;
 	[[nodiscard]] QColor ColorOf( const MapFlatObject_t &object ) const;
+	void PlaceSolid( const xv::map::CScene &scene, std::uint32_t nSolid, const xv::map::CMapMesh &mesh, xv::map::MeshRange_t range );
+	void PlaceSolid( const xv::map::CScene &scene, std::uint32_t nSolid );
+	void PlaceEntity( const xv::map::CScene &scene, std::size_t nEntity );
+	void Place( MapFlatObject_t object );
+	void Patch( const xv::map::CScene &scene );
 	void UpdateScrollBars();
 	void ReportCursor( QPointF at );
 	[[nodiscard]] QRectF GetVisible() const;
@@ -124,6 +132,9 @@ private:
 	std::vector<QLineF> m_Segments;    // in map units
 	std::vector<std::uint32_t> m_ObjectIndex; // object number -> index into m_Objects, or ~0
 	const void *m_pBuiltFor = nullptr;
+	const void *m_pBuiltMesh = nullptr;          // the mesh as read of the map built for
+	std::vector<std::uint32_t> m_PendingObjects; // changed by edits since
+	std::size_t m_nStaleSegments = 0;            // segments no object uses any more
 	std::shared_ptr<const xv::map::CMapMesh> m_pProps; // the props the objects were built with
 	std::shared_ptr<const std::vector<std::array<std::uint8_t, 3>>> m_pLineColors; // each object's, for this paint
 

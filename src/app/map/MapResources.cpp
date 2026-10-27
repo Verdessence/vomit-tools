@@ -25,14 +25,6 @@ namespace
 
 constexpr std::size_t BATCH = 16;
 
-// What a batch of materials draws: faces, sprites and overlays each blend their own way.
-enum class MaterialUse_t
-{
-	MATERIAL_USE_FACES,
-	MATERIAL_USE_SPRITES,
-	MATERIAL_USE_OVERLAYS,
-};
-
 //-----------------------------------------------------------------------------
 // Purpose: A tool material: what Hammer++'s tool texture toggle hides (the sky stays).
 //-----------------------------------------------------------------------------
@@ -125,6 +117,11 @@ void CMapResources::Stop()
 	{
 		m_Worker.join();
 	}
+	for ( std::thread &extra : m_Extras )
+	{
+		extra.join();
+	}
+	m_Extras.clear();
 }
 
 //-----------------------------------------------------------------------------
@@ -137,8 +134,11 @@ void CMapResources::Start( std::shared_ptr<const xv::map::CScene> pScene, std::o
 	m_bDecoded = bDecoded;
 	const int nGeneration = ++m_nGeneration;
 	const std::size_t nMaterials = pScene ? pScene->m_Materials.size() : 0;
-	m_Current.assign( nMaterials + 1, {} ); // and the place kept for the entity boxes'
+	m_nEntityMaterial = static_cast<std::uint32_t>( nMaterials ) + MAP_MATERIAL_RESERVE;
+	m_Current.assign( m_nEntityMaterial + 1, {} ); // the map's, the places kept for new ones, the entity boxes'
 	m_Keep.clear();
+	m_Game = game;
+	m_nMaxSize = nMaxSize;
 	m_pSky.reset();
 	m_pProps.reset();
 	m_PropObjects.clear();
@@ -193,52 +193,16 @@ void CMapResources::Run( std::shared_ptr<const xv::map::CScene> pScene, xv::vfs:
 
 	// Each material's base texture size, for placing models' texture coordinates.
 	const std::size_t nMaterials = pScene->m_Materials.size();
-	std::vector<std::array<int, 2>> sizes( nMaterials + 1, { 128, 128 } );
-	std::vector<bool> drawable( nMaterials + 1, false );
-	std::vector<bool> additive( nMaterials + 1, false ); // sprites' materials that add
-	std::vector<double> decalScales( nMaterials + 1, 1.0 );
+	const std::size_t nTable = static_cast<std::size_t>( nMaterials ) + MAP_MATERIAL_RESERVE + 1;
+	std::vector<std::array<int, 2>> sizes( nTable, { 128, 128 } );
+	std::vector<bool> drawable( nTable, false );
+	std::vector<bool> additive( nTable, false ); // sprites' materials that add
+	std::vector<double> decalScales( nTable, 1.0 );
 	auto load = [ & ]( const std::vector<std::pair<std::uint32_t, std::string>> &todo, MaterialUse_t nUse ) {
-		const bool bSprites = nUse == MaterialUse_t::MATERIAL_USE_SPRITES;
 		for ( std::size_t nStart = 0; nStart < todo.size() && !m_bStop; nStart += BATCH )
 		{
-			const std::size_t nEnd = std::min( todo.size(), nStart + BATCH );
-			std::vector<Loaded_t> batch( nEnd - nStart );
-			std::vector<std::optional<std::vector<std::byte>>> base( batch.size() );
-			std::vector<std::optional<std::vector<std::byte>>> base2( batch.size() );
-			for ( std::size_t i = 0; i < batch.size(); i++ )
-			{
-				Loaded_t &loaded = batch[ i ];
-				const auto &[ nMaterial, szName ] = todo[ nStart + i ];
-				loaded.m_nMaterial = nMaterial;
-				loaded.m_bSprite = bSprites;
-				loaded.m_bOverlay = nUse == MaterialUse_t::MATERIAL_USE_OVERLAYS;
-				loaded.m_bAdditive = bSprites && nMaterial < additive.size() && additive[ nMaterial ];
-				loaded.m_Info = xv::map::ReadMaterialInfo( szName, read );
-				loaded.m_bTool = IsToolMaterial( loaded.m_Info, szName );
-				if ( !loaded.m_Info.m_szTexture.empty() )
-				{
-					base[ i ] = read( xv::material::TexturePath( loaded.m_Info.m_szTexture ) );
-				}
-				if ( loaded.m_Info.m_bBlend && !loaded.m_Info.m_szTexture2.empty() )
-				{
-					base2[ i ] = read( xv::material::TexturePath( loaded.m_Info.m_szTexture2 ) );
-				}
-			}
-			xv::ParallelFor( batch.size(), 1, [ & ]( std::size_t nBegin, std::size_t nFinish ) {
-				for ( std::size_t i = nBegin; i < nFinish; i++ )
-				{
-					if ( base[ i ] )
-					{
-						batch[ i ].m_pBase = ReadMapTexture( *base[ i ], nMaxSize, bDecoded );
-					}
-					if ( base2[ i ] )
-					{
-						batch[ i ].m_pBase2 = ReadMapTexture( *base2[ i ], nMaxSize, bDecoded );
-					}
-					// Source draws its checker for a material, or a texture, it can't find.
-					batch[ i ].m_bMissing = !batch[ i ].m_Info.m_bFound || ( !batch[ i ].m_Info.m_szTexture.empty() && !batch[ i ].m_pBase );
-				}
-			} );
+			const std::vector<std::pair<std::uint32_t, std::string>> part( todo.begin() + static_cast<std::ptrdiff_t>( nStart ), todo.begin() + static_cast<std::ptrdiff_t>( std::min( todo.size(), nStart + BATCH ) ) );
+			std::vector<Loaded_t> batch = ReadMaterials( part, nUse, read, nMaxSize, bDecoded, additive );
 			for ( const Loaded_t &loaded : batch )
 			{
 				if ( loaded.m_pBase && loaded.m_nMaterial < sizes.size() )
@@ -277,9 +241,9 @@ void CMapResources::Run( std::shared_ptr<const xv::map::CScene> pScene, xv::vfs:
 	}
 	load( todo, MaterialUse_t::MATERIAL_USE_FACES );
 
-	// The table keeps one place after the map's own materials for the entity boxes'; the
-	// sprites' and the props' come after it.
-	auto nNext = static_cast<std::uint32_t>( nMaterials + 1 );
+	// The table keeps places after the map's own materials for those edits bring in, then one
+	// for the entity boxes'; the sprites' and the props' come after it.
+	auto nNext = static_cast<std::uint32_t>( nTable );
 
 	// Sprites next: few and small, and they show where the lights are. Their materials get
 	// places of their own, as they draw unlit and tinted. Instances' sprites, props, overlays
@@ -483,6 +447,95 @@ void CMapResources::Run( std::shared_ptr<const xv::map::CScene> pScene, xv::vfs:
 		m_bFinished = true;
 		emit Finished();
 	} );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Each material's VMT and textures, the files read one by one, the textures decoded on
+//          every core.
+//-----------------------------------------------------------------------------
+std::vector<CMapResources::Loaded_t> CMapResources::ReadMaterials( const std::vector<std::pair<std::uint32_t, std::string>> &todo, MaterialUse_t nUse, const xv::material::Reader_t &read, int nMaxSize, bool bDecoded, const std::vector<bool> &additive )
+{
+	const bool bSprites = nUse == MaterialUse_t::MATERIAL_USE_SPRITES;
+	std::vector<Loaded_t> batch( todo.size() );
+	std::vector<std::optional<std::vector<std::byte>>> base( batch.size() );
+	std::vector<std::optional<std::vector<std::byte>>> base2( batch.size() );
+	for ( std::size_t i = 0; i < batch.size(); i++ )
+	{
+		Loaded_t &loaded = batch[ i ];
+		const auto &[ nMaterial, szName ] = todo[ i ];
+		loaded.m_nMaterial = nMaterial;
+		loaded.m_bSprite = bSprites;
+		loaded.m_bOverlay = nUse == MaterialUse_t::MATERIAL_USE_OVERLAYS;
+		loaded.m_bAdditive = bSprites && nMaterial < additive.size() && additive[ nMaterial ];
+		loaded.m_Info = xv::map::ReadMaterialInfo( szName, read );
+		loaded.m_bTool = IsToolMaterial( loaded.m_Info, szName );
+		if ( !loaded.m_Info.m_szTexture.empty() )
+		{
+			base[ i ] = read( xv::material::TexturePath( loaded.m_Info.m_szTexture ) );
+		}
+		if ( loaded.m_Info.m_bBlend && !loaded.m_Info.m_szTexture2.empty() )
+		{
+			base2[ i ] = read( xv::material::TexturePath( loaded.m_Info.m_szTexture2 ) );
+		}
+	}
+	xv::ParallelFor( batch.size(), 1, [ & ]( std::size_t nBegin, std::size_t nFinish ) {
+		for ( std::size_t i = nBegin; i < nFinish; i++ )
+		{
+			if ( base[ i ] )
+			{
+				batch[ i ].m_pBase = ReadMapTexture( *base[ i ], nMaxSize, bDecoded );
+			}
+			if ( base2[ i ] )
+			{
+				batch[ i ].m_pBase2 = ReadMapTexture( *base2[ i ], nMaxSize, bDecoded );
+			}
+			// Source draws its checker for a material, or a texture, it can't find.
+			batch[ i ].m_bMissing = !batch[ i ].m_Info.m_bFound || ( !batch[ i ].m_Info.m_szTexture.empty() && !batch[ i ].m_pBase );
+		}
+	} );
+	return batch;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: On a thread of its own, with its own mount of the game: a few materials, put in their
+//          places as the main reading does.
+//-----------------------------------------------------------------------------
+bool CMapResources::LoadMaterials( std::shared_ptr<const xv::map::CScene> pScene, const std::vector<std::uint32_t> &materials )
+{
+	if ( !pScene || !m_Game )
+	{
+		return true;
+	}
+	std::vector<std::pair<std::uint32_t, std::string>> todo;
+	for ( const std::uint32_t n : materials )
+	{
+		if ( n >= m_nEntityMaterial || n >= pScene->m_Materials.size() )
+		{
+			return false;
+		}
+		todo.emplace_back( n, pScene->m_Materials[ n ] );
+	}
+	if ( todo.empty() )
+	{
+		return true;
+	}
+	m_nTotal += static_cast<int>( todo.size() );
+	const int nGeneration = m_nGeneration;
+	m_Extras.emplace_back( [ this, todo = std::move( todo ), game = *m_Game, nMaxSize = m_nMaxSize, bDecoded = m_bDecoded, nGeneration ] {
+		xv::vfs::CFileSystem fileSystem;
+		fileSystem.Mount( game );
+		const xv::material::Reader_t read = [ &fileSystem ]( std::string_view szPath ) { return fileSystem.Read( szPath ); };
+		std::vector<Loaded_t> batch = ReadMaterials( todo, MaterialUse_t::MATERIAL_USE_FACES, read, nMaxSize, bDecoded, {} );
+		QMetaObject::invokeMethod(
+			this, [ this, nGeneration, batch = std::move( batch ) ]() mutable {
+				if ( nGeneration == m_nGeneration )
+				{
+					Take( std::move( batch ) );
+				}
+			},
+			Qt::QueuedConnection );
+	} );
+	return true;
 }
 
 //-----------------------------------------------------------------------------

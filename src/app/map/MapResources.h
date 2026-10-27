@@ -23,6 +23,11 @@
 #include "sky/Sky.h"
 #include "vfs/Vfs.h"
 
+// Places the material table keeps after the map's own materials, for those edits bring in: they
+// are read into them as they come (LoadMaterials). The entity boxes' material comes after them,
+// then the sprites', props' and overlays'.
+inline constexpr std::uint32_t MAP_MATERIAL_RESERVE = 256;
+
 class CMapResources : public QObject
 {
 	Q_OBJECT
@@ -38,6 +43,11 @@ public:
 	void Start( std::shared_ptr<const xv::map::CScene> pScene, std::optional<xv::vfs::CGameInfo> game, int nMaxSize, bool bDecoded );
 	[[nodiscard]] bool IsDecoded() const { return m_bDecoded; }
 	void Stop();
+	// Reads materials of the scene an edit brought in (indices past those it had at Start) into
+	// their places; false when they don't fit the places kept for them (Start again then).
+	[[nodiscard]] bool LoadMaterials( std::shared_ptr<const xv::map::CScene> pScene, const std::vector<std::uint32_t> &materials );
+	// Where the entity boxes' material is in the table (past the places kept for new ones).
+	[[nodiscard]] std::uint32_t GetEntityMaterial() const { return m_nEntityMaterial; }
 
 	// The map's materials as drawn now (one per material of the map), and what keeps their
 	// textures alive; both replaced as more arrive.
@@ -77,10 +87,23 @@ private:
 		bool m_bOverlay = false;  // an overlay's or a decal's: blended by its alpha
 	};
 
+	enum class MaterialUse_t
+	{
+		MATERIAL_USE_FACES,
+		MATERIAL_USE_SPRITES,
+		MATERIAL_USE_OVERLAYS,
+	};
+
 	void Run( std::shared_ptr<const xv::map::CScene> pScene, xv::vfs::CGameInfo game, int nMaxSize, bool bDecoded, int nGeneration );
+	// Reads materials (their index and name) through read, textures decoded on every core.
+	[[nodiscard]] static std::vector<Loaded_t> ReadMaterials( const std::vector<std::pair<std::uint32_t, std::string>> &todo, MaterialUse_t nUse, const xv::material::Reader_t &read, int nMaxSize, bool bDecoded, const std::vector<bool> &additive );
 	void Take( std::vector<Loaded_t> batch );
 
 	std::thread m_Worker;
+	std::vector<std::thread> m_Extras; // LoadMaterials'
+	std::optional<xv::vfs::CGameInfo> m_Game;
+	int m_nMaxSize = 1024;
+	std::uint32_t m_nEntityMaterial = MAP_MATERIAL_RESERVE;
 	std::atomic<bool> m_bStop{ false };
 	int m_nGeneration = 0;
 	std::vector<xv::map::RasterMaterial_t> m_Current;

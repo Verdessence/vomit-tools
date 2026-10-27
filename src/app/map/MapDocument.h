@@ -1,9 +1,9 @@
 //===========================================================================//
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
-// Purpose: One open map for the viewer: read and built in the background, then what is shown,
-//          hidden and selected. Nothing here changes the map; hiding and selecting are the
-//          view's own state.
+// Purpose: One open map: read and built in the background, then edited through an undo stack
+//          (each edit makes a new snapshot of the scene, map/Edit.h), saved by patching the text
+//          it was read from, and what is shown, hidden and selected (the views' own state).
 //
 //===========================================================================//
 #pragma once
@@ -19,8 +19,11 @@
 #include <QObject>
 #include <QString>
 
+#include "map/Edit.h"
 #include "map/Scene.h"
 #include "vfs/Vfs.h"
+
+class QUndoStack;
 
 // Selection picks whole groups, whole entities with their solids, or single solids (Hammer's
 // selection modes).
@@ -59,6 +62,17 @@ public:
 	[[nodiscard]] QString GetFgdSource() const { return m_szFgdSource; }
 	// Another game, or the same one mounted again (for the next load; resources follow it).
 	void SetGame( std::optional<xv::vfs::CGameInfo> game ) { m_Game = std::move( game ); }
+
+	// Edits go through the undo stack: szName names them in Edit > Undo. The selection becomes
+	// selectAfter (or stays, when it is null), and goes back with an undo.
+	void Edit( xv::map::MapEdit_t edit, const QString &szName, std::optional<std::vector<std::uint32_t>> selectAfter = std::nullopt );
+	[[nodiscard]] QUndoStack *GetUndoStack() const { return m_pUndo; }
+	[[nodiscard]] bool IsModified() const;
+	// Writes the map (the text read, patched with every edit) to path, keeping what was there as
+	// Hammer does, in a .vmx beside it. The undo stack is clean afterwards.
+	bool Save( const std::filesystem::path &path, QString *pError );
+	// An edit's scene, now (the undo stack's commands call it).
+	void ApplyEditNow( const xv::map::MapEdit_t &edit );
 
 	// Visibility, per object: hidden by its visgroups (or Hammer's own flags in the file), by
 	// an automatic group, or quick-hidden.
@@ -100,6 +114,9 @@ signals:
 	void SelectionChanged();
 	void VisibilityChanged();
 	void SelectModeChanged();
+	// An edit changed these objects (and the scene is a new snapshot).
+	void SceneEdited( const std::vector<std::uint32_t> &changed );
+	void ModifiedChanged( bool bModified );
 
 private:
 	void Run( Source_t source, int nGeneration );
@@ -107,6 +124,7 @@ private:
 	void Changed( bool bVisibility );
 
 	std::shared_ptr<const xv::map::CScene> m_pScene;
+	QUndoStack *m_pUndo = nullptr;
 	std::optional<xv::vfs::CGameInfo> m_Game;
 	QString m_szFgdSource;
 

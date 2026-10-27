@@ -12,6 +12,7 @@
 #include <unordered_map>
 
 #include "Preferences.h"
+#include "map/MapResources.h"
 #include "map/MapConstants.h"
 #include "map/MapDocument.h"
 
@@ -63,9 +64,14 @@ xv::map::RasterScene_t MapFrame_t::MakeScene() const
 	if ( m_pScene )
 	{
 		scene.m_Meshes.push_back( &m_pScene->GetMesh() );
+		scene.m_AsRead.push_back( &m_pScene->GetMesh() );
 		if ( !m_pScene->GetInstanceMesh().m_Vertices.empty() )
 		{
 			scene.m_Meshes.push_back( &m_pScene->GetInstanceMesh() );
+		}
+		if ( !m_pScene->GetEditMesh().m_Vertices.empty() )
+		{
+			scene.m_Meshes.push_back( &m_pScene->GetEditMesh() );
 		}
 	}
 	if ( m_pEntityMesh )
@@ -205,8 +211,7 @@ CMapRenderData::CMapRenderData( const CMapDocument &document )
 //-----------------------------------------------------------------------------
 std::uint32_t CMapRenderData::GetEntityMaterial() const
 {
-	const xv::map::CScene *pScene = m_Document.GetScene();
-	return pScene ? static_cast<std::uint32_t>( pScene->m_Materials.size() ) : 0;
+	return m_nEntityMaterial;
 }
 
 //-----------------------------------------------------------------------------
@@ -216,7 +221,14 @@ std::uint32_t CMapRenderData::GetEntityMaterial() const
 void CMapRenderData::Rebuild()
 {
 	const xv::map::CScene *pScene = m_Document.GetScene();
+	if ( pScene && m_pBuiltFor && pScene->m_pMesh.get() == m_pBuiltMesh )
+	{
+		Refresh();
+		return;
+	}
 	m_pBuiltFor = pScene;
+	m_pBuiltMesh = pScene ? pScene->m_pMesh.get() : nullptr;
+	m_nEntityMaterial = pScene ? static_cast<std::uint32_t>( pScene->m_Materials.size() ) + MAP_MATERIAL_RESERVE : 0;
 	m_nStateFor = ~0ull;
 	m_LineColorsFor = {};
 	m_nGeneration++;
@@ -234,11 +246,26 @@ void CMapRenderData::Rebuild()
 	m_SpriteObjects.clear();
 	BuildEntityBoxes();
 
-	auto pMaterials = std::make_shared<std::vector<xv::map::RasterMaterial_t>>( pScene->m_Materials.size() + 1 );
+	auto pMaterials = std::make_shared<std::vector<xv::map::RasterMaterial_t>>( m_nEntityMaterial + 1 );
 	pMaterials->back().m_bObjectColor = true;
 	m_Frame.m_pMaterials = pMaterials;
 
 	UpdateFlatColors();
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: The same map, edited: the frame takes the new scene, and what is worked out per object
+//          is made again; the textures, props, sprites and overlays stay.
+//-----------------------------------------------------------------------------
+void CMapRenderData::Refresh()
+{
+	m_pBuiltFor = m_Document.GetScene();
+	m_Frame.m_pScene = m_Document.GetSharedScene();
+	m_nStateFor = ~0ull;
+	m_LineColorsFor = {};
+	BuildEntityBoxes();
+	UpdateFlatColors();
+	m_nGeneration++;
 }
 
 //-----------------------------------------------------------------------------
@@ -317,11 +344,16 @@ void CMapRenderData::BuildEntityBoxes()
 //-----------------------------------------------------------------------------
 // Purpose:
 //-----------------------------------------------------------------------------
-void CMapRenderData::SetMaterials( std::shared_ptr<const std::vector<xv::map::RasterMaterial_t>> pMaterials, std::shared_ptr<const void> pTextures )
+void CMapRenderData::SetMaterials( std::shared_ptr<const std::vector<xv::map::RasterMaterial_t>> pMaterials, std::shared_ptr<const void> pTextures, std::uint32_t nEntityMaterial )
 {
 	if ( m_Document.GetScene() != m_pBuiltFor )
 	{
 		Rebuild();
+	}
+	if ( nEntityMaterial != m_nEntityMaterial )
+	{
+		m_nEntityMaterial = nEntityMaterial;
+		BuildEntityBoxes();
 	}
 	// The map's materials, then the one entity boxes are drawn with, then the props'.
 	auto pAll = std::make_shared<std::vector<xv::map::RasterMaterial_t>>( pMaterials ? *pMaterials : std::vector<xv::map::RasterMaterial_t>{} );
@@ -483,6 +515,10 @@ MapFrame_t CMapRenderData::Snapshot( const xv::map::CViewCamera &camera, const x
 			{
 				( *pFlags )[ n ] |= xv::map::RASTER_OBJECT_SKYBOX;
 			}
+		}
+		for ( const std::uint32_t nSolid : pScene->m_EditedSolids )
+		{
+			( *pFlags )[ pScene->SolidObject( nSolid ) ] |= xv::map::RASTER_OBJECT_EDITED;
 		}
 		for ( std::uint32_t n = 0; n < pScene->GetObjectCount(); n++ )
 		{

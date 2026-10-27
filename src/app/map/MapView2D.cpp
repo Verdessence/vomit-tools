@@ -168,6 +168,16 @@ void CMapView2D::Rebuild()
 	{
 		return;
 	}
+	// The same map edited: only what the edits changed is projected again, while what is left
+	// behind stays under a third of the segments.
+	if ( pScene && m_pBuiltFor && pProps == m_pProps && pScene->m_pMesh.get() == m_pBuiltMesh && m_nStaleSegments * 3 < m_Segments.size() )
+	{
+		Patch( *pScene );
+		return;
+	}
+	m_pBuiltMesh = pScene ? pScene->m_pMesh.get() : nullptr;
+	m_PendingObjects.clear();
+	m_nStaleSegments = 0;
 	m_pBuiltFor = pScene;
 	m_pProps = std::move( pProps );
 	for ( QScrollBar *pBar : { m_pHorizontal, m_pVertical } )
@@ -184,65 +194,23 @@ void CMapView2D::Rebuild()
 	}
 	m_ObjectIndex.assign( pScene->GetObjectCount(), NO_OBJECT );
 	const xv::map::CMapMesh &mesh = pScene->GetMesh();
-	const auto a0 = static_cast<std::size_t>( GetAxis( 0 ) );
-	const auto a1 = static_cast<std::size_t>( GetAxis( 1 ) );
-	std::vector<std::array<std::int64_t, 4>> keys;
 	for ( std::uint32_t i = 0; i < pScene->m_Solids.size(); i++ )
 	{
-		const xv::map::SolidGeometry_t &geometry = pScene->m_Solids[ i ];
-		if ( geometry.m_Faces.empty() )
+		// Edited solids' lines come from the edit mesh.
+		if ( pScene->IsEditedSolid( i ) )
 		{
+			PlaceSolid( *pScene, i );
 			continue;
 		}
-		MapFlatObject_t object;
-		object.m_nObject = pScene->SolidObject( i );
-		object.m_bInvalid = !geometry.IsValid();
-		object.m_Bounds = QRectF{ QPointF{ geometry.m_Bounds.m_Mins[ a0 ], geometry.m_Bounds.m_Mins[ a1 ] }, QPointF{ geometry.m_Bounds.m_Maxs[ a0 ], geometry.m_Bounds.m_Maxs[ a1 ] } };
-		object.m_nFirstSegment = static_cast<std::uint32_t>( m_Segments.size() );
-		keys.clear();
 		const xv::map::MeshRange_t range = i < mesh.m_SolidLines.size() ? mesh.m_SolidLines[ i ] : xv::map::MeshRange_t{};
-		for ( std::uint32_t k = 0; k < range.m_nCount; k++ )
-		{
-			const xv::CVec3 &a = mesh.m_Vertices[ mesh.m_Lines[ ( range.m_nFirst + k ) * 2 ] ].m_vecPosition;
-			const xv::CVec3 &b = mesh.m_Vertices[ mesh.m_Lines[ ( range.m_nFirst + k ) * 2 + 1 ] ].m_vecPosition;
-			const std::array<float, 3> pa{ a.m_flX, a.m_flY, a.m_flZ };
-			const std::array<float, 3> pb{ b.m_flX, b.m_flY, b.m_flZ };
-			// Sixteenths of a unit are as close as two edges need to be to count as one.
-			std::array<std::int64_t, 4> key{ std::llround( pa[ a0 ] * 16.0 ), std::llround( pa[ a1 ] * 16.0 ), std::llround( pb[ a0 ] * 16.0 ), std::llround( pb[ a1 ] * 16.0 ) };
-			if ( key[ 0 ] == key[ 2 ] && key[ 1 ] == key[ 3 ] )
-			{
-				continue;
-			}
-			if ( std::pair{ key[ 2 ], key[ 3 ] } < std::pair{ key[ 0 ], key[ 1 ] } )
-			{
-				key = { key[ 2 ], key[ 3 ], key[ 0 ], key[ 1 ] };
-			}
-			keys.push_back( key );
-		}
-		std::ranges::sort( keys );
-		keys.erase( std::unique( keys.begin(), keys.end() ), keys.end() );
-		for ( const auto &key : keys )
-		{
-			m_Segments.emplace_back( static_cast<double>( key[ 0 ] ) / 16.0, static_cast<double>( key[ 1 ] ) / 16.0, static_cast<double>( key[ 2 ] ) / 16.0, static_cast<double>( key[ 3 ] ) / 16.0 );
-		}
-		object.m_nSegmentCount = static_cast<std::uint32_t>( m_Segments.size() ) - object.m_nFirstSegment;
-		m_ObjectIndex[ object.m_nObject ] = static_cast<std::uint32_t>( m_Objects.size() );
-		m_Objects.push_back( object );
+		PlaceSolid( *pScene, i, mesh, range );
 	}
 	for ( std::size_t e = 0; e < pScene->m_Entities.size(); e++ )
 	{
-		if ( !pScene->m_Entities[ e ].m_bPoint )
-		{
-			continue;
-		}
-		const xv::map::Box_t box = pScene->GetEntityBox( e );
-		MapFlatObject_t object;
-		object.m_nObject = pScene->EntityObject( e );
-		object.m_bPointEntity = true;
-		object.m_Bounds = QRectF{ QPointF{ box.m_Mins[ a0 ], box.m_Mins[ a1 ] }, QPointF{ box.m_Maxs[ a0 ], box.m_Maxs[ a1 ] } };
-		m_ObjectIndex[ object.m_nObject ] = static_cast<std::uint32_t>( m_Objects.size() );
-		m_Objects.push_back( object );
+		PlaceEntity( *pScene, e );
 	}
+	const auto a0 = static_cast<std::size_t>( GetAxis( 0 ) );
+	const auto a1 = static_cast<std::size_t>( GetAxis( 1 ) );
 	// Props and instances: each one's edges lie together in its mesh, and its box becomes the
 	// box around them.
 	auto lines = [ & ]( const xv::map::CMapMesh &mesh, bool bInstances ) {
@@ -277,6 +245,147 @@ void CMapView2D::Rebuild()
 		lines( *m_pProps, false );
 	}
 	lines( pScene->GetInstanceMesh(), true );
+	update();
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: A solid's edges projected onto the view's axes, from range of mesh's lines. Edges that
+//          land on each other, or on a point, are kept once. It takes the place it had among
+//          the objects, or a new one.
+//-----------------------------------------------------------------------------
+void CMapView2D::PlaceSolid( const xv::map::CScene &scene, std::uint32_t nSolid, const xv::map::CMapMesh &mesh, xv::map::MeshRange_t range )
+{
+	const xv::map::SolidGeometry_t &geometry = scene.m_Solids[ nSolid ];
+	const std::uint32_t nObject = scene.SolidObject( nSolid );
+	if ( geometry.m_Faces.empty() || scene.m_Map.m_Solids[ nSolid ].m_bDeleted )
+	{
+		return;
+	}
+	const auto a0 = static_cast<std::size_t>( GetAxis( 0 ) );
+	const auto a1 = static_cast<std::size_t>( GetAxis( 1 ) );
+	MapFlatObject_t object;
+	object.m_nObject = nObject;
+	object.m_bInvalid = !geometry.IsValid();
+	object.m_Bounds = QRectF{ QPointF{ geometry.m_Bounds.m_Mins[ a0 ], geometry.m_Bounds.m_Mins[ a1 ] }, QPointF{ geometry.m_Bounds.m_Maxs[ a0 ], geometry.m_Bounds.m_Maxs[ a1 ] } };
+	object.m_nFirstSegment = static_cast<std::uint32_t>( m_Segments.size() );
+	std::vector<std::array<std::int64_t, 4>> keys;
+	for ( std::uint32_t k = 0; k < range.m_nCount; k++ )
+	{
+		const xv::CVec3 &a = mesh.m_Vertices[ mesh.m_Lines[ ( range.m_nFirst + k ) * 2 ] ].m_vecPosition;
+		const xv::CVec3 &b = mesh.m_Vertices[ mesh.m_Lines[ ( range.m_nFirst + k ) * 2 + 1 ] ].m_vecPosition;
+		const std::array<float, 3> pa{ a.m_flX, a.m_flY, a.m_flZ };
+		const std::array<float, 3> pb{ b.m_flX, b.m_flY, b.m_flZ };
+		// Sixteenths of a unit are as close as two edges need to be to count as one.
+		std::array<std::int64_t, 4> key{ std::llround( pa[ a0 ] * 16.0 ), std::llround( pa[ a1 ] * 16.0 ), std::llround( pb[ a0 ] * 16.0 ), std::llround( pb[ a1 ] * 16.0 ) };
+		if ( key[ 0 ] == key[ 2 ] && key[ 1 ] == key[ 3 ] )
+		{
+			continue;
+		}
+		if ( std::pair{ key[ 2 ], key[ 3 ] } < std::pair{ key[ 0 ], key[ 1 ] } )
+		{
+			key = { key[ 2 ], key[ 3 ], key[ 0 ], key[ 1 ] };
+		}
+		keys.push_back( key );
+	}
+	std::ranges::sort( keys );
+	keys.erase( std::unique( keys.begin(), keys.end() ), keys.end() );
+	for ( const auto &key : keys )
+	{
+		m_Segments.emplace_back( static_cast<double>( key[ 0 ] ) / 16.0, static_cast<double>( key[ 1 ] ) / 16.0, static_cast<double>( key[ 2 ] ) / 16.0, static_cast<double>( key[ 3 ] ) / 16.0 );
+	}
+	object.m_nSegmentCount = static_cast<std::uint32_t>( m_Segments.size() ) - object.m_nFirstSegment;
+	Place( object );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: An edited solid: its lines in the edit mesh.
+//-----------------------------------------------------------------------------
+void CMapView2D::PlaceSolid( const xv::map::CScene &scene, std::uint32_t nSolid )
+{
+	const xv::map::CMapMesh &edits = scene.GetEditMesh();
+	const auto it = std::ranges::lower_bound( edits.m_SolidIndices, nSolid );
+	const xv::map::MeshRange_t range = it != edits.m_SolidIndices.end() && *it == nSolid ? edits.m_SolidLines[ static_cast<std::size_t>( it - edits.m_SolidIndices.begin() ) ] : xv::map::MeshRange_t{};
+	PlaceSolid( scene, nSolid, edits, range );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: A point entity's box (brush entities show as their solids).
+//-----------------------------------------------------------------------------
+void CMapView2D::PlaceEntity( const xv::map::CScene &scene, std::size_t nEntity )
+{
+	if ( !scene.m_Entities[ nEntity ].m_bPoint || scene.m_Map.m_Entities[ nEntity ].m_bDeleted )
+	{
+		return;
+	}
+	const auto a0 = static_cast<std::size_t>( GetAxis( 0 ) );
+	const auto a1 = static_cast<std::size_t>( GetAxis( 1 ) );
+	const xv::map::Box_t box = scene.GetEntityBox( nEntity );
+	MapFlatObject_t object;
+	object.m_nObject = scene.EntityObject( nEntity );
+	object.m_bPointEntity = true;
+	object.m_Bounds = QRectF{ QPointF{ box.m_Mins[ a0 ], box.m_Mins[ a1 ] }, QPointF{ box.m_Maxs[ a0 ], box.m_Maxs[ a1 ] } };
+	Place( object );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: An object into the list: in the place it had (what its segments were becomes
+//          stale), or a new one. A prop's or an instance's lines stay with it.
+//-----------------------------------------------------------------------------
+void CMapView2D::Place( MapFlatObject_t object )
+{
+	if ( object.m_nObject >= m_ObjectIndex.size() )
+	{
+		m_ObjectIndex.resize( object.m_nObject + 1, NO_OBJECT );
+	}
+	std::uint32_t &nIndex = m_ObjectIndex[ object.m_nObject ];
+	if ( nIndex == NO_OBJECT )
+	{
+		nIndex = static_cast<std::uint32_t>( m_Objects.size() );
+		m_Objects.push_back( object );
+		return;
+	}
+	MapFlatObject_t &old = m_Objects[ nIndex ];
+	m_nStaleSegments += old.m_nSegmentCount;
+	object.m_nFirstModelLine = old.m_nFirstModelLine;
+	object.m_nModelLineCount = old.m_nModelLineCount;
+	object.m_nFirstInstanceLine = old.m_nFirstInstanceLine;
+	object.m_nInstanceLineCount = old.m_nInstanceLineCount;
+	old = object;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: The objects edits changed since the view last drew, placed again.
+//-----------------------------------------------------------------------------
+void CMapView2D::Patch( const xv::map::CScene &scene )
+{
+	m_pBuiltFor = &scene;
+	std::ranges::sort( m_PendingObjects );
+	m_PendingObjects.erase( std::unique( m_PendingObjects.begin(), m_PendingObjects.end() ), m_PendingObjects.end() );
+	for ( const std::uint32_t n : m_PendingObjects )
+	{
+		if ( n >= scene.GetObjectCount() )
+		{
+			continue;
+		}
+		if ( scene.IsSolidObject( n ) )
+		{
+			PlaceSolid( scene, scene.GetIndex( n ) );
+		}
+		else
+		{
+			PlaceEntity( scene, scene.GetIndex( n ) );
+		}
+	}
+	m_PendingObjects.clear();
+	update();
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+void CMapView2D::ObjectsChanged( const std::vector<std::uint32_t> &objects )
+{
+	m_PendingObjects.insert( m_PendingObjects.end(), objects.begin(), objects.end() );
 	update();
 }
 

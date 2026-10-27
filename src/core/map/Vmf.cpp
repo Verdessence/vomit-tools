@@ -1112,7 +1112,7 @@ bool CMap::HasErrors() const
 //-----------------------------------------------------------------------------
 // Purpose:
 //-----------------------------------------------------------------------------
-std::string_view CMap::Store( std::string szText )
+std::string_view CMap::Store( std::string szText ) const
 {
 	return m_pStrings->emplace_back( std::move( szText ) );
 }

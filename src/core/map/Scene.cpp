@@ -6,6 +6,9 @@
 //===========================================================================//
 #include "Scene.h"
 
+#include <algorithm>
+#include <utility>
+
 namespace xv::map
 {
 
@@ -38,8 +41,33 @@ bool CScene::IsDeleted( std::uint32_t nObject ) const
 //-----------------------------------------------------------------------------
 // Purpose:
 //-----------------------------------------------------------------------------
+bool CScene::IsEditedSolid( std::uint32_t nSolid ) const
+{
+	return std::ranges::binary_search( m_EditedSolids, nSolid );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Also where new ids start: past every one in use.
+//-----------------------------------------------------------------------------
 void CScene::NumberObjects()
 {
+	m_nNextObjectId = std::max( m_nNextObjectId, m_Map.m_World.m_nId + 1 );
+	for ( const Solid_t &solid : std::as_const( m_Map.m_Solids ) )
+	{
+		m_nNextObjectId = std::max( m_nNextObjectId, solid.m_nId + 1 );
+		for ( const Side_t &side : solid.m_Sides )
+		{
+			m_nNextSideId = std::max( m_nNextSideId, side.m_nId + 1 );
+		}
+	}
+	for ( const Entity_t &entity : std::as_const( m_Map.m_Entities ) )
+	{
+		m_nNextObjectId = std::max( m_nNextObjectId, entity.m_nId + 1 );
+	}
+	for ( const Group_t &group : m_Map.m_Groups )
+	{
+		m_nNextObjectId = std::max( m_nNextObjectId, group.m_nId + 1 );
+	}
 	m_Objects.clear();
 	m_SolidObjects.resize( m_Map.m_Solids.size() );
 	m_EntityObjects.resize( m_Map.m_Entities.size() );

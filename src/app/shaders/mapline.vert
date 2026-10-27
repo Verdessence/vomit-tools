@@ -17,7 +17,7 @@ layout(std140, binding = 0) uniform Frame {
 	vec4 faceShade;     // xyz
 	vec4 state;         // the state texture's width, and the most samples anisotropic filtering takes
 	vec4 instance;      // rgb, and how much of it func_instances' contents take
-	vec4 pass;          // 1: the 3D skybox, drawn from its own camera first
+	vec4 pass;          // x 1: the 3D skybox, drawn from its own camera first; y 1: a mesh as read
 	vec4 invalid;       // rgb, and how much of it broken solids' faces take
 	vec4 eyeLow;        // what float precision leaves of the eye after eye
 } frame;
@@ -37,7 +37,7 @@ void main() {
 	int width = int(frame.state.x);
 	ivec2 at = ivec2(n % width, n / width);
 	int flags = int(texelFetch(stateTexture, at, 0).a * 255.0 + 0.5);
-	bool shown = (flags & 1) != 0;
+	bool shown = (flags & 1) != 0 && (frame.pass.y < 0.5 || (flags & 32) == 0);
 	bool selected = (flags & 2) != 0 && frame.mode.w > 0.5;
 	bool invalid = (flags & 4) != 0;
 	bool onTop = selected || invalid;

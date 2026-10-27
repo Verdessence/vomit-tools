@@ -77,9 +77,15 @@ public:
 	[[nodiscard]] bool IsFromGame() const override { return m_bFromGame; }
 	void StopWork() override;
 	void GameChanged( const xv::vfs::CGameInfo *pGame ) override;
+	[[nodiscard]] QUndoStack *GetUndoStack() const override;
+	bool ConfirmClose() override;
+	bool Save() override;
+	bool SaveAs() override;
 
 signals:
 	void StatusMessage( const QString &szText );
+	// The tab's title changed (saved under another name, or modified).
+	void TitleChanged();
 
 private:
 	void BuildToolBars( QVBoxLayout *pLayout );
@@ -88,6 +94,8 @@ private:
 	void UpdateStatus();
 	void UpdateGameStatus();
 	void ResourcesArrived();
+	// An edit made a new scene: the views follow, and materials it brought in are read.
+	void SceneEdited( const std::vector<std::uint32_t> &changed );
 	void GoToBrush();
 	void ShowProperties();
 	void TakePreferences();
@@ -114,6 +122,7 @@ private:
 	CMapQuadSplitter *m_pSplitter = nullptr;
 	std::vector<std::pair<QAction *, const bool *>> m_SettingActions; // toggles and what they show
 	int m_nTextureSize = 1024;
+	std::uint32_t m_nMaterialsRead = 0; // the scene's materials the resources were given
 	QSplitter *m_pSidePanel = nullptr;
 	CMapFilterControl *m_pFilter = nullptr;
 	CMapProperties *m_pProperties = nullptr;

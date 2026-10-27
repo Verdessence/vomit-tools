@@ -24,9 +24,12 @@
 #include <QSplitter>
 #include <QToolBar>
 #include <QCoreApplication>
+#include <QDir>
+#include <QMessageBox>
 #include <QTimer>
 #include <QVBoxLayout>
 
+#include "FileDialogs.h"
 #include "Preferences.h"
 #include "map/MapConstants.h"
 #include "map/MapFilterControl.h"
@@ -259,6 +262,8 @@ CMapEditor::CMapEditor( const QString &szPath, bool bFromGame, QWidget *pParent 
 	};
 	connect( m_pDocument, &CMapDocument::SelectionChanged, this, repaint );
 	connect( m_pDocument, &CMapDocument::VisibilityChanged, this, repaint );
+	connect( m_pDocument, &CMapDocument::SceneEdited, this, &CMapEditor::SceneEdited );
+	connect( m_pDocument, &CMapDocument::ModifiedChanged, this, &CMapEditor::TitleChanged );
 	UpdateStatus();
 }
 
@@ -753,7 +758,113 @@ bool CMapEditor::RunAction( MapAction_t nAction, CMapView *pFrom )
 //-----------------------------------------------------------------------------
 QString CMapEditor::GetTabTitle() const
 {
-	return QFileInfo{ m_szPath }.fileName();
+	return ( m_pDocument->IsModified() ? QStringLiteral( "*" ) : QString{} ) + QFileInfo{ m_szPath }.fileName();
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+QUndoStack *CMapEditor::GetUndoStack() const
+{
+	return m_pDocument->GetUndoStack();
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+bool CMapEditor::ConfirmClose()
+{
+	if ( !m_pDocument->IsModified() )
+	{
+		return true;
+	}
+	const auto nAnswer = QMessageBox::question( this, tr( "Save Changes" ), tr( "%1 has changes that aren't saved. Save them?" ).arg( QFileInfo{ m_szPath }.fileName() ), QMessageBox::Save | QMessageBox::Discard | QMessageBox::Cancel, QMessageBox::Save );
+	return nAnswer == QMessageBox::Discard || ( nAnswer == QMessageBox::Save && Save() );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Over the file it was read from; a map from the game's files is saved as a file of
+//          its own (Save As).
+//-----------------------------------------------------------------------------
+bool CMapEditor::Save()
+{
+	if ( m_bFromGame || !m_pDocument->IsLoaded() )
+	{
+		return m_pDocument->IsLoaded() && SaveAs();
+	}
+	QString szError;
+	if ( !m_pDocument->Save( std::filesystem::path{ m_szPath.toStdString() }, &szError ) )
+	{
+		QMessageBox::critical( this, tr( "Save failed" ), tr( "Could not write %1:\n%2" ).arg( QDir::toNativeSeparators( m_szPath ), szError ) );
+		return false;
+	}
+	emit StatusMessage( tr( "Saved %1" ).arg( QDir::toNativeSeparators( m_szPath ) ) );
+	return true;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+bool CMapEditor::SaveAs()
+{
+	if ( !m_pDocument->IsLoaded() )
+	{
+		return false;
+	}
+	const QString szStart = m_bFromGame ? QFileInfo{ m_szPath }.fileName() : m_szPath;
+	const QString szFile = AskSaveFile( this, tr( "Save Map As" ), szStart, tr( "Hammer maps (*.vmf)" ) );
+	if ( szFile.isEmpty() )
+	{
+		return false;
+	}
+	QString szError;
+	if ( !m_pDocument->Save( std::filesystem::path{ szFile.toStdString() }, &szError ) )
+	{
+		QMessageBox::critical( this, tr( "Save failed" ), tr( "Could not write %1:\n%2" ).arg( QDir::toNativeSeparators( szFile ), szError ) );
+		return false;
+	}
+	m_szPath = QFileInfo{ szFile }.absoluteFilePath();
+	m_bFromGame = false;
+	emit TitleChanged();
+	emit StatusMessage( tr( "Saved %1" ).arg( QDir::toNativeSeparators( m_szPath ) ) );
+	return true;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+void CMapEditor::SceneEdited( const std::vector<std::uint32_t> &changed )
+{
+	const xv::map::CScene *pScene = m_pDocument->GetScene();
+	// Materials the edit brought in: read into the places kept for them, or everything again
+	// when those are used up.
+	std::vector<std::uint32_t> added;
+	for ( std::uint32_t n = m_nMaterialsRead; pScene && n < pScene->m_Materials.size(); n++ )
+	{
+		added.push_back( n );
+	}
+	if ( pScene )
+	{
+		m_nMaterialsRead = static_cast<std::uint32_t>( pScene->m_Materials.size() );
+	}
+	if ( !added.empty() && !m_pResources->LoadMaterials( m_pDocument->GetSharedScene(), added ) )
+	{
+		StartResources();
+	}
+	for ( CMapView *pView : GetViews() )
+	{
+		if ( auto *p2D = qobject_cast<CMapView2D *>( pView ) )
+		{
+			p2D->ObjectsChanged( changed );
+		}
+		else if ( auto *p3D = qobject_cast<CMapView3D *>( pView ) )
+		{
+			p3D->Redraw();
+		}
+		pView->update();
+	}
+	m_pProperties->Refresh();
+	UpdateStatus();
 }
 
 //-----------------------------------------------------------------------------
@@ -791,7 +902,7 @@ void CMapEditor::GameChanged( const xv::vfs::CGameInfo *pGame )
 //-----------------------------------------------------------------------------
 void CMapEditor::ResourcesArrived()
 {
-	m_pRenderData->SetMaterials( m_pResources->GetMaterials(), m_pResources->GetTextures() );
+	m_pRenderData->SetMaterials( m_pResources->GetMaterials(), m_pResources->GetTextures(), m_pResources->GetEntityMaterial() );
 	m_pRenderData->SetSky( m_pResources->GetSky() );
 	m_pRenderData->SetProps( m_pResources->GetProps(), m_pResources->GetPropObjects() );
 	m_pRenderData->SetSprites( m_pResources->GetSprites() );
@@ -959,6 +1070,8 @@ bool CMapEditor::NeedsDecodedTextures() const
 //-----------------------------------------------------------------------------
 void CMapEditor::StartResources()
 {
+	const xv::map::CScene *pScene = m_pDocument->GetScene();
+	m_nMaterialsRead = pScene ? static_cast<std::uint32_t>( pScene->m_Materials.size() ) : 0;
 	m_pResources->Start( m_pDocument->GetSharedScene(), m_pDocument->GetGame(), m_nTextureSize, NeedsDecodedTextures() );
 }
 

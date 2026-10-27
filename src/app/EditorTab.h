@@ -31,6 +31,9 @@ public:
 	[[nodiscard]] virtual bool IsFromGame() const = 0;
 	// Asks about unsaved changes; false keeps the tab open.
 	virtual bool ConfirmClose() { return true; }
+	// File > Save and Save As; false when nothing was saved (cancelled, or failed and said so).
+	virtual bool Save() { return false; }
+	virtual bool SaveAs() { return false; }
 	[[nodiscard]] virtual QUndoStack *GetUndoStack() const { return nullptr; }
 	// Stops background work, before the tab goes away.
 	virtual void StopWork() {}

@@ -67,7 +67,7 @@ public:
 	[[nodiscard]] std::shared_ptr<const std::vector<std::array<std::uint8_t, 3>>> GetLineColors( const MapViewSettings_t &settings );
 	// The materials changed (textures arrived): later frames use these, one per material of
 	// the map; the entity boxes' own is added after them.
-	void SetMaterials( std::shared_ptr<const std::vector<xv::map::RasterMaterial_t>> pMaterials, std::shared_ptr<const void> pTextures );
+	void SetMaterials( std::shared_ptr<const std::vector<xv::map::RasterMaterial_t>> pMaterials, std::shared_ptr<const void> pTextures, std::uint32_t nEntityMaterial );
 	[[nodiscard]] std::uint32_t GetEntityMaterial() const;
 	// The map's sky, drawn on its sky faces.
 	void SetSky( std::shared_ptr<const xv::sky::CCube> pSky );
@@ -79,13 +79,18 @@ public:
 	void SetSprites( std::shared_ptr<const std::vector<xv::map::SpritePlacement_t>> pSprites );
 
 private:
+	// The scene changed: another map (everything starts over), or the same one edited (what the
+	// resources gave stays; what depends on its objects is made again).
 	void Rebuild();
+	void Refresh();
 	void BuildEntityBoxes();
 	void UpdateFlatColors();
 	void ApplySprites();
 
 	const CMapDocument &m_Document;
 	const xv::map::CScene *m_pBuiltFor = nullptr;
+	const xv::map::CMapMesh *m_pBuiltMesh = nullptr; // the mesh as read of the map it was built for
+	std::uint32_t m_nEntityMaterial = 0;            // where entity boxes' material is in the table
 	std::uint64_t m_nStateFor = ~0ull;
 	std::pair<bool, std::uint64_t> m_LineColorsFor{}; // group colours on, and the preferences' revision
 	std::uint64_t m_nGeneration = 0;
