@@ -114,6 +114,8 @@ private:
 	[[nodiscard]] bool IsTexturedModel( const MapFlatObject_t &object, const QRectF &box ) const;
 	void PaintObjects( QPainter &painter, const QRectF &visible ) const;
 	void PaintSelection( QPainter &painter ) const;
+	// The block tool's box and the entity tool's marker.
+	void PaintTools( QPainter &painter ) const;
 	void PaintCamera( QPainter &painter ) const;
 	[[nodiscard]] QColor ColorOf( const MapFlatObject_t &object ) const;
 	void PlaceSolid( const xv::map::CScene &scene, std::uint32_t nSolid, const xv::map::CMapMesh &mesh, xv::map::MeshRange_t range );
@@ -123,6 +125,13 @@ private:
 	void Patch( const xv::map::CScene &scene );
 	void UpdateScrollBars();
 	[[nodiscard]] xv::map::Point_t DragOffset( QPointF at, Qt::KeyboardModifiers modifiers ) const;
+	// A map coordinate on the grid, unless snapping is off or Alt is held.
+	[[nodiscard]] double Snap( double flValue, Qt::KeyboardModifiers modifiers ) const;
+	// A box as this view shows it, in the widget's pixels.
+	[[nodiscard]] QRectF RectOf( const xv::map::Box_t &box ) const;
+	// The block tool: a press starts a new box, moves the one there or pulls one of its handles.
+	void PressBlock( QPointF at );
+	void DragBlock( QPointF at, Qt::KeyboardModifiers modifiers );
 	void PreviewMove( QPointF at, Qt::KeyboardModifiers modifiers );
 	void CancelMove();
 	void ReportCursor( QPointF at );
@@ -157,6 +166,19 @@ private:
 	QPointF m_MoveCorner;
 	std::shared_ptr<const xv::map::CScene> m_pMoveScene;
 	std::vector<std::uint32_t> m_MoveSelection;
+	// The block tool's drag: what it does, where it began (map units) and the box then.
+	enum class BoxDrag_t
+	{
+		BOX_DRAG_NONE,
+		BOX_DRAG_NEW,
+		BOX_DRAG_MOVE,
+		BOX_DRAG_HANDLE,
+	};
+	BoxDrag_t m_nBoxDrag = BoxDrag_t::BOX_DRAG_NONE;
+	bool m_bBoxDragMoved = false; // a new box starts once the mouse has moved a little
+	QPointF m_BoxDragFrom;
+	xv::map::Box_t m_BoxDragStart;
+	QPoint m_BoxHandle; // -1, 0 or 1 across and down the widget: which side or corner it pulls
 	QPoint m_PressAt;
 	double m_flPaintMs = 0.0;
 	int m_nPaints = 0;

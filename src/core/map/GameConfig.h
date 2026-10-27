@@ -15,10 +15,20 @@
 namespace xv::map
 {
 
+// What new objects get, from the game's Hammer configuration (its own defaults without one).
+struct HammerDefaults_t
+{
+	std::string m_szPointEntity = "info_player_start"; // the entity tool's class
+	std::string m_szSolidEntity = "func_detail";        // Tie to Entity's
+	double m_flTextureScale = 0.25;
+	int m_nLightmapScale = 16;
+};
+
 struct GameFgds_t
 {
 	std::vector<std::filesystem::path> m_Files; // in the order to read them
 	std::string m_szSource;                     // where the list came from, for the user
+	HammerDefaults_t m_Defaults;
 };
 
 // gameDir is the folder that holds gameinfo.txt (".../Counter-Strike Source/cstrike").

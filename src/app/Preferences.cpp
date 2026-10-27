@@ -88,6 +88,7 @@ void ForEachMapPreference( Preferences_t &map, Visit_t &&pfnVisit )
 	pfnVisit( "maps/colors/selectionFill", colors.m_SelectionFill );
 	pfnVisit( "maps/colors/toolSelection", colors.m_ToolSelection );
 	pfnVisit( "maps/colors/toolHandle", colors.m_ToolHandle );
+	pfnVisit( "maps/colors/toolBlock", colors.m_ToolBlock );
 	pfnVisit( "maps/colors/camera", colors.m_Camera );
 	pfnVisit( "maps/colors/instance2D", colors.m_Instance2D );
 	pfnVisit( "maps/colors/background3D", colors.m_Background3D );

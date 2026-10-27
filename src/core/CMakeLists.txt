@@ -40,6 +40,8 @@ add_library(vomit_tools_core STATIC
         map/Mesh.h
         map/Overlay.cpp
         map/Overlay.h
+        map/Primitives.cpp
+        map/Primitives.h
         map/Properties.cpp
         map/Properties.h
         map/Props.cpp

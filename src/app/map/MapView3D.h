@@ -14,6 +14,7 @@
 #include <mutex>
 #include <optional>
 #include <thread>
+#include <utility>
 #include <vector>
 
 #include <QElapsedTimer>
@@ -63,12 +64,17 @@ public:
 	void SetCamera( const xv::map::CViewCamera &camera );
 	// The map's state changed (selection, visibility, settings): draw it again.
 	void Redraw() { RequestRender(); }
+	// Only what is drawn over the picture changed (the tools' box or marker).
+	void RedrawLabels();
 	void ApplyPreferences();
 	// The map was loaded: the camera starts where it was when the map was last closed, or at the
 	// map's active camera, as in Hammer.
 	void ResetCamera();
 	// What a click at a widget point would hit, nearest first.
 	[[nodiscard]] std::vector<xv::map::TraceHit_t> HitsAt( QPointF at );
+	// Where a click at a widget point meets the nearest thing drawn, and the way that surface
+	// faces (towards the camera).
+	[[nodiscard]] std::optional<std::pair<xv::map::Point_t, xv::map::Point_t>> SurfaceAt( QPointF at );
 	// The picture as it would be drawn now, in software, synchronously (for tests and the
 	// comparison with the graphics card).
 	[[nodiscard]] QImage RenderNow( QSize size );
@@ -109,6 +115,8 @@ private:
 	// Turns the camera by a mouse movement, at the preferences' speed.
 	void Look( QPointF delta );
 	void Select( QPointF at, bool bToggle );
+	// The block tool's box and the entity tool's marker, over the picture.
+	void PaintTools( QPainter &painter ) const;
 	[[nodiscard]] xv::map::RasterMode_t GetMode() const;
 
 	MapViewType_t m_nType;

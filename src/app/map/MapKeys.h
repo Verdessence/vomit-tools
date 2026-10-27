@@ -46,6 +46,8 @@ enum class MapAction_t
 	MAP_ACTION_TOOL_SELECT,          // Shift+S
 	MAP_ACTION_TOOL_MAGNIFY,         // Shift+G
 	MAP_ACTION_TOOL_CAMERA,          // Shift+C
+	MAP_ACTION_TOOL_ENTITY,          // Shift+E
+	MAP_ACTION_TOOL_BLOCK,           // Shift+B
 	MAP_ACTION_NEXT_HIT,             // Page Down
 	MAP_ACTION_PREVIOUS_HIT,         // Page Up
 	MAP_ACTION_ENTER,                // Enter
@@ -57,7 +59,7 @@ enum class MapAction_t
 	MAP_ACTION_SELECT_ALL,           // Ctrl+Shift+A
 	MAP_ACTION_TOGGLE_SNAP,          // Shift+W
 	MAP_ACTION_SNAP_SELECTION,       // Ctrl+B
-	MAP_ACTION_TOGGLE_TEXTURE_LOCK,  // the tool bar's button (Hammer++ has no key for it)
+	MAP_ACTION_TOGGLE_TEXTURE_LOCK,  // Shift+L
 	// 2D views.
 	MAP_ACTION_NEXT_AXIS,            // Tab
 	MAP_ACTION_ZOOM_IN,              // keypad +

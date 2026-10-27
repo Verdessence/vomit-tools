@@ -34,12 +34,14 @@ enum class MapViewType_t
 	return nType == MapViewType_t::MAP_VIEW_TYPE_TOP || nType == MapViewType_t::MAP_VIEW_TYPE_FRONT || nType == MapViewType_t::MAP_VIEW_TYPE_SIDE;
 }
 
-// The tools of Hammer's tool bar that a viewer has.
+// The tools of Hammer's tool bar that the editor has so far.
 enum class MapTool_t
 {
 	MAP_TOOL_SELECT,
 	MAP_TOOL_MAGNIFY,
 	MAP_TOOL_CAMERA,
+	MAP_TOOL_ENTITY,
+	MAP_TOOL_BLOCK,
 };
 
 // How the views draw, shared by all of a map's views (Hammer's View menu toggles).

@@ -55,6 +55,8 @@ const Binding_t BINDINGS[] = {
 	{ MapAction_t::MAP_ACTION_TOOL_SELECT, Qt::Key_S, Qt::ShiftModifier, BOTH },
 	{ MapAction_t::MAP_ACTION_TOOL_MAGNIFY, Qt::Key_G, Qt::ShiftModifier, BOTH },
 	{ MapAction_t::MAP_ACTION_TOOL_CAMERA, Qt::Key_C, Qt::ShiftModifier, BOTH },
+	{ MapAction_t::MAP_ACTION_TOOL_ENTITY, Qt::Key_E, Qt::ShiftModifier, BOTH },
+	{ MapAction_t::MAP_ACTION_TOOL_BLOCK, Qt::Key_B, Qt::ShiftModifier, BOTH },
 	{ MapAction_t::MAP_ACTION_NEXT_HIT, Qt::Key_PageDown, Qt::NoModifier, BOTH },
 	{ MapAction_t::MAP_ACTION_PREVIOUS_HIT, Qt::Key_PageUp, Qt::NoModifier, BOTH },
 	{ MapAction_t::MAP_ACTION_ENTER, Qt::Key_Return, Qt::NoModifier, BOTH },
@@ -67,6 +69,7 @@ const Binding_t BINDINGS[] = {
 	{ MapAction_t::MAP_ACTION_SELECT_ALL, Qt::Key_A, Qt::ControlModifier | Qt::ShiftModifier, BOTH },
 	{ MapAction_t::MAP_ACTION_TOGGLE_SNAP, Qt::Key_W, Qt::ShiftModifier, BOTH },
 	{ MapAction_t::MAP_ACTION_SNAP_SELECTION, Qt::Key_B, Qt::ControlModifier, BOTH },
+	{ MapAction_t::MAP_ACTION_TOGGLE_TEXTURE_LOCK, Qt::Key_L, Qt::ShiftModifier, BOTH },
 	{ MapAction_t::MAP_ACTION_NEXT_AXIS, Qt::Key_Tab, Qt::NoModifier, ONLY_2D },
 	// Hammer's zoom keys are the keypad's; the main row's work too, for keyboards without one.
 	{ MapAction_t::MAP_ACTION_ZOOM_IN, Qt::Key_Plus, Qt::NoModifier, ONLY_2D },

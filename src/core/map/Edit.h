@@ -75,6 +75,11 @@ struct ObjectSet_t
 // will have once the edit is made (the copies of entities first, then of solids).
 [[nodiscard]] MapEdit_t CopyObjects( const CScene &scene, const std::vector<std::uint32_t> &objects, const Transform_t &transform, bool bTextureLock, std::vector<std::uint32_t> *pAdded );
 
+// New objects added (their ids given here): solids whose m_nEntity is an index into entities belong
+// to that new entity, -1 to the world. Their text must be in the map's store (as MakeBlock and
+// MakePointEntity keep it). pAdded as for CopyObjects.
+[[nodiscard]] MapEdit_t AddObjects( const CScene &scene, std::vector<Solid_t> solids, std::vector<Entity_t> entities, std::vector<std::uint32_t> *pAdded );
+
 // The objects as VMF text, for the clipboard: the world's solids in a world block, entities with
 // theirs. What other editors (and Hammer) read too.
 [[nodiscard]] std::string ObjectsToText( const CScene &scene, const std::vector<std::uint32_t> &objects );

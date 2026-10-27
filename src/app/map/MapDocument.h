@@ -20,6 +20,7 @@
 #include <QString>
 
 #include "map/Edit.h"
+#include "map/GameConfig.h"
 #include "map/Scene.h"
 #include "vfs/Vfs.h"
 
@@ -60,6 +61,8 @@ public:
 	[[nodiscard]] std::shared_ptr<const xv::map::CScene> GetSharedScene() const { return m_pScene; }
 	[[nodiscard]] const std::optional<xv::vfs::CGameInfo> &GetGame() const { return m_Game; }
 	[[nodiscard]] QString GetFgdSource() const { return m_szFgdSource; }
+	// What new objects get, from the game's Hammer configuration.
+	[[nodiscard]] const xv::map::HammerDefaults_t &GetDefaults() const { return m_Defaults; }
 	// Another game, or the same one mounted again (for the next load; resources follow it).
 	void SetGame( std::optional<xv::vfs::CGameInfo> game ) { m_Game = std::move( game ); }
 
@@ -126,7 +129,7 @@ signals:
 
 private:
 	void Run( Source_t source, int nGeneration );
-	void Finish( std::shared_ptr<xv::map::CScene> pScene, QString szFgdSource );
+	void Finish( std::shared_ptr<xv::map::CScene> pScene, QString szFgdSource, xv::map::HammerDefaults_t defaults );
 	void Changed( bool bVisibility );
 
 	std::shared_ptr<const xv::map::CScene> m_pScene;
@@ -134,6 +137,7 @@ private:
 	std::shared_ptr<const xv::map::CScene> m_pPreviewBase; // the scene before the drag
 	std::optional<xv::vfs::CGameInfo> m_Game;
 	QString m_szFgdSource;
+	xv::map::HammerDefaults_t m_Defaults;
 
 	std::thread m_Worker;
 	std::atomic<bool> m_bStop{ false };

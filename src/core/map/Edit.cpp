@@ -558,6 +558,17 @@ MapEdit_t CopyObjects( const CScene &scene, const std::vector<std::uint32_t> &ob
 //-----------------------------------------------------------------------------
 // Purpose:
 //-----------------------------------------------------------------------------
+MapEdit_t AddObjects( const CScene &scene, std::vector<Solid_t> solids, std::vector<Entity_t> entities, std::vector<std::uint32_t> *pAdded )
+{
+	Incoming_t incoming;
+	incoming.m_Solids = std::move( solids );
+	incoming.m_Entities = std::move( entities );
+	return AddIncoming( scene, std::move( incoming ), {}, false, pAdded );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
 std::string ObjectsToText( const CScene &scene, const std::vector<std::uint32_t> &objects )
 {
 	const ObjectSet_t set = ObjectsOf( scene, objects );

@@ -286,11 +286,17 @@ void CMapDocument::Run( Source_t source, int nGeneration )
 	progress( 10, "game data" );
 	std::vector<std::filesystem::path> fgds = source.m_Fgds;
 	QString szFgdSource = tr( "Preferences" );
-	if ( fgds.empty() && source.m_Game )
+	// The game's Hammer configuration also says what new objects get, whichever FGDs are read.
+	xv::map::HammerDefaults_t defaults;
+	if ( source.m_Game )
 	{
 		xv::map::GameFgds_t found = xv::map::FindGameFgds( source.m_Game->m_GameDir );
-		fgds = std::move( found.m_Files );
-		szFgdSource = QString::fromStdString( found.m_szSource );
+		defaults = std::move( found.m_Defaults );
+		if ( fgds.empty() )
+		{
+			fgds = std::move( found.m_Files );
+			szFgdSource = QString::fromStdString( found.m_szSource );
+		}
 	}
 	if ( fgds.empty() )
 	{
@@ -316,15 +322,16 @@ void CMapDocument::Run( Source_t source, int nGeneration )
 	{
 		return;
 	}
-	post( [ this, pScene = std::move( pScene ), szFgdSource ]() mutable { Finish( std::move( pScene ), szFgdSource ); } );
+	post( [ this, pScene = std::move( pScene ), szFgdSource, defaults = std::move( defaults ) ]() mutable { Finish( std::move( pScene ), szFgdSource, std::move( defaults ) ); } );
 }
 
 //-----------------------------------------------------------------------------
 // Purpose: The map is built: what starts hidden follows the flags Hammer saved.
 //-----------------------------------------------------------------------------
-void CMapDocument::Finish( std::shared_ptr<xv::map::CScene> pScene, QString szFgdSource )
+void CMapDocument::Finish( std::shared_ptr<xv::map::CScene> pScene, QString szFgdSource, xv::map::HammerDefaults_t defaults )
 {
 	m_szFgdSource = std::move( szFgdSource );
+	m_Defaults = std::move( defaults );
 	const std::uint32_t nObjects = pScene->GetObjectCount();
 	m_UserShown.assign( nObjects, 1 );
 	m_AutoShown.assign( nObjects, 1 );

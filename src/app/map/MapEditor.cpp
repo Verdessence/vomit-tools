@@ -24,6 +24,11 @@
 #include <QSplitter>
 #include <QToolBar>
 #include <QClipboard>
+#include <QComboBox>
+#include <QCompleter>
+#include <QFormLayout>
+#include <QLineEdit>
+#include <QRandomGenerator>
 #include <QCoreApplication>
 #include <QGuiApplication>
 #include <QDir>
@@ -40,6 +45,8 @@
 #include "map/MapResources.h"
 #include "map/MapView2D.h"
 #include "map/MapView3D.h"
+#include "map/Entities.h"
+#include "map/Primitives.h"
 #include "util/Memory.h"
 
 namespace
@@ -50,6 +57,8 @@ enum class MapIcon_t
 	MAP_ICON_SELECT,
 	MAP_ICON_MAGNIFY,
 	MAP_ICON_CAMERA,
+	MAP_ICON_ENTITY,
+	MAP_ICON_BLOCK,
 };
 
 //-----------------------------------------------------------------------------
@@ -86,6 +95,25 @@ QIcon MakeIcon( MapIcon_t nIcon, const QColor &color )
 			painter.drawRoundedRect( QRectF{ 4, 10, 18, 13 }, 2, 2 );
 			painter.drawPolygon( QPolygonF{ { QPointF{ 22, 14 }, QPointF{ 29, 10 }, QPointF{ 29, 23 }, QPointF{ 22, 19 } } } );
 			break;
+		case MapIcon_t::MAP_ICON_ENTITY:
+			// A marker where the entity goes.
+			painter.drawEllipse( QPointF{ 16, 16 }, 8.5, 8.5 );
+			painter.drawLine( QPointF{ 16, 3 }, QPointF{ 16, 29 } );
+			painter.drawLine( QPointF{ 3, 16 }, QPointF{ 29, 16 } );
+			break;
+		case MapIcon_t::MAP_ICON_BLOCK:
+		{
+			// A box seen from a corner.
+			const QPointF front[ 4 ] = { { 5, 12 }, { 20, 12 }, { 20, 27 }, { 5, 27 } };
+			const QPointF back{ 7, -7 };
+			painter.drawPolygon( front, 4 );
+			painter.drawLine( front[ 0 ], front[ 0 ] + back );
+			painter.drawLine( front[ 1 ], front[ 1 ] + back );
+			painter.drawLine( front[ 2 ], front[ 2 ] + back );
+			painter.drawLine( front[ 0 ] + back, front[ 1 ] + back );
+			painter.drawLine( front[ 1 ] + back, front[ 2 ] + back );
+			break;
+		}
 	}
 	return QIcon{ pixmap };
 }
@@ -165,8 +193,10 @@ CMapEditor::CMapEditor( const QString &szPath, bool bFromGame, QWidget *pParent 
 	m_pProperties = new CMapProperties( *m_pDocument );
 	section( tr( "Filter Control" ), m_pFilter );
 	section( tr( "Object Properties" ), m_pProperties );
+	section( tr( "New Objects" ), BuildNewObjects() );
 	m_pSidePanel->setStretchFactor( 0, 2 );
 	m_pSidePanel->setStretchFactor( 1, 3 );
+	m_pSidePanel->setStretchFactor( 2, 0 );
 
 	auto *pMiddle = new QSplitter( Qt::Horizontal );
 	pMiddle->addWidget( m_pSplitter );
@@ -194,6 +224,8 @@ CMapEditor::CMapEditor( const QString &szPath, bool bFromGame, QWidget *pParent 
 		{ MapTool_t::MAP_TOOL_SELECT, MapIcon_t::MAP_ICON_SELECT, tr( "Selection Tool" ), MapAction_t::MAP_ACTION_TOOL_SELECT },
 		{ MapTool_t::MAP_TOOL_MAGNIFY, MapIcon_t::MAP_ICON_MAGNIFY, tr( "Magnify" ), MapAction_t::MAP_ACTION_TOOL_MAGNIFY },
 		{ MapTool_t::MAP_TOOL_CAMERA, MapIcon_t::MAP_ICON_CAMERA, tr( "Camera" ), MapAction_t::MAP_ACTION_TOOL_CAMERA },
+		{ MapTool_t::MAP_TOOL_ENTITY, MapIcon_t::MAP_ICON_ENTITY, tr( "Entity Tool" ), MapAction_t::MAP_ACTION_TOOL_ENTITY },
+		{ MapTool_t::MAP_TOOL_BLOCK, MapIcon_t::MAP_ICON_BLOCK, tr( "Block Tool" ), MapAction_t::MAP_ACTION_TOOL_BLOCK },
 	};
 	for ( const auto &tool : tools )
 	{
@@ -202,6 +234,7 @@ CMapEditor::CMapEditor( const QString &szPath, bool bFromGame, QWidget *pParent 
 		pAction->setChecked( tool.m_nTool == m_nTool );
 		pAction->setToolTip( QStringLiteral( "%1 (%2)" ).arg( tool.m_szName, MapActionKey( tool.m_nKey ).toString( QKeySequence::NativeText ) ) );
 		pAction->setData( static_cast<int>( tool.m_nTool ) );
+		pAction->setObjectName( QStringLiteral( "mapTool%1" ).arg( static_cast<int>( tool.m_nTool ) ) );
 		m_pTools->addAction( pAction );
 	}
 	connect( m_pTools, &QActionGroup::triggered, this, [ this ]( QAction *pAction ) { SetTool( static_cast<MapTool_t>( pAction->data().toInt() ) ); } );
@@ -252,14 +285,7 @@ CMapEditor::CMapEditor( const QString &szPath, bool bFromGame, QWidget *pParent 
 		m_pLoading->move( ( m_pSplitter->width() - m_pLoading->width() ) / 2, ( m_pSplitter->height() - m_pLoading->height() ) / 2 );
 	} );
 	auto repaint = [ this ] {
-		for ( CMapView *pView : GetViews() )
-		{
-			if ( auto *p3D = qobject_cast<CMapView3D *>( pView ) )
-			{
-				p3D->Redraw();
-			}
-			pView->update();
-		}
+		RepaintViews();
 		UpdateStatus();
 	};
 	connect( m_pDocument, &CMapDocument::SelectionChanged, this, repaint );
@@ -283,6 +309,107 @@ CMapEditor::~CMapEditor()
 	// Once the map itself is gone (with the tab's children, after this), the memory it took goes
 	// back to the system rather than staying with the process.
 	QTimer::singleShot( 0, QCoreApplication::instance(), [] { xv::ReleaseFreedMemory(); } );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Every view drawn again (what they show of the map's state changed).
+//-----------------------------------------------------------------------------
+void CMapEditor::RepaintViews()
+{
+	for ( CMapView *pView : GetViews() )
+	{
+		if ( auto *p3D = qobject_cast<CMapView3D *>( pView ) )
+		{
+			p3D->Redraw();
+		}
+		pView->update();
+	}
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: The tools' box or marker moved: the 3D views draw only what goes over the picture.
+//-----------------------------------------------------------------------------
+void CMapEditor::RepaintTools()
+{
+	for ( CMapView *pView : GetViews() )
+	{
+		if ( auto *p3D = qobject_cast<CMapView3D *>( pView ) )
+		{
+			p3D->RedrawLabels();
+		}
+		else
+		{
+			pView->update();
+		}
+	}
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Hammer's New Objects and current texture, together: the class the entity tool places
+//          and the material new blocks get.
+//-----------------------------------------------------------------------------
+QWidget *CMapEditor::BuildNewObjects()
+{
+	auto *pBox = new QWidget;
+	auto *pForm = new QFormLayout( pBox );
+	pForm->setContentsMargins( 0, 0, 0, 0 );
+	m_pEntityClass = new QComboBox;
+	m_pEntityClass->setObjectName( QStringLiteral( "mapNewEntityClass" ) );
+	m_pEntityClass->setEditable( true );
+	m_pEntityClass->setInsertPolicy( QComboBox::NoInsert );
+	m_pEntityClass->setToolTip( tr( "The class the entity tool places (%1)" ).arg( MapActionKey( MapAction_t::MAP_ACTION_TOOL_ENTITY ).toString( QKeySequence::NativeText ) ) );
+	m_pEntityClass->addItem( QString::fromStdString( m_pDocument->GetDefaults().m_szPointEntity ) );
+	m_pMaterial = new QLineEdit( QStringLiteral( "DEV/DEV_MEASUREGENERIC01" ) );
+	m_pMaterial->setObjectName( QStringLiteral( "mapNewMaterial" ) );
+	m_pMaterial->setToolTip( tr( "The material the block tool gives new blocks (%1)" ).arg( MapActionKey( MapAction_t::MAP_ACTION_TOOL_BLOCK ).toString( QKeySequence::NativeText ) ) );
+	pForm->addRow( tr( "Entity" ), m_pEntityClass );
+	pForm->addRow( tr( "Texture" ), m_pMaterial );
+	return pBox;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: The game data's point classes for the entity tool (the game's default picked), and the
+//          map's materials offered as the texture is typed.
+//-----------------------------------------------------------------------------
+void CMapEditor::FillNewObjects()
+{
+	const xv::map::CScene *pScene = m_pDocument->GetScene();
+	if ( !pScene )
+	{
+		return;
+	}
+	QStringList classes;
+	if ( pScene->m_pFgd )
+	{
+		for ( const auto &[ szLower, fgdClass ] : pScene->m_pFgd->GetClasses() )
+		{
+			if ( fgdClass.IsPointClass() )
+			{
+				classes << QString::fromStdString( fgdClass.m_szName );
+			}
+		}
+	}
+	const QString szDefault = QString::fromStdString( m_pDocument->GetDefaults().m_szPointEntity );
+	const QString szWas = m_pEntityClass->currentText();
+	m_pEntityClass->clear();
+	m_pEntityClass->addItems( classes );
+	m_pEntityClass->completer()->setCaseSensitivity( Qt::CaseInsensitive );
+	m_pEntityClass->completer()->setFilterMode( Qt::MatchContains );
+	const int nDefault = m_pEntityClass->findText( szDefault, Qt::MatchFixedString );
+	m_pEntityClass->setCurrentIndex( nDefault );
+	m_pEntityClass->setCurrentText( nDefault >= 0 ? m_pEntityClass->itemText( nDefault ) : szDefault.isEmpty() ? szWas
+																											   : szDefault );
+
+	QStringList materials;
+	for ( const std::string &szMaterial : pScene->m_Materials )
+	{
+		materials << QString::fromStdString( szMaterial ).toUpper();
+	}
+	auto *pCompleter = new QCompleter( materials, m_pMaterial );
+	pCompleter->setCaseSensitivity( Qt::CaseInsensitive );
+	pCompleter->setFilterMode( Qt::MatchContains );
+	delete m_pMaterial->completer();
+	m_pMaterial->setCompleter( pCompleter );
 }
 
 //-----------------------------------------------------------------------------
@@ -388,6 +515,7 @@ void CMapEditor::Loaded()
 	}
 	StartResources();
 	UpdateGameStatus();
+	FillNewObjects();
 	std::size_t nErrors = 0;
 	for ( const xv::map::Diagnostic_t &diagnostic : scene.m_Map.m_Diagnostics )
 	{
@@ -403,6 +531,15 @@ void CMapEditor::Loaded()
 void CMapEditor::SetTool( MapTool_t nTool )
 {
 	m_nTool = nTool;
+	// What a tool was making goes with it.
+	if ( nTool != MapTool_t::MAP_TOOL_BLOCK )
+	{
+		SetNewBox( std::nullopt );
+	}
+	if ( nTool != MapTool_t::MAP_TOOL_ENTITY )
+	{
+		SetEntityMarker( std::nullopt );
+	}
 	for ( QAction *pAction : m_pTools->actions() )
 	{
 		pAction->setChecked( pAction->data().toInt() == static_cast<int>( nTool ) );
@@ -710,10 +847,31 @@ bool CMapEditor::RunAction( MapAction_t nAction, CMapView *pFrom )
 			}
 			return true;
 		}
-		case MapAction_t::MAP_ACTION_CLEAR_SELECTION:
 		case MapAction_t::MAP_ACTION_ESCAPE:
+			// A box or marker being made goes first, then the selection.
+			if ( m_NewBox || m_EntityMarker )
+			{
+				SetNewBox( std::nullopt );
+				SetEntityMarker( std::nullopt );
+				return true;
+			}
 			m_pDocument->ClearSelection();
 			return true;
+		case MapAction_t::MAP_ACTION_CLEAR_SELECTION:
+			m_pDocument->ClearSelection();
+			return true;
+		case MapAction_t::MAP_ACTION_ENTER:
+			if ( m_nTool == MapTool_t::MAP_TOOL_BLOCK && m_NewBox )
+			{
+				CreateBlock();
+				return true;
+			}
+			if ( m_nTool == MapTool_t::MAP_TOOL_ENTITY && m_EntityMarker )
+			{
+				PlaceEntity( *m_EntityMarker );
+				return true;
+			}
+			return false;
 		case MapAction_t::MAP_ACTION_QUICK_HIDE:
 			m_pDocument->QuickHide( selection );
 			return true;
@@ -781,6 +939,12 @@ bool CMapEditor::RunAction( MapAction_t nAction, CMapView *pFrom )
 		case MapAction_t::MAP_ACTION_TOOL_CAMERA:
 			SetTool( MapTool_t::MAP_TOOL_CAMERA );
 			return true;
+		case MapAction_t::MAP_ACTION_TOOL_ENTITY:
+			SetTool( MapTool_t::MAP_TOOL_ENTITY );
+			return true;
+		case MapAction_t::MAP_ACTION_TOOL_BLOCK:
+			SetTool( MapTool_t::MAP_TOOL_BLOCK );
+			return true;
 		case MapAction_t::MAP_ACTION_ZOOM_IN_ALL:
 		case MapAction_t::MAP_ACTION_ZOOM_OUT_ALL:
 			for ( CMapView *pView : GetViews() )
@@ -817,6 +981,174 @@ void CMapEditor::MoveSelection( xv::map::Point_t offset, bool bClone )
 		return;
 	}
 	m_pDocument->Edit( xv::map::TransformObjects( *pScene, selection, move, m_Settings.m_bTextureLock ), tr( "Move" ), selection );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+void CMapEditor::SetNewBox( std::optional<xv::map::Box_t> box )
+{
+	if ( box == m_NewBox )
+	{
+		return;
+	}
+	m_NewBox = box;
+	RepaintTools();
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+std::pair<double, double> CMapEditor::GetNewBoxDepth( int nAxis ) const
+{
+	const auto a = static_cast<std::size_t>( nAxis );
+	if ( m_NewBox )
+	{
+		return { m_NewBox->m_Mins[ a ], m_NewBox->m_Maxs[ a ] };
+	}
+	const xv::map::Box_t bounds = m_pDocument->GetSelectionBounds();
+	if ( !bounds.IsEmpty() && bounds.m_Maxs[ a ] > bounds.m_Mins[ a ] )
+	{
+		return { bounds.m_Mins[ a ], bounds.m_Maxs[ a ] };
+	}
+	return { m_LastBox.m_Mins[ a ], m_LastBox.m_Maxs[ a ] };
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Each new solid gets an editor colour of its own, as Hammer gives one: no red, green
+//          and blue from 100 up (what the maps it saved hold).
+//-----------------------------------------------------------------------------
+void CMapEditor::CreateBlock()
+{
+	const xv::map::CScene *pScene = m_pDocument->GetScene();
+	if ( !pScene || !m_NewBox )
+	{
+		return;
+	}
+	const xv::map::Box_t box = *m_NewBox;
+	for ( std::size_t a = 0; a < 3; a++ )
+	{
+		if ( box.m_Maxs[ a ] - box.m_Mins[ a ] <= 0.0 )
+		{
+			emit StatusMessage( tr( "The box is flat: drag its sides apart in another view first" ) );
+			return;
+		}
+	}
+	const xv::map::HammerDefaults_t &defaults = m_pDocument->GetDefaults();
+	// Hammer writes material names in capitals.
+	const std::string szMaterial = GetCurrentMaterial().trimmed().toUpper().toStdString();
+	xv::map::FaceDefaults_t faces;
+	if ( !szMaterial.empty() )
+	{
+		faces.m_szMaterial = szMaterial;
+	}
+	faces.m_flTextureScale = defaults.m_flTextureScale;
+	faces.m_nLightmapScale = defaults.m_nLightmapScale;
+	QRandomGenerator *pRandom = QRandomGenerator::global();
+	faces.m_Color = { 0, static_cast<std::uint8_t>( pRandom->bounded( 100, 256 ) ), static_cast<std::uint8_t>( pRandom->bounded( 100, 256 ) ) };
+	std::vector<std::uint32_t> added;
+	xv::map::MapEdit_t edit = xv::map::AddObjects( *pScene, { xv::map::MakeBlock( pScene->m_Map, box, faces ) }, {}, &added );
+	m_LastBox = box;
+	SetNewBox( std::nullopt );
+	m_pDocument->Edit( std::move( edit ), tr( "Create Block" ), std::move( added ) );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+void CMapEditor::SetEntityMarker( std::optional<xv::map::Point_t> at )
+{
+	if ( at == m_EntityMarker )
+	{
+		return;
+	}
+	m_EntityMarker = at;
+	RepaintTools();
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Only point classes: a brush entity is made from brushes (Tie to Entity).
+//-----------------------------------------------------------------------------
+void CMapEditor::PlaceEntity( const xv::map::Point_t &origin )
+{
+	const xv::map::CScene *pScene = m_pDocument->GetScene();
+	const std::string szClass = GetEntityClass().trimmed().toStdString();
+	if ( !pScene )
+	{
+		return;
+	}
+	if ( szClass.empty() )
+	{
+		emit StatusMessage( tr( "Pick a class for the entity tool to place" ) );
+		return;
+	}
+	const xv::map::FgdClass_t *pClass = pScene->m_pFgd ? pScene->m_pFgd->Find( szClass ) : nullptr;
+	if ( pClass && !pClass->IsPointClass() )
+	{
+		emit StatusMessage( tr( "%1 is a brush entity: make its brushes, then tie them to it" ).arg( QString::fromStdString( pClass->m_szName ) ) );
+		return;
+	}
+	std::vector<std::uint32_t> added;
+	xv::map::MapEdit_t edit = xv::map::AddObjects( *pScene, {}, { xv::map::MakePointEntity( pScene->m_Map, pScene->m_pFgd.get(), szClass, origin ) }, &added );
+	m_pDocument->Edit( std::move( edit ), tr( "Create Entity" ), std::move( added ) );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: The origin goes out from the surface by as much as the class's box reaches behind it,
+//          so the box rests on the surface; on a floor, wall or ceiling the grid places it along
+//          the surface.
+//-----------------------------------------------------------------------------
+void CMapEditor::PlaceEntityOn( const xv::map::Point_t &point, const xv::map::Point_t &normal )
+{
+	const xv::map::CScene *pScene = m_pDocument->GetScene();
+	if ( !pScene )
+	{
+		return;
+	}
+	const std::string szClass = GetEntityClass().trimmed().toStdString();
+	xv::map::Entity_t probe;
+	probe.m_Keys.push_back( { "classname", szClass, {} } );
+	const xv::map::Box_t box = xv::map::DescribeEntity( probe, pScene->m_pFgd.get() ).m_Box;
+	double flBehind = std::numeric_limits<double>::max();
+	for ( int nCorner = 0; nCorner < 8; nCorner++ )
+	{
+		const xv::map::Point_t corner{ ( nCorner & 1 ) ? box.m_Maxs[ 0 ] : box.m_Mins[ 0 ], ( nCorner & 2 ) ? box.m_Maxs[ 1 ] : box.m_Mins[ 1 ], ( nCorner & 4 ) ? box.m_Maxs[ 2 ] : box.m_Mins[ 2 ] };
+		flBehind = std::min( flBehind, xv::map::Dot( corner, normal ) );
+	}
+	xv::map::Point_t origin = xv::map::Subtract( point, xv::map::Scale( normal, flBehind ) );
+	std::size_t nFacing = 0;
+	for ( std::size_t a = 1; a < 3; a++ )
+	{
+		nFacing = std::abs( normal[ a ] ) > std::abs( normal[ nFacing ] ) ? a : nFacing;
+	}
+	if ( m_Settings.m_bSnapToGrid && std::abs( normal[ nFacing ] ) > 0.999 )
+	{
+		const auto flGrid = static_cast<double>( m_Settings.m_nGridSize );
+		for ( std::size_t a = 0; a < 3; a++ )
+		{
+			if ( a != nFacing )
+			{
+				origin[ a ] = std::round( origin[ a ] / flGrid ) * flGrid;
+			}
+		}
+	}
+	PlaceEntity( origin );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+QString CMapEditor::GetCurrentMaterial() const
+{
+	return m_pMaterial->text();
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+QString CMapEditor::GetEntityClass() const
+{
+	return m_pEntityClass->currentText();
 }
 
 //-----------------------------------------------------------------------------

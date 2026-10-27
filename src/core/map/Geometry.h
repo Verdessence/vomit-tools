@@ -97,6 +97,8 @@ struct Box_t
 	[[nodiscard]] Point_t GetSize() const { return Subtract( m_Maxs, m_Mins ); }
 	[[nodiscard]] bool Contains( Point_t p ) const;
 	[[nodiscard]] bool Intersects( const Box_t &box ) const;
+
+	friend bool operator==( const Box_t &, const Box_t & ) = default;
 };
 
 // A convex polygon on one of a set of planes (m_nPlane indexes them; -1 for none).

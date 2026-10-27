@@ -3,9 +3,20 @@
 ## Unreleased
 
 ### Hammer maps (new)
-- **Map viewer:** open Hammer maps (`.vmf`) in a tab laid out as Hammer++'s: a 3D view and the
+- **Map editor:** open Hammer maps (`.vmf`) in a tab laid out as Hammer++'s: a 3D view and the
   Top, Front and Side views in four panes, its keys, colours, grid and camera (fly with WASD, look
-  with Z or the mouse), from Hammer++'s own settings. Read only for now.
+  with Z or the mouse), from Hammer++'s own settings.
+- **Editing:** move the selection by dragging it in a 2D view or with the arrows (Shift clones),
+  delete, cut, copy and paste (as VMF text, so between maps and to and from Hammer), select all,
+  snap to the grid (Ctrl+B), with texture lock (Shift+L). Every edit can be undone.
+- **Block tool** (Shift+B): drag a box in a 2D view, pull its handles in the others, Enter (or the
+  right button's Create Object) makes a block with the current texture. **Entity tool** (Shift+E):
+  click in 2D and press Enter, or click a surface in 3D to stand the entity on it, with the class
+  picked under New Objects. New objects get the keys and colours Hammer gives them, and the game's
+  Hammer configuration's default entity, texture scale and lightmap scale.
+- **Saving** writes the map back as it was read, changing only what was edited: untouched parts
+  stay byte for byte, so diffs against Hammer's saves stay small. The previous file is kept as a
+  `.vmx`, as Hammer does.
 - Brushes (with Hammer++'s exact vertices), displacements with their blended materials, entities
   as their FGD draws them (boxes, models, sprites tinted by their light, helper spheres), overlays
   and decals on their faces, `func_instance` contents tinted orange, the 2D sky on sky faces and

@@ -1,9 +1,9 @@
 //===========================================================================//
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
-// Purpose: The map viewer's tab, laid out as Hammer is: the tool bar down the left, the four
+// Purpose: The map editor's tab, laid out as Hammer is: the tool bar down the left, the four
 //          view panes, the object panels on the right and Hammer's status bar along the
-//          bottom. It views a map; nothing is changed or saved.
+//          bottom.
 //
 //===========================================================================//
 #pragma once
@@ -11,6 +11,7 @@
 #include <array>
 #include <memory>
 #include <optional>
+#include <utility>
 #include <vector>
 
 #include <QWidget>
@@ -27,7 +28,9 @@ class CMapResources;
 class CMapQuadSplitter;
 class QAction;
 class QActionGroup;
+class QComboBox;
 class QLabel;
+class QLineEdit;
 class QSplitter;
 class QToolBar;
 class QVBoxLayout;
@@ -70,6 +73,26 @@ public:
 	void CameraMoved( CMapView *pView );
 	// The selection moved by offset (units), or copied there (bClone); one step to undo.
 	void MoveSelection( xv::map::Point_t offset, bool bClone );
+
+	// The block tool's box, dragged in a 2D view and shown in every view; Enter makes it a block.
+	[[nodiscard]] const std::optional<xv::map::Box_t> &GetNewBox() const { return m_NewBox; }
+	void SetNewBox( std::optional<xv::map::Box_t> box );
+	// How far a new box reaches along an axis its 2D view doesn't show: as far as the box there
+	// already, else the selection, else the last block made.
+	[[nodiscard]] std::pair<double, double> GetNewBoxDepth( int nAxis ) const;
+	// The box made a block with the current texture, and selected.
+	void CreateBlock();
+	// The entity tool's marker, placed in a 2D view; Enter puts an entity there.
+	[[nodiscard]] const std::optional<xv::map::Point_t> &GetEntityMarker() const { return m_EntityMarker; }
+	void SetEntityMarker( std::optional<xv::map::Point_t> at );
+	// A new entity of the entity tool's class at origin, selected.
+	void PlaceEntity( const xv::map::Point_t &origin );
+	// The same, standing on a surface (a click in 3D): its box touches the surface at point, on
+	// the side normal faces.
+	void PlaceEntityOn( const xv::map::Point_t &point, const xv::map::Point_t &normal );
+	// What new blocks' faces get, and the class the entity tool places.
+	[[nodiscard]] QString GetCurrentMaterial() const;
+	[[nodiscard]] QString GetEntityClass() const;
 	// A 3D view changed how it draws (the card's drawing failed): software needs the textures decoded.
 	void RendererChanged();
 
@@ -91,6 +114,11 @@ signals:
 
 private:
 	void BuildToolBars( QVBoxLayout *pLayout );
+	[[nodiscard]] QWidget *BuildNewObjects();
+	// The entity classes and materials to pick from, once the map's game data is read.
+	void FillNewObjects();
+	void RepaintViews();
+	void RepaintTools();
 	void Loaded();
 	void SettingsChanged();
 	void UpdateStatus();
@@ -121,6 +149,11 @@ private:
 	MapTool_t m_nTool = MapTool_t::MAP_TOOL_SELECT;
 	std::optional<xv::map::CViewCamera> m_RememberedCamera;
 	CMapView *m_pActiveView = nullptr;
+	std::optional<xv::map::Box_t> m_NewBox;
+	xv::map::Box_t m_LastBox{ { 0, 0, 0 }, { 64, 64, 64 } };
+	std::optional<xv::map::Point_t> m_EntityMarker;
+	QLineEdit *m_pMaterial = nullptr;
+	QComboBox *m_pEntityClass = nullptr;
 
 	std::array<CMapPane *, 4> m_Panes{};
 	CMapQuadSplitter *m_pSplitter = nullptr;

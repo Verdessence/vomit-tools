@@ -15,6 +15,7 @@
 #include <QApplication>
 #include <QElapsedTimer>
 #include <QKeyEvent>
+#include <QMenu>
 #include <QMouseEvent>
 #include <QPainter>
 #include <QScrollBar>
@@ -61,6 +62,60 @@ double DistanceToSegment( QPointF p, QPointF a, QPointF b )
 const MapPreferences_t &Look()
 {
 	return CPreferences::Instance().GetMapPreferences();
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Hammer's eight handles round a box, just outside its corners and sides, each with
+//          where it is (-1, 0 or 1 across and down).
+//-----------------------------------------------------------------------------
+std::array<std::pair<QPoint, QRectF>, 8> HandlesOf( const QRectF &box )
+{
+	std::array<std::pair<QPoint, QRectF>, 8> handles;
+	const double h = Look().m_nHandleSize;
+	const double flOut = h / 2.0 + 2.0;
+	std::size_t n = 0;
+	for ( int ix = -1; ix <= 1; ix++ )
+	{
+		for ( int iy = -1; iy <= 1; iy++ )
+		{
+			if ( ix == 0 && iy == 0 )
+			{
+				continue;
+			}
+			const double x = ix < 0 ? box.left() - flOut : ix > 0 ? box.right() + flOut
+																  : box.center().x();
+			const double y = iy < 0 ? box.top() - flOut : iy > 0 ? box.bottom() + flOut
+																 : box.center().y();
+			handles[ n++ ] = { QPoint{ ix, iy }, QRectF{ x - h / 2.0, y - h / 2.0, h, h } };
+		}
+	}
+	return handles;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Hammer's handles drawn round box.
+//-----------------------------------------------------------------------------
+void PaintHandles( QPainter &painter, const QRectF &box )
+{
+	painter.setPen( QPen{ Qt::black, 0 } );
+	painter.setBrush( Look().m_Colors.m_ToolHandle );
+	for ( const auto &[ where, handle ] : HandlesOf( box ) )
+	{
+		painter.drawRect( handle );
+	}
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: A box's width and height written above it and to its left, as Hammer shows them.
+//-----------------------------------------------------------------------------
+void PaintSizes( QPainter &painter, const QRectF &box, QPointF size, const QColor &color )
+{
+	painter.setPen( color );
+	const QString szWidth = QString::number( std::lround( size.x() ) );
+	const QString szHeight = QString::number( std::lround( size.y() ) );
+	const QFontMetrics metrics = painter.fontMetrics();
+	painter.drawText( QPointF{ box.center().x() - metrics.horizontalAdvance( szWidth ) / 2.0, box.top() - 10.0 }, szWidth );
+	painter.drawText( QPointF{ box.left() - metrics.horizontalAdvance( szHeight ) - 10.0, box.center().y() + metrics.ascent() / 2.0 }, szHeight );
 }
 
 //-----------------------------------------------------------------------------
@@ -849,46 +904,17 @@ void CMapView2D::PaintSelection( QPainter &painter ) const
 		painter.setBrush( Qt::NoBrush );
 		painter.drawRect( box );
 	};
-	// Hammer's eight handles, just outside the box's corners and sides.
-	auto handles = [ & ]( const QRectF &box ) {
-		painter.setPen( QPen{ Qt::black, 0 } );
-		painter.setBrush( Look().m_Colors.m_ToolHandle );
-		const double h = Look().m_nHandleSize;
-		const double flOut = h / 2.0 + 2.0;
-		for ( int ix = -1; ix <= 1; ix++ )
-		{
-			for ( int iy = -1; iy <= 1; iy++ )
-			{
-				if ( ix == 0 && iy == 0 )
-				{
-					continue;
-				}
-				const double x = ix < 0 ? box.left() - flOut : ix > 0 ? box.right() + flOut
-																	  : box.center().x();
-				const double y = iy < 0 ? box.top() - flOut : iy > 0 ? box.bottom() + flOut
-																	 : box.center().y();
-				painter.drawRect( QRectF{ x - h / 2.0, y - h / 2.0, h, h } );
-			}
-		}
-	};
 	if ( !document.GetSelection().empty() )
 	{
 		const xv::map::Box_t bounds = document.GetSelectionBounds();
 		if ( !bounds.IsEmpty() )
 		{
-			const QPointF mins = Flatten( bounds.m_Mins );
-			const QPointF maxs = Flatten( bounds.m_Maxs );
-			const QRectF box = QRectF{ ToWidget( mins ), ToWidget( maxs ) }.normalized();
+			const QRectF box = RectOf( bounds );
 			painter.fillRect( box, Look().m_Colors.m_SelectionFill );
 			dotted( box );
-			handles( box );
+			PaintHandles( painter, box );
 			// Its size on two sides, as Hammer shows it while selecting.
-			painter.setPen( Look().m_Colors.m_ToolSelection );
-			const QString szWidth = QString::number( std::lround( maxs.x() - mins.x() ) );
-			const QString szHeight = QString::number( std::lround( maxs.y() - mins.y() ) );
-			const QFontMetrics metrics = painter.fontMetrics();
-			painter.drawText( QPointF{ box.center().x() - metrics.horizontalAdvance( szWidth ) / 2.0, box.top() - 10.0 }, szWidth );
-			painter.drawText( QPointF{ box.left() - metrics.horizontalAdvance( szHeight ) - 10.0, box.center().y() + metrics.ascent() / 2.0 }, szHeight );
+			PaintSizes( painter, box, Flatten( bounds.m_Maxs ) - Flatten( bounds.m_Mins ), Look().m_Colors.m_ToolSelection );
 		}
 	}
 	if ( m_BoxFrom && m_PressAt != QPoint{} && !m_pMoveScene )
@@ -900,7 +926,35 @@ void CMapView2D::PaintSelection( QPainter &painter ) const
 	{
 		const QRectF box = QRectF{ ToWidget( m_PendingBox->topLeft() ), ToWidget( m_PendingBox->bottomRight() ) }.normalized();
 		dotted( box );
-		handles( box );
+		PaintHandles( painter, box );
+	}
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: The new box as Hammer's block tool draws it, with its handles and size; the entity
+//          marker as lines across the view through where the entity will go.
+//-----------------------------------------------------------------------------
+void CMapView2D::PaintTools( QPainter &painter ) const
+{
+	const QColor &color = Look().m_Colors.m_ToolBlock;
+	if ( const std::optional<xv::map::Box_t> &newBox = m_Editor.GetNewBox() )
+	{
+		const QRectF box = RectOf( *newBox );
+		painter.setPen( QPen{ color, 0 } );
+		painter.setBrush( Qt::NoBrush );
+		painter.drawRect( box );
+		PaintHandles( painter, box );
+		PaintSizes( painter, box, Flatten( newBox->m_Maxs ) - Flatten( newBox->m_Mins ), color );
+	}
+	if ( const std::optional<xv::map::Point_t> &marker = m_Editor.GetEntityMarker() )
+	{
+		const QPointF at = ToWidget( Flatten( *marker ) );
+		painter.setPen( QPen{ color, 0, Qt::DotLine } );
+		painter.drawLine( QPointF{ 0.0, at.y() }, QPointF{ static_cast<double>( width() ), at.y() } );
+		painter.drawLine( QPointF{ at.x(), 0.0 }, QPointF{ at.x(), static_cast<double>( height() ) } );
+		painter.setPen( QPen{ color, 0 } );
+		painter.setBrush( Qt::NoBrush );
+		painter.drawRect( QRectF{ at.x() - 4.0, at.y() - 4.0, 8.0, 8.0 } );
 	}
 }
 
@@ -993,6 +1047,7 @@ void CMapView2D::paintEvent( QPaintEvent * )
 	painter.drawPixmap( 0, 0, m_Layer );
 	PaintCamera( painter );
 	PaintSelection( painter );
+	PaintTools( painter );
 	if ( hasFocus() )
 	{
 		// The view keys go to: Hammer marks it with its caption, a thin frame here.
@@ -1101,6 +1156,34 @@ void CMapView2D::mousePressEvent( QMouseEvent *pEvent )
 		}
 		return;
 	}
+	if ( nTool == MapTool_t::MAP_TOOL_BLOCK )
+	{
+		if ( pEvent->button() == Qt::LeftButton )
+		{
+			PressBlock( at );
+		}
+		else if ( pEvent->button() == Qt::RightButton && m_Editor.GetNewBox() && RectOf( *m_Editor.GetNewBox() ).contains( at ) )
+		{
+			// Hammer's other way to make the box a block.
+			QMenu menu( this );
+			QAction *pCreate = menu.addAction( tr( "Create Object" ) );
+			if ( menu.exec( pEvent->globalPosition().toPoint() ) == pCreate )
+			{
+				m_Editor.CreateBlock();
+			}
+		}
+		return;
+	}
+	if ( nTool == MapTool_t::MAP_TOOL_ENTITY )
+	{
+		if ( pEvent->button() == Qt::LeftButton )
+		{
+			m_PressAt = at.toPoint();
+			m_nBoxDrag = BoxDrag_t::BOX_DRAG_NEW;
+			DragBlock( at, pEvent->modifiers() );
+		}
+		return;
+	}
 	if ( pEvent->button() == Qt::LeftButton )
 	{
 		m_PressAt = pEvent->position().toPoint();
@@ -1118,6 +1201,134 @@ void CMapView2D::mousePressEvent( QMouseEvent *pEvent )
 			}
 		}
 	}
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+double CMapView2D::Snap( double flValue, Qt::KeyboardModifiers modifiers ) const
+{
+	const MapViewSettings_t &settings = m_Editor.GetSettings();
+	if ( !settings.m_bSnapToGrid || modifiers.testFlag( Qt::AltModifier ) )
+	{
+		return flValue;
+	}
+	const auto flGrid = static_cast<double>( settings.m_nGridSize );
+	return std::round( flValue / flGrid ) * flGrid;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+QRectF CMapView2D::RectOf( const xv::map::Box_t &box ) const
+{
+	return QRectF{ ToWidget( Flatten( box.m_Mins ) ), ToWidget( Flatten( box.m_Maxs ) ) }.normalized();
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: On one of the box's handles, that side or corner follows the drag; inside it, the box
+//          moves; anywhere else, a new box is dragged out from there.
+//-----------------------------------------------------------------------------
+void CMapView2D::PressBlock( QPointF at )
+{
+	m_PressAt = at.toPoint();
+	m_nBoxDrag = BoxDrag_t::BOX_DRAG_NEW;
+	m_bBoxDragMoved = false;
+	m_BoxDragFrom = ToMap( at );
+	if ( const std::optional<xv::map::Box_t> &box = m_Editor.GetNewBox() )
+	{
+		m_BoxDragStart = *box;
+		const QRectF rect = RectOf( *box );
+		for ( const auto &[ where, handle ] : HandlesOf( rect ) )
+		{
+			if ( handle.adjusted( -2.0, -2.0, 2.0, 2.0 ).contains( at ) )
+			{
+				m_nBoxDrag = BoxDrag_t::BOX_DRAG_HANDLE;
+				m_BoxHandle = where;
+				return;
+			}
+		}
+		if ( rect.adjusted( -2.0, -2.0, 2.0, 2.0 ).contains( at ) )
+		{
+			m_nBoxDrag = BoxDrag_t::BOX_DRAG_MOVE;
+		}
+	}
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: The block tool's drag (and the entity tool's marker, which follows the mouse while
+//          the button is down). Everything lands on the grid: a new box's corners, a pulled side,
+//          a moved box's lowest corner.
+//-----------------------------------------------------------------------------
+void CMapView2D::DragBlock( QPointF at, Qt::KeyboardModifiers modifiers )
+{
+	const QPointF map = ToMap( at );
+	const auto a0 = static_cast<std::size_t>( GetAxis( 0 ) );
+	const auto a1 = static_cast<std::size_t>( GetAxis( 1 ) );
+	const std::size_t a2 = 3 - a0 - a1;
+	if ( m_Editor.GetTool() == MapTool_t::MAP_TOOL_ENTITY )
+	{
+		xv::map::Point_t marker = m_Editor.GetEntityMarker().value_or( xv::map::Point_t{} );
+		marker[ a0 ] = Snap( map.x(), modifiers );
+		marker[ a1 ] = Snap( map.y(), modifiers );
+		m_Editor.SetEntityMarker( marker );
+		return;
+	}
+	xv::map::Box_t box = m_BoxDragStart;
+	switch ( m_nBoxDrag )
+	{
+		case BoxDrag_t::BOX_DRAG_NONE:
+			return;
+		case BoxDrag_t::BOX_DRAG_NEW:
+		{
+			// A click outside the box leaves it be.
+			if ( !m_bBoxDragMoved && ( at.toPoint() - m_PressAt ).manhattanLength() < DRAG_THRESHOLD )
+			{
+				return;
+			}
+			m_bBoxDragMoved = true;
+			const QPointF from{ Snap( m_BoxDragFrom.x(), modifiers ), Snap( m_BoxDragFrom.y(), modifiers ) };
+			const QPointF to{ Snap( map.x(), modifiers ), Snap( map.y(), modifiers ) };
+			const auto [ flLow, flHigh ] = m_Editor.GetNewBoxDepth( static_cast<int>( a2 ) );
+			box.m_Mins[ a0 ] = std::min( from.x(), to.x() );
+			box.m_Maxs[ a0 ] = std::max( from.x(), to.x() );
+			box.m_Mins[ a1 ] = std::min( from.y(), to.y() );
+			box.m_Maxs[ a1 ] = std::max( from.y(), to.y() );
+			box.m_Mins[ a2 ] = flLow;
+			box.m_Maxs[ a2 ] = flHigh;
+			break;
+		}
+		case BoxDrag_t::BOX_DRAG_MOVE:
+		{
+			const QPointF corner{ box.m_Mins[ a0 ], box.m_Mins[ a1 ] };
+			const QPointF moved = corner + ( map - m_BoxDragFrom );
+			const QPointF delta = QPointF{ Snap( moved.x(), modifiers ), Snap( moved.y(), modifiers ) } - corner;
+			box.m_Mins[ a0 ] += delta.x();
+			box.m_Maxs[ a0 ] += delta.x();
+			box.m_Mins[ a1 ] += delta.y();
+			box.m_Maxs[ a1 ] += delta.y();
+			break;
+		}
+		case BoxDrag_t::BOX_DRAG_HANDLE:
+			// Down the widget is down the view's vertical axis: the handle on top pulls its maximum.
+			if ( m_BoxHandle.x() != 0 )
+			{
+				( m_BoxHandle.x() < 0 ? box.m_Mins : box.m_Maxs )[ a0 ] = Snap( map.x(), modifiers );
+			}
+			if ( m_BoxHandle.y() != 0 )
+			{
+				( m_BoxHandle.y() < 0 ? box.m_Maxs : box.m_Mins )[ a1 ] = Snap( map.y(), modifiers );
+			}
+			for ( const std::size_t a : { a0, a1 } )
+			{
+				if ( box.m_Mins[ a ] > box.m_Maxs[ a ] )
+				{
+					std::swap( box.m_Mins[ a ], box.m_Maxs[ a ] );
+				}
+			}
+			break;
+	}
+	m_Editor.SetNewBox( box );
 }
 
 //-----------------------------------------------------------------------------
@@ -1184,6 +1395,11 @@ void CMapView2D::mouseMoveEvent( QMouseEvent *pEvent )
 		SetCenter( m_Center + QPointF{ -delta.x() / m_flZoom, delta.y() / m_flZoom } );
 		return;
 	}
+	if ( m_nBoxDrag != BoxDrag_t::BOX_DRAG_NONE && ( pEvent->buttons() & Qt::LeftButton ) )
+	{
+		DragBlock( pEvent->position(), pEvent->modifiers() );
+		return;
+	}
 	if ( m_MoveFrom && ( pEvent->buttons() & Qt::LeftButton ) && ( m_pMoveScene || ( pEvent->position().toPoint() - m_PressAt ).manhattanLength() >= DRAG_THRESHOLD ) )
 	{
 		PreviewMove( pEvent->position(), pEvent->modifiers() );
@@ -1204,6 +1420,12 @@ void CMapView2D::mouseReleaseEvent( QMouseEvent *pEvent )
 	{
 		m_PanFrom.reset();
 		setCursor( m_bSpaceHeld ? Qt::OpenHandCursor : Qt::ArrowCursor );
+		return;
+	}
+	if ( m_nBoxDrag != BoxDrag_t::BOX_DRAG_NONE && pEvent->button() == Qt::LeftButton )
+	{
+		m_nBoxDrag = BoxDrag_t::BOX_DRAG_NONE;
+		m_PressAt = {};
 		return;
 	}
 	if ( pEvent->button() != Qt::LeftButton || !m_BoxFrom )
@@ -1407,6 +1629,8 @@ bool CMapView2D::Run( MapAction_t nAction )
 			}
 			return false;
 		case MapAction_t::MAP_ACTION_ESCAPE:
+			// The editor drops the box or marker; the drag mustn't bring it back.
+			m_nBoxDrag = BoxDrag_t::BOX_DRAG_NONE;
 			if ( m_pMoveScene )
 			{
 				CancelMove();

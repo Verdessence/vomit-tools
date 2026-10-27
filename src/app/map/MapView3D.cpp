@@ -386,6 +386,21 @@ void CMapView3D::paintEvent( QPaintEvent * )
 }
 
 //-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+void CMapView3D::RedrawLabels()
+{
+	if ( m_pOverlay )
+	{
+		m_pOverlay->update();
+	}
+	else
+	{
+		update();
+	}
+}
+
+//-----------------------------------------------------------------------------
 // Purpose: What goes over the picture: the statistics (O) and the focus frame.
 //-----------------------------------------------------------------------------
 void CMapView3D::PaintLabels( QPainter &painter )
@@ -429,6 +444,7 @@ void CMapView3D::PaintLabels( QPainter &painter )
 			DebugLog() << "map 3D view:" << lines.join( QStringLiteral( "; " ) );
 		}
 	}
+	PaintTools( painter );
 	// The axes as the camera sees them, in the bottom left corner: which way is which.
 	{
 		const xv::map::Point_t right = m_Camera.GetRight();
@@ -602,9 +618,21 @@ void CMapView3D::mouseReleaseEvent( QMouseEvent *pEvent )
 {
 	const bool bWasLeft = ( m_Dragging & Qt::LeftButton ) != 0;
 	m_Dragging = pEvent->buttons();
-	if ( bWasLeft && !m_bMoved && !m_bSpaceHeld && !m_bMouselook && m_Editor.GetTool() == MapTool_t::MAP_TOOL_SELECT && pEvent->button() == Qt::LeftButton )
+	if ( !bWasLeft || m_bMoved || m_bSpaceHeld || m_bMouselook || pEvent->button() != Qt::LeftButton )
+	{
+		return;
+	}
+	if ( m_Editor.GetTool() == MapTool_t::MAP_TOOL_SELECT )
 	{
 		Select( pEvent->position(), pEvent->modifiers().testFlag( Qt::ControlModifier ) );
+	}
+	else if ( m_Editor.GetTool() == MapTool_t::MAP_TOOL_ENTITY )
+	{
+		// Hammer's entity tool puts it straight on what was clicked.
+		if ( const auto surface = SurfaceAt( pEvent->position() ) )
+		{
+			m_Editor.PlaceEntityOn( surface->first, surface->second );
+		}
 	}
 }
 
@@ -620,6 +648,109 @@ std::vector<xv::map::TraceHit_t> CMapView3D::HitsAt( QPointF at )
 	}
 	const auto [ from, dir ] = frame.m_Camera.Ray( at.x(), at.y() );
 	return xv::map::TraceScene( frame.MakeScene(), m_Editor.GetSettings().m_bToolTextures, from, dir, m_Camera.m_flFar );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: The nearest hit's triangle gives the surface's direction.
+//-----------------------------------------------------------------------------
+std::optional<std::pair<xv::map::Point_t, xv::map::Point_t>> CMapView3D::SurfaceAt( QPointF at )
+{
+	const MapFrame_t frame = MakeFrame( size() );
+	if ( !frame.m_pScene )
+	{
+		return std::nullopt;
+	}
+	const xv::map::RasterScene_t scene = frame.MakeScene();
+	const auto [ from, dir ] = frame.m_Camera.Ray( at.x(), at.y() );
+	const std::vector<xv::map::TraceHit_t> hits = xv::map::TraceScene( scene, m_Editor.GetSettings().m_bToolTextures, from, dir, m_Camera.m_flFar );
+	if ( hits.empty() )
+	{
+		return std::nullopt;
+	}
+	const xv::map::TraceHit_t &hit = hits.front();
+	const xv::map::CMapMesh &mesh = *scene.m_Meshes[ hit.m_nMesh ];
+	std::array<xv::map::Point_t, 3> corners{};
+	for ( std::size_t k = 0; k < 3; k++ )
+	{
+		const auto &p = mesh.m_Vertices[ mesh.m_Indices[ hit.m_nTriangle * 3 + k ] ].m_vecPosition;
+		corners[ k ] = { p.m_flX, p.m_flY, p.m_flZ };
+	}
+	xv::map::Point_t normal = xv::map::Normalized( xv::map::Cross( xv::map::Subtract( corners[ 1 ], corners[ 0 ] ), xv::map::Subtract( corners[ 2 ], corners[ 0 ] ) ) );
+	if ( xv::map::Dot( normal, dir ) > 0.0 )
+	{
+		normal = xv::map::Scale( normal, -1.0 );
+	}
+	return std::pair{ xv::map::Add( from, xv::map::Scale( dir, hit.m_flDistance ) ), normal };
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Edges in front of the near plane are cut where they cross it, so a box reaching
+//          behind the camera is still drawn where it is in view. A dark edge round each line
+//          keeps it seen against faces of its own colour.
+//-----------------------------------------------------------------------------
+void CMapView3D::PaintTools( QPainter &painter ) const
+{
+	const std::optional<xv::map::Box_t> &box = m_Editor.GetNewBox();
+	const std::optional<xv::map::Point_t> &marker = m_Editor.GetEntityMarker();
+	if ( !box && !marker )
+	{
+		return;
+	}
+	xv::map::CViewCamera camera = m_Camera;
+	camera.m_nWidth = width();
+	camera.m_nHeight = height();
+	const xv::map::Point_t forward = camera.GetForward();
+	std::vector<QLineF> lines;
+	auto line = [ & ]( xv::map::Point_t a, xv::map::Point_t b ) {
+		const double flA = xv::map::Dot( xv::map::Subtract( a, camera.m_Eye ), forward ) - camera.m_flNear * 1.01;
+		const double flB = xv::map::Dot( xv::map::Subtract( b, camera.m_Eye ), forward ) - camera.m_flNear * 1.01;
+		if ( flA < 0.0 && flB < 0.0 )
+		{
+			return;
+		}
+		if ( flA < 0.0 || flB < 0.0 )
+		{
+			const xv::map::Point_t cut = xv::map::Add( a, xv::map::Scale( xv::map::Subtract( b, a ), flA / ( flA - flB ) ) );
+			( flA < 0.0 ? a : b ) = cut;
+		}
+		const auto pa = camera.Project( a );
+		const auto pb = camera.Project( b );
+		if ( pa && pb )
+		{
+			lines.emplace_back( QPointF{ ( *pa )[ 0 ], ( *pa )[ 1 ] }, QPointF{ ( *pb )[ 0 ], ( *pb )[ 1 ] } );
+		}
+	};
+	if ( box )
+	{
+		auto corner = [ & ]( int n ) { return xv::map::Point_t{ ( n & 1 ) ? box->m_Maxs[ 0 ] : box->m_Mins[ 0 ], ( n & 2 ) ? box->m_Maxs[ 1 ] : box->m_Mins[ 1 ], ( n & 4 ) ? box->m_Maxs[ 2 ] : box->m_Mins[ 2 ] }; };
+		for ( int n = 0; n < 8; n++ )
+		{
+			for ( const int nBit : { 1, 2, 4 } )
+			{
+				if ( ( n & nBit ) == 0 )
+				{
+					line( corner( n ), corner( n | nBit ) );
+				}
+			}
+		}
+	}
+	if ( marker )
+	{
+		for ( std::size_t a = 0; a < 3; a++ )
+		{
+			xv::map::Point_t from = *marker;
+			xv::map::Point_t to = *marker;
+			from[ a ] -= 16.0;
+			to[ a ] += 16.0;
+			line( from, to );
+		}
+	}
+	painter.setRenderHint( QPainter::Antialiasing, true );
+	painter.setPen( QPen{ QColor{ 0, 0, 0, 160 }, 3.0 } );
+	painter.drawLines( lines.data(), static_cast<int>( lines.size() ) );
+	painter.setPen( QPen{ CPreferences::Instance().GetMapPreferences().m_Colors.m_ToolBlock, 1.0 } );
+	painter.drawLines( lines.data(), static_cast<int>( lines.size() ) );
+	painter.setRenderHint( QPainter::Antialiasing, false );
 }
 
 //-----------------------------------------------------------------------------
