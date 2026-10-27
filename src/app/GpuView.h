@@ -14,6 +14,7 @@
 #include <memory>
 
 #include <QImage>
+#include <QString>
 #include <QRhiWidget>
 #include <QSize>
 
@@ -51,6 +52,8 @@ public:
 	~CGpuView() override;
 
 	[[nodiscard]] IGpuRenderer &GetRenderer() { return *m_pRenderer; }
+	// The QRhi backend drawing this widget ("Vulkan", "OpenGL"...), once it has one.
+	[[nodiscard]] QString GetBackendName() const;
 
 protected:
 	void initialize( QRhiCommandBuffer *pCommands ) override;

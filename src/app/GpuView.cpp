@@ -96,6 +96,14 @@ void CGpuView::render( QRhiCommandBuffer *pCommands )
 //-----------------------------------------------------------------------------
 // Purpose:
 //-----------------------------------------------------------------------------
+QString CGpuView::GetBackendName() const
+{
+	return rhi() ? QString::fromUtf8( rhi()->backendName() ) : QString{};
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
 void CGpuView::releaseResources()
 {
 	m_pRenderer->Release();

@@ -20,11 +20,17 @@
 #include <QWheelEvent>
 
 #include "Preferences.h"
+#include "DebugLog.h"
+#include "map/MapPanes.h"
+#include "map/MapView2D.h"
 #include "map/MapConstants.h"
 #include "map/MapDocument.h"
 #include "map/MapEditor.h"
 #include "Graphics.h"
 #include "GpuView.h"
+#ifdef VOMIT_TOOLS_GPU
+#include <rhi/qrhi.h>
+#endif
 #include "map/MapRenderer.h"
 
 namespace
@@ -111,6 +117,7 @@ CMapView3D::~CMapView3D()
 //-----------------------------------------------------------------------------
 void CMapView3D::SetUseGpu( bool bOn )
 {
+	DebugLog() << "map 3D view drawn" << ( bOn ? "on the graphics card" : "in software" ) << ( m_pGpu && !bOn ? "(the card's drawing failed)" : "" );
 	delete m_pGpu;
 	m_pGpu = nullptr;
 #ifdef VOMIT_TOOLS_GPU
@@ -302,6 +309,23 @@ void CMapView3D::WorkerLoop()
 //-----------------------------------------------------------------------------
 // Purpose:
 //-----------------------------------------------------------------------------
+MapRenderStats_t CMapView3D::GetStats() const
+{
+	if ( m_pGpu )
+	{
+		if ( const auto *pRenderer = dynamic_cast<const CMapRenderer *>( &m_pGpu->GetRenderer() ) )
+		{
+			return pRenderer->GetStats();
+		}
+	}
+	MapRenderStats_t stats;
+	stats.m_flFrameMs = m_flRenderMs;
+	return stats;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
 QImage CMapView3D::RenderNow( QSize size )
 {
 	const MapFrame_t frame = MakeFrame( size );
@@ -339,9 +363,39 @@ void CMapView3D::PaintLabels( QPainter &painter )
 {
 	if ( m_bStatistics )
 	{
+		// Hammer++'s statistics, with where each frame's time goes: the overlay and the debug
+		// log (once a second) say the same.
+		const MapRenderStats_t stats = GetStats();
+		QStringList lines;
+		if ( m_pGpu )
+		{
+			lines << tr( "%1 (%2)" ).arg( GraphicsApiName( CGraphics::Instance().GetActive() ), m_pGpu->GetBackendName() );
+			lines << tr( "%1 ms between frames (%2 a second)" ).arg( stats.m_flIntervalMs, 0, 'f', 1 ).arg( stats.m_flIntervalMs > 0.0 ? 1000.0 / stats.m_flIntervalMs : 0.0, 0, 'f', 0 );
+			lines << tr( "%1 ms on the main thread: %2 frame, %3 upload, %4 record" ).arg( stats.m_flFrameMs, 0, 'f', 1 ).arg( stats.m_flSnapshotMs, 0, 'f', 1 ).arg( stats.m_flUploadMs, 0, 'f', 1 ).arg( stats.m_flRecordMs, 0, 'f', 1 );
+			if ( stats.m_flGpuMs >= 0.0 )
+			{
+				lines << tr( "%1 ms on the card" ).arg( stats.m_flGpuMs, 0, 'f', 1 );
+			}
+			lines << tr( "%1 draw calls, %2 triangles%3" ).arg( stats.m_nDrawCalls ).arg( stats.m_nTriangles ).arg( stats.m_nUploads ? tr( ", %n mesh(es) uploaded", nullptr, stats.m_nUploads ) : QString{} );
+		}
+		else
+		{
+			lines << tr( "software: %1 ms a frame%2" ).arg( m_flRenderMs, 0, 'f', 1 ).arg( m_bReduced ? tr( " (half size while moving)" ) : QString{} );
+		}
+		for ( CMapView *pView : m_Editor.GetViews() )
+		{
+			if ( auto *p2D = qobject_cast<CMapView2D *>( pView ) )
+			{
+				lines << tr( "%1: %2 ms a repaint, %3 repaints" ).arg( CMapPane::TypeName( p2D->GetType() ) ).arg( p2D->GetLastPaintTime(), 0, 'f', 1 ).arg( p2D->GetPaintCount() );
+			}
+		}
 		painter.setPen( Qt::white );
-		const QString szText = m_pGpu ? tr( "graphics card" ) : tr( "%1 ms a frame in software%2" ).arg( m_flRenderMs, 0, 'f', 1 ).arg( m_bReduced ? tr( " (half size while moving)" ) : QString{} );
-		painter.drawText( rect().adjusted( 0, 4, -8, 0 ), Qt::AlignRight | Qt::AlignTop, szText );
+		painter.drawText( rect().adjusted( 0, 4, -8, 0 ), Qt::AlignRight | Qt::AlignTop, lines.join( QLatin1Char( '\n' ) ) );
+		if ( !m_LogClock.isValid() || m_LogClock.elapsed() > 1000 )
+		{
+			m_LogClock.start();
+			DebugLog() << "map 3D view:" << lines.join( QStringLiteral( "; " ) );
+		}
 	}
 	if ( hasFocus() )
 	{
@@ -413,6 +467,10 @@ void CMapView3D::mouseMoveEvent( QMouseEvent *pEvent )
 	const bool bCameraTool = m_Editor.GetTool() == MapTool_t::MAP_TOOL_CAMERA;
 	const double flSensitivity = CPreferences::Instance().GetMapPreferences().m_flSensitivity;
 	auto look = [ & ] {
+		if ( delta.isNull() )
+		{
+			return; // the move the cursor's own warp sends
+		}
 		m_Camera.m_flYaw -= delta.x() * flSensitivity;
 		m_Camera.m_flPitch = std::clamp( m_Camera.m_flPitch + delta.y() * flSensitivity, -89.0, 89.0 );
 		Changed();

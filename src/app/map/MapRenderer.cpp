@@ -201,6 +201,7 @@ void CMapRenderer::UploadMeshes( const MapFrame_t &frame, QRhiResourceUpdateBatc
 		}
 		mesh = {};
 		mesh.m_pFor = pMesh;
+		m_Stats.m_nUploads++;
 		auto upload = [ & ]( std::unique_ptr<QRhiBuffer> &pBuffer, QRhiBuffer::UsageFlags usage, const void *pData, std::size_t nBytes ) {
 			if ( nBytes == 0 )
 			{
@@ -550,7 +551,14 @@ void CMapRenderer::MakePipelines( QRhiRenderTarget *pTarget )
 void CMapRenderer::Render( QRhiCommandBuffer *pCommands, QRhiRenderTarget *pTarget )
 {
 	const QSize size = pTarget->pixelSize();
+	QElapsedTimer timer;
+	timer.start();
+	m_Stats.m_flIntervalMs = m_Interval.isValid() ? static_cast<double>( m_Interval.nsecsElapsed() ) / 1e6 : 0.0;
+	m_Interval.start();
+	m_Stats.m_nFrames++;
+	m_Stats.m_nUploads = 0;
 	const MapFrame_t frame = m_pfnSource ? m_pfnSource( size ) : MapFrame_t{};
+	m_Stats.m_flSnapshotMs = static_cast<double>( timer.nsecsElapsed() ) / 1e6;
 	QRhiResourceUpdateBatch *pUpdates = m_pRhi->nextResourceUpdateBatch();
 	UploadMeshes( frame, pUpdates );
 	UploadState( frame, pUpdates );
@@ -559,6 +567,9 @@ void CMapRenderer::Render( QRhiCommandBuffer *pCommands, QRhiRenderTarget *pTarg
 	{
 		MakePipelines( pTarget );
 	}
+	m_Stats.m_flUploadMs = static_cast<double>( timer.nsecsElapsed() ) / 1e6 - m_Stats.m_flSnapshotMs;
+	const double flRecordFrom = static_cast<double>( timer.nsecsElapsed() ) / 1e6;
+	m_Stats.m_nTriangles = 0;
 
 	// The world's frame, and the 3D skybox's when it is drawn: textured views only.
 	const xv::map::ShadeOptions_t &shade = frame.m_Options.m_Shade;
@@ -641,6 +652,7 @@ void CMapRenderer::Render( QRhiCommandBuffer *pCommands, QRhiRenderTarget *pTarg
 		pCommands->setVertexInput( 0, 1, &input, m_Meshes[ nMesh ].m_pIndices.get(), 0, QRhiCommandBuffer::IndexUInt32 );
 		pCommands->drawIndexed( batch.m_nIndexCount, 1, batch.m_nFirstIndex );
 		m_nDrawCalls++;
+		m_Stats.m_nTriangles += static_cast<int>( batch.m_nIndexCount / 3 );
 	};
 	// Every face in view of camera: opaque ones, then see-through ones far to near.
 	auto faces = [ & ]( const xv::map::CViewCamera &camera, bool bSkyPass ) {
@@ -731,6 +743,10 @@ void CMapRenderer::Render( QRhiCommandBuffer *pCommands, QRhiRenderTarget *pTarg
 	}
 	pCommands->endPass();
 	m_Held = frame;
+	m_Stats.m_nDrawCalls = m_nDrawCalls;
+	m_Stats.m_flRecordMs = static_cast<double>( timer.nsecsElapsed() ) / 1e6 - flRecordFrom;
+	m_Stats.m_flFrameMs = static_cast<double>( timer.nsecsElapsed() ) / 1e6;
+	m_Stats.m_flGpuMs = m_pRhi->isFeatureSupported( QRhi::Timestamps ) ? pCommands->lastCompletedGpuTime() * 1000.0 : -1.0;
 }
 
 #endif

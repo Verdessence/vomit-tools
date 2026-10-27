@@ -9,6 +9,21 @@
 //===========================================================================//
 #pragma once
 
+// What the last picture cost, for the statistics overlay (O) and the debug log.
+struct MapRenderStats_t
+{
+	int m_nFrames = 0;            // pictures drawn since the renderer was made
+	double m_flIntervalMs = 0.0;  // between this picture and the one before
+	double m_flFrameMs = 0.0;     // the main thread's time in Render(): the three below and the rest
+	double m_flSnapshotMs = 0.0;  // making the frame from the document (MakeFrame)
+	double m_flUploadMs = 0.0;    // meshes, state and materials that changed
+	double m_flRecordMs = 0.0;    // recording the draw calls
+	double m_flGpuMs = -1.0;      // the card's own time, when the QRhi can say (timestamps on)
+	int m_nDrawCalls = 0;
+	int m_nTriangles = 0;
+	int m_nUploads = 0;           // mesh buffers made this picture (0 once a map is up)
+};
+
 #ifdef VOMIT_TOOLS_GPU
 
 #include <array>
@@ -16,6 +31,7 @@
 #include <memory>
 #include <vector>
 
+#include <QElapsedTimer>
 #include <QSize>
 
 #include "GpuView.h"
@@ -42,6 +58,7 @@ public:
 
 	// Draw calls and triangles of the last picture, for the statistics.
 	[[nodiscard]] int GetDrawCalls() const { return m_nDrawCalls; }
+	[[nodiscard]] const MapRenderStats_t &GetStats() const { return m_Stats; }
 
 private:
 	struct Mesh_t
@@ -102,6 +119,8 @@ private:
 	std::unique_ptr<QRhiShaderResourceBindings> m_pNoBindings;
 	quint32 m_nFrameStride = 0; // the world's frame uniforms, then the 3D skybox's
 	int m_nDrawCalls = 0;
+	MapRenderStats_t m_Stats;
+	QElapsedTimer m_Interval;
 	// The last frame, held so nothing it points to is freed (and its address reused) while the
 	// uploads above are still compared with it.
 	MapFrame_t m_Held;

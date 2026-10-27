@@ -21,6 +21,7 @@
 #include <QPointer>
 
 #include "map/MapRenderData.h"
+#include "map/MapRenderer.h"
 #include "map/MapView.h"
 #include "map/Trace.h"
 #include "map/ViewCamera.h"
@@ -70,6 +71,8 @@ public:
 	// comparison with the graphics card).
 	[[nodiscard]] QImage RenderNow( QSize size );
 	[[nodiscard]] bool IsUsingGpu() const { return m_pGpu != nullptr; }
+	// The last picture's cost (the card's renderer's, or the software one's time in m_flFrameMs).
+	[[nodiscard]] MapRenderStats_t GetStats() const;
 	[[nodiscard]] double GetLastRenderTime() const { return m_flRenderMs; }
 	// Moves the camera as held keys would over flSeconds (the fly logic, without the clock).
 	void Fly( double flSeconds );
@@ -136,4 +139,5 @@ private:
 	std::size_t m_nHit = 0;
 	std::size_t m_nCamera = 0; // the map's camera Page Up and Page Down went to
 	bool m_bStatistics = false;
+	QElapsedTimer m_LogClock; // the statistics go to the debug log once a second
 };
