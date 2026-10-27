@@ -28,6 +28,7 @@ struct MapFrame_t
 	std::shared_ptr<const xv::map::CScene> m_pScene;
 	std::shared_ptr<const xv::map::CMapMesh> m_pEntityMesh;
 	std::shared_ptr<const xv::map::CMapMesh> m_pPropMesh;
+	std::shared_ptr<const xv::map::CMapMesh> m_pOverlayMesh;
 	std::shared_ptr<const xv::map::CMapMesh> m_pSpriteMesh; // facing this frame's camera
 	std::shared_ptr<const std::vector<xv::map::RasterMaterial_t>> m_pMaterials;
 	std::shared_ptr<const void> m_pTextures; // keeps the materials' textures alive
@@ -62,6 +63,8 @@ public:
 	void SetSky( std::shared_ptr<const xv::sky::CCube> pSky );
 	// The props placed in the world, and the entities they draw: those show no box.
 	void SetProps( std::shared_ptr<const xv::map::CMapMesh> pProps, std::vector<std::uint32_t> objects );
+	// The overlays and decals laid on the faces.
+	void SetOverlays( std::shared_ptr<const xv::map::CMapMesh> pOverlays );
 	// The entities drawn as sprites, tinted by their own colours: those show no box either.
 	void SetSprites( std::shared_ptr<const std::vector<xv::map::SpritePlacement_t>> pSprites );
 

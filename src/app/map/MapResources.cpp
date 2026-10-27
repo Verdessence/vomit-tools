@@ -11,6 +11,7 @@
 #include <numeric>
 
 #include "map/Materials.h"
+#include "map/Overlay.h"
 #include "map/Props.h"
 #include "map/Sprites.h"
 #include "map/Vmf.h"
@@ -22,6 +23,14 @@ namespace
 {
 
 constexpr std::size_t BATCH = 16;
+
+// What a batch of materials draws: faces, sprites and overlays each blend their own way.
+enum class MaterialUse_t
+{
+	MATERIAL_USE_FACES,
+	MATERIAL_USE_SPRITES,
+	MATERIAL_USE_OVERLAYS,
+};
 
 //-----------------------------------------------------------------------------
 // Purpose: A tool material: what Hammer++'s tool texture toggle hides (the sky stays).
@@ -109,6 +118,7 @@ void CMapResources::Start( std::shared_ptr<const xv::map::CScene> pScene, std::o
 	m_pProps.reset();
 	m_PropObjects.clear();
 	m_pSprites.reset();
+	m_pOverlays.reset();
 	m_nModels = 0;
 	m_nModelsTotal = 0;
 	m_nLoaded = 0;
@@ -161,7 +171,9 @@ void CMapResources::Run( std::shared_ptr<const xv::map::CScene> pScene, xv::vfs:
 	std::vector<std::array<int, 2>> sizes( nMaterials + 1, { 128, 128 } );
 	std::vector<bool> drawable( nMaterials + 1, false );
 	std::vector<bool> additive( nMaterials + 1, false ); // sprites' materials that add
-	auto load = [ & ]( const std::vector<std::pair<std::uint32_t, std::string>> &todo, bool bSprites ) {
+	std::vector<double> decalScales( nMaterials + 1, 1.0 );
+	auto load = [ & ]( const std::vector<std::pair<std::uint32_t, std::string>> &todo, MaterialUse_t nUse ) {
+		const bool bSprites = nUse == MaterialUse_t::MATERIAL_USE_SPRITES;
 		for ( std::size_t nStart = 0; nStart < todo.size() && !m_bStop; nStart += BATCH )
 		{
 			const std::size_t nEnd = std::min( todo.size(), nStart + BATCH );
@@ -174,6 +186,7 @@ void CMapResources::Run( std::shared_ptr<const xv::map::CScene> pScene, xv::vfs:
 				const auto &[ nMaterial, szName ] = todo[ nStart + i ];
 				loaded.m_nMaterial = nMaterial;
 				loaded.m_bSprite = bSprites;
+				loaded.m_bOverlay = nUse == MaterialUse_t::MATERIAL_USE_OVERLAYS;
 				loaded.m_bAdditive = bSprites && nMaterial < additive.size() && additive[ nMaterial ];
 				loaded.m_Info = xv::map::ReadMaterialInfo( szName, read );
 				loaded.m_bTool = IsToolMaterial( loaded.m_Info, szName );
@@ -208,6 +221,10 @@ void CMapResources::Run( std::shared_ptr<const xv::map::CScene> pScene, xv::vfs:
 					sizes[ loaded.m_nMaterial ] = { loaded.m_pBase->m_nWidth, loaded.m_pBase->m_nHeight };
 					drawable[ loaded.m_nMaterial ] = !loaded.m_bMissing;
 				}
+				if ( loaded.m_nMaterial < decalScales.size() )
+				{
+					decalScales[ loaded.m_nMaterial ] = loaded.m_Info.m_flDecalScale;
+				}
 			}
 			post( [ this, batch = std::move( batch ) ]() mutable { Take( std::move( batch ) ); } );
 		}
@@ -230,7 +247,7 @@ void CMapResources::Run( std::shared_ptr<const xv::map::CScene> pScene, xv::vfs:
 	{
 		todo.emplace_back( n, pScene->m_Map.m_Materials[ n ] );
 	}
-	load( todo, false );
+	load( todo, MaterialUse_t::MATERIAL_USE_FACES );
 
 	// The table keeps one place after the map's own materials for the entity boxes'; the
 	// sprites' and the props' come after it.
@@ -269,7 +286,8 @@ void CMapResources::Run( std::shared_ptr<const xv::map::CScene> pScene, xv::vfs:
 	post( [ this, nMore = static_cast<int>( todo.size() ) ] { m_nTotal += nMore; } );
 	sizes.resize( nNext, { 128, 128 } );
 	drawable.resize( nNext, false );
-	load( todo, true );
+	decalScales.resize( nNext, 1.0 );
+	load( todo, MaterialUse_t::MATERIAL_USE_SPRITES );
 	if ( !m_bStop && !sprites.empty() )
 	{
 		for ( std::size_t i = 0; i < sprites.size(); i++ )
@@ -333,7 +351,8 @@ void CMapResources::Run( std::shared_ptr<const xv::map::CScene> pScene, xv::vfs:
 	} );
 	sizes.resize( nNext, { 128, 128 } );
 	drawable.resize( nNext, false );
-	load( todo, false );
+	decalScales.resize( nNext, 1.0 );
+	load( todo, MaterialUse_t::MATERIAL_USE_FACES );
 	if ( !m_bStop && !list.m_Entities.empty() )
 	{
 		for ( xv::map::PropModel_t &prop : models )
@@ -367,6 +386,34 @@ void CMapResources::Run( std::shared_ptr<const xv::map::CScene> pScene, xv::vfs:
 		post( [ this, pProps, drawn = std::move( drawn ) ]() mutable {
 			m_pProps = pProps;
 			m_PropObjects = std::move( drawn );
+			emit Arrived();
+		} );
+	}
+
+	// Last the overlays and decals, which need their materials' sizes to be laid on the faces.
+	const std::vector<std::string> overlayNames = xv::map::OverlayMaterialNames( *pScene );
+	if ( !m_bStop && !overlayNames.empty() )
+	{
+		todo.clear();
+		std::vector<xv::map::OverlayMaterial_t> overlayMaterials;
+		for ( const std::string &szName : overlayNames )
+		{
+			overlayMaterials.push_back( { nNext, { 128, 128 }, 1.0 } );
+			todo.emplace_back( nNext++, szName );
+		}
+		post( [ this, nMore = static_cast<int>( todo.size() ) ] { m_nTotal += nMore; } );
+		sizes.resize( nNext, { 128, 128 } );
+		drawable.resize( nNext, false );
+		decalScales.resize( nNext, 1.0 );
+		load( todo, MaterialUse_t::MATERIAL_USE_OVERLAYS );
+		for ( xv::map::OverlayMaterial_t &material : overlayMaterials )
+		{
+			material.m_TextureSize = sizes[ material.m_nMaterial ];
+			material.m_flDecalScale = decalScales[ material.m_nMaterial ];
+		}
+		auto pOverlays = std::make_shared<const xv::map::CMapMesh>( xv::map::BuildOverlayMesh( *pScene, overlayMaterials ) );
+		post( [ this, pOverlays ] {
+			m_pOverlays = pOverlays;
 			emit Arrived();
 		} );
 	}
@@ -404,6 +451,11 @@ void CMapResources::Take( std::vector<Loaded_t> batch )
 		shade.m_bSky = info.IsSky();
 		shade.m_bTinted = loaded.m_bSprite;
 		shade.m_bUnlit = loaded.m_bSprite;
+		if ( loaded.m_bOverlay && !shade.m_bAlphaTest && !shade.m_bAdditive )
+		{
+			// Overlays and decals blend by their alpha, as the game draws decals.
+			shade.m_bTranslucent = true;
+		}
 		if ( loaded.m_bSprite )
 		{
 			// Hammer blends sprites whatever their material says.

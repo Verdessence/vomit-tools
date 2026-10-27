@@ -68,6 +68,10 @@ xv::map::RasterScene_t MapFrame_t::MakeScene() const
 	{
 		scene.m_Meshes.push_back( m_pPropMesh.get() );
 	}
+	if ( m_pOverlayMesh )
+	{
+		scene.m_Meshes.push_back( m_pOverlayMesh.get() );
+	}
 	if ( m_pSpriteMesh )
 	{
 		scene.m_Meshes.push_back( m_pSpriteMesh.get() );
@@ -248,6 +252,22 @@ void CMapRenderData::SetProps( std::shared_ptr<const xv::map::CMapMesh> pProps, 
 	std::ranges::sort( m_PropObjects );
 	BuildEntityBoxes();
 	m_nGeneration++;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+void CMapRenderData::SetOverlays( std::shared_ptr<const xv::map::CMapMesh> pOverlays )
+{
+	if ( m_Document.GetScene() != m_pBuiltFor )
+	{
+		Rebuild();
+	}
+	if ( pOverlays != m_Frame.m_pOverlayMesh )
+	{
+		m_Frame.m_pOverlayMesh = std::move( pOverlays );
+		m_nGeneration++;
+	}
 }
 
 //-----------------------------------------------------------------------------
