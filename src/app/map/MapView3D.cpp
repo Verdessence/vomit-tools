@@ -176,16 +176,23 @@ xv::map::RasterMode_t CMapView3D::GetMode() const
 }
 
 //-----------------------------------------------------------------------------
-// Purpose: The map's active camera, or Hammer's start without one: the origin, facing north.
+// Purpose: Where the camera was when the map was last closed, else the map's active camera, else
+//          Hammer's start without one: the origin, at angles 0 0 0 (facing east).
 //-----------------------------------------------------------------------------
 void CMapView3D::PlaceCamera()
 {
 	const xv::map::CScene *pScene = GetDocument().GetScene();
 	m_pCameraFor = pScene;
 	m_Camera.m_Eye = {};
-	m_Camera.m_flYaw = 90.0;
+	m_Camera.m_flYaw = 0.0;
 	m_Camera.m_flPitch = 0.0;
-	if ( pScene && !pScene->m_Map.m_Cameras.empty() )
+	if ( const std::optional<xv::map::CViewCamera> &remembered = m_Editor.GetRememberedCamera(); pScene && remembered )
+	{
+		m_Camera.m_Eye = remembered->m_Eye;
+		m_Camera.m_flYaw = remembered->m_flYaw;
+		m_Camera.m_flPitch = remembered->m_flPitch;
+	}
+	else if ( pScene && !pScene->m_Map.m_Cameras.empty() )
 	{
 		const int nActive = std::clamp( pScene->m_Map.m_nActiveCamera, 0, static_cast<int>( pScene->m_Map.m_Cameras.size() ) - 1 );
 		const xv::map::Camera_t &camera = pScene->m_Map.m_Cameras[ static_cast<std::size_t>( nActive ) ];

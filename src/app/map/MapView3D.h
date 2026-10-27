@@ -64,7 +64,8 @@ public:
 	// The map's state changed (selection, visibility, settings): draw it again.
 	void Redraw() { RequestRender(); }
 	void ApplyPreferences();
-	// The map was loaded: the camera starts at the map's active camera, as in Hammer.
+	// The map was loaded: the camera starts where it was when the map was last closed, or at the
+	// map's active camera, as in Hammer.
 	void ResetCamera();
 	// What a click at a widget point would hit, nearest first.
 	[[nodiscard]] std::vector<xv::map::TraceHit_t> HitsAt( QPointF at );
@@ -96,7 +97,7 @@ protected:
 
 private:
 	void SetUseGpu( bool bOn );
-	// Puts the camera where the map's own active camera is, without drawing.
+	// Puts the camera where the map starts it (see ResetCamera), without drawing.
 	void PlaceCamera();
 	void Changed();
 	void RequestRender();

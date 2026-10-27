@@ -11,6 +11,9 @@
 #include <limits>
 
 #include <QAction>
+#include <QCryptographicHash>
+#include <QDateTime>
+#include <QSettings>
 #include <QActionGroup>
 #include <QFileInfo>
 #include <QHBoxLayout>
@@ -344,6 +347,7 @@ void CMapEditor::Load( CMapDocument::Source_t source )
 void CMapEditor::Loaded()
 {
 	const xv::map::CScene &scene = *m_pDocument->GetScene();
+	m_RememberedCamera = RecallCamera();
 	m_Settings.m_nGridSize = GridSizeFor( scene.m_Map.m_ViewSettings.m_nGridSpacing );
 	m_Settings.m_bShowGrid = scene.m_Map.m_ViewSettings.m_bShowGrid;
 	m_Settings.m_bSnapToGrid = scene.m_Map.m_ViewSettings.m_bSnapToGrid;
@@ -757,6 +761,7 @@ QString CMapEditor::GetSessionEntry() const
 //-----------------------------------------------------------------------------
 void CMapEditor::StopWork()
 {
+	RememberCamera();
 	m_pDocument->Stop();
 	m_pResources->Stop();
 }
@@ -856,6 +861,68 @@ std::optional<xv::map::CViewCamera> CMapEditor::GetCamera() const
 		}
 	}
 	return std::nullopt;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: The settings key a map's camera is kept under: its file, on disk or in the game.
+//-----------------------------------------------------------------------------
+QString CMapEditor::GetCameraKey() const
+{
+	const QString szWhere = m_bFromGame ? QStringLiteral( "game:" ) + m_szPath : QStringLiteral( "disk:" ) + QFileInfo( m_szPath ).absoluteFilePath();
+	return QStringLiteral( "mapCameras/" ) + QString::fromLatin1( QCryptographicHash::hash( szWhere.toUtf8(), QCryptographicHash::Md5 ).toHex() );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Keeps where the 3D camera is, as Hammer++ keeps it in the map when it saves (this
+//          viewer saves nothing, so it goes in the settings). Only the most recent maps' are kept.
+//-----------------------------------------------------------------------------
+void CMapEditor::RememberCamera() const
+{
+	const std::optional<xv::map::CViewCamera> camera = GetCamera();
+	if ( !camera || !m_pDocument->IsLoaded() )
+	{
+		return;
+	}
+	constexpr int MAX_MAPS = 64;
+	QSettings settings;
+	const QVariantList entry{ camera->m_Eye[ 0 ], camera->m_Eye[ 1 ], camera->m_Eye[ 2 ], camera->m_flYaw, camera->m_flPitch, QDateTime::currentMSecsSinceEpoch() };
+	settings.setValue( GetCameraKey(), entry );
+	settings.beginGroup( QStringLiteral( "mapCameras" ) );
+	QStringList keys = settings.childKeys();
+	if ( keys.size() > MAX_MAPS )
+	{
+		std::ranges::sort( keys, [ & ]( const QString &a, const QString &b ) { return settings.value( a ).toList().value( 5 ).toLongLong() < settings.value( b ).toList().value( 5 ).toLongLong(); } );
+		for ( qsizetype i = 0; i < keys.size() - MAX_MAPS; i++ )
+		{
+			settings.remove( keys[ i ] );
+		}
+	}
+	settings.endGroup();
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: The camera kept for this map, if it is newer than the file on disk.
+//-----------------------------------------------------------------------------
+std::optional<xv::map::CViewCamera> CMapEditor::RecallCamera() const
+{
+	const QVariantList entry = QSettings{}.value( GetCameraKey() ).toList();
+	if ( entry.size() < 6 )
+	{
+		return std::nullopt;
+	}
+	if ( !m_bFromGame )
+	{
+		const QDateTime modified = QFileInfo( m_szPath ).lastModified();
+		if ( modified.isValid() && modified.toMSecsSinceEpoch() > entry[ 5 ].toLongLong() )
+		{
+			return std::nullopt;
+		}
+	}
+	xv::map::CViewCamera camera;
+	camera.m_Eye = { entry[ 0 ].toDouble(), entry[ 1 ].toDouble(), entry[ 2 ].toDouble() };
+	camera.m_flYaw = entry[ 3 ].toDouble();
+	camera.m_flPitch = std::clamp( entry[ 4 ].toDouble(), -89.0, 89.0 );
+	return camera;
 }
 
 //-----------------------------------------------------------------------------

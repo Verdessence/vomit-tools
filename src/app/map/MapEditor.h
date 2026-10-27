@@ -57,6 +57,9 @@ public:
 	[[nodiscard]] CMapProperties &GetProperties() { return *m_pProperties; }
 	// Where the 3D camera is, for the 2D views to draw it (the first 3D pane's).
 	[[nodiscard]] std::optional<xv::map::CViewCamera> GetCamera() const;
+	// Where the camera was when this map was last closed, unless the file was saved since
+	// (Hammer then wrote its own camera into it); the 3D views start there.
+	[[nodiscard]] const std::optional<xv::map::CViewCamera> &GetRememberedCamera() const { return m_RememberedCamera; }
 
 	// What the views report and ask for.
 	bool RunAction( MapAction_t nAction, CMapView *pFrom );
@@ -90,6 +93,10 @@ private:
 	void TakePreferences();
 	[[nodiscard]] bool NeedsDecodedTextures() const;
 	void StartResources();
+	// The camera kept between runs, per map file.
+	void RememberCamera() const;
+	[[nodiscard]] std::optional<xv::map::CViewCamera> RecallCamera() const;
+	[[nodiscard]] QString GetCameraKey() const;
 	void PreferencesChanged();
 	[[nodiscard]] CMapPane *PaneOf( const CMapView *pView ) const;
 
@@ -100,6 +107,7 @@ private:
 	bool m_bFromGame = false;
 	MapViewSettings_t m_Settings;
 	MapTool_t m_nTool = MapTool_t::MAP_TOOL_SELECT;
+	std::optional<xv::map::CViewCamera> m_RememberedCamera;
 	CMapView *m_pActiveView = nullptr;
 
 	std::array<CMapPane *, 4> m_Panes{};
