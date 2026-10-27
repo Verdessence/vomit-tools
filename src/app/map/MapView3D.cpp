@@ -223,6 +223,8 @@ MapFrame_t CMapView3D::MakeFrame( QSize size )
 	options.m_Shade.m_nMode = GetMode();
 	options.m_Shade.m_vecSelection = { mapstyle::SELECTION_3D.redF(), mapstyle::SELECTION_3D.greenF(), mapstyle::SELECTION_3D.blueF() };
 	options.m_Shade.m_vecFaceShade = { mapstyle::FACE_SHADE[ 0 ], mapstyle::FACE_SHADE[ 1 ], mapstyle::FACE_SHADE[ 2 ] };
+	options.m_Shade.m_vecInstance = { mapstyle::INSTANCE_TINT.redF(), mapstyle::INSTANCE_TINT.greenF(), mapstyle::INSTANCE_TINT.blueF() };
+	options.m_Shade.m_flInstanceTint = mapstyle::INSTANCE_TINT_AMOUNT;
 	options.m_Background = { static_cast<std::uint8_t>( mapstyle::BACKGROUND_3D.red() ), static_cast<std::uint8_t>( mapstyle::BACKGROUND_3D.green() ), static_cast<std::uint8_t>( mapstyle::BACKGROUND_3D.blue() ) };
 	options.m_SelectionEdge = { static_cast<std::uint8_t>( mapstyle::SELECTION_EDGE_3D.red() ), static_cast<std::uint8_t>( mapstyle::SELECTION_EDGE_3D.green() ), static_cast<std::uint8_t>( mapstyle::SELECTION_EDGE_3D.blue() ) };
 	return m_Editor.GetRenderData().Snapshot( camera, options, m_Editor.GetSettings() );

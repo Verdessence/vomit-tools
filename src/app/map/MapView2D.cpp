@@ -219,20 +219,19 @@ void CMapView2D::Rebuild()
 		m_ObjectIndex[ object.m_nObject ] = static_cast<std::uint32_t>( m_Objects.size() );
 		m_Objects.push_back( object );
 	}
-	// Props: each one's edges lie together in the props' mesh. Its box becomes the model's.
-	if ( m_pProps )
-	{
-		const xv::map::CMapMesh &props = *m_pProps;
-		for ( std::uint32_t k = 0; k + 1 < props.m_Lines.size(); )
+	// Props and instances: each one's edges lie together in its mesh, and its box becomes the
+	// box around them.
+	auto lines = [ & ]( const xv::map::CMapMesh &mesh, bool bInstances ) {
+		for ( std::uint32_t k = 0; k + 1 < mesh.m_Lines.size(); )
 		{
-			const std::uint32_t nObject = props.m_Vertices[ props.m_Lines[ k ] ].m_nObject;
+			const std::uint32_t nObject = mesh.m_Vertices[ mesh.m_Lines[ k ] ].m_nObject;
 			const std::uint32_t nFirst = k;
 			double x0 = std::numeric_limits<double>::max(), y0 = x0, x1 = -x0, y1 = -x0;
-			for ( ; k + 1 < props.m_Lines.size() && props.m_Vertices[ props.m_Lines[ k ] ].m_nObject == nObject; k += 2 )
+			for ( ; k + 1 < mesh.m_Lines.size() && mesh.m_Vertices[ mesh.m_Lines[ k ] ].m_nObject == nObject; k += 2 )
 			{
-				for ( const std::uint32_t nVertex : { props.m_Lines[ k ], props.m_Lines[ k + 1 ] } )
+				for ( const std::uint32_t nVertex : { mesh.m_Lines[ k ], mesh.m_Lines[ k + 1 ] } )
 				{
-					const xv::CVec3 &p = props.m_Vertices[ nVertex ].m_vecPosition;
+					const xv::CVec3 &p = mesh.m_Vertices[ nVertex ].m_vecPosition;
 					const std::array<double, 3> at{ p.m_flX, p.m_flY, p.m_flZ };
 					x0 = std::min( x0, at[ a0 ] );
 					x1 = std::max( x1, at[ a0 ] );
@@ -243,12 +242,17 @@ void CMapView2D::Rebuild()
 			if ( nObject < m_ObjectIndex.size() && m_ObjectIndex[ nObject ] != NO_OBJECT )
 			{
 				MapFlatObject_t &object = m_Objects[ m_ObjectIndex[ nObject ] ];
-				object.m_nFirstModelLine = nFirst / 2;
-				object.m_nModelLineCount = ( k - nFirst ) / 2;
+				( bInstances ? object.m_nFirstInstanceLine : object.m_nFirstModelLine ) = nFirst / 2;
+				( bInstances ? object.m_nInstanceLineCount : object.m_nModelLineCount ) = ( k - nFirst ) / 2;
 				object.m_Bounds = QRectF{ QPointF{ x0, y0 }, QPointF{ x1, y1 } };
 			}
 		}
+	};
+	if ( m_pProps )
+	{
+		lines( *m_pProps, false );
 	}
+	lines( pScene->m_InstanceMesh, true );
 	update();
 }
 
@@ -477,6 +481,15 @@ void CMapView2D::PaintObjects( QPainter &painter, const QRectF &visible ) const
 			batch.m_Points.push_back( box.center() );
 			return;
 		}
+		// An instance shows what it holds, at every size.
+		const xv::map::CMapMesh &instances = pScene->m_InstanceMesh;
+		for ( std::uint32_t k = 0; k < object.m_nInstanceLineCount; k++ )
+		{
+			const std::uint32_t nLine = ( object.m_nFirstInstanceLine + k ) * 2;
+			const xv::CVec3 &a = instances.m_Vertices[ instances.m_Lines[ nLine ] ].m_vecPosition;
+			const xv::CVec3 &b = instances.m_Vertices[ instances.m_Lines[ nLine + 1 ] ].m_vecPosition;
+			batch.m_Lines.emplace_back( ToWidget( Flatten( { a.m_flX, a.m_flY, a.m_flZ } ) ), ToWidget( Flatten( { b.m_flX, b.m_flY, b.m_flZ } ) ) );
+		}
 		// A prop big enough on screen shows its model's edges (Shift+M), else its box.
 		const bool bModel = object.m_nModelLineCount > 0 && settings.m_bModels2D && std::max( box.width(), box.height() ) >= mapstyle::MODELS_FROM_PIXELS;
 		if ( bModel )
@@ -490,7 +503,7 @@ void CMapView2D::PaintObjects( QPainter &painter, const QRectF &visible ) const
 				batch.m_Lines.emplace_back( ToWidget( Flatten( { a.m_flX, a.m_flY, a.m_flZ } ) ), ToWidget( Flatten( { b.m_flX, b.m_flY, b.m_flZ } ) ) );
 			}
 		}
-		else if ( object.m_bPointEntity )
+		else if ( object.m_bPointEntity && object.m_nInstanceLineCount == 0 )
 		{
 			batch.m_Boxes.push_back( box.adjusted( 0.5, 0.5, -0.5, -0.5 ) );
 		}

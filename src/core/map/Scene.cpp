@@ -93,6 +93,12 @@ std::unique_ptr<CScene> BuildScene( CMap map, std::shared_ptr<const CFgd> pFgd, 
 		return nullptr;
 	}
 	pScene->m_Mesh = BuildMesh( pScene->m_Map, pScene->m_Solids );
+	pScene->m_Materials = pScene->m_Map.m_Materials;
+	if ( !progress( 80, "instances" ) )
+	{
+		return nullptr;
+	}
+	LoadInstances( *pScene, options );
 	for ( const SolidGeometry_t &solid : pScene->m_Solids )
 	{
 		pScene->m_Bounds.Add( solid.m_Bounds );
@@ -103,6 +109,10 @@ std::unique_ptr<CScene> BuildScene( CMap map, std::shared_ptr<const CFgd> pFgd, 
 		{
 			pScene->m_Bounds.Add( pScene->GetEntityBox( i ) );
 		}
+	}
+	for ( const MeshChunk_t &chunk : pScene->m_InstanceMesh.m_Chunks )
+	{
+		pScene->m_Bounds.Add( chunk.m_Bounds );
 	}
 	pScene->m_AutoVisgroups = BuildAutoVisgroups( *pScene );
 	progress( 100, "done" );

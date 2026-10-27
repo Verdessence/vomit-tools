@@ -35,6 +35,7 @@ inline const QColor FILL_SELECTION{ 255, 255, 255, 10 };
 inline const QColor INVALID{ 255, 0, 0 };
 // Func_instance's VDC article: instances are drawn with an orange tint by default.
 inline const QColor INSTANCE_TINT{ 255, 140, 0 }; // unconfirmed: the exact orange
+inline constexpr float INSTANCE_TINT_AMOUNT = 0.35f; // how much of it the contents take; unconfirmed
 
 // 2D views (Hammer++ settings, [View2D]).
 inline constexpr int GRID_DEFAULT_SIZE = 64;

@@ -20,6 +20,7 @@ layout(std140, binding = 0) uniform Frame {
 	vec4 selectionEdge; // rgb
 	vec4 faceShade;     // xyz
 	vec4 state;         // the state texture's width
+	vec4 instance;      // rgb, and how much of it func_instances' contents take
 } frame;
 
 layout(std140, binding = 1) uniform Material {
@@ -131,6 +132,9 @@ void main() {
 		color.rgb *= faceShade(n);
 	}
 	int flags = int(v_state.a * 255.0 + 0.5);
+	if ((flags & 8) != 0) {
+		color.rgb = mix(color.rgb, frame.instance.rgb, frame.instance.a);
+	}
 	if ((flags & 2) != 0) {
 		color.rgb = mix(color.rgb, frame.selection.rgb, frame.mode.y);
 	}

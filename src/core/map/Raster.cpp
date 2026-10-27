@@ -378,6 +378,7 @@ void CRasterizer::FillTriangle( const ScreenVertex_t &a, const ScreenVertex_t &b
 	const std::uint8_t nFlags = FlagsOf( nObject );
 	ShadeInput_t input;
 	input.m_bSelected = ( nFlags & RASTER_OBJECT_SELECTED ) != 0;
+	input.m_bInstance = ( nFlags & RASTER_OBJECT_INSTANCE ) != 0;
 	if ( nObject < m_Scene.m_ObjectColors.size() )
 	{
 		const auto &color = m_Scene.m_ObjectColors[ nObject ];

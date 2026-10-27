@@ -29,6 +29,7 @@ struct FrameUniforms_t
 	float m_SelectionEdge[ 4 ];
 	float m_FaceShade[ 4 ];
 	float m_State[ 4 ];
+	float m_Instance[ 4 ];
 };
 
 struct MaterialUniforms_t
@@ -551,6 +552,10 @@ void CMapRenderer::Render( QRhiCommandBuffer *pCommands, QRhiRenderTarget *pTarg
 	uniforms.m_FaceShade[ 1 ] = shade.m_vecFaceShade.m_flY;
 	uniforms.m_FaceShade[ 2 ] = shade.m_vecFaceShade.m_flZ;
 	uniforms.m_State[ 0 ] = static_cast<float>( m_nStateWidth );
+	uniforms.m_Instance[ 0 ] = shade.m_vecInstance.m_flX;
+	uniforms.m_Instance[ 1 ] = shade.m_vecInstance.m_flY;
+	uniforms.m_Instance[ 2 ] = shade.m_vecInstance.m_flZ;
+	uniforms.m_Instance[ 3 ] = shade.m_flInstanceTint;
 	pUpdates->updateDynamicBuffer( m_pFrame.get(), 0, sizeof uniforms, &uniforms );
 
 	const auto &background = frame.m_Options.m_Background;

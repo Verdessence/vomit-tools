@@ -26,6 +26,7 @@ layout(std140, binding = 0) uniform Frame {
 	vec4 selectionEdge; // rgb
 	vec4 faceShade;     // xyz
 	vec4 state;         // the state texture's width
+	vec4 instance;      // rgb, and how much of it func_instances' contents take
 } frame;
 
 layout(binding = 4) uniform sampler2D stateTexture;

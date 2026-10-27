@@ -87,14 +87,11 @@ CMapMesh BuildPropMesh( std::span<const PropModel_t> models, std::span<const Pro
 		}
 		const PropModel_t &prop = models[ placement.m_nModel ];
 		const model::CModel &model = *prop.m_pModel;
-		const model::CTransform turn = model::CTransform::Rotation( static_cast<float>( placement.m_Angles[ 0 ] ), static_cast<float>( placement.m_Angles[ 1 ] ), static_cast<float>( placement.m_Angles[ 2 ] ) );
-		const CVec3 vecOrigin{ static_cast<float>( placement.m_Origin[ 0 ] ), static_cast<float>( placement.m_Origin[ 1 ] ), static_cast<float>( placement.m_Origin[ 2 ] ) };
-		const auto flScale = static_cast<float>( placement.m_flScale );
-
+		const Transform_t &place = placement.m_Transform;
 		std::array<std::int64_t, 3> cell{};
 		for ( std::size_t a = 0; a < 3; a++ )
 		{
-			cell[ a ] = static_cast<std::int64_t>( std::floor( placement.m_Origin[ a ] / flChunkSize ) );
+			cell[ a ] = static_cast<std::int64_t>( std::floor( place.m_Offset[ a ] / flChunkSize ) );
 		}
 		const auto [ chunk, bNewChunk ] = chunkOf.try_emplace( cell, static_cast<std::uint32_t>( mesh.m_Chunks.size() ) );
 		if ( bNewChunk )
@@ -131,8 +128,8 @@ CMapMesh BuildPropMesh( std::span<const PropModel_t> models, std::span<const Pro
 					{
 						const model::Vertex_t &source = model.m_Vertices[ nVertex ];
 						MeshVertex_t vertex;
-						vertex.m_vecPosition = turn.Rotate( source.m_vecPosition * flScale ) + vecOrigin;
-						vertex.m_vecNormal = turn.Rotate( source.m_vecNormal );
+						vertex.m_vecPosition = ToVec3( place.Apply( ToPoint( source.m_vecPosition ) ) );
+						vertex.m_vecNormal = ToVec3( Normalized( place.Rotate( ToPoint( source.m_vecNormal ) ) ) );
 						vertex.m_Texel = { source.m_Uv[ 0 ] * static_cast<float>( size[ 0 ] ), source.m_Uv[ 1 ] * static_cast<float>( size[ 1 ] ) };
 						vertex.m_nObject = placement.m_nObject;
 						remap[ nVertex ] = static_cast<std::uint32_t>( mesh.m_Vertices.size() );

@@ -44,6 +44,8 @@ struct MapFlatObject_t
 	bool m_bInvalid = false;
 	std::uint32_t m_nFirstModelLine = 0; // a prop's model: its edges in the props' mesh lines
 	std::uint32_t m_nModelLineCount = 0;
+	std::uint32_t m_nFirstInstanceLine = 0; // a func_instance's contents: in the scene's instance mesh
+	std::uint32_t m_nInstanceLineCount = 0;
 };
 
 class CMapView2D : public CMapView

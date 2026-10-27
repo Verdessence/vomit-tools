@@ -10,6 +10,7 @@
 #include <map>
 #include <numeric>
 
+#include "map/Instance.h"
 #include "map/Materials.h"
 #include "map/Overlay.h"
 #include "map/Props.h"
@@ -111,7 +112,7 @@ void CMapResources::Start( std::shared_ptr<const xv::map::CScene> pScene, std::o
 	Stop();
 	m_bStop = false;
 	const int nGeneration = ++m_nGeneration;
-	const std::size_t nMaterials = pScene ? pScene->m_Map.m_Materials.size() : 0;
+	const std::size_t nMaterials = pScene ? pScene->m_Materials.size() : 0;
 	m_Current.assign( nMaterials + 1, {} ); // and the place kept for the entity boxes'
 	m_Keep.clear();
 	m_pSky.reset();
@@ -167,7 +168,7 @@ void CMapResources::Run( std::shared_ptr<const xv::map::CScene> pScene, xv::vfs:
 	}
 
 	// Each material's base texture size, for placing models' texture coordinates.
-	const std::size_t nMaterials = pScene->m_Map.m_Materials.size();
+	const std::size_t nMaterials = pScene->m_Materials.size();
 	std::vector<std::array<int, 2>> sizes( nMaterials + 1, { 128, 128 } );
 	std::vector<bool> drawable( nMaterials + 1, false );
 	std::vector<bool> additive( nMaterials + 1, false ); // sprites' materials that add
@@ -232,11 +233,14 @@ void CMapResources::Run( std::shared_ptr<const xv::map::CScene> pScene, xv::vfs:
 
 	// Most triangles first: what the views show most of arrives first.
 	std::vector<std::size_t> triangles( nMaterials, 0 );
-	for ( const xv::map::MeshBatch_t &batch : pScene->m_Mesh.m_Batches )
+	for ( const xv::map::CMapMesh *pMesh : { &pScene->m_Mesh, &pScene->m_InstanceMesh } )
 	{
-		if ( batch.m_nMaterial < nMaterials )
+		for ( const xv::map::MeshBatch_t &batch : pMesh->m_Batches )
 		{
-			triangles[ batch.m_nMaterial ] += batch.m_nIndexCount / 3;
+			if ( batch.m_nMaterial < nMaterials )
+			{
+				triangles[ batch.m_nMaterial ] += batch.m_nIndexCount / 3;
+			}
 		}
 	}
 	std::vector<std::uint32_t> order( nMaterials );
@@ -245,7 +249,7 @@ void CMapResources::Run( std::shared_ptr<const xv::map::CScene> pScene, xv::vfs:
 	std::vector<std::pair<std::uint32_t, std::string>> todo;
 	for ( const std::uint32_t n : order )
 	{
-		todo.emplace_back( n, pScene->m_Map.m_Materials[ n ] );
+		todo.emplace_back( n, pScene->m_Materials[ n ] );
 	}
 	load( todo, MaterialUse_t::MATERIAL_USE_FACES );
 
@@ -254,35 +258,38 @@ void CMapResources::Run( std::shared_ptr<const xv::map::CScene> pScene, xv::vfs:
 	auto nNext = static_cast<std::uint32_t>( nMaterials + 1 );
 
 	// Sprites next: few and small, and they show where the lights are. Their materials get
-	// places of their own, as they draw unlit and tinted.
+	// places of their own, as they draw unlit and tinted. Instances' sprites, props, overlays
+	// and decals are drawn as their func_instance.
 	std::vector<xv::map::SpritePlacement_t> sprites;
 	std::vector<double> scales;
 	std::map<std::string, std::uint32_t, std::less<>> spriteIndex;
 	todo.clear();
-	for ( std::size_t e = 0; e < pScene->m_Entities.size(); e++ )
-	{
-		const xv::map::EntityVisual_t &visual = pScene->m_Entities[ e ];
-		if ( !visual.m_bPoint || visual.m_szSprite.empty() )
+	xv::map::ForEachInstance( *pScene, [ & ]( const xv::map::CScene &inner, const xv::map::Transform_t &toScene, std::optional<std::uint32_t> nObject ) {
+		for ( std::size_t e = 0; e < inner.m_Entities.size(); e++ )
 		{
-			continue;
+			const xv::map::EntityVisual_t &visual = inner.m_Entities[ e ];
+			if ( !visual.m_bPoint || visual.m_szSprite.empty() )
+			{
+				continue;
+			}
+			// A sprite that adds and one that blends need materials of their own.
+			const std::string szMaterial = xv::map::NormalizeMaterial( visual.m_szSprite );
+			const auto [ it, bAdded ] = spriteIndex.try_emplace( szMaterial + ( visual.m_bSpriteAdditive ? "+" : "" ), nNext );
+			if ( bAdded )
+			{
+				additive.resize( nNext + 1, false );
+				additive[ nNext ] = visual.m_bSpriteAdditive;
+				todo.emplace_back( nNext++, szMaterial );
+			}
+			xv::map::SpritePlacement_t sprite;
+			sprite.m_nObject = nObject.value_or( inner.EntityObject( e ) );
+			sprite.m_nMaterial = it->second;
+			sprite.m_Origin = toScene.Apply( visual.m_Origin );
+			sprite.m_Tint = { visual.m_SpriteTint.m_nR, visual.m_SpriteTint.m_nG, visual.m_SpriteTint.m_nB };
+			sprites.push_back( sprite );
+			scales.push_back( visual.m_flSpriteScale );
 		}
-		// A sprite that adds and one that blends need materials of their own.
-		const std::string szMaterial = xv::map::NormalizeMaterial( visual.m_szSprite );
-		const auto [ it, bAdded ] = spriteIndex.try_emplace( szMaterial + ( visual.m_bSpriteAdditive ? "+" : "" ), nNext );
-		if ( bAdded )
-		{
-			additive.resize( nNext + 1, false );
-			additive[ nNext ] = visual.m_bSpriteAdditive;
-			todo.emplace_back( nNext++, szMaterial );
-		}
-		xv::map::SpritePlacement_t sprite;
-		sprite.m_nObject = pScene->EntityObject( e );
-		sprite.m_nMaterial = it->second;
-		sprite.m_Origin = visual.m_Origin;
-		sprite.m_Tint = { visual.m_SpriteTint.m_nR, visual.m_SpriteTint.m_nG, visual.m_SpriteTint.m_nB };
-		sprites.push_back( sprite );
-		scales.push_back( visual.m_flSpriteScale );
-	}
+	} );
 	post( [ this, nMore = static_cast<int>( todo.size() ) ] { m_nTotal += nMore; } );
 	sizes.resize( nNext, { 128, 128 } );
 	drawable.resize( nNext, false );
@@ -308,21 +315,45 @@ void CMapResources::Run( std::shared_ptr<const xv::map::CScene> pScene, xv::vfs:
 
 	// Then the props: each model once, the materials of theirs the map doesn't use yet, and
 	// all of them placed in one mesh.
-	const xv::map::PropList_t list = xv::map::ListProps( *pScene );
-	std::vector<xv::map::PropModel_t> models( list.m_Keys.size() );
+	std::vector<xv::map::PropKey_t> keys;
+	std::map<xv::map::PropKey_t, std::uint32_t> keyIndex;
+	struct PropUse_t
+	{
+		std::uint32_t m_nObject = 0;
+		std::uint32_t m_nKey = 0;
+		xv::map::Transform_t m_Transform;
+	};
+	std::vector<PropUse_t> uses;
+	xv::map::ForEachInstance( *pScene, [ & ]( const xv::map::CScene &inner, const xv::map::Transform_t &toScene, std::optional<std::uint32_t> nObject ) {
+		const xv::map::PropList_t list = xv::map::ListProps( inner );
+		for ( const auto &[ nInner, nKey ] : list.m_Entities )
+		{
+			const auto [ it, bAdded ] = keyIndex.try_emplace( list.m_Keys[ nKey ], static_cast<std::uint32_t>( keys.size() ) );
+			if ( bAdded )
+			{
+				keys.push_back( list.m_Keys[ nKey ] );
+			}
+			const xv::map::EntityVisual_t &visual = inner.m_Entities[ nInner - inner.m_Solids.size() ];
+			std::array<double, 3> angles = visual.m_Angles;
+			// lightprop draws a light's model aimed the way its pitch key says.
+			angles[ 0 ] = visual.m_bInvertPitch ? -angles[ 0 ] : angles[ 0 ];
+			uses.push_back( { nObject.value_or( nInner ), it->second, toScene * xv::map::Transform_t::FromAngles( visual.m_Origin, angles, visual.m_flModelScale ) } );
+		}
+	} );
+	std::vector<xv::map::PropModel_t> models( keys.size() );
 	std::map<std::string, std::uint32_t, std::less<>> indexOf;
 	for ( std::uint32_t n = 0; n < nMaterials; n++ )
 	{
-		indexOf.try_emplace( pScene->m_Map.m_Materials[ n ], n );
+		indexOf.try_emplace( pScene->m_Materials[ n ], n );
 	}
 	todo.clear();
 	const xv::model::Reader_t readModel = [ &fileSystem ]( std::string_view szPath ) { return fileSystem.Read( szPath ); };
 	int nModels = 0;
-	for ( std::size_t k = 0; k < list.m_Keys.size() && !m_bStop; k++ )
+	for ( std::size_t k = 0; k < keys.size() && !m_bStop; k++ )
 	{
 		xv::model::Selection_t selection;
-		selection.m_nSkin = list.m_Keys[ k ].m_nSkin;
-		std::optional<xv::model::CModel> model = xv::model::LoadModel( list.m_Keys[ k ].m_szModel, readModel, nullptr, selection );
+		selection.m_nSkin = keys[ k ].m_nSkin;
+		std::optional<xv::model::CModel> model = xv::model::LoadModel( keys[ k ].m_szModel, readModel, nullptr, selection );
 		if ( !model )
 		{
 			continue;
@@ -344,7 +375,7 @@ void CMapResources::Run( std::shared_ptr<const xv::map::CScene> pScene, xv::vfs:
 		}
 		models[ k ].m_pModel = std::make_shared<const xv::model::CModel>( std::move( *model ) );
 	}
-	post( [ this, nMore = static_cast<int>( todo.size() ), nModels, nKeys = static_cast<int>( list.m_Keys.size() ) ] {
+	post( [ this, nMore = static_cast<int>( todo.size() ), nModels, nKeys = static_cast<int>( keys.size() ) ] {
 		m_nTotal += nMore;
 		m_nModels = nModels;
 		m_nModelsTotal = nKeys;
@@ -353,7 +384,7 @@ void CMapResources::Run( std::shared_ptr<const xv::map::CScene> pScene, xv::vfs:
 	drawable.resize( nNext, false );
 	decalScales.resize( nNext, 1.0 );
 	load( todo, MaterialUse_t::MATERIAL_USE_FACES );
-	if ( !m_bStop && !list.m_Entities.empty() )
+	if ( !m_bStop && !uses.empty() )
 	{
 		for ( xv::map::PropModel_t &prop : models )
 		{
@@ -364,23 +395,13 @@ void CMapResources::Run( std::shared_ptr<const xv::map::CScene> pScene, xv::vfs:
 		}
 		std::vector<xv::map::PropPlacement_t> placements;
 		std::vector<std::uint32_t> drawn;
-		for ( const auto &[ nObject, nModel ] : list.m_Entities )
+		for ( const PropUse_t &use : uses )
 		{
-			if ( !models[ nModel ].m_pModel )
+			if ( models[ use.m_nKey ].m_pModel )
 			{
-				continue;
+				placements.push_back( { use.m_nObject, use.m_nKey, use.m_Transform } );
+				drawn.push_back( use.m_nObject );
 			}
-			const xv::map::EntityVisual_t &visual = pScene->m_Entities[ nObject - pScene->m_Solids.size() ];
-			xv::map::PropPlacement_t placement;
-			placement.m_nObject = nObject;
-			placement.m_nModel = nModel;
-			placement.m_Origin = visual.m_Origin;
-			placement.m_Angles = visual.m_Angles;
-			// lightprop draws a light's model aimed the way its pitch key says.
-			placement.m_Angles[ 0 ] = visual.m_bInvertPitch ? -visual.m_Angles[ 0 ] : visual.m_Angles[ 0 ];
-			placement.m_flScale = visual.m_flModelScale;
-			placements.push_back( placement );
-			drawn.push_back( nObject );
 		}
 		auto pProps = std::make_shared<const xv::map::CMapMesh>( xv::map::BuildPropMesh( models, placements ) );
 		post( [ this, pProps, drawn = std::move( drawn ) ]() mutable {
@@ -391,7 +412,16 @@ void CMapResources::Run( std::shared_ptr<const xv::map::CScene> pScene, xv::vfs:
 	}
 
 	// Last the overlays and decals, which need their materials' sizes to be laid on the faces.
-	const std::vector<std::string> overlayNames = xv::map::OverlayMaterialNames( *pScene );
+	std::vector<std::string> overlayNames;
+	xv::map::ForEachInstance( *pScene, [ & ]( const xv::map::CScene &inner, const xv::map::Transform_t &, std::optional<std::uint32_t> ) {
+		for ( std::string &szName : xv::map::OverlayMaterialNames( inner ) )
+		{
+			if ( std::ranges::find( overlayNames, szName ) == overlayNames.end() )
+			{
+				overlayNames.push_back( std::move( szName ) );
+			}
+		}
+	} );
 	if ( !m_bStop && !overlayNames.empty() )
 	{
 		todo.clear();
@@ -411,8 +441,16 @@ void CMapResources::Run( std::shared_ptr<const xv::map::CScene> pScene, xv::vfs:
 			material.m_TextureSize = sizes[ material.m_nMaterial ];
 			material.m_flDecalScale = decalScales[ material.m_nMaterial ];
 		}
-		auto pOverlays = std::make_shared<const xv::map::CMapMesh>( xv::map::BuildOverlayMesh( *pScene, overlayMaterials ) );
-		post( [ this, pOverlays ] {
+		auto pOverlays = std::make_shared<xv::map::CMapMesh>();
+		xv::map::ForEachInstance( *pScene, [ & ]( const xv::map::CScene &inner, const xv::map::Transform_t &toScene, std::optional<std::uint32_t> nObject ) {
+			std::vector<xv::map::OverlayMaterial_t> innerMaterials;
+			for ( const std::string &szName : xv::map::OverlayMaterialNames( inner ) )
+			{
+				innerMaterials.push_back( overlayMaterials[ static_cast<std::size_t>( std::ranges::find( overlayNames, szName ) - overlayNames.begin() ) ] );
+			}
+			xv::map::AppendPlaced( *pOverlays, xv::map::BuildOverlayMesh( inner, innerMaterials ), toScene, nObject );
+		} );
+		post( [ this, pOverlays = std::shared_ptr<const xv::map::CMapMesh>( std::move( pOverlays ) ) ] {
 			m_pOverlays = pOverlays;
 			emit Arrived();
 		} );

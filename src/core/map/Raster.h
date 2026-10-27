@@ -28,6 +28,7 @@ enum RasterObject_t : std::uint8_t
 	RASTER_OBJECT_SHOWN = 1u << 0,
 	RASTER_OBJECT_SELECTED = 1u << 1,
 	RASTER_OBJECT_INVALID = 1u << 2,
+	RASTER_OBJECT_INSTANCE = 1u << 3, // a func_instance's contents: tinted
 };
 
 // A material as the renderers use it, from MaterialInfo_t and the textures read for it.

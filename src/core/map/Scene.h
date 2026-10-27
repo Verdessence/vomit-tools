@@ -19,6 +19,7 @@
 #include "map/Brushes.h"
 #include "map/Entities.h"
 #include "map/Fgd.h"
+#include "map/Instance.h"
 #include "map/Map.h"
 #include "map/Mesh.h"
 #include "map/Visgroups.h"
@@ -36,6 +37,11 @@ public:
 	CMapMesh m_Mesh;
 	Box_t m_Bounds;                          // everything drawn
 	AutoVisgroup_t m_AutoVisgroups;         // the Filter Control's Auto tab
+	// What the meshes' material indices name: the map's own materials, then those only its
+	// instances use.
+	std::vector<std::string> m_Materials;
+	std::vector<PlacedInstance_t> m_Instances;
+	CMapMesh m_InstanceMesh;                 // every instance's solids, placed, as its func_instance
 
 	[[nodiscard]] std::uint32_t GetObjectCount() const { return static_cast<std::uint32_t>( m_Solids.size() + m_Entities.size() ); }
 	[[nodiscard]] std::uint32_t EntityObject( std::size_t nEntity ) const { return static_cast<std::uint32_t>( m_Solids.size() + nEntity ); }
@@ -56,6 +62,8 @@ struct SceneOptions_t
 	std::function<void( int nPercent, std::string_view szStage )> m_pfnProgress;
 	// Set from another thread to stop early; BuildScene then returns nullptr.
 	const std::atomic<bool> *m_pCancel = nullptr;
+	// Where the map's file is, for its func_instances' files; none are read without it.
+	InstanceOptions_t m_Instances;
 };
 
 [[nodiscard]] std::unique_ptr<CScene> BuildScene( CMap map, std::shared_ptr<const CFgd> pFgd, const SceneOptions_t &options = {} );

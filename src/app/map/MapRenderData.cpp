@@ -59,6 +59,10 @@ xv::map::RasterScene_t MapFrame_t::MakeScene() const
 	if ( m_pScene )
 	{
 		scene.m_Meshes.push_back( &m_pScene->m_Mesh );
+		if ( !m_pScene->m_InstanceMesh.m_Vertices.empty() )
+		{
+			scene.m_Meshes.push_back( &m_pScene->m_InstanceMesh );
+		}
 	}
 	if ( m_pEntityMesh )
 	{
@@ -139,7 +143,7 @@ CMapRenderData::CMapRenderData( const CMapDocument &document )
 std::uint32_t CMapRenderData::GetEntityMaterial() const
 {
 	const xv::map::CScene *pScene = m_Document.GetScene();
-	return pScene ? static_cast<std::uint32_t>( pScene->m_Map.m_Materials.size() ) : 0;
+	return pScene ? static_cast<std::uint32_t>( pScene->m_Materials.size() ) : 0;
 }
 
 //-----------------------------------------------------------------------------
@@ -166,7 +170,7 @@ void CMapRenderData::Rebuild()
 	m_SpriteObjects.clear();
 	BuildEntityBoxes();
 
-	auto pMaterials = std::make_shared<std::vector<xv::map::RasterMaterial_t>>( pScene->m_Map.m_Materials.size() + 1 );
+	auto pMaterials = std::make_shared<std::vector<xv::map::RasterMaterial_t>>( pScene->m_Materials.size() + 1 );
 	pMaterials->back().m_bObjectColor = true;
 	m_Frame.m_pMaterials = pMaterials;
 
@@ -185,16 +189,27 @@ void CMapRenderData::Rebuild()
 }
 
 //-----------------------------------------------------------------------------
-// Purpose: The boxes of point entities, but for those drawn as their model.
+// Purpose: The boxes of point entities, but for those drawn as their model, sprite or
+//          instance.
 //-----------------------------------------------------------------------------
 void CMapRenderData::BuildEntityBoxes()
 {
 	const xv::map::CScene *pScene = m_Document.GetScene();
 	auto pEntities = std::make_shared<xv::map::CMapMesh>();
+	// func_instances whose file was read show what it holds instead.
+	std::vector<std::uint32_t> instances;
+	if ( pScene )
+	{
+		for ( const xv::map::PlacedInstance_t &placed : pScene->m_Instances )
+		{
+			instances.push_back( placed.m_nObject );
+		}
+	}
+	std::ranges::sort( instances );
 	for ( std::size_t e = 0; pScene && e < pScene->m_Entities.size(); e++ )
 	{
 		const std::uint32_t nObject = pScene->EntityObject( e );
-		if ( pScene->m_Entities[ e ].m_bPoint && !std::ranges::binary_search( m_PropObjects, nObject ) && !std::ranges::binary_search( m_SpriteObjects, nObject ) )
+		if ( pScene->m_Entities[ e ].m_bPoint && !std::ranges::binary_search( instances, nObject ) && !std::ranges::binary_search( m_PropObjects, nObject ) && !std::ranges::binary_search( m_SpriteObjects, nObject ) )
 		{
 			AddBox( *pEntities, pScene->GetEntityBox( e ), nObject );
 		}
@@ -331,9 +346,13 @@ MapFrame_t CMapRenderData::Snapshot( const xv::map::CViewCamera &camera, const x
 	{
 		m_nStateFor = m_Document.GetStateGeneration();
 		auto pFlags = std::make_shared<std::vector<std::uint8_t>>( pScene->GetObjectCount(), 0 );
+		for ( const xv::map::PlacedInstance_t &placed : pScene->m_Instances )
+		{
+			( *pFlags )[ placed.m_nObject ] = xv::map::RASTER_OBJECT_INSTANCE;
+		}
 		for ( std::uint32_t n = 0; n < pScene->GetObjectCount(); n++ )
 		{
-			std::uint8_t nFlags = m_Document.IsShown( n ) ? xv::map::RASTER_OBJECT_SHOWN : 0;
+			std::uint8_t nFlags = ( *pFlags )[ n ] | ( m_Document.IsShown( n ) ? xv::map::RASTER_OBJECT_SHOWN : 0 );
 			nFlags |= m_Document.IsSelected( n ) ? xv::map::RASTER_OBJECT_SELECTED : 0;
 			nFlags |= pScene->IsSolidObject( n ) && !pScene->m_Solids[ n ].IsValid() ? xv::map::RASTER_OBJECT_INVALID : 0;
 			( *pFlags )[ n ] = nFlags;

@@ -16,6 +16,7 @@
 #include <vector>
 
 #include "map/Geometry.h"
+#include "map/Instance.h"
 #include "map/Mesh.h"
 #include "model/Model.h"
 
@@ -32,14 +33,12 @@ struct PropModel_t
 	std::vector<std::array<int, 2>> m_TextureSizes; // per model material: its base texture's size
 };
 
-// Where an entity's model stands.
+// Where an entity's model stands: its origin, angles and scale, and the instance it is in.
 struct PropPlacement_t
 {
 	std::uint32_t m_nObject = 0;
-	std::uint32_t m_nModel = 0;       // into the models
-	Point_t m_Origin{};
-	std::array<double, 3> m_Angles{}; // pitch, yaw, roll in degrees
-	double m_flScale = 1.0;
+	std::uint32_t m_nModel = 0; // into the models
+	Transform_t m_Transform;    // model space to the map's
 };
 
 // A model an entity shows, by its path and skin, for loading each once.

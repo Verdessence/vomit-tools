@@ -192,6 +192,12 @@ std::optional<std::array<float, 4>> ShadeFragment( const ShadeMaterial_t &materi
 		color[ 1 ] *= flShade;
 		color[ 2 ] *= flShade;
 	}
+	if ( input.m_bInstance )
+	{
+		color[ 0 ] += ( options.m_vecInstance.m_flX - color[ 0 ] ) * options.m_flInstanceTint;
+		color[ 1 ] += ( options.m_vecInstance.m_flY - color[ 1 ] ) * options.m_flInstanceTint;
+		color[ 2 ] += ( options.m_vecInstance.m_flZ - color[ 2 ] ) * options.m_flInstanceTint;
+	}
 	if ( input.m_bSelected )
 	{
 		color[ 0 ] += ( options.m_vecSelection.m_flX - color[ 0 ] ) * options.m_flSelectionTint;

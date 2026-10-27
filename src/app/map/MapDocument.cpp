@@ -7,9 +7,11 @@
 #include "MapDocument.h"
 
 #include <algorithm>
+#include <fstream>
 #include <set>
 #include <unordered_map>
 
+#include "kv1/Kv1.h"
 #include "map/GameConfig.h"
 #include "map/Vmf.h"
 
@@ -31,6 +33,23 @@ void SortUnique( std::vector<std::uint32_t> &objects )
 {
 	std::ranges::sort( objects );
 	objects.erase( std::unique( objects.begin(), objects.end() ), objects.end() );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: gameinfo.txt's InstancePath, under the game's folder, when it has one.
+//-----------------------------------------------------------------------------
+std::optional<std::filesystem::path> InstancePath( const xv::vfs::CGameInfo &game )
+{
+	std::ifstream file( game.m_File, std::ios::binary );
+	const std::string szText( ( std::istreambuf_iterator<char>( file ) ), std::istreambuf_iterator<char>() );
+	const xv::kv1::CParseResult result = xv::kv1::Parse( szText );
+	const xv::kv1::CNode *pGameInfo = result.m_Document.Find( "GameInfo" );
+	const xv::kv1::CNode *pPath = pGameInfo ? pGameInfo->Find( "InstancePath" ) : nullptr;
+	if ( !pPath || pPath->GetValue().empty() )
+	{
+		return std::nullopt;
+	}
+	return game.m_GameDir / std::filesystem::path{ pPath->GetValue() };
 }
 
 } // namespace
@@ -126,6 +145,16 @@ void CMapDocument::Run( Source_t source, int nGeneration )
 	xv::map::SceneOptions_t options;
 	options.m_pCancel = &m_bStop;
 	options.m_pfnProgress = progress;
+	// func_instances' files are found from the map's own folder, then from the game's
+	// InstancePath (a map read out of the game has no folder of its own).
+	options.m_Instances.m_MapFile = source.m_DiskPath;
+	if ( source.m_Game )
+	{
+		if ( const std::optional<std::filesystem::path> path = InstancePath( *source.m_Game ) )
+		{
+			options.m_Instances.m_SearchPaths.push_back( *path );
+		}
+	}
 	std::shared_ptr<xv::map::CScene> pScene = xv::map::BuildScene( std::move( *map ), std::move( pFgd ), options );
 	if ( !pScene )
 	{
