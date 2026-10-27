@@ -1,5 +1,22 @@
 # Changelog
 
+## Unreleased
+
+### Hammer maps (new)
+- **Map viewer:** open Hammer maps (`.vmf`) in a tab laid out as Hammer++'s: a 3D view and the
+  Top, Front and Side views in four panes, its keys, colours, grid and camera (fly with WASD, look
+  with Z or the mouse), from Hammer++'s own settings. Read only for now.
+- Brushes (with Hammer++'s exact vertices), displacements with their blended materials, entities
+  as their FGD draws them (boxes, models, sprites tinted by their light, helper spheres), overlays
+  and decals on their faces, `func_instance` contents tinted orange, the 2D sky on sky faces and
+  the 3D skybox behind the world. Textures stream in from the game. Drawn on the graphics card, or
+  in software without one.
+- Selection by Hammer's rules (groups, objects or solids; box selection with Enter), quick hide,
+  Go to Brush, Filter Control (the map's visgroups and the automatic ones) and a read-only Object
+  Properties with SmartEdit's names. Game data comes from Hammer++'s or Hammer's configuration for
+  the game, or from Preferences → Maps, which also holds the views' settings.
+- Large maps open in about a second: a 50 MB map reads in a quarter of a second.
+
 ## 0.7.0 — The Model (2026-10-27)
 
 ### Models (new)
