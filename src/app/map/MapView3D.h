@@ -20,6 +20,7 @@
 #include <QImage>
 #include <QPointer>
 
+#include "PointerLock.h"
 #include "map/MapRenderData.h"
 #include "map/MapRenderer.h"
 #include "map/MapView.h"
@@ -102,6 +103,8 @@ private:
 	void WorkerLoop();
 	void Tick();
 	void SetMouselook( bool bOn );
+	// Turns the camera by a mouse movement, at the preferences' speed.
+	void Look( QPointF delta );
 	void Select( QPointF at, bool bToggle );
 	[[nodiscard]] xv::map::RasterMode_t GetMode() const;
 
@@ -128,6 +131,8 @@ private:
 	std::vector<MapAction_t> m_Held;
 	double m_flSpeed = 0.0;
 	bool m_bMouselook = false;  // Z
+	QPoint m_LookFrom;          // where the cursor was when mouselook began: it goes back there
+	CPointerLock m_PointerLock; // Wayland: pins the pointer meanwhile
 	bool m_bSpaceHeld = false;
 	Qt::MouseButtons m_Dragging;
 	QPoint m_LastMouse;

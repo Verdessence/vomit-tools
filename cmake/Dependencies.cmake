@@ -7,6 +7,10 @@ if(VOMIT_TOOLS_BUILD_APP OR VOMIT_TOOLS_BUILD_TESTS)
     # The desktop's file chooser portal is reached over D-Bus (Linux and other freedesktop systems).
     if(UNIX AND NOT APPLE)
         find_package(Qt6 QUIET OPTIONAL_COMPONENTS DBus)
+        # Pinning the pointer for the map's mouselook needs the compositor's protocols, which Qt
+        # only lets a program bind itself (QtWaylandClient and its scanner).
+        find_package(Qt6 QUIET OPTIONAL_COMPONENTS WaylandClient)
+        find_program(VOMIT_TOOLS_WAYLAND_SCANNER wayland-scanner)
     endif()
     qt_standard_project_setup()
 endif()

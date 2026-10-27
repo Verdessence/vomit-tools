@@ -75,6 +75,9 @@ vomit_tools_add_notice(NAME "Qt" FILE "${CMAKE_SOURCE_DIR}/LICENSES/LGPL-3.0-onl
         NOTE "Qt's libraries are linked dynamically and shipped as separate files, so they can be replaced
 with other builds of the same version. Qt itself contains third-party code; its notices are listed
 at https://doc.qt.io/qt-6/licenses-used-in-qt.html and in Help > About Qt.")
+vomit_tools_add_notice(NAME "wayland-protocols (pointer constraints and relative pointer, for the map's mouselook on Wayland)"
+        FILE "${CMAKE_SOURCE_DIR}/LICENSES/wayland-protocols-MIT.txt"
+        URL "https://gitlab.freedesktop.org/wayland/wayland-protocols" LICENSE "MIT")
 vomit_tools_add_notice(NAME "sourcepp (vpkpp, kvpp and their support code)" FETCH sourcepp FILE ./LICENSE
         URL "https://github.com/craftablescience/sourcepp/archive/5dcbbe8ac556b1c833cccf31a2b016e114dbc3f0.tar.gz" LICENSE "MIT")
 vomit_tools_add_notice(NAME "BufferStream" FETCH bufferstream FILE ./LICENSE

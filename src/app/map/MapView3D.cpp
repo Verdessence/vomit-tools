@@ -426,17 +426,48 @@ void CMapView3D::resizeEvent( QResizeEvent *pEvent )
 //-----------------------------------------------------------------------------
 void CMapView3D::SetMouselook( bool bOn )
 {
+	if ( bOn == m_bMouselook )
+	{
+		return;
+	}
 	m_bMouselook = bOn;
 	setCursor( bOn ? Qt::BlankCursor : Qt::ArrowCursor );
-	m_LastMouse = mapFromGlobal( QCursor::pos() );
 	if ( bOn )
 	{
+		// The cursor goes back here afterwards. Meanwhile the pointer is pinned (Wayland), or
+		// warped back to the middle at each move (mouseMoveEvent), so it never reaches an edge.
+		m_LookFrom = mapFromGlobal( QCursor::pos() );
+		m_LastMouse = m_LookFrom;
 		grabMouse();
+		m_PointerLock.Lock( this, [ this ]( QPointF delta ) { Look( delta ); } );
 	}
 	else
 	{
 		releaseMouse();
+		if ( m_PointerLock.IsActive() )
+		{
+			m_PointerLock.Unlock( m_LookFrom );
+		}
+		else
+		{
+			QCursor::setPos( mapToGlobal( m_LookFrom ) );
+		}
 	}
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+void CMapView3D::Look( QPointF delta )
+{
+	if ( delta.isNull() )
+	{
+		return; // the move the cursor's own warp sends
+	}
+	const double flSensitivity = CPreferences::Instance().GetMapPreferences().m_flSensitivity;
+	m_Camera.m_flYaw -= delta.x() * flSensitivity;
+	m_Camera.m_flPitch = std::clamp( m_Camera.m_flPitch + delta.y() * flSensitivity, -89.0, 89.0 );
+	Changed();
 }
 
 //-----------------------------------------------------------------------------
@@ -465,22 +496,17 @@ void CMapView3D::mouseMoveEvent( QMouseEvent *pEvent )
 		m_bMoved = true;
 	}
 	const bool bCameraTool = m_Editor.GetTool() == MapTool_t::MAP_TOOL_CAMERA;
-	const double flSensitivity = CPreferences::Instance().GetMapPreferences().m_flSensitivity;
-	auto look = [ & ] {
-		if ( delta.isNull() )
-		{
-			return; // the move the cursor's own warp sends
-		}
-		m_Camera.m_flYaw -= delta.x() * flSensitivity;
-		m_Camera.m_flPitch = std::clamp( m_Camera.m_flPitch + delta.y() * flSensitivity, -89.0, 89.0 );
-		Changed();
-	};
+	if ( m_bMouselook && m_PointerLock.IsActive() )
+	{
+		return; // the pinned pointer's movement comes through Look() directly
+	}
+	auto look = [ & ] { Look( delta ); };
 	if ( m_bMouselook || ( m_bSpaceHeld && ( pEvent->buttons() & Qt::LeftButton ) ) )
 	{
 		look();
-		// Back to the middle, so the mouse never runs into the screen's edge. Wayland doesn't
-		// let programs move the pointer; there the movement is all there is.
-		if ( m_bMouselook && QGuiApplication::platformName() != QStringLiteral( "wayland" ) )
+		// Back to the middle, so the mouse never runs into the screen's edge (a compositor
+		// that won't move the pointer leaves it where it is, and the movement is all there is).
+		if ( m_bMouselook )
 		{
 			const QPoint middle{ width() / 2, height() / 2 };
 			QCursor::setPos( mapToGlobal( middle ) );

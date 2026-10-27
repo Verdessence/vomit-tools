@@ -165,7 +165,9 @@ add_library(vomit_tools_ui STATIC
         map/MapView2D.cpp
         map/MapView2D.h
         map/MapView3D.cpp
-        map/MapView3D.h)
+        map/MapView3D.h
+        PointerLock.cpp
+        PointerLock.h)
 target_include_directories(vomit_tools_ui PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
 # The version and `git describe` shown in Help → About. Regenerated at every build so the commit
 # stays current; the file is only rewritten (and recompiled) when it changes.
@@ -237,6 +239,21 @@ if(TARGET Qt6::DBus)
     target_sources(vomit_tools_ui PRIVATE PortalFileChooser.cpp PortalFileChooser.h)
     target_link_libraries(vomit_tools_ui PRIVATE Qt6::DBus)
     target_compile_definitions(vomit_tools_ui PRIVATE VOMIT_TOOLS_PORTAL)
+endif()
+# On Wayland, the map's mouselook pins the pointer through the compositor's pointer constraints.
+if(TARGET Qt6::WaylandClient AND TARGET Qt6::qtwaylandscanner AND VOMIT_TOOLS_WAYLAND_SCANNER)
+    if(NOT TARGET Wayland::Scanner)
+        add_executable(Wayland::Scanner IMPORTED)
+        set_target_properties(Wayland::Scanner PROPERTIES IMPORTED_LOCATION "${VOMIT_TOOLS_WAYLAND_SCANNER}")
+    endif()
+    qt6_generate_wayland_protocol_client_sources(vomit_tools_ui PRIVATE_CODE
+            FILES "${CMAKE_CURRENT_SOURCE_DIR}/wayland/pointer-constraints-unstable-v1.xml"
+                  "${CMAKE_CURRENT_SOURCE_DIR}/wayland/relative-pointer-unstable-v1.xml")
+    target_link_libraries(vomit_tools_ui PRIVATE Qt6::WaylandClient)
+    target_compile_definitions(vomit_tools_ui PRIVATE VOMIT_TOOLS_WAYLAND)
+    message(STATUS "vomit-tools: mouselook pins the pointer on Wayland")
+else()
+    message(STATUS "vomit-tools: mouselook warps the pointer (no Qt WaylandClient or wayland-scanner)")
 endif()
 if(WIN32)
     # Explorer's right-click menu in the file trees.
