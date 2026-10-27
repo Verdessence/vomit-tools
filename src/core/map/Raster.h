@@ -53,6 +53,7 @@ struct RasterLine_t
 struct RasterScene_t
 {
 	std::vector<const CMapMesh *> m_Meshes;            // the map's, then entity boxes and the like
+	std::vector<const CMapMesh *> m_NoWireframe;       // of those, the ones whose edges the wireframe view leaves out
 	std::span<const RasterMaterial_t> m_Materials;     // by the meshes' material indices
 	std::span<const std::uint8_t> m_ObjectFlags;       // RasterObject_t bits, by object
 	std::span<const std::array<std::uint8_t, 3>> m_ObjectColors; // flat colours, by object

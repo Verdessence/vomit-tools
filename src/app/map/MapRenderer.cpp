@@ -745,13 +745,13 @@ void CMapRenderer::Render( QRhiCommandBuffer *pCommands, QRhiRenderTarget *pTarg
 		faces( frame.m_Camera, false );
 	}
 	// Edges: the wireframe's, then the selection's over everything.
-	auto edges = [ & ]( Material_t &material ) {
+	auto edges = [ & ]( Material_t &material, bool bWireframe ) {
 		pCommands->setGraphicsPipeline( m_pLines.get() );
 		bind( material.m_pBindings.get() );
 		for ( std::size_t nMesh = 0; nMesh < scene.m_Meshes.size(); nMesh++ )
 		{
 			const xv::map::CMapMesh &mesh = *scene.m_Meshes[ nMesh ];
-			if ( !m_Meshes[ nMesh ].m_pLines || !m_Meshes[ nMesh ].m_pVertices )
+			if ( !m_Meshes[ nMesh ].m_pLines || !m_Meshes[ nMesh ].m_pVertices || ( bWireframe && std::ranges::find( scene.m_NoWireframe, &mesh ) != scene.m_NoWireframe.end() ) )
 			{
 				continue;
 			}
@@ -763,11 +763,11 @@ void CMapRenderer::Render( QRhiCommandBuffer *pCommands, QRhiRenderTarget *pTarg
 	};
 	if ( shade.m_nMode == xv::map::RasterMode_t::RASTER_MODE_WIREFRAME )
 	{
-		edges( m_LinesAll );
+		edges( m_LinesAll, true );
 	}
 	if ( frame.m_Options.m_bSelectionEdges )
 	{
-		edges( m_LinesSelected );
+		edges( m_LinesSelected, false );
 	}
 	if ( bSky )
 	{

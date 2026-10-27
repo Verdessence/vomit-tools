@@ -11,6 +11,7 @@
 #include <array>
 #include <cstdint>
 #include <memory>
+#include <utility>
 #include <vector>
 
 #include <QColor>
@@ -40,13 +41,16 @@ struct MapFrame_t
 	xv::map::CViewCamera m_Camera;
 	xv::map::RasterOptions_t m_Options;
 	std::uint64_t m_nGeneration = 0; // changes whenever anything but the camera does
+	bool m_bModelEdges = true;       // the props' edges in the wireframe view
 
 	[[nodiscard]] xv::map::RasterScene_t MakeScene() const;
 };
 
-// The colour an object's lines are drawn in, as Hammer chooses it (2D views and wireframe):
-// a visgroup's colour, the entity's, invalid red, or white for the world.
-[[nodiscard]] QColor MapLineColor( const xv::map::CScene &scene, std::uint32_t nObject, const MapViewSettings_t &settings, bool bInvalid );
+// The colour each object's lines are drawn in, as Hammer chooses it (2D views and wireframe):
+// broken solids' red, a group's or visgroup's colour, the entity's, or white for the world.
+[[nodiscard]] std::vector<std::array<std::uint8_t, 3>> MapLineColors( const xv::map::CScene &scene, const MapViewSettings_t &settings );
+// The colour a group is given when groups get one each (Preferences > Maps).
+[[nodiscard]] QColor MapGroupColor( int nGroupId );
 
 class CMapRenderData
 {
@@ -55,6 +59,9 @@ public:
 
 	// The frame for a camera, from what the document shows now.
 	[[nodiscard]] MapFrame_t Snapshot( const xv::map::CViewCamera &camera, const xv::map::RasterOptions_t &options, const MapViewSettings_t &settings );
+	// Each object's line colour (MapLineColors), made again when the settings or preferences
+	// change; null without a map.
+	[[nodiscard]] std::shared_ptr<const std::vector<std::array<std::uint8_t, 3>>> GetLineColors( const MapViewSettings_t &settings );
 	// The materials changed (textures arrived): later frames use these, one per material of
 	// the map; the entity boxes' own is added after them.
 	void SetMaterials( std::shared_ptr<const std::vector<xv::map::RasterMaterial_t>> pMaterials, std::shared_ptr<const void> pTextures );
@@ -71,15 +78,20 @@ public:
 private:
 	void Rebuild();
 	void BuildEntityBoxes();
+	void UpdateFlatColors();
+	void ApplySprites();
 
 	const CMapDocument &m_Document;
 	const xv::map::CScene *m_pBuiltFor = nullptr;
 	std::uint64_t m_nStateFor = ~0ull;
-	std::uint64_t m_nSettingsFor = ~0ull;
+	std::pair<bool, std::uint64_t> m_LineColorsFor{}; // group colours on, and the preferences' revision
 	std::uint64_t m_nGeneration = 0;
+	std::uint64_t m_nFlatFor = ~0ull; // the preferences' revision the flat colours follow
 	MapFrame_t m_Frame;
 	std::vector<std::uint32_t> m_PropObjects; // sorted
-	std::shared_ptr<const std::vector<xv::map::SpritePlacement_t>> m_pSprites;
+	std::shared_ptr<const std::vector<xv::map::SpritePlacement_t>> m_pReceivedSprites;
+	std::shared_ptr<const std::vector<xv::map::SpritePlacement_t>> m_pSprites; // those drawn
+	bool m_bSpritesShown = true;
 	std::vector<std::uint32_t> m_SpriteObjects; // sorted
 	xv::map::Point_t m_SpritesRight{};          // the camera the sprite mesh faces
 	xv::map::Point_t m_SpritesUp{};

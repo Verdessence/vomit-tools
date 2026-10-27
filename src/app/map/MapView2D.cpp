@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
+#include <numbers>
 #include <unordered_map>
 
 #include <QApplication>
@@ -19,6 +20,7 @@
 #include <QScrollBar>
 #include <QWheelEvent>
 
+#include "Preferences.h"
 #include "map/MapConstants.h"
 #include "map/MapDocument.h"
 #include "map/MapEditor.h"
@@ -53,16 +55,32 @@ double DistanceToSegment( QPointF p, QPointF a, QPointF b )
 	return std::sqrt( QPointF::dotProduct( d, d ) );
 }
 
+//-----------------------------------------------------------------------------
+// Purpose: Preferences > Maps, which most of what a 2D view draws follows.
+//-----------------------------------------------------------------------------
+const MapPreferences_t &Look()
+{
+	return CPreferences::Instance().GetMapPreferences();
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+QColor ToColor( const std::array<std::uint8_t, 3> &color )
+{
+	return QColor{ color[ 0 ], color[ 1 ], color[ 2 ] };
+}
+
 } // namespace
 
 //-----------------------------------------------------------------------------
 // Purpose: Each kind of line is left out once it would come closer than Hammer++'s smallest
 //          spacing in pixels.
 //-----------------------------------------------------------------------------
-GridPlan_t PlanGrid( double flPixelsPerUnit, int nGridSize, int nHighlightEvery, bool bHideSmall )
+GridPlan_t PlanGrid( double flPixelsPerUnit, int nGridSize, int nHighlightEvery, bool bHideSmall, double flHideBelowPixels )
 {
 	// Without HideSmallGrid lines still stop where they would be closer than a pixel.
-	const double flHideBelow = bHideSmall ? mapstyle::HIDE_GRID_BELOW_PIXELS : 1.0;
+	const double flHideBelow = bHideSmall ? std::max( flHideBelowPixels, 1.0 ) : 1.0;
 	auto shown = [ flPixelsPerUnit, flHideBelow ]( double flSpacing ) {
 		return flSpacing * flPixelsPerUnit >= flHideBelow ? flSpacing : 0.0;
 	};
@@ -277,7 +295,7 @@ void CMapView2D::Fit()
 	const QPointF maxs = Flatten( pScene->m_Bounds.m_Maxs );
 	const double flWidth = std::max( maxs.x() - mins.x(), 64.0 );
 	const double flHeight = std::max( maxs.y() - mins.y(), 64.0 );
-	m_flZoom = std::clamp( std::min( ( width() - SCROLLBAR_SIZE ) / flWidth, ( height() - SCROLLBAR_SIZE ) / flHeight ) * 0.9, mapstyle::ZOOM_SMALLEST, mapstyle::ZOOM_LARGEST );
+	m_flZoom = std::clamp( std::min( ( width() - SCROLLBAR_SIZE ) / flWidth, ( height() - SCROLLBAR_SIZE ) / flHeight ) * 0.9, Look().m_flZoomSmallest, Look().m_flZoomLargest );
 	SetCenter( ( mins + maxs ) / 2.0 );
 }
 
@@ -286,7 +304,7 @@ void CMapView2D::Fit()
 //-----------------------------------------------------------------------------
 void CMapView2D::SetZoom( double flZoom )
 {
-	m_flZoom = std::clamp( flZoom, mapstyle::ZOOM_SMALLEST, mapstyle::ZOOM_LARGEST );
+	m_flZoom = std::clamp( flZoom, Look().m_flZoomSmallest, Look().m_flZoomLargest );
 	UpdateScrollBars();
 	m_Editor.ShowZoom( m_flZoom );
 	update();
@@ -299,7 +317,7 @@ void CMapView2D::Zoom( double flFactor, std::optional<QPointF> at )
 {
 	const QPointF pivot = at.value_or( QPointF{ width() / 2.0, height() / 2.0 } );
 	const QPointF before = ToMap( pivot );
-	m_flZoom = std::clamp( m_flZoom * flFactor, mapstyle::ZOOM_SMALLEST, mapstyle::ZOOM_LARGEST );
+	m_flZoom = std::clamp( m_flZoom * flFactor, Look().m_flZoomSmallest, Look().m_flZoomLargest );
 	const QPointF after = ToMap( pivot );
 	SetCenter( m_Center + ( before - after ) );
 	m_Editor.ShowZoom( m_flZoom );
@@ -360,47 +378,23 @@ void CMapView2D::UpdateScrollBars()
 	const int nPage = static_cast<int>( std::max( 1.0, width() / m_flZoom ) );
 	m_pHorizontal->setPageStep( nPage );
 	m_pVertical->setPageStep( static_cast<int>( std::max( 1.0, height() / m_flZoom ) ) );
-	m_pHorizontal->setSingleStep( std::max( 1, static_cast<int>( mapstyle::SCROLL_STEP_PIXELS / m_flZoom ) ) );
-	m_pVertical->setSingleStep( std::max( 1, static_cast<int>( mapstyle::SCROLL_STEP_PIXELS / m_flZoom ) ) );
+	m_pHorizontal->setSingleStep( std::max( 1, static_cast<int>( Look().m_nScrollStep / m_flZoom ) ) );
+	m_pVertical->setSingleStep( std::max( 1, static_cast<int>( Look().m_nScrollStep / m_flZoom ) ) );
 	m_pHorizontal->setValue( static_cast<int>( std::lround( m_Center.x() ) ) );
 	m_pVertical->setValue( static_cast<int>( -std::lround( m_Center.y() ) ) );
 	m_bUpdatingScrollBars = false;
 }
 
 //-----------------------------------------------------------------------------
-// Purpose: Hammer's colours: the selection, then a visgroup's colour, then the entity's, then
-//          white for the world.
+// Purpose: Hammer's colours: the selection's, else the object's line colour (MapLineColors).
 //-----------------------------------------------------------------------------
 QColor CMapView2D::ColorOf( const MapFlatObject_t &object ) const
 {
-	const CMapDocument &document = GetDocument();
-	if ( document.IsSelected( object.m_nObject ) )
+	if ( GetDocument().IsSelected( object.m_nObject ) )
 	{
-		return mapstyle::SELECTION;
+		return Look().m_Colors.m_Selection;
 	}
-	const xv::map::CScene &scene = *document.GetScene();
-	if ( object.m_bInvalid )
-	{
-		return mapstyle::INVALID;
-	}
-	const int nEntity = scene.GetObjectEntity( object.m_nObject );
-	const xv::map::EditorInfo_t &editor = nEntity >= 0 ? scene.m_Map.m_Entities[ static_cast<std::size_t>( nEntity ) ].m_Editor : scene.GetObjectEditor( object.m_nObject );
-	if ( m_Editor.GetSettings().m_bUseGroupColors && !editor.m_Visgroups.empty() )
-	{
-		for ( const xv::map::Visgroup_t &visgroup : scene.m_Map.m_Visgroups )
-		{
-			if ( visgroup.m_nId == editor.m_Visgroups.front() )
-			{
-				return QColor{ visgroup.m_Color.m_nR, visgroup.m_Color.m_nG, visgroup.m_Color.m_nB };
-			}
-		}
-	}
-	if ( nEntity >= 0 )
-	{
-		const xv::map::Color_t color = scene.m_Entities[ static_cast<std::size_t>( nEntity ) ].m_Color;
-		return QColor{ color.m_nR, color.m_nG, color.m_nB };
-	}
-	return mapstyle::BRUSH;
+	return m_pLineColors && object.m_nObject < m_pLineColors->size() ? ToColor( ( *m_pLineColors )[ object.m_nObject ] ) : Look().m_Colors.m_Brush;
 }
 
 //-----------------------------------------------------------------------------
@@ -439,14 +433,15 @@ void CMapView2D::PaintGrid( QPainter &painter, const QRectF &all ) const
 	};
 	if ( settings.m_bShowGrid )
 	{
-		const GridPlan_t plan = PlanGrid( m_flZoom, settings.m_nGridSize, settings.m_nHighlightEvery, settings.m_bHideSmallGrid );
-		lines( plan.m_flBase, mapstyle::GRID );
-		lines( plan.m_flSixtyFour, mapstyle::GRID_10 );
-		lines( plan.m_flHighlight, mapstyle::GRID_10 );
-		lines( plan.m_fl1024, mapstyle::GRID_1024 );
+		const MapColors_t &colors = Look().m_Colors;
+		const GridPlan_t plan = PlanGrid( m_flZoom, settings.m_nGridSize, settings.m_nHighlightEvery, settings.m_bHideSmallGrid, Look().m_flHideGridBelow );
+		lines( plan.m_flBase, colors.m_Grid );
+		lines( plan.m_flSixtyFour, colors.m_GridHighlight );
+		lines( plan.m_flHighlight, colors.m_GridHighlight );
+		lines( plan.m_fl1024, colors.m_Grid1024 );
 	}
 	// The axes show with or without the grid.
-	painter.setPen( QPen{ mapstyle::AXIS, 0 } );
+	painter.setPen( QPen{ Look().m_Colors.m_Axis, 0 } );
 	const QPointF origin = ToWidget( { 0, 0 } );
 	const double flX = std::round( origin.x() ) + 0.5;
 	const double flY = std::round( origin.y() ) + 0.5;
@@ -464,7 +459,8 @@ double CMapView2D::GetWorldLimit() const
 }
 
 //-----------------------------------------------------------------------------
-// Purpose: Every shown object in view, in batches of one colour; selected ones last, on top.
+// Purpose: Every shown object in view, in batches of one colour; broken solids over the rest
+//          (Hammer++ draws them over everything), and selected ones last, on top.
 //-----------------------------------------------------------------------------
 void CMapView2D::PaintObjects( QPainter &painter, const QRectF &visible ) const
 {
@@ -475,6 +471,7 @@ void CMapView2D::PaintObjects( QPainter &painter, const QRectF &visible ) const
 		return;
 	}
 	const MapViewSettings_t &settings = m_Editor.GetSettings();
+	const MapPreferences_t &look = Look();
 	struct Batch_t
 	{
 		QColor m_Color;
@@ -495,9 +492,11 @@ void CMapView2D::PaintObjects( QPainter &painter, const QRectF &visible ) const
 		return batches.back();
 	};
 	std::vector<QPointF> vertices;
+	std::vector<QLineF> handles;
+	std::vector<const MapFlatObject_t *> invalid;
 	std::vector<const MapFlatObject_t *> selected;
-	const double flHalfHandle = mapstyle::HANDLE_SIZE / 2.0;
-	auto add = [ & ]( const MapFlatObject_t &object, Batch_t &batch ) {
+	const double flHalfHandle = look.m_nHandleSize / 2.0;
+	auto add = [ & ]( const MapFlatObject_t &object, Batch_t &batch, bool bSelected ) {
 		const QRectF bounds{ ToWidget( object.m_Bounds.topLeft() ), ToWidget( object.m_Bounds.bottomRight() ) };
 		const QRectF box = bounds.normalized();
 		if ( box.width() < 1.0 && box.height() < 1.0 )
@@ -506,17 +505,19 @@ void CMapView2D::PaintObjects( QPainter &painter, const QRectF &visible ) const
 			batch.m_Points.push_back( box.center() );
 			return;
 		}
-		// An instance shows what it holds, at every size.
+		// An instance shows what it holds, at every size: in the func_instance's colour, or the
+		// preferences' own.
+		Batch_t &contents = !bSelected && look.m_bInstanceColor2D && object.m_nInstanceLineCount > 0 ? batchFor( look.m_Colors.m_Instance2D ) : batch;
 		const xv::map::CMapMesh &instances = pScene->m_InstanceMesh;
 		for ( std::uint32_t k = 0; k < object.m_nInstanceLineCount; k++ )
 		{
 			const std::uint32_t nLine = ( object.m_nFirstInstanceLine + k ) * 2;
 			const xv::CVec3 &a = instances.m_Vertices[ instances.m_Lines[ nLine ] ].m_vecPosition;
 			const xv::CVec3 &b = instances.m_Vertices[ instances.m_Lines[ nLine + 1 ] ].m_vecPosition;
-			batch.m_Lines.emplace_back( ToWidget( Flatten( { a.m_flX, a.m_flY, a.m_flZ } ) ), ToWidget( Flatten( { b.m_flX, b.m_flY, b.m_flZ } ) ) );
+			contents.m_Lines.emplace_back( ToWidget( Flatten( { a.m_flX, a.m_flY, a.m_flZ } ) ), ToWidget( Flatten( { b.m_flX, b.m_flY, b.m_flZ } ) ) );
 		}
 		// A prop big enough on screen shows its model's edges (Shift+M), else its box.
-		const bool bModel = object.m_nModelLineCount > 0 && settings.m_bModels2D && std::max( box.width(), box.height() ) >= mapstyle::MODELS_FROM_PIXELS;
+		const bool bModel = object.m_nModelLineCount > 0 && settings.m_bModels2D && std::max( box.width(), box.height() ) >= look.m_nModelsFromPixels;
 		if ( bModel )
 		{
 			const xv::map::CMapMesh &props = *m_pProps;
@@ -532,23 +533,24 @@ void CMapView2D::PaintObjects( QPainter &painter, const QRectF &visible ) const
 		{
 			batch.m_Boxes.push_back( box.adjusted( 0.5, 0.5, -0.5, -0.5 ) );
 		}
+		const bool bCorners = settings.m_bDrawVertices && box.width() > look.m_nVerticesFromPixels && box.height() > look.m_nVerticesFromPixels;
 		for ( std::uint32_t k = 0; k < object.m_nSegmentCount; k++ )
 		{
 			const QLineF &segment = m_Segments[ object.m_nFirstSegment + k ];
 			const QLineF line{ ToWidget( segment.p1() ), ToWidget( segment.p2() ) };
 			batch.m_Lines.push_back( line );
-			if ( settings.m_bDrawVertices && box.width() > 8.0 && box.height() > 8.0 )
+			if ( bCorners )
 			{
 				vertices.push_back( line.p1() );
 				vertices.push_back( line.p2() );
 			}
 		}
 		// The centre handle Hammer draws on every object big enough to have room for it.
-		if ( settings.m_bCenterHandles && box.width() > 3 * mapstyle::HANDLE_SIZE && box.height() > 3 * mapstyle::HANDLE_SIZE )
+		if ( settings.m_bCenterHandles && box.width() > look.m_nCenterHandlesFromPixels && box.height() > look.m_nCenterHandlesFromPixels )
 		{
 			const QPointF c = box.center();
-			batch.m_Lines.emplace_back( c.x() - flHalfHandle, c.y() - flHalfHandle, c.x() + flHalfHandle, c.y() + flHalfHandle );
-			batch.m_Lines.emplace_back( c.x() - flHalfHandle, c.y() + flHalfHandle, c.x() + flHalfHandle, c.y() - flHalfHandle );
+			handles.emplace_back( c.x() - flHalfHandle, c.y() - flHalfHandle, c.x() + flHalfHandle, c.y() + flHalfHandle );
+			handles.emplace_back( c.x() - flHalfHandle, c.y() + flHalfHandle, c.x() + flHalfHandle, c.y() - flHalfHandle );
 		}
 	};
 	for ( const MapFlatObject_t &object : m_Objects )
@@ -562,7 +564,12 @@ void CMapView2D::PaintObjects( QPainter &painter, const QRectF &visible ) const
 			selected.push_back( &object );
 			continue;
 		}
-		add( object, batchFor( ColorOf( object ) ) );
+		if ( object.m_bInvalid )
+		{
+			invalid.push_back( &object );
+			continue;
+		}
+		add( object, batchFor( ColorOf( object ) ), false );
 	}
 	auto draw = [ & ]( const Batch_t &batch ) {
 		painter.setPen( QPen{ batch.m_Color, 0 } );
@@ -571,31 +578,46 @@ void CMapView2D::PaintObjects( QPainter &painter, const QRectF &visible ) const
 		painter.drawRects( batch.m_Boxes.data(), static_cast<int>( batch.m_Boxes.size() ) );
 		painter.drawPoints( batch.m_Points.data(), static_cast<int>( batch.m_Points.size() ) );
 	};
+	auto dots = [ & ] {
+		if ( !vertices.empty() )
+		{
+			painter.setPen( QPen{ look.m_Colors.m_Vertex, static_cast<double>( look.m_nVertexSize ), Qt::SolidLine, Qt::SquareCap } );
+			painter.drawPoints( vertices.data(), static_cast<int>( vertices.size() ) );
+		}
+		vertices.clear();
+		if ( !handles.empty() )
+		{
+			painter.setPen( QPen{ look.m_Colors.m_CenterHandle, 0 } );
+			painter.drawLines( handles.data(), static_cast<int>( handles.size() ) );
+		}
+		handles.clear();
+	};
 	for ( const Batch_t &batch : batches )
 	{
 		draw( batch );
 	}
-	if ( !vertices.empty() )
+	Batch_t broken{ look.m_Colors.m_Invalid, {}, {}, {} };
+	for ( const MapFlatObject_t *pObject : invalid )
 	{
-		painter.setPen( QPen{ mapstyle::VERTEX, static_cast<double>( mapstyle::VERTEX_SIZE ), Qt::SolidLine, Qt::SquareCap } );
-		painter.drawPoints( vertices.data(), static_cast<int>( vertices.size() ) );
+		add( *pObject, broken, false );
 	}
-	vertices.clear();
-	Batch_t chosen{ mapstyle::SELECTION, {}, {}, {} };
+	draw( broken );
+	dots();
+	Batch_t chosen{ look.m_Colors.m_Selection, {}, {}, {} };
 	for ( const MapFlatObject_t *pObject : selected )
 	{
-		add( *pObject, chosen );
+		add( *pObject, chosen, true );
 	}
 	draw( chosen );
 	// A selected entity's sphere helpers (a light's falloff distances, say), in its colour.
 	for ( const MapFlatObject_t *pObject : selected )
 	{
-		if ( !settings.m_bHelpers || !pObject->m_bPointEntity )
+		if ( !settings.m_bHelpers || !pObject->m_bPointEntity || !m_pLineColors || pObject->m_nObject >= m_pLineColors->size() )
 		{
 			continue;
 		}
 		const xv::map::EntityVisual_t &visual = pScene->m_Entities[ pObject->m_nObject - pScene->m_Solids.size() ];
-		painter.setPen( QPen{ MapLineColor( *pScene, pObject->m_nObject, settings, false ), 0 } );
+		painter.setPen( QPen{ ToColor( ( *m_pLineColors )[ pObject->m_nObject ] ), 0 } );
 		const QPointF centre = ToWidget( Flatten( visual.m_Origin ) );
 		for ( const double flRadius : visual.m_Spheres )
 		{
@@ -605,14 +627,10 @@ void CMapView2D::PaintObjects( QPainter &painter, const QRectF &visible ) const
 			}
 		}
 	}
-	if ( !vertices.empty() )
-	{
-		painter.setPen( QPen{ mapstyle::VERTEX, static_cast<double>( mapstyle::VERTEX_SIZE ), Qt::SolidLine, Qt::SquareCap } );
-		painter.drawPoints( vertices.data(), static_cast<int>( vertices.size() ) );
-	}
+	dots();
 
 	// Entity names, where there's room for them.
-	if ( settings.m_bNames && m_flZoom * 16.0 >= mapstyle::NAMES_FROM_PIXELS )
+	if ( settings.m_bNames && m_flZoom * 16.0 >= look.m_nNamesFromPixels )
 	{
 		QFont font = painter.font();
 		font.setPointSizeF( std::max( 6.0, font.pointSizeF() * 0.8 ) );
@@ -641,7 +659,7 @@ void CMapView2D::PaintSelection( QPainter &painter ) const
 {
 	const CMapDocument &document = GetDocument();
 	auto dotted = [ & ]( const QRectF &box ) {
-		QPen pen{ mapstyle::TOOL_SELECTION, 0, Qt::DotLine };
+		QPen pen{ Look().m_Colors.m_ToolSelection, 0, Qt::DotLine };
 		painter.setPen( pen );
 		painter.setBrush( Qt::NoBrush );
 		painter.drawRect( box );
@@ -649,8 +667,8 @@ void CMapView2D::PaintSelection( QPainter &painter ) const
 	// Hammer's eight handles, just outside the box's corners and sides.
 	auto handles = [ & ]( const QRectF &box ) {
 		painter.setPen( QPen{ Qt::black, 0 } );
-		painter.setBrush( mapstyle::TOOL_HANDLE );
-		const double h = mapstyle::HANDLE_SIZE;
+		painter.setBrush( Look().m_Colors.m_ToolHandle );
+		const double h = Look().m_nHandleSize;
 		const double flOut = h / 2.0 + 2.0;
 		for ( int ix = -1; ix <= 1; ix++ )
 		{
@@ -676,11 +694,11 @@ void CMapView2D::PaintSelection( QPainter &painter ) const
 			const QPointF mins = Flatten( bounds.m_Mins );
 			const QPointF maxs = Flatten( bounds.m_Maxs );
 			const QRectF box = QRectF{ ToWidget( mins ), ToWidget( maxs ) }.normalized();
-			painter.fillRect( box, mapstyle::FILL_SELECTION );
+			painter.fillRect( box, Look().m_Colors.m_SelectionFill );
 			dotted( box );
 			handles( box );
 			// Its size on two sides, as Hammer shows it while selecting.
-			painter.setPen( mapstyle::TOOL_SELECTION );
+			painter.setPen( Look().m_Colors.m_ToolSelection );
 			const QString szWidth = QString::number( std::lround( maxs.x() - mins.x() ) );
 			const QString szHeight = QString::number( std::lround( maxs.y() - mins.y() ) );
 			const QFontMetrics metrics = painter.fontMetrics();
@@ -702,7 +720,9 @@ void CMapView2D::PaintSelection( QPainter &painter ) const
 }
 
 //-----------------------------------------------------------------------------
-// Purpose: Where the 3D view's camera is and which way it looks, seen from this axis.
+// Purpose: The 3D view's camera as Blender draws one, seen from this axis: a pyramid from the eye
+//          to a rectangle the shape of the 3D view, its field of view wide, with a triangle over
+//          the rectangle's top for which way is up. It is the same size on screen at any zoom.
 //-----------------------------------------------------------------------------
 void CMapView2D::PaintCamera( QPainter &painter ) const
 {
@@ -711,14 +731,32 @@ void CMapView2D::PaintCamera( QPainter &painter ) const
 	{
 		return;
 	}
+	const MapPreferences_t &look = Look();
+	const double flLength = look.m_nCameraPixels / std::max( m_flZoom, 1e-9 );
+	const double flHalfWidth = flLength * std::tan( std::clamp( camera->m_flFov, 1.0, 179.0 ) * std::numbers::pi / 360.0 );
+	const double flHalfHeight = flHalfWidth * std::max( camera->m_nHeight, 1 ) / std::max( camera->m_nWidth, 1 );
 	const xv::map::Point_t forward = camera->GetForward();
-	const double flLength = mapstyle::CAMERA_LOOK_PIXELS / std::max( m_flZoom, 1e-9 );
+	const xv::map::Point_t right = camera->GetRight();
+	const xv::map::Point_t up = camera->GetUp();
+	// A point on the rectangle's plane, so far right and up of its middle.
+	auto at = [ & ]( double flRight, double flUp ) {
+		const xv::map::Point_t p = xv::map::Add( xv::map::Add( xv::map::Add( camera->m_Eye, xv::map::Scale( forward, flLength ) ), xv::map::Scale( right, flRight ) ), xv::map::Scale( up, flUp ) );
+		return ToWidget( Flatten( p ) );
+	};
 	const QPointF eye = ToWidget( Flatten( camera->m_Eye ) );
-	const QPointF look = ToWidget( Flatten( xv::map::Add( camera->m_Eye, xv::map::Scale( forward, flLength ) ) ) );
-	painter.setPen( QPen{ mapstyle::CAMERA, 0 } );
+	const std::array<QPointF, 4> corners{ at( -flHalfWidth, flHalfHeight ), at( flHalfWidth, flHalfHeight ), at( flHalfWidth, -flHalfHeight ), at( -flHalfWidth, -flHalfHeight ) };
+	painter.setRenderHint( QPainter::Antialiasing, true );
+	painter.setPen( QPen{ look.m_Colors.m_Camera, 0 } );
 	painter.setBrush( Qt::NoBrush );
-	painter.drawEllipse( eye, mapstyle::CAMERA_EYE_PIXELS, mapstyle::CAMERA_EYE_PIXELS );
-	painter.drawLine( eye, look );
+	for ( std::size_t i = 0; i < corners.size(); i++ )
+	{
+		painter.drawLine( eye, corners[ i ] );
+		painter.drawLine( corners[ i ], corners[ ( i + 1 ) % corners.size() ] );
+	}
+	const std::array<QPointF, 3> top{ at( -flHalfWidth * 0.6, flHalfHeight * 1.1 ), at( flHalfWidth * 0.6, flHalfHeight * 1.1 ), at( 0.0, flHalfHeight * 1.1 + flHalfWidth * 0.5 ) };
+	painter.setBrush( look.m_Colors.m_Camera );
+	painter.drawPolygon( top.data(), static_cast<int>( top.size() ) );
+	painter.setRenderHint( QPainter::Antialiasing, false );
 }
 
 //-----------------------------------------------------------------------------
@@ -735,6 +773,7 @@ void CMapView2D::PaintLayer()
 	key.m_flZoom = m_flZoom;
 	key.m_Size = size();
 	key.m_flRatio = devicePixelRatioF();
+	key.m_nRevision = CPreferences::Instance().GetMapRevision();
 	if ( key == m_LayerKey && !m_Layer.isNull() )
 	{
 		return;
@@ -746,7 +785,7 @@ void CMapView2D::PaintLayer()
 		m_Layer = QPixmap( size() * key.m_flRatio );
 		m_Layer.setDevicePixelRatio( key.m_flRatio );
 	}
-	m_Layer.fill( mapstyle::BACKGROUND );
+	m_Layer.fill( Look().m_Colors.m_Background );
 	QPainter painter( &m_Layer );
 	const QRectF visible = GetVisible();
 	PaintGrid( painter, visible );
@@ -761,6 +800,7 @@ void CMapView2D::paintEvent( QPaintEvent * )
 	QElapsedTimer timer;
 	timer.start();
 	Rebuild();
+	m_pLineColors = m_Editor.GetRenderData().GetLineColors( m_Editor.GetSettings() );
 	PaintLayer();
 	QPainter painter( this );
 	painter.drawPixmap( 0, 0, m_Layer );
@@ -800,7 +840,7 @@ std::optional<std::uint32_t> CMapView2D::HitAt( QPointF at ) const
 	{
 		return std::nullopt;
 	}
-	const double flReach = mapstyle::HANDLE_SIZE / 2.0 + 2.0;
+	const double flReach = Look().m_nHandleSize / 2.0 + 2.0;
 	const QRectF near = QRectF{ ToMap( at - QPointF{ flReach, -flReach } ), ToMap( at + QPointF{ flReach, -flReach } ) }.normalized();
 	std::optional<std::uint32_t> best;
 	double flBestArea = 0.0;
@@ -955,7 +995,7 @@ void CMapView2D::wheelEvent( QWheelEvent *pEvent )
 	const double flNotches = pEvent->angleDelta().y() / 120.0;
 	if ( flNotches != 0.0 )
 	{
-		Zoom( std::pow( mapstyle::WHEEL_ZOOM_STEP, flNotches ), pEvent->position() );
+		Zoom( std::pow( Look().m_flWheelZoom, flNotches ), pEvent->position() );
 	}
 	pEvent->accept();
 }
@@ -1017,7 +1057,7 @@ void CMapView2D::ReportCursor( QPointF at )
 //-----------------------------------------------------------------------------
 bool CMapView2D::Run( MapAction_t nAction )
 {
-	const double flStep = mapstyle::SCROLL_STEP_PIXELS / m_flZoom;
+	const double flStep = Look().m_nScrollStep / m_flZoom;
 	switch ( nAction )
 	{
 		case MapAction_t::MAP_ACTION_NEXT_AXIS:
@@ -1025,8 +1065,8 @@ bool CMapView2D::Run( MapAction_t nAction )
 																																					  : MapViewType_t::MAP_VIEW_TYPE_TOP );
 			m_Editor.ViewTypeChanged( this );
 			return true;
-		case MapAction_t::MAP_ACTION_ZOOM_IN: Zoom( mapstyle::KEY_ZOOM_STEP ); return true;
-		case MapAction_t::MAP_ACTION_ZOOM_OUT: Zoom( 1.0 / mapstyle::KEY_ZOOM_STEP ); return true;
+		case MapAction_t::MAP_ACTION_ZOOM_IN: Zoom( Look().m_flKeyZoom ); return true;
+		case MapAction_t::MAP_ACTION_ZOOM_OUT: Zoom( 1.0 / Look().m_flKeyZoom ); return true;
 		case MapAction_t::MAP_ACTION_SCROLL_UP: SetCenter( m_Center + QPointF{ 0, flStep } ); return true;
 		case MapAction_t::MAP_ACTION_SCROLL_DOWN: SetCenter( m_Center - QPointF{ 0, flStep } ); return true;
 		case MapAction_t::MAP_ACTION_SCROLL_LEFT: SetCenter( m_Center - QPointF{ flStep, 0 } ); return true;

@@ -7,7 +7,11 @@
 #include "MapRenderData.h"
 
 #include <algorithm>
+#include <cmath>
+#include <optional>
+#include <unordered_map>
 
+#include "Preferences.h"
 #include "map/MapConstants.h"
 #include "map/MapDocument.h"
 
@@ -71,6 +75,10 @@ xv::map::RasterScene_t MapFrame_t::MakeScene() const
 	if ( m_pPropMesh )
 	{
 		scene.m_Meshes.push_back( m_pPropMesh.get() );
+		if ( !m_bModelEdges )
+		{
+			scene.m_NoWireframe.push_back( m_pPropMesh.get() );
+		}
 	}
 	if ( m_pOverlayMesh )
 	{
@@ -101,32 +109,87 @@ xv::map::RasterScene_t MapFrame_t::MakeScene() const
 }
 
 //-----------------------------------------------------------------------------
-// Purpose: Hammer's precedence for line colours (the selection's red is the caller's).
+// Purpose: The colour Hammer++ gives a group of its own: a bright hue picked from its id, so it
+//          stays the same each time the map is opened.
 //-----------------------------------------------------------------------------
-QColor MapLineColor( const xv::map::CScene &scene, std::uint32_t nObject, const MapViewSettings_t &settings, bool bInvalid )
+QColor MapGroupColor( int nGroupId )
 {
-	if ( bInvalid )
+	const double flHue = std::fmod( static_cast<double>( static_cast<std::uint32_t>( nGroupId ) * 2654435761u ) / 4294967296.0 + 0.1, 1.0 );
+	const QColor color = QColor::fromHsvF( static_cast<float>( flHue ), 0.65f, 1.0f );
+	return QColor{ color.red(), color.green(), color.blue() }; // as 8-bit RGB, which is what is drawn
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Hammer's precedence for line colours (the selection's red is the caller's): broken
+//          solids, then (with group colours on) the outermost group's colour, the first
+//          visgroup's, then the entity's, then the world's.
+//-----------------------------------------------------------------------------
+std::vector<std::array<std::uint8_t, 3>> MapLineColors( const xv::map::CScene &scene, const MapViewSettings_t &settings )
+{
+	const MapPreferences_t &preferences = CPreferences::Instance().GetMapPreferences();
+	const xv::map::CMap &map = scene.m_Map;
+	std::unordered_map<int, std::size_t> groups;
+	for ( std::size_t i = 0; i < map.m_Groups.size(); i++ )
 	{
-		return mapstyle::INVALID;
+		groups.emplace( map.m_Groups[ i ].m_nId, i );
 	}
-	const int nEntity = scene.GetObjectEntity( nObject );
-	const xv::map::EditorInfo_t &editor = nEntity >= 0 ? scene.m_Map.m_Entities[ static_cast<std::size_t>( nEntity ) ].m_Editor : scene.GetObjectEditor( nObject );
-	if ( settings.m_bUseGroupColors && !editor.m_Visgroups.empty() )
+	std::unordered_map<int, QColor> visgroups;
+	for ( const xv::map::Visgroup_t &visgroup : map.m_Visgroups )
 	{
-		for ( const xv::map::Visgroup_t &visgroup : scene.m_Map.m_Visgroups )
+		visgroups.emplace( visgroup.m_nId, QColor{ visgroup.m_Color.m_nR, visgroup.m_Color.m_nG, visgroup.m_Color.m_nB } );
+	}
+	// A group's colour, from the group a nested one sits in at the top.
+	auto groupColor = [ & ]( int nGroup ) -> std::optional<QColor> {
+		int nTop = 0;
+		for ( int nDepth = 0; nGroup != 0 && nDepth < 64; nDepth++ )
 		{
-			if ( visgroup.m_nId == editor.m_Visgroups.front() )
+			const auto it = groups.find( nGroup );
+			if ( it == groups.end() )
 			{
-				return QColor{ visgroup.m_Color.m_nR, visgroup.m_Color.m_nG, visgroup.m_Color.m_nB };
+				break;
 			}
+			nTop = nGroup;
+			nGroup = map.m_Groups[ it->second ].m_Editor.m_nGroup;
 		}
-	}
-	if ( nEntity >= 0 )
+		if ( nTop == 0 )
+		{
+			return std::nullopt;
+		}
+		if ( preferences.m_nGroupColors == MapGroupColors_t::MAP_GROUP_COLORS_SAVED )
+		{
+			const xv::map::EditorInfo_t &editor = map.m_Groups[ groups.at( nTop ) ].m_Editor;
+			return editor.m_bHasColor ? std::optional<QColor>{ QColor{ editor.m_Color.m_nR, editor.m_Color.m_nG, editor.m_Color.m_nB } } : std::nullopt;
+		}
+		return MapGroupColor( nTop );
+	};
+	const bool bGroups = settings.m_bUseGroupColors && preferences.m_nGroupColors != MapGroupColors_t::MAP_GROUP_COLORS_NONE;
+	std::vector<std::array<std::uint8_t, 3>> colors( scene.GetObjectCount() );
+	for ( std::uint32_t n = 0; n < scene.GetObjectCount(); n++ )
 	{
-		const xv::map::Color_t color = scene.m_Entities[ static_cast<std::size_t>( nEntity ) ].m_Color;
-		return QColor{ color.m_nR, color.m_nG, color.m_nB };
+		QColor color = preferences.m_Colors.m_Brush;
+		const int nEntity = scene.GetObjectEntity( n );
+		const xv::map::EditorInfo_t &editor = nEntity >= 0 ? map.m_Entities[ static_cast<std::size_t>( nEntity ) ].m_Editor : scene.GetObjectEditor( n );
+		std::optional<QColor> grouped = bGroups ? groupColor( editor.m_nGroup ) : std::nullopt;
+		if ( scene.IsSolidObject( n ) && !scene.m_Solids[ n ].IsValid() )
+		{
+			color = preferences.m_Colors.m_Invalid;
+		}
+		else if ( grouped )
+		{
+			color = *grouped;
+		}
+		else if ( settings.m_bUseGroupColors && !editor.m_Visgroups.empty() && visgroups.contains( editor.m_Visgroups.front() ) )
+		{
+			color = visgroups.at( editor.m_Visgroups.front() );
+		}
+		else if ( nEntity >= 0 )
+		{
+			const xv::map::EntityVisual_t &visual = scene.m_Entities[ static_cast<std::size_t>( nEntity ) ];
+			color = visual.m_bClassColor ? QColor{ visual.m_Color.m_nR, visual.m_Color.m_nG, visual.m_Color.m_nB } : preferences.m_Colors.m_Entity;
+		}
+		colors[ n ] = { static_cast<std::uint8_t>( color.red() ), static_cast<std::uint8_t>( color.green() ), static_cast<std::uint8_t>( color.blue() ) };
 	}
-	return mapstyle::BRUSH;
+	return colors;
 }
 
 //-----------------------------------------------------------------------------
@@ -155,7 +218,7 @@ void CMapRenderData::Rebuild()
 	const xv::map::CScene *pScene = m_Document.GetScene();
 	m_pBuiltFor = pScene;
 	m_nStateFor = ~0ull;
-	m_nSettingsFor = ~0ull;
+	m_LineColorsFor = {};
 	m_nGeneration++;
 	std::shared_ptr<const xv::sky::CCube> pSky = std::move( m_Frame.m_pSky );
 	m_Frame = {};
@@ -167,6 +230,7 @@ void CMapRenderData::Rebuild()
 	m_Frame.m_pScene = m_Document.GetSharedScene();
 	m_PropObjects.clear();
 	m_pSprites.reset();
+	m_pReceivedSprites.reset();
 	m_SpriteObjects.clear();
 	BuildEntityBoxes();
 
@@ -174,18 +238,43 @@ void CMapRenderData::Rebuild()
 	pMaterials->back().m_bObjectColor = true;
 	m_Frame.m_pMaterials = pMaterials;
 
+	UpdateFlatColors();
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Hammer's flat colour for each object: the solid's own editor colour, or the
+//          entity's (the preferences' for classes without one); sprites take their tint, which
+//          they are multiplied by.
+//-----------------------------------------------------------------------------
+void CMapRenderData::UpdateFlatColors()
+{
+	const xv::map::CScene *pScene = m_Document.GetScene();
+	m_nFlatFor = CPreferences::Instance().GetMapRevision();
+	if ( !pScene )
+	{
+		return;
+	}
+	const QColor entity = CPreferences::Instance().GetMapPreferences().m_Colors.m_Entity;
 	auto pFlat = std::make_shared<std::vector<std::array<std::uint8_t, 3>>>( pScene->GetObjectCount() );
 	for ( std::uint32_t n = 0; n < pScene->GetObjectCount(); n++ )
 	{
-		// Hammer's flat colour: the solid's own editor colour, or the entity's.
 		xv::map::Color_t color = pScene->GetObjectEditor( n ).m_Color;
 		if ( !pScene->IsSolidObject( n ) )
 		{
-			color = pScene->m_Entities[ n - pScene->m_Solids.size() ].m_Color;
+			const xv::map::EntityVisual_t &visual = pScene->m_Entities[ n - pScene->m_Solids.size() ];
+			color = visual.m_bClassColor ? visual.m_Color : xv::map::Color_t{ static_cast<std::uint8_t>( entity.red() ), static_cast<std::uint8_t>( entity.green() ), static_cast<std::uint8_t>( entity.blue() ) };
 		}
 		( *pFlat )[ n ] = { color.m_nR, color.m_nG, color.m_nB };
 	}
+	for ( const xv::map::SpritePlacement_t &sprite : m_pSprites ? *m_pSprites : std::vector<xv::map::SpritePlacement_t>{} )
+	{
+		if ( sprite.m_nObject < pFlat->size() )
+		{
+			( *pFlat )[ sprite.m_nObject ] = sprite.m_Tint;
+		}
+	}
 	m_Frame.m_pFlatColors = pFlat;
+	m_nGeneration++;
 }
 
 //-----------------------------------------------------------------------------
@@ -286,8 +375,7 @@ void CMapRenderData::SetOverlays( std::shared_ptr<const xv::map::CMapMesh> pOver
 }
 
 //-----------------------------------------------------------------------------
-// Purpose: The sprites' tints go in as their entities' flat colours, which sprites are
-//          multiplied by.
+// Purpose:
 //-----------------------------------------------------------------------------
 void CMapRenderData::SetSprites( std::shared_ptr<const std::vector<xv::map::SpritePlacement_t>> pSprites )
 {
@@ -295,26 +383,29 @@ void CMapRenderData::SetSprites( std::shared_ptr<const std::vector<xv::map::Spri
 	{
 		Rebuild();
 	}
-	if ( pSprites == m_pSprites )
+	if ( pSprites == m_pReceivedSprites )
 	{
 		return;
 	}
-	m_pSprites = std::move( pSprites );
+	m_pReceivedSprites = std::move( pSprites );
+	ApplySprites();
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: The sprites drawn, unless Preferences > Maps turns them off (their entities then show
+//          their boxes). Their tints go in as their entities' flat colours.
+//-----------------------------------------------------------------------------
+void CMapRenderData::ApplySprites()
+{
+	m_bSpritesShown = CPreferences::Instance().GetMapPreferences().m_bSprites;
+	m_pSprites = m_bSpritesShown ? m_pReceivedSprites : nullptr;
 	m_SpriteObjects.clear();
-	if ( m_pSprites && m_Frame.m_pFlatColors )
+	for ( const xv::map::SpritePlacement_t &sprite : m_pSprites ? *m_pSprites : std::vector<xv::map::SpritePlacement_t>{} )
 	{
-		auto pFlat = std::make_shared<std::vector<std::array<std::uint8_t, 3>>>( *m_Frame.m_pFlatColors );
-		for ( const xv::map::SpritePlacement_t &sprite : *m_pSprites )
-		{
-			if ( sprite.m_nObject < pFlat->size() )
-			{
-				( *pFlat )[ sprite.m_nObject ] = sprite.m_Tint;
-			}
-			m_SpriteObjects.push_back( sprite.m_nObject );
-		}
-		m_Frame.m_pFlatColors = pFlat;
+		m_SpriteObjects.push_back( sprite.m_nObject );
 	}
 	std::ranges::sort( m_SpriteObjects );
+	UpdateFlatColors();
 	m_Frame.m_pSpriteMesh.reset();
 	BuildEntityBoxes();
 	m_nGeneration++;
@@ -330,6 +421,30 @@ void CMapRenderData::SetSky( std::shared_ptr<const xv::sky::CCube> pSky )
 		m_Frame.m_pSky = std::move( pSky );
 		m_nGeneration++;
 	}
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+std::shared_ptr<const std::vector<std::array<std::uint8_t, 3>>> CMapRenderData::GetLineColors( const MapViewSettings_t &settings )
+{
+	const xv::map::CScene *pScene = m_Document.GetScene();
+	if ( pScene != m_pBuiltFor )
+	{
+		Rebuild();
+	}
+	if ( !pScene )
+	{
+		return nullptr;
+	}
+	const std::pair<bool, std::uint64_t> key{ settings.m_bUseGroupColors, CPreferences::Instance().GetMapRevision() };
+	if ( !m_Frame.m_pLineColors || key != m_LineColorsFor )
+	{
+		m_LineColorsFor = key;
+		m_Frame.m_pLineColors = std::make_shared<const std::vector<std::array<std::uint8_t, 3>>>( MapLineColors( *pScene, settings ) );
+		m_nGeneration++;
+	}
+	return m_Frame.m_pLineColors;
 }
 
 //-----------------------------------------------------------------------------
@@ -367,18 +482,17 @@ MapFrame_t CMapRenderData::Snapshot( const xv::map::CViewCamera &camera, const x
 		m_Frame.m_pFlags = pFlags;
 		m_nGeneration++;
 	}
-	const std::uint64_t nSettings = settings.m_bUseGroupColors ? 1 : 0;
-	if ( pScene && m_nSettingsFor != nSettings )
+	if ( pScene )
 	{
-		m_nSettingsFor = nSettings;
-		auto pLines = std::make_shared<std::vector<std::array<std::uint8_t, 3>>>( pScene->GetObjectCount() );
-		for ( std::uint32_t n = 0; n < pScene->GetObjectCount(); n++ )
+		GetLineColors( settings );
+		if ( CPreferences::Instance().GetMapPreferences().m_bSprites != m_bSpritesShown )
 		{
-			const QColor color = MapLineColor( *pScene, n, settings, pScene->IsSolidObject( n ) && !pScene->m_Solids[ n ].IsValid() );
-			( *pLines )[ n ] = { static_cast<std::uint8_t>( color.red() ), static_cast<std::uint8_t>( color.green() ), static_cast<std::uint8_t>( color.blue() ) };
+			ApplySprites();
 		}
-		m_Frame.m_pLineColors = pLines;
-		m_nGeneration++;
+		if ( m_nFlatFor != CPreferences::Instance().GetMapRevision() )
+		{
+			UpdateFlatColors();
+		}
 	}
 	// Sprites face the camera: made again whenever it turns.
 	if ( m_pSprites && !m_pSprites->empty() )

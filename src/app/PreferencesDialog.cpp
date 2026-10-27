@@ -10,6 +10,9 @@
 #include <vector>
 
 #include <QButtonGroup>
+#include <QColorDialog>
+#include <QScrollArea>
+#include <QTabWidget>
 #include <QCheckBox>
 #include <QSpinBox>
 #include <QDoubleSpinBox>
@@ -299,70 +302,20 @@ QWidget *CPreferencesDialog::BuildMaterialsPage()
 }
 
 //-----------------------------------------------------------------------------
-// Purpose: The map viewer: where entities' game data comes from, the 3D views' camera, and the
-//          2D views' grid and drawing. Every change applies at once.
+// Purpose: The map viewer, in tabs: where entities' game data comes from and how textures are
+//          read, the 3D views' camera and drawing, the 2D views', and the colours. Every change
+//          applies at once; the defaults are Hammer++'s.
 //-----------------------------------------------------------------------------
 QWidget *CPreferencesDialog::BuildMapsPage()
 {
 	auto *pPage = new QWidget;
+	pPage->setObjectName( QStringLiteral( "preferencesMaps" ) );
 	const MapPreferences_t &current = CPreferences::Instance().GetMapPreferences();
 	auto change = []( auto pfnEdit ) {
 		MapPreferences_t preferences = CPreferences::Instance().GetMapPreferences();
 		pfnEdit( preferences );
 		CPreferences::Instance().SetMapPreferences( preferences );
 	};
-
-	// Game data: a list of FGDs, in the order they are read.
-	auto *pFgds = new QListWidget;
-	pFgds->setObjectName( QStringLiteral( "preferencesMapFgds" ) );
-	pFgds->addItems( current.m_Fgds );
-	pFgds->setMaximumHeight( 110 );
-	auto storeFgds = [ pFgds, change ] {
-		QStringList fgds;
-		for ( int i = 0; i < pFgds->count(); i++ )
-		{
-			fgds << pFgds->item( i )->text();
-		}
-		change( [ & ]( MapPreferences_t &preferences ) { preferences.m_Fgds = fgds; } );
-	};
-	auto *pAdd = new QPushButton( tr( "Add…" ) );
-	pAdd->setObjectName( QStringLiteral( "preferencesMapFgdAdd" ) );
-	auto *pRemove = new QPushButton( tr( "Remove" ) );
-	pRemove->setObjectName( QStringLiteral( "preferencesMapFgdRemove" ) );
-	auto *pUp = new QPushButton( tr( "Up" ) );
-	auto *pDown = new QPushButton( tr( "Down" ) );
-	connect( pAdd, &QPushButton::clicked, this, [ this, pFgds, storeFgds ] {
-		for ( const QString &szFile : AskOpenFiles( this, tr( "Add Game Data" ), {}, tr( "Game data (*.fgd)" ) ) )
-		{
-			pFgds->addItem( QDir::toNativeSeparators( szFile ) );
-		}
-		storeFgds();
-	} );
-	connect( pRemove, &QPushButton::clicked, this, [ pFgds, storeFgds ] {
-		delete pFgds->currentItem();
-		storeFgds();
-	} );
-	auto move = [ pFgds, storeFgds ]( int nBy ) {
-		const int nRow = pFgds->currentRow();
-		if ( nRow < 0 || nRow + nBy < 0 || nRow + nBy >= pFgds->count() )
-		{
-			return;
-		}
-		QListWidgetItem *pItem = pFgds->takeItem( nRow );
-		pFgds->insertItem( nRow + nBy, pItem );
-		pFgds->setCurrentItem( pItem );
-		storeFgds();
-	};
-	connect( pUp, &QPushButton::clicked, this, [ move ] { move( -1 ); } );
-	connect( pDown, &QPushButton::clicked, this, [ move ] { move( 1 ); } );
-	auto *pFgdButtons = new QHBoxLayout;
-	for ( QPushButton *pButton : { pAdd, pRemove, pUp, pDown } )
-	{
-		pFgdButtons->addWidget( pButton );
-	}
-	pFgdButtons->addStretch();
-
-	// The 3D views.
 	auto spin = [ & ]( const QString &szName, double flValue, double flLowest, double flHighest, double flStep, int nDecimals, auto pfnStore ) {
 		auto *pSpin = new QDoubleSpinBox;
 		pSpin->setObjectName( szName );
@@ -373,22 +326,15 @@ QWidget *CPreferencesDialog::BuildMapsPage()
 		connect( pSpin, &QDoubleSpinBox::valueChanged, this, [ change, pfnStore ]( double flNew ) { change( [ & ]( MapPreferences_t &preferences ) { pfnStore( preferences, flNew ); } ); } );
 		return pSpin;
 	};
-	auto *pForm = new QFormLayout;
-	pForm->addRow( tr( "Field of view" ), spin( QStringLiteral( "preferencesMapFov" ), current.m_flFov, 30, 150, 5, 0, []( MapPreferences_t &p, double fl ) { p.m_flFov = fl; } ) );
-	pForm->addRow( tr( "Mouse look speed" ), spin( QStringLiteral( "preferencesMapSensitivity" ), current.m_flSensitivity, 0.05, 5, 0.05, 2, []( MapPreferences_t &p, double fl ) { p.m_flSensitivity = fl; } ) );
-	pForm->addRow( tr( "Flying speed (units a second)" ), spin( QStringLiteral( "preferencesMapSpeed" ), current.m_flForwardSpeed, 100, 10000, 100, 0, []( MapPreferences_t &p, double fl ) { p.m_flForwardSpeed = fl; } ) );
-	pForm->addRow( tr( "Render distance" ), spin( QStringLiteral( "preferencesMapDistance" ), current.m_flRenderDistance, 1024, 131072, 1024, 0, []( MapPreferences_t &p, double fl ) { p.m_flRenderDistance = fl; } ) );
-	auto *pTextures = new QComboBox;
-	pTextures->setObjectName( QStringLiteral( "preferencesMapTextureSize" ) );
-	for ( const int nSize : { 256, 512, 1024, 2048, 4096 } )
-	{
-		pTextures->addItem( QString::number( nSize ), nSize );
-	}
-	pTextures->setCurrentIndex( std::max( 0, pTextures->findData( current.m_nTextureSize ) ) );
-	connect( pTextures, &QComboBox::currentIndexChanged, this, [ pTextures, change ] { change( [ & ]( MapPreferences_t &preferences ) { preferences.m_nTextureSize = pTextures->currentData().toInt(); } ); } );
-	pForm->addRow( tr( "Largest texture size" ), pTextures );
-
-	// The 2D views, and what a map opens with.
+	auto whole = [ & ]( const QString &szName, int nValue, int nLowest, int nHighest, const QString &szSuffix, auto pfnStore ) {
+		auto *pSpin = new QSpinBox;
+		pSpin->setObjectName( szName );
+		pSpin->setRange( nLowest, nHighest );
+		pSpin->setValue( nValue );
+		pSpin->setSuffix( szSuffix );
+		connect( pSpin, &QSpinBox::valueChanged, this, [ change, pfnStore ]( int nNew ) { change( [ & ]( MapPreferences_t &preferences ) { pfnStore( preferences, nNew ); } ); } );
+		return pSpin;
+	};
 	auto check = [ & ]( const QString &szName, const QString &szText, bool bValue, auto pfnStore ) {
 		auto *pCheck = new QCheckBox( szText );
 		pCheck->setObjectName( szName );
@@ -396,29 +342,245 @@ QWidget *CPreferencesDialog::BuildMapsPage()
 		connect( pCheck, &QCheckBox::toggled, this, [ change, pfnStore ]( bool bOn ) { change( [ & ]( MapPreferences_t &preferences ) { pfnStore( preferences, bOn ); } ); } );
 		return pCheck;
 	};
-	auto *pHighlight = new QSpinBox;
-	pHighlight->setObjectName( QStringLiteral( "preferencesMapHighlight" ) );
-	pHighlight->setRange( 2, 64 );
-	pHighlight->setValue( current.m_nHighlightEvery );
-	connect( pHighlight, &QSpinBox::valueChanged, this, [ change ]( int nEvery ) { change( [ & ]( MapPreferences_t &preferences ) { preferences.m_nHighlightEvery = nEvery; } ); } );
-	pForm->addRow( tr( "Brighter grid line every" ), pHighlight );
+	auto choice = [ & ]( const QString &szName, const std::vector<std::pair<QString, int>> &items, int nValue, auto pfnStore ) {
+		auto *pCombo = new QComboBox;
+		pCombo->setObjectName( szName );
+		for ( const auto &[ szText, nData ] : items )
+		{
+			pCombo->addItem( szText, nData );
+		}
+		pCombo->setCurrentIndex( std::max( 0, pCombo->findData( nValue ) ) );
+		connect( pCombo, &QComboBox::currentIndexChanged, this, [ pCombo, change, pfnStore ] { change( [ & ]( MapPreferences_t &preferences ) { pfnStore( preferences, pCombo->currentData().toInt() ); } ); } );
+		return pCombo;
+	};
+	// A swatch that opens a colour picker.
+	auto colour = [ & ]( const QString &szName, const QColor &value, bool bAlpha, auto pfnStore ) {
+		auto *pButton = new QPushButton;
+		pButton->setObjectName( szName );
+		auto show = [ pButton ]( const QColor &color ) {
+			QPixmap swatch( 32, 16 );
+			swatch.fill( color );
+			pButton->setIcon( QIcon( swatch ) );
+			pButton->setIconSize( swatch.size() );
+			pButton->setText( color.name( color.alpha() < 255 ? QColor::HexArgb : QColor::HexRgb ) );
+			pButton->setProperty( "color", color );
+		};
+		show( value );
+		connect( pButton, &QPushButton::clicked, this, [ this, pButton, show, bAlpha, change, pfnStore ] {
+			const QColor picked = QColorDialog::getColor( pButton->property( "color" ).value<QColor>(), this, pButton->toolTip(), bAlpha ? QColorDialog::ShowAlphaChannel : QColorDialog::ColorDialogOptions{} );
+			if ( picked.isValid() )
+			{
+				show( picked );
+				change( [ & ]( MapPreferences_t &preferences ) { pfnStore( preferences, picked ); } );
+			}
+		} );
+		return pButton;
+	};
+	auto tab = []( QTabWidget *pTabs, const QString &szTitle ) {
+		auto *pScroll = new QScrollArea;
+		pScroll->setWidgetResizable( true );
+		pScroll->setFrameShape( QFrame::NoFrame );
+		auto *pInside = new QWidget;
+		pScroll->setWidget( pInside );
+		pTabs->addTab( pScroll, szTitle );
+		auto *pLayout = new QVBoxLayout( pInside );
+		pLayout->setContentsMargins( 8, 8, 8, 8 );
+		return pLayout;
+	};
+	auto *pTabs = new QTabWidget;
+	pTabs->setObjectName( QStringLiteral( "preferencesMapTabs" ) );
 
-	QVBoxLayout *pLayout = PageLayout( pPage );
-	pLayout->addWidget( new QLabel( tr( "Game data (FGD files), read in this order:" ) ) );
-	pLayout->addWidget( pFgds );
-	pLayout->addLayout( pFgdButtons );
-	pLayout->addWidget( Hint( tr( "Empty: the files the game's Hammer or Hammer++ configuration names. They are read again when a "
-								  "map is opened." ) ) );
-	pLayout->addSpacing( 12 );
-	pLayout->addLayout( pForm );
-	pLayout->addWidget( check( QStringLiteral( "preferencesMapHideSmallGrid" ), tr( "Hide grid lines that come too close together" ), current.m_bHideSmallGrid, []( MapPreferences_t &p, bool b ) { p.m_bHideSmallGrid = b; } ) );
-	pLayout->addWidget( check( QStringLiteral( "preferencesMapVertices" ), tr( "Draw brushes' corners in the 2D views" ), current.m_bDrawVertices, []( MapPreferences_t &p, bool b ) { p.m_bDrawVertices = b; } ) );
-	pLayout->addWidget( check( QStringLiteral( "preferencesMapModels2D" ), tr( "Draw models in the 2D views" ), current.m_bModels2D, []( MapPreferences_t &p, bool b ) { p.m_bModels2D = b; } ) );
-	pLayout->addWidget( check( QStringLiteral( "preferencesMapGroupColors" ), tr( "Draw objects in their visgroup's colour" ), current.m_bGroupColors, []( MapPreferences_t &p, bool b ) { p.m_bGroupColors = b; } ) );
-	pLayout->addWidget( check( QStringLiteral( "preferencesMapSkybox3D" ), tr( "Draw the 3D skybox" ), current.m_bSkybox3D, []( MapPreferences_t &p, bool b ) { p.m_bSkybox3D = b; } ) );
-	pLayout->addWidget( Hint( tr( "Hammer++'s own settings are the defaults. The views' toolbar buttons change these for one map until "
-								  "this page changes again." ) ) );
-	pLayout->addStretch();
+	// General: game data, a list of FGDs in the order they are read, and textures.
+	{
+		QVBoxLayout *pLayout = tab( pTabs, tr( "General" ) );
+		auto *pFgds = new QListWidget;
+		pFgds->setObjectName( QStringLiteral( "preferencesMapFgds" ) );
+		pFgds->addItems( current.m_Fgds );
+		pFgds->setMaximumHeight( 110 );
+		auto storeFgds = [ pFgds, change ] {
+			QStringList fgds;
+			for ( int i = 0; i < pFgds->count(); i++ )
+			{
+				fgds << pFgds->item( i )->text();
+			}
+			change( [ & ]( MapPreferences_t &preferences ) { preferences.m_Fgds = fgds; } );
+		};
+		auto *pAdd = new QPushButton( tr( "Add…" ) );
+		pAdd->setObjectName( QStringLiteral( "preferencesMapFgdAdd" ) );
+		auto *pRemove = new QPushButton( tr( "Remove" ) );
+		pRemove->setObjectName( QStringLiteral( "preferencesMapFgdRemove" ) );
+		auto *pUp = new QPushButton( tr( "Up" ) );
+		auto *pDown = new QPushButton( tr( "Down" ) );
+		connect( pAdd, &QPushButton::clicked, this, [ this, pFgds, storeFgds ] {
+			for ( const QString &szFile : AskOpenFiles( this, tr( "Add Game Data" ), {}, tr( "Game data (*.fgd)" ) ) )
+			{
+				pFgds->addItem( QDir::toNativeSeparators( szFile ) );
+			}
+			storeFgds();
+		} );
+		connect( pRemove, &QPushButton::clicked, this, [ pFgds, storeFgds ] {
+			delete pFgds->currentItem();
+			storeFgds();
+		} );
+		auto move = [ pFgds, storeFgds ]( int nBy ) {
+			const int nRow = pFgds->currentRow();
+			if ( nRow < 0 || nRow + nBy < 0 || nRow + nBy >= pFgds->count() )
+			{
+				return;
+			}
+			QListWidgetItem *pItem = pFgds->takeItem( nRow );
+			pFgds->insertItem( nRow + nBy, pItem );
+			pFgds->setCurrentItem( pItem );
+			storeFgds();
+		};
+		connect( pUp, &QPushButton::clicked, this, [ move ] { move( -1 ); } );
+		connect( pDown, &QPushButton::clicked, this, [ move ] { move( 1 ); } );
+		auto *pFgdButtons = new QHBoxLayout;
+		for ( QPushButton *pButton : { pAdd, pRemove, pUp, pDown } )
+		{
+			pFgdButtons->addWidget( pButton );
+		}
+		pFgdButtons->addStretch();
+		pLayout->addWidget( new QLabel( tr( "Game data (FGD files), read in this order:" ) ) );
+		pLayout->addWidget( pFgds );
+		pLayout->addLayout( pFgdButtons );
+		pLayout->addWidget( Hint( tr( "Empty: the files the game's Hammer or Hammer++ configuration names. They are read again when a "
+									  "map is opened." ) ) );
+		pLayout->addSpacing( 12 );
+		auto *pForm = new QFormLayout;
+		std::vector<std::pair<QString, int>> sizes;
+		for ( const int nSize : { 256, 512, 1024, 2048, 4096 } )
+		{
+			sizes.emplace_back( QString::number( nSize ), nSize );
+		}
+		pForm->addRow( tr( "Largest texture size" ), choice( QStringLiteral( "preferencesMapTextureSize" ), sizes, current.m_nTextureSize, []( MapPreferences_t &p, int n ) { p.m_nTextureSize = n; } ) );
+		pLayout->addLayout( pForm );
+		pLayout->addStretch();
+	}
+
+	// The 3D views.
+	{
+		QVBoxLayout *pLayout = tab( pTabs, tr( "3D View" ) );
+		auto *pForm = new QFormLayout;
+		pForm->addRow( tr( "Field of view" ), spin( QStringLiteral( "preferencesMapFov" ), current.m_flFov, 30, 150, 5, 0, []( MapPreferences_t &p, double fl ) { p.m_flFov = fl; } ) );
+		pForm->addRow( tr( "Mouse look speed" ), spin( QStringLiteral( "preferencesMapSensitivity" ), current.m_flSensitivity, 0.05, 5, 0.05, 2, []( MapPreferences_t &p, double fl ) { p.m_flSensitivity = fl; } ) );
+		pForm->addRow( tr( "Flying speed (units a second)" ), spin( QStringLiteral( "preferencesMapSpeed" ), current.m_flForwardSpeed, 100, 10000, 100, 0, []( MapPreferences_t &p, double fl ) { p.m_flForwardSpeed = fl; } ) );
+		pForm->addRow( tr( "Wheel step (units a notch)" ), spin( QStringLiteral( "preferencesMapWheelStep" ), current.m_flWheelStep, 1, 1024, 8, 0, []( MapPreferences_t &p, double fl ) { p.m_flWheelStep = fl; } ) );
+		pForm->addRow( tr( "Right-drag (units a pixel)" ), spin( QStringLiteral( "preferencesMapPanScale" ), current.m_flPanScale, 0.1, 16, 0.25, 2, []( MapPreferences_t &p, double fl ) { p.m_flPanScale = fl; } ) );
+		pForm->addRow( tr( "Render distance" ), spin( QStringLiteral( "preferencesMapDistance" ), current.m_flRenderDistance, 1024, 131072, 1024, 0, []( MapPreferences_t &p, double fl ) { p.m_flRenderDistance = fl; } ) );
+		pForm->addRow( tr( "Keys 1 and 2 change it by" ), spin( QStringLiteral( "preferencesMapFarStep" ), current.m_flFarStep, 1.05, 4, 0.05, 2, []( MapPreferences_t &p, double fl ) { p.m_flFarStep = fl; } ) );
+		pForm->addRow( tr( "Texture filtering" ), choice( QStringLiteral( "preferencesMapTextureFilter" ), { { tr( "Bilinear" ), static_cast<int>( MapTextureFilter_t::MAP_TEXTURE_FILTER_BILINEAR ) }, { tr( "Trilinear" ), static_cast<int>( MapTextureFilter_t::MAP_TEXTURE_FILTER_TRILINEAR ) }, { tr( "Anisotropic 2×" ), static_cast<int>( MapTextureFilter_t::MAP_TEXTURE_FILTER_ANISOTROPIC_2X ) }, { tr( "Anisotropic 4×" ), static_cast<int>( MapTextureFilter_t::MAP_TEXTURE_FILTER_ANISOTROPIC_4X ) }, { tr( "Anisotropic 8×" ), static_cast<int>( MapTextureFilter_t::MAP_TEXTURE_FILTER_ANISOTROPIC_8X ) }, { tr( "Anisotropic 16×" ), static_cast<int>( MapTextureFilter_t::MAP_TEXTURE_FILTER_ANISOTROPIC_16X ) } }, static_cast<int>( current.m_nTextureFilter ), []( MapPreferences_t &p, int n ) { p.m_nTextureFilter = static_cast<MapTextureFilter_t>( n ); } ) );
+		pForm->addRow( tr( "Selection tint" ), spin( QStringLiteral( "preferencesMapSelectionTint" ), current.m_flSelectionTint, 0, 1, 0.05, 2, []( MapPreferences_t &p, double fl ) { p.m_flSelectionTint = fl; } ) );
+		pForm->addRow( tr( "Broken solids' tint" ), spin( QStringLiteral( "preferencesMapInvalidTint" ), current.m_flInvalidTint, 0, 1, 0.05, 2, []( MapPreferences_t &p, double fl ) { p.m_flInvalidTint = fl; } ) );
+		pForm->addRow( tr( "Instances' tint" ), spin( QStringLiteral( "preferencesMapInstanceTint" ), current.m_flInstanceTint, 0, 1, 0.05, 2, []( MapPreferences_t &p, double fl ) { p.m_flInstanceTint = fl; } ) );
+		pLayout->addLayout( pForm );
+		pLayout->addWidget( check( QStringLiteral( "preferencesMapSkybox3D" ), tr( "Draw the 3D skybox" ), current.m_bSkybox3D, []( MapPreferences_t &p, bool b ) { p.m_bSkybox3D = b; } ) );
+		pLayout->addWidget( check( QStringLiteral( "preferencesMapSprites" ), tr( "Draw sprites (else entities' boxes)" ), current.m_bSprites, []( MapPreferences_t &p, bool b ) { p.m_bSprites = b; } ) );
+		pLayout->addWidget( check( QStringLiteral( "preferencesMapWireframeModels" ), tr( "Draw models' edges in the wireframe view" ), current.m_bWireframeModels, []( MapPreferences_t &p, bool b ) { p.m_bWireframeModels = b; } ) );
+		pLayout->addStretch();
+	}
+
+	// The 2D views.
+	{
+		QVBoxLayout *pLayout = tab( pTabs, tr( "2D Views" ) );
+		const QString szPixels = tr( " px" );
+		auto *pForm = new QFormLayout;
+		pForm->addRow( tr( "Brighter grid line every" ), whole( QStringLiteral( "preferencesMapHighlight" ), current.m_nHighlightEvery, 2, 64, QString{}, []( MapPreferences_t &p, int n ) { p.m_nHighlightEvery = n; } ) );
+		pForm->addRow( tr( "Grid lines closer than this are hidden" ), spin( QStringLiteral( "preferencesMapHideGridBelow" ), current.m_flHideGridBelow, 1, 32, 1, 1, []( MapPreferences_t &p, double fl ) { p.m_flHideGridBelow = fl; } ) );
+		pForm->addRow( tr( "Corner dots' size" ), whole( QStringLiteral( "preferencesMapVertexSize" ), current.m_nVertexSize, 1, 8, szPixels, []( MapPreferences_t &p, int n ) { p.m_nVertexSize = n; } ) );
+		pForm->addRow( tr( "Corners on brushes from" ), whole( QStringLiteral( "preferencesMapVerticesFrom" ), current.m_nVerticesFromPixels, 0, 256, szPixels, []( MapPreferences_t &p, int n ) { p.m_nVerticesFromPixels = n; } ) );
+		pForm->addRow( tr( "Handles' size" ), whole( QStringLiteral( "preferencesMapHandleSize" ), current.m_nHandleSize, 3, 16, szPixels, []( MapPreferences_t &p, int n ) { p.m_nHandleSize = n; } ) );
+		pForm->addRow( tr( "Centre handles on objects from" ), whole( QStringLiteral( "preferencesMapCenterHandlesFrom" ), current.m_nCenterHandlesFromPixels, 0, 256, szPixels, []( MapPreferences_t &p, int n ) { p.m_nCenterHandlesFromPixels = n; } ) );
+		pForm->addRow( tr( "Models drawn from" ), whole( QStringLiteral( "preferencesMapModelsFrom" ), current.m_nModelsFromPixels, 0, 512, szPixels, []( MapPreferences_t &p, int n ) { p.m_nModelsFromPixels = n; } ) );
+		pForm->addRow( tr( "Names shown once 16 units are" ), whole( QStringLiteral( "preferencesMapNamesFrom" ), current.m_nNamesFromPixels, 1, 512, szPixels, []( MapPreferences_t &p, int n ) { p.m_nNamesFromPixels = n; } ) );
+		pForm->addRow( tr( "The camera's size" ), whole( QStringLiteral( "preferencesMapCameraPixels" ), current.m_nCameraPixels, 8, 256, szPixels, []( MapPreferences_t &p, int n ) { p.m_nCameraPixels = n; } ) );
+		pForm->addRow( tr( "Group colours" ), choice( QStringLiteral( "preferencesMapGroupColorsFrom" ), { { tr( "A colour for each group" ), static_cast<int>( MapGroupColors_t::MAP_GROUP_COLORS_RANDOM ) }, { tr( "The colour saved in the map" ), static_cast<int>( MapGroupColors_t::MAP_GROUP_COLORS_SAVED ) }, { tr( "None" ), static_cast<int>( MapGroupColors_t::MAP_GROUP_COLORS_NONE ) } }, static_cast<int>( current.m_nGroupColors ), []( MapPreferences_t &p, int n ) { p.m_nGroupColors = static_cast<MapGroupColors_t>( n ); } ) );
+		pForm->addRow( tr( "Wheel zoom (times a notch)" ), spin( QStringLiteral( "preferencesMapWheelZoom" ), current.m_flWheelZoom, 1.05, 4, 0.05, 2, []( MapPreferences_t &p, double fl ) { p.m_flWheelZoom = fl; } ) );
+		pForm->addRow( tr( "Keypad + and − zoom (times)" ), spin( QStringLiteral( "preferencesMapKeyZoom" ), current.m_flKeyZoom, 1.05, 8, 0.25, 2, []( MapPreferences_t &p, double fl ) { p.m_flKeyZoom = fl; } ) );
+		pForm->addRow( tr( "Arrow keys scroll" ), whole( QStringLiteral( "preferencesMapScrollStep" ), current.m_nScrollStep, 1, 1024, szPixels, []( MapPreferences_t &p, int n ) { p.m_nScrollStep = n; } ) );
+		pForm->addRow( tr( "Furthest zoom (pixels a unit)" ), spin( QStringLiteral( "preferencesMapZoomSmallest" ), current.m_flZoomSmallest, 0.001, 1, 0.001, 3, []( MapPreferences_t &p, double fl ) { p.m_flZoomSmallest = fl; } ) );
+		pForm->addRow( tr( "Closest zoom (pixels a unit)" ), spin( QStringLiteral( "preferencesMapZoomLargest" ), current.m_flZoomLargest, 1, 1024, 8, 0, []( MapPreferences_t &p, double fl ) { p.m_flZoomLargest = fl; } ) );
+		pLayout->addLayout( pForm );
+		pLayout->addWidget( check( QStringLiteral( "preferencesMapHideSmallGrid" ), tr( "Hide grid lines that come too close together" ), current.m_bHideSmallGrid, []( MapPreferences_t &p, bool b ) { p.m_bHideSmallGrid = b; } ) );
+		pLayout->addWidget( check( QStringLiteral( "preferencesMapVertices" ), tr( "Draw brushes' corners" ), current.m_bDrawVertices, []( MapPreferences_t &p, bool b ) { p.m_bDrawVertices = b; } ) );
+		pLayout->addWidget( check( QStringLiteral( "preferencesMapCenterHandles" ), tr( "Draw centre handles" ), current.m_bCenterHandles, []( MapPreferences_t &p, bool b ) { p.m_bCenterHandles = b; } ) );
+		pLayout->addWidget( check( QStringLiteral( "preferencesMapModels2D" ), tr( "Draw models" ), current.m_bModels2D, []( MapPreferences_t &p, bool b ) { p.m_bModels2D = b; } ) );
+		pLayout->addWidget( check( QStringLiteral( "preferencesMapTexturedModels2D" ), tr( "Draw models textured (else their edges)" ), current.m_bTexturedModels2D, []( MapPreferences_t &p, bool b ) { p.m_bTexturedModels2D = b; } ) );
+		pLayout->addWidget( check( QStringLiteral( "preferencesMapGroupColors" ), tr( "Draw objects in their visgroup's and group's colour" ), current.m_bGroupColors, []( MapPreferences_t &p, bool b ) { p.m_bGroupColors = b; } ) );
+		pLayout->addWidget( check( QStringLiteral( "preferencesMapInstanceColor2D" ), tr( "Draw instances' contents in the instance colour (Colours), not the func_instance's" ), current.m_bInstanceColor2D, []( MapPreferences_t &p, bool b ) { p.m_bInstanceColor2D = b; } ) );
+		pLayout->addStretch();
+	}
+
+	// Colours.
+	{
+		QVBoxLayout *pLayout = tab( pTabs, tr( "Colours" ) );
+		auto *pForm = new QFormLayout;
+		struct Colour_t
+		{
+			const char *m_pszName;
+			QString m_szLabel;
+			QColor MapColors_t::*m_pMember;
+			bool m_bAlpha;
+		};
+		const std::vector<Colour_t> colours = {
+			{ "Background", tr( "2D background" ), &MapColors_t::m_Background, false },
+			{ "Grid", tr( "Grid" ), &MapColors_t::m_Grid, false },
+			{ "GridHighlight", tr( "Brighter grid lines" ), &MapColors_t::m_GridHighlight, false },
+			{ "Grid1024", tr( "Grid every 1024 units" ), &MapColors_t::m_Grid1024, false },
+			{ "Axis", tr( "Axes" ), &MapColors_t::m_Axis, false },
+			{ "Brush", tr( "World brushes" ), &MapColors_t::m_Brush, false },
+			{ "Entity", tr( "Entities without a colour of their own" ), &MapColors_t::m_Entity, false },
+			{ "Invalid", tr( "Broken solids" ), &MapColors_t::m_Invalid, false },
+			{ "Vertex", tr( "Brushes' corners" ), &MapColors_t::m_Vertex, false },
+			{ "CenterHandle", tr( "Centre handles" ), &MapColors_t::m_CenterHandle, false },
+			{ "Selection", tr( "2D selection" ), &MapColors_t::m_Selection, false },
+			{ "SelectionFill", tr( "2D selection's fill" ), &MapColors_t::m_SelectionFill, true },
+			{ "ToolSelection", tr( "Selection box and sizes" ), &MapColors_t::m_ToolSelection, false },
+			{ "ToolHandle", tr( "Selection box's handles" ), &MapColors_t::m_ToolHandle, false },
+			{ "Camera", tr( "The 3D camera in 2D" ), &MapColors_t::m_Camera, false },
+			{ "Instance2D", tr( "Instances' contents in 2D" ), &MapColors_t::m_Instance2D, false },
+			{ "Background3D", tr( "3D background" ), &MapColors_t::m_Background3D, false },
+			{ "Selection3D", tr( "3D selection's tint" ), &MapColors_t::m_Selection3D, false },
+			{ "SelectionEdge3D", tr( "3D selection's edges" ), &MapColors_t::m_SelectionEdge3D, false },
+			{ "Instance", tr( "Instances' tint in 3D" ), &MapColors_t::m_Instance, false },
+		};
+		for ( const Colour_t &entry : colours )
+		{
+			QPushButton *pButton = colour( QStringLiteral( "preferencesMapColor%1" ).arg( QLatin1String( entry.m_pszName ) ), current.m_Colors.*entry.m_pMember, entry.m_bAlpha, [ pMember = entry.m_pMember ]( MapPreferences_t &p, const QColor &color ) { p.m_Colors.*pMember = color; } );
+			pButton->setToolTip( entry.m_szLabel );
+			pForm->addRow( entry.m_szLabel, pButton );
+		}
+		pLayout->addLayout( pForm );
+		pLayout->addStretch();
+	}
+
+	// Back to Hammer++'s settings, keeping the game data.
+	auto *pReset = new QPushButton( tr( "Restore Hammer++'s Settings" ) );
+	pReset->setObjectName( QStringLiteral( "preferencesMapReset" ) );
+	connect( pReset, &QPushButton::clicked, this, [ this ] {
+		MapPreferences_t preferences;
+		preferences.m_Fgds = CPreferences::Instance().GetMapPreferences().m_Fgds;
+		CPreferences::Instance().SetMapPreferences( preferences );
+		const int nTab = m_pMapsPage ? m_pMapsPage->findChild<QTabWidget *>()->currentIndex() : 0;
+		QWidget *pOld = m_pMapsPage;
+		m_pMapsPage = BuildMapsPage();
+		const int nIndex = m_pStack->indexOf( pOld );
+		m_pStack->insertWidget( nIndex, m_pMapsPage );
+		m_pStack->setCurrentWidget( m_pMapsPage );
+		m_pStack->removeWidget( pOld );
+		pOld->deleteLater();
+		m_pMapsPage->findChild<QTabWidget *>()->setCurrentIndex( nTab );
+	} );
+	auto *pLayout = new QVBoxLayout( pPage );
+	pLayout->setContentsMargins( 0, 0, 0, 0 );
+	pLayout->addWidget( pTabs, 1 );
+	auto *pRow = new QHBoxLayout;
+	pRow->addWidget( Hint( tr( "Hammer++'s own settings are the defaults. The views' toolbar buttons change some of these for one map "
+							   "until this page changes again." ) ),
+		1 );
+	pRow->addWidget( pReset );
+	pLayout->addLayout( pRow );
+	m_pMapsPage = pPage;
 	return pPage;
 }
 

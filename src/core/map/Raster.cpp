@@ -678,6 +678,10 @@ void CRasterizer::Run()
 	const bool bWireframe = m_Options.m_Shade.m_nMode == RasterMode_t::RASTER_MODE_WIREFRAME;
 	for ( const CMapMesh *pMesh : m_Scene.m_Meshes )
 	{
+		if ( std::ranges::find( m_Scene.m_NoWireframe, pMesh ) != m_Scene.m_NoWireframe.end() )
+		{
+			continue;
+		}
 		for ( std::size_t i = 0; i + 1 < pMesh->m_Lines.size(); i += 2 )
 		{
 			const MeshVertex_t &a = pMesh->m_Vertices[ pMesh->m_Lines[ i ] ];

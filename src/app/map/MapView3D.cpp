@@ -232,15 +232,22 @@ MapFrame_t CMapView3D::MakeFrame( QSize size )
 	xv::map::CViewCamera camera = m_Camera;
 	camera.m_nWidth = std::max( 1, size.width() );
 	camera.m_nHeight = std::max( 1, size.height() );
+	const MapPreferences_t &preferences = CPreferences::Instance().GetMapPreferences();
+	const MapColors_t &colors = preferences.m_Colors;
+	auto vector = []( const QColor &color ) { return xv::CVec3{ static_cast<float>( color.redF() ), static_cast<float>( color.greenF() ), static_cast<float>( color.blueF() ) }; };
+	auto bytes = []( const QColor &color ) { return std::array<std::uint8_t, 3>{ static_cast<std::uint8_t>( color.red() ), static_cast<std::uint8_t>( color.green() ), static_cast<std::uint8_t>( color.blue() ) }; };
 	xv::map::RasterOptions_t options;
 	options.m_Shade.m_nMode = GetMode();
-	options.m_Shade.m_vecSelection = { mapstyle::SELECTION_3D.redF(), mapstyle::SELECTION_3D.greenF(), mapstyle::SELECTION_3D.blueF() };
+	options.m_Shade.m_vecSelection = vector( colors.m_Selection3D );
+	options.m_Shade.m_flSelectionTint = static_cast<float>( preferences.m_flSelectionTint );
 	options.m_Shade.m_vecFaceShade = { mapstyle::FACE_SHADE[ 0 ], mapstyle::FACE_SHADE[ 1 ], mapstyle::FACE_SHADE[ 2 ] };
-	options.m_Shade.m_vecInstance = { mapstyle::INSTANCE_TINT.redF(), mapstyle::INSTANCE_TINT.greenF(), mapstyle::INSTANCE_TINT.blueF() };
-	options.m_Shade.m_flInstanceTint = mapstyle::INSTANCE_TINT_AMOUNT;
-	options.m_Background = { static_cast<std::uint8_t>( mapstyle::BACKGROUND_3D.red() ), static_cast<std::uint8_t>( mapstyle::BACKGROUND_3D.green() ), static_cast<std::uint8_t>( mapstyle::BACKGROUND_3D.blue() ) };
-	options.m_SelectionEdge = { static_cast<std::uint8_t>( mapstyle::SELECTION_EDGE_3D.red() ), static_cast<std::uint8_t>( mapstyle::SELECTION_EDGE_3D.green() ), static_cast<std::uint8_t>( mapstyle::SELECTION_EDGE_3D.blue() ) };
-	return m_Editor.GetRenderData().Snapshot( camera, options, m_Editor.GetSettings() );
+	options.m_Shade.m_vecInstance = vector( colors.m_Instance );
+	options.m_Shade.m_flInstanceTint = static_cast<float>( preferences.m_flInstanceTint );
+	options.m_Background = bytes( colors.m_Background3D );
+	options.m_SelectionEdge = bytes( colors.m_SelectionEdge3D );
+	MapFrame_t frame = m_Editor.GetRenderData().Snapshot( camera, options, m_Editor.GetSettings() );
+	frame.m_bModelEdges = preferences.m_bWireframeModels;
+	return frame;
 }
 
 //-----------------------------------------------------------------------------
@@ -350,7 +357,7 @@ void CMapView3D::paintEvent( QPaintEvent * )
 	QPainter painter( this );
 	if ( m_Image.isNull() )
 	{
-		painter.fillRect( rect(), mapstyle::BACKGROUND_3D );
+		painter.fillRect( rect(), CPreferences::Instance().GetMapPreferences().m_Colors.m_Background3D );
 	}
 	else
 	{
@@ -553,9 +560,10 @@ void CMapView3D::mouseMoveEvent( QMouseEvent *pEvent )
 	}
 	const bool bLeft = ( pEvent->buttons() & Qt::LeftButton ) != 0;
 	const bool bRight = ( pEvent->buttons() & Qt::RightButton ) != 0;
+	const double flPan = CPreferences::Instance().GetMapPreferences().m_flPanScale;
 	if ( bLeft && bRight )
 	{
-		m_Camera.m_Eye = xv::map::Add( m_Camera.m_Eye, xv::map::Scale( m_Camera.GetForward(), -delta.y() * mapstyle::PAN_SCALE ) );
+		m_Camera.m_Eye = xv::map::Add( m_Camera.m_Eye, xv::map::Scale( m_Camera.GetForward(), -delta.y() * flPan ) );
 		Changed();
 	}
 	else if ( bLeft )
@@ -564,7 +572,7 @@ void CMapView3D::mouseMoveEvent( QMouseEvent *pEvent )
 	}
 	else if ( bRight )
 	{
-		m_Camera.m_Eye = xv::map::Add( m_Camera.m_Eye, xv::map::Add( xv::map::Scale( m_Camera.GetRight(), delta.x() * mapstyle::PAN_SCALE ), xv::map::Scale( m_Camera.GetUp(), -delta.y() * mapstyle::PAN_SCALE ) ) );
+		m_Camera.m_Eye = xv::map::Add( m_Camera.m_Eye, xv::map::Add( xv::map::Scale( m_Camera.GetRight(), delta.x() * flPan ), xv::map::Scale( m_Camera.GetUp(), -delta.y() * flPan ) ) );
 		Changed();
 	}
 }
@@ -629,7 +637,7 @@ void CMapView3D::Select( QPointF at, bool bToggle )
 void CMapView3D::wheelEvent( QWheelEvent *pEvent )
 {
 	const double flNotches = pEvent->angleDelta().y() / 120.0;
-	m_Camera.m_Eye = xv::map::Add( m_Camera.m_Eye, xv::map::Scale( m_Camera.GetForward(), flNotches * mapstyle::WHEEL_STEP ) );
+	m_Camera.m_Eye = xv::map::Add( m_Camera.m_Eye, xv::map::Scale( m_Camera.GetForward(), flNotches * CPreferences::Instance().GetMapPreferences().m_flWheelStep ) );
 	Changed();
 	pEvent->accept();
 }
@@ -791,11 +799,11 @@ bool CMapView3D::Run( MapAction_t nAction )
 			SetMouselook( !m_bMouselook );
 			return true;
 		case MapAction_t::MAP_ACTION_RENDER_CLOSER:
-			m_Camera.m_flFar = std::max( 256.0, m_Camera.m_flFar / mapstyle::FAR_PLANE_STEP );
+			m_Camera.m_flFar = std::max( 256.0, m_Camera.m_flFar / CPreferences::Instance().GetMapPreferences().m_flFarStep );
 			Changed();
 			return true;
 		case MapAction_t::MAP_ACTION_RENDER_FURTHER:
-			m_Camera.m_flFar = std::min<double>( CPreferences::Instance().GetMapPreferences().m_flRenderDistance * 2.0, m_Camera.m_flFar * mapstyle::FAR_PLANE_STEP );
+			m_Camera.m_flFar = std::min<double>( CPreferences::Instance().GetMapPreferences().m_flRenderDistance * 2.0, m_Camera.m_flFar * CPreferences::Instance().GetMapPreferences().m_flFarStep );
 			Changed();
 			return true;
 		case MapAction_t::MAP_ACTION_STATISTICS:

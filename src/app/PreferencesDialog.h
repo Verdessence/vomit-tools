@@ -40,5 +40,6 @@ private:
 	QWidget *BuildSourceToolsPage();
 
 	QListWidget *m_pPages = nullptr;
+	QWidget *m_pMapsPage = nullptr; // made again when its settings are restored
 	QStackedWidget *m_pStack = nullptr;
 };

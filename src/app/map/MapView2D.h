@@ -33,7 +33,7 @@ struct GridPlan_t
 	double m_flSixtyFour = 0.0; // every 64 units, when that differs from the above
 	double m_fl1024 = 0.0;      // every 1024 units
 };
-[[nodiscard]] GridPlan_t PlanGrid( double flPixelsPerUnit, int nGridSize, int nHighlightEvery = 8, bool bHideSmall = true );
+[[nodiscard]] GridPlan_t PlanGrid( double flPixelsPerUnit, int nGridSize, int nHighlightEvery = 8, bool bHideSmall = true, double flHideBelowPixels = 4.0 );
 
 // One object as a 2D view draws it, projected once onto the view's two axes.
 struct MapFlatObject_t
@@ -121,6 +121,7 @@ private:
 	std::vector<std::uint32_t> m_ObjectIndex; // object number -> index into m_Objects, or ~0
 	const void *m_pBuiltFor = nullptr;
 	std::shared_ptr<const xv::map::CMapMesh> m_pProps; // the props the objects were built with
+	std::shared_ptr<const std::vector<std::array<std::uint8_t, 3>>> m_pLineColors; // each object's, for this paint
 
 	QScrollBar *m_pHorizontal = nullptr;
 	QScrollBar *m_pVertical = nullptr;
@@ -146,6 +147,7 @@ private:
 		double m_flZoom = 0.0;
 		QSize m_Size;
 		qreal m_flRatio = 1.0;
+		std::uint64_t m_nRevision = 0; // the preferences'
 		friend bool operator==( const LayerKey_t &, const LayerKey_t & ) = default;
 	};
 	QPixmap m_Layer;

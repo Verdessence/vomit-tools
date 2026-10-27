@@ -552,6 +552,7 @@ void CMapEditor::TakePreferences()
 {
 	const MapPreferences_t &preferences = CPreferences::Instance().GetMapPreferences();
 	m_Settings.m_bDrawVertices = preferences.m_bDrawVertices;
+	m_Settings.m_bCenterHandles = preferences.m_bCenterHandles;
 	m_Settings.m_bModels2D = preferences.m_bModels2D;
 	m_Settings.m_bUseGroupColors = preferences.m_bGroupColors;
 	m_Settings.m_bSkybox3D = preferences.m_bSkybox3D;
@@ -726,7 +727,7 @@ bool CMapEditor::RunAction( MapAction_t nAction, CMapView *pFrom )
 			{
 				if ( auto *p2D = qobject_cast<CMapView2D *>( pView ) )
 				{
-					p2D->Zoom( nAction == MapAction_t::MAP_ACTION_ZOOM_IN_ALL ? mapstyle::KEY_ZOOM_STEP : 1.0 / mapstyle::KEY_ZOOM_STEP );
+					p2D->Zoom( nAction == MapAction_t::MAP_ACTION_ZOOM_IN_ALL ? CPreferences::Instance().GetMapPreferences().m_flKeyZoom : 1.0 / CPreferences::Instance().GetMapPreferences().m_flKeyZoom );
 				}
 			}
 			return true;
@@ -847,7 +848,11 @@ std::optional<xv::map::CViewCamera> CMapEditor::GetCamera() const
 	{
 		if ( const auto *p3D = qobject_cast<const CMapView3D *>( pView ) )
 		{
-			return p3D->GetCamera();
+			// With the view's shape, for the 2D views' drawing of what it sees.
+			xv::map::CViewCamera camera = p3D->GetCamera();
+			camera.m_nWidth = std::max( 1, p3D->width() );
+			camera.m_nHeight = std::max( 1, p3D->height() );
+			return camera;
 		}
 	}
 	return std::nullopt;

@@ -8,6 +8,8 @@
 
 #include "DebugLog.h"
 
+#include <type_traits>
+
 #include <QSettings>
 
 namespace
@@ -22,20 +24,144 @@ constexpr auto REOPEN_SESSION_KEY = "reopenSession";
 constexpr auto DEBUG_LOG_KEY = "debugLog";
 constexpr auto MATERIAL_LIVE_KEY = "materialLivePreview";
 constexpr auto DESKTOP_FILE_CHOOSER_KEY = "desktopFileChooser";
-constexpr auto MAP_FGDS_KEY = "maps/fgds";
-constexpr auto MAP_FOV_KEY = "maps/fov";
-constexpr auto MAP_SENSITIVITY_KEY = "maps/sensitivity";
-constexpr auto MAP_SPEED_KEY = "maps/forwardSpeed";
-constexpr auto MAP_DISTANCE_KEY = "maps/renderDistance";
-constexpr auto MAP_TEXTURE_SIZE_KEY = "maps/textureSize";
-constexpr auto MAP_HIDE_SMALL_GRID_KEY = "maps/hideSmallGrid";
-constexpr auto MAP_HIGHLIGHT_KEY = "maps/highlightEvery";
-constexpr auto MAP_VERTICES_KEY = "maps/drawVertices";
-constexpr auto MAP_MODELS_KEY = "maps/models2D";
-constexpr auto MAP_GROUP_COLORS_KEY = "maps/groupColors";
-constexpr auto MAP_SKYBOX_KEY = "maps/skybox3D";
+
+//-----------------------------------------------------------------------------
+// Purpose: Calls pfnVisit( key, member ) for every map preference, so reading and saving them
+//          go through one list.
+//-----------------------------------------------------------------------------
+template <class Preferences_t, class Visit_t>
+void ForEachMapPreference( Preferences_t &map, Visit_t &&pfnVisit )
+{
+	pfnVisit( "maps/fgds", map.m_Fgds );
+	pfnVisit( "maps/textureSize", map.m_nTextureSize );
+	pfnVisit( "maps/fov", map.m_flFov );
+	pfnVisit( "maps/sensitivity", map.m_flSensitivity );
+	pfnVisit( "maps/forwardSpeed", map.m_flForwardSpeed );
+	pfnVisit( "maps/renderDistance", map.m_flRenderDistance );
+	pfnVisit( "maps/wheelStep", map.m_flWheelStep );
+	pfnVisit( "maps/panScale", map.m_flPanScale );
+	pfnVisit( "maps/farStep", map.m_flFarStep );
+	pfnVisit( "maps/textureFilter", map.m_nTextureFilter );
+	pfnVisit( "maps/selectionTint", map.m_flSelectionTint );
+	pfnVisit( "maps/invalidTint", map.m_flInvalidTint );
+	pfnVisit( "maps/instanceTint", map.m_flInstanceTint );
+	pfnVisit( "maps/skybox3D", map.m_bSkybox3D );
+	pfnVisit( "maps/sprites", map.m_bSprites );
+	pfnVisit( "maps/wireframeModels", map.m_bWireframeModels );
+	pfnVisit( "maps/hideSmallGrid", map.m_bHideSmallGrid );
+	pfnVisit( "maps/hideGridBelow", map.m_flHideGridBelow );
+	pfnVisit( "maps/highlightEvery", map.m_nHighlightEvery );
+	pfnVisit( "maps/drawVertices", map.m_bDrawVertices );
+	pfnVisit( "maps/vertexSize", map.m_nVertexSize );
+	pfnVisit( "maps/verticesFrom", map.m_nVerticesFromPixels );
+	pfnVisit( "maps/centerHandles", map.m_bCenterHandles );
+	pfnVisit( "maps/handleSize", map.m_nHandleSize );
+	pfnVisit( "maps/centerHandlesFrom", map.m_nCenterHandlesFromPixels );
+	pfnVisit( "maps/namesFrom", map.m_nNamesFromPixels );
+	pfnVisit( "maps/models2D", map.m_bModels2D );
+	pfnVisit( "maps/texturedModels2D", map.m_bTexturedModels2D );
+	pfnVisit( "maps/modelsFrom", map.m_nModelsFromPixels );
+	pfnVisit( "maps/groupColors", map.m_bGroupColors );
+	pfnVisit( "maps/groupColorsFrom", map.m_nGroupColors );
+	pfnVisit( "maps/instanceColor2D", map.m_bInstanceColor2D );
+	pfnVisit( "maps/cameraPixels", map.m_nCameraPixels );
+	pfnVisit( "maps/wheelZoom", map.m_flWheelZoom );
+	pfnVisit( "maps/keyZoom", map.m_flKeyZoom );
+	pfnVisit( "maps/scrollStep", map.m_nScrollStep );
+	pfnVisit( "maps/zoomSmallest", map.m_flZoomSmallest );
+	pfnVisit( "maps/zoomLargest", map.m_flZoomLargest );
+	auto &colors = map.m_Colors;
+	pfnVisit( "maps/colors/background", colors.m_Background );
+	pfnVisit( "maps/colors/grid", colors.m_Grid );
+	pfnVisit( "maps/colors/gridHighlight", colors.m_GridHighlight );
+	pfnVisit( "maps/colors/grid1024", colors.m_Grid1024 );
+	pfnVisit( "maps/colors/axis", colors.m_Axis );
+	pfnVisit( "maps/colors/brush", colors.m_Brush );
+	pfnVisit( "maps/colors/entity", colors.m_Entity );
+	pfnVisit( "maps/colors/invalid", colors.m_Invalid );
+	pfnVisit( "maps/colors/vertex", colors.m_Vertex );
+	pfnVisit( "maps/colors/centerHandle", colors.m_CenterHandle );
+	pfnVisit( "maps/colors/selection", colors.m_Selection );
+	pfnVisit( "maps/colors/selectionFill", colors.m_SelectionFill );
+	pfnVisit( "maps/colors/toolSelection", colors.m_ToolSelection );
+	pfnVisit( "maps/colors/toolHandle", colors.m_ToolHandle );
+	pfnVisit( "maps/colors/camera", colors.m_Camera );
+	pfnVisit( "maps/colors/instance2D", colors.m_Instance2D );
+	pfnVisit( "maps/colors/background3D", colors.m_Background3D );
+	pfnVisit( "maps/colors/selection3D", colors.m_Selection3D );
+	pfnVisit( "maps/colors/selectionEdge3D", colors.m_SelectionEdge3D );
+	pfnVisit( "maps/colors/instance", colors.m_Instance );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: A setting as the type of the member it goes into; enums are kept as numbers and
+//          colours as #aarrggbb, and anything unreadable leaves the member as it was.
+//-----------------------------------------------------------------------------
+template <class Value_t>
+void ReadSetting( const QSettings &settings, const char *pszKey, Value_t &value )
+{
+	const QVariant stored = settings.value( QLatin1String( pszKey ) );
+	if ( !stored.isValid() )
+	{
+		return;
+	}
+	if constexpr ( std::is_enum_v<Value_t> )
+	{
+		value = static_cast<Value_t>( stored.toInt() );
+	}
+	else if constexpr ( std::is_same_v<Value_t, QColor> )
+	{
+		if ( const QColor color = QColor::fromString( stored.toString() ); color.isValid() )
+		{
+			value = color;
+		}
+	}
+	else if constexpr ( std::is_same_v<Value_t, QStringList> )
+	{
+		value = stored.toStringList();
+	}
+	else
+	{
+		value = stored.value<Value_t>();
+	}
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+template <class Value_t>
+void WriteSetting( QSettings &settings, const char *pszKey, const Value_t &value )
+{
+	if constexpr ( std::is_enum_v<Value_t> )
+	{
+		settings.setValue( QLatin1String( pszKey ), static_cast<int>( value ) );
+	}
+	else if constexpr ( std::is_same_v<Value_t, QColor> )
+	{
+		settings.setValue( QLatin1String( pszKey ), value.name( QColor::HexArgb ) );
+	}
+	else
+	{
+		settings.setValue( QLatin1String( pszKey ), value );
+	}
+}
 
 } // namespace
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+int MapAnisotropy( MapTextureFilter_t nFilter )
+{
+	switch ( nFilter )
+	{
+		case MapTextureFilter_t::MAP_TEXTURE_FILTER_ANISOTROPIC_2X: return 2;
+		case MapTextureFilter_t::MAP_TEXTURE_FILTER_ANISOTROPIC_4X: return 4;
+		case MapTextureFilter_t::MAP_TEXTURE_FILTER_ANISOTROPIC_8X: return 8;
+		case MapTextureFilter_t::MAP_TEXTURE_FILTER_ANISOTROPIC_16X: return 16;
+		default: return 1;
+	}
+}
 
 //-----------------------------------------------------------------------------
 // Purpose:
@@ -61,19 +187,7 @@ CPreferences::CPreferences()
 	  m_bDebugLog( QSettings{}.value( DEBUG_LOG_KEY, false ).toBool() )
 {
 	const QSettings settings;
-	const MapPreferences_t defaults;
-	m_Map.m_Fgds = settings.value( MAP_FGDS_KEY ).toStringList();
-	m_Map.m_flFov = settings.value( MAP_FOV_KEY, defaults.m_flFov ).toDouble();
-	m_Map.m_flSensitivity = settings.value( MAP_SENSITIVITY_KEY, defaults.m_flSensitivity ).toDouble();
-	m_Map.m_flForwardSpeed = settings.value( MAP_SPEED_KEY, defaults.m_flForwardSpeed ).toDouble();
-	m_Map.m_flRenderDistance = settings.value( MAP_DISTANCE_KEY, defaults.m_flRenderDistance ).toDouble();
-	m_Map.m_nTextureSize = settings.value( MAP_TEXTURE_SIZE_KEY, defaults.m_nTextureSize ).toInt();
-	m_Map.m_bHideSmallGrid = settings.value( MAP_HIDE_SMALL_GRID_KEY, defaults.m_bHideSmallGrid ).toBool();
-	m_Map.m_nHighlightEvery = settings.value( MAP_HIGHLIGHT_KEY, defaults.m_nHighlightEvery ).toInt();
-	m_Map.m_bDrawVertices = settings.value( MAP_VERTICES_KEY, defaults.m_bDrawVertices ).toBool();
-	m_Map.m_bModels2D = settings.value( MAP_MODELS_KEY, defaults.m_bModels2D ).toBool();
-	m_Map.m_bGroupColors = settings.value( MAP_GROUP_COLORS_KEY, defaults.m_bGroupColors ).toBool();
-	m_Map.m_bSkybox3D = settings.value( MAP_SKYBOX_KEY, defaults.m_bSkybox3D ).toBool();
+	ForEachMapPreference( m_Map, [ & ]( const char *pszKey, auto &value ) { ReadSetting( settings, pszKey, value ); } );
 }
 
 //-----------------------------------------------------------------------------
@@ -86,19 +200,9 @@ void CPreferences::SetMapPreferences( const MapPreferences_t &map )
 		return;
 	}
 	m_Map = map;
+	m_nMapRevision++;
 	QSettings settings;
-	settings.setValue( MAP_FGDS_KEY, map.m_Fgds );
-	settings.setValue( MAP_FOV_KEY, map.m_flFov );
-	settings.setValue( MAP_SENSITIVITY_KEY, map.m_flSensitivity );
-	settings.setValue( MAP_SPEED_KEY, map.m_flForwardSpeed );
-	settings.setValue( MAP_DISTANCE_KEY, map.m_flRenderDistance );
-	settings.setValue( MAP_TEXTURE_SIZE_KEY, map.m_nTextureSize );
-	settings.setValue( MAP_HIDE_SMALL_GRID_KEY, map.m_bHideSmallGrid );
-	settings.setValue( MAP_HIGHLIGHT_KEY, map.m_nHighlightEvery );
-	settings.setValue( MAP_VERTICES_KEY, map.m_bDrawVertices );
-	settings.setValue( MAP_MODELS_KEY, map.m_bModels2D );
-	settings.setValue( MAP_GROUP_COLORS_KEY, map.m_bGroupColors );
-	settings.setValue( MAP_SKYBOX_KEY, map.m_bSkybox3D );
+	ForEachMapPreference( m_Map, [ & ]( const char *pszKey, const auto &value ) { WriteSetting( settings, pszKey, value ); } );
 	emit MapPreferencesChanged();
 }
 
