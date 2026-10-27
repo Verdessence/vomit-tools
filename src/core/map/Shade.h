@@ -50,6 +50,8 @@ struct ShadeMaterial_t
 	const RasterTexture_t *m_pBase2 = nullptr;
 	bool m_bMissing = false;                   // the VMT wasn't found: Source's checker
 	bool m_bSky = false;                       // toolsskybox and its kind: the map's sky shows
+	bool m_bTinted = false;                    // sprites: times the object's colour (a light's)
+	bool m_bUnlit = false;                     // sprites: never shaded by facing
 	bool m_bBlend = false;
 	bool m_bAlphaTest = false;
 	bool m_bTranslucent = false;

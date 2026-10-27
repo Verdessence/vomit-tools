@@ -210,6 +210,10 @@ EntityVisual_t DescribeEntity( const Entity_t &entity, const CFgd *pFgd )
 			{
 				visual.m_flSpriteScale = helper.m_szName == "sprite" ? 1.0 : 0.25;
 			}
+			// Editor icons blend by their alpha; a sprite() entity as its rendermode says (3 glow,
+			// 5 additive, 7 additive fractional frame, 9 world space glow).
+			const int nRenderMode = ParseNumber<int>( entity.GetValue( "rendermode" ) ).value_or( 0 );
+			visual.m_bSpriteAdditive = helper.m_szName == "sprite" && ( nRenderMode == 3 || nRenderMode == 5 || nRenderMode == 7 || nRenderMode == 9 );
 			const std::string_view szTint = entity.HasKey( "_light" ) ? entity.GetValue( "_light" ) : entity.GetValue( "rendercolor" );
 			if ( const auto tint = ParseColor( szTint ) )
 			{

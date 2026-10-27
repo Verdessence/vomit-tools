@@ -22,6 +22,7 @@
 #include "map/MapConstants.h"
 #include "map/MapDocument.h"
 #include "map/MapEditor.h"
+#include "map/MapRenderData.h"
 #include "map/MapResources.h"
 
 namespace
@@ -548,6 +549,24 @@ void CMapView2D::PaintObjects( QPainter &painter, const QRectF &visible ) const
 		add( *pObject, chosen );
 	}
 	draw( chosen );
+	// A selected entity's sphere helpers (a light's falloff distances, say), in its colour.
+	for ( const MapFlatObject_t *pObject : selected )
+	{
+		if ( !settings.m_bHelpers || !pObject->m_bPointEntity )
+		{
+			continue;
+		}
+		const xv::map::EntityVisual_t &visual = pScene->m_Entities[ pObject->m_nObject - pScene->m_Solids.size() ];
+		painter.setPen( QPen{ MapLineColor( *pScene, pObject->m_nObject, settings, false ), 0 } );
+		const QPointF centre = ToWidget( Flatten( visual.m_Origin ) );
+		for ( const double flRadius : visual.m_Spheres )
+		{
+			if ( flRadius > 0.0 )
+			{
+				painter.drawEllipse( centre, flRadius * m_flZoom, flRadius * m_flZoom );
+			}
+		}
+	}
 	if ( !vertices.empty() )
 	{
 		painter.setPen( QPen{ mapstyle::VERTEX, static_cast<double>( mapstyle::VERTEX_SIZE ), Qt::SolidLine, Qt::SquareCap } );
@@ -658,12 +677,10 @@ void CMapView2D::PaintCamera( QPainter &painter ) const
 	const double flLength = mapstyle::CAMERA_LOOK_PIXELS / std::max( m_flZoom, 1e-9 );
 	const QPointF eye = ToWidget( Flatten( camera->m_Eye ) );
 	const QPointF look = ToWidget( Flatten( xv::map::Add( camera->m_Eye, xv::map::Scale( forward, flLength ) ) ) );
-	painter.setRenderHint( QPainter::Antialiasing, true );
 	painter.setPen( QPen{ mapstyle::CAMERA, 0 } );
 	painter.setBrush( Qt::NoBrush );
 	painter.drawEllipse( eye, mapstyle::CAMERA_EYE_PIXELS, mapstyle::CAMERA_EYE_PIXELS );
 	painter.drawLine( eye, look );
-	painter.setRenderHint( QPainter::Antialiasing, false );
 }
 
 //-----------------------------------------------------------------------------

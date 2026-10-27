@@ -68,6 +68,10 @@ xv::map::RasterScene_t MapFrame_t::MakeScene() const
 	{
 		scene.m_Meshes.push_back( m_pPropMesh.get() );
 	}
+	if ( m_pSpriteMesh )
+	{
+		scene.m_Meshes.push_back( m_pSpriteMesh.get() );
+	}
 	if ( m_pMaterials )
 	{
 		scene.m_Materials = *m_pMaterials;
@@ -154,6 +158,8 @@ void CMapRenderData::Rebuild()
 	}
 	m_Frame.m_pScene = m_Document.GetSharedScene();
 	m_PropObjects.clear();
+	m_pSprites.reset();
+	m_SpriteObjects.clear();
 	BuildEntityBoxes();
 
 	auto pMaterials = std::make_shared<std::vector<xv::map::RasterMaterial_t>>( pScene->m_Map.m_Materials.size() + 1 );
@@ -184,7 +190,7 @@ void CMapRenderData::BuildEntityBoxes()
 	for ( std::size_t e = 0; pScene && e < pScene->m_Entities.size(); e++ )
 	{
 		const std::uint32_t nObject = pScene->EntityObject( e );
-		if ( pScene->m_Entities[ e ].m_bPoint && !std::ranges::binary_search( m_PropObjects, nObject ) )
+		if ( pScene->m_Entities[ e ].m_bPoint && !std::ranges::binary_search( m_PropObjects, nObject ) && !std::ranges::binary_search( m_SpriteObjects, nObject ) )
 		{
 			AddBox( *pEntities, pScene->GetEntityBox( e ), nObject );
 		}
@@ -245,6 +251,41 @@ void CMapRenderData::SetProps( std::shared_ptr<const xv::map::CMapMesh> pProps, 
 }
 
 //-----------------------------------------------------------------------------
+// Purpose: The sprites' tints go in as their entities' flat colours, which sprites are
+//          multiplied by.
+//-----------------------------------------------------------------------------
+void CMapRenderData::SetSprites( std::shared_ptr<const std::vector<xv::map::SpritePlacement_t>> pSprites )
+{
+	if ( m_Document.GetScene() != m_pBuiltFor )
+	{
+		Rebuild();
+	}
+	if ( pSprites == m_pSprites )
+	{
+		return;
+	}
+	m_pSprites = std::move( pSprites );
+	m_SpriteObjects.clear();
+	if ( m_pSprites && m_Frame.m_pFlatColors )
+	{
+		auto pFlat = std::make_shared<std::vector<std::array<std::uint8_t, 3>>>( *m_Frame.m_pFlatColors );
+		for ( const xv::map::SpritePlacement_t &sprite : *m_pSprites )
+		{
+			if ( sprite.m_nObject < pFlat->size() )
+			{
+				( *pFlat )[ sprite.m_nObject ] = sprite.m_Tint;
+			}
+			m_SpriteObjects.push_back( sprite.m_nObject );
+		}
+		m_Frame.m_pFlatColors = pFlat;
+	}
+	std::ranges::sort( m_SpriteObjects );
+	m_Frame.m_pSpriteMesh.reset();
+	BuildEntityBoxes();
+	m_nGeneration++;
+}
+
+//-----------------------------------------------------------------------------
 // Purpose:
 //-----------------------------------------------------------------------------
 void CMapRenderData::SetSky( std::shared_ptr<const xv::sky::CCube> pSky )
@@ -292,6 +333,18 @@ MapFrame_t CMapRenderData::Snapshot( const xv::map::CViewCamera &camera, const x
 		}
 		m_Frame.m_pLineColors = pLines;
 		m_nGeneration++;
+	}
+	// Sprites face the camera: made again whenever it turns.
+	if ( m_pSprites && !m_pSprites->empty() )
+	{
+		const xv::map::Point_t right = camera.GetRight();
+		const xv::map::Point_t up = camera.GetUp();
+		if ( !m_Frame.m_pSpriteMesh || right != m_SpritesRight || up != m_SpritesUp )
+		{
+			m_SpritesRight = right;
+			m_SpritesUp = up;
+			m_Frame.m_pSpriteMesh = std::make_shared<const xv::map::CMapMesh>( xv::map::BuildSpriteMesh( *m_pSprites, right, up ) );
+		}
 	}
 	MapFrame_t frame = m_Frame;
 	frame.m_Camera = camera;

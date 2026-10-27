@@ -730,6 +730,7 @@ void CMapEditor::ResourcesArrived()
 	m_pRenderData->SetMaterials( m_pResources->GetMaterials(), m_pResources->GetTextures() );
 	m_pRenderData->SetSky( m_pResources->GetSky() );
 	m_pRenderData->SetProps( m_pResources->GetProps(), m_pResources->GetPropObjects() );
+	m_pRenderData->SetSprites( m_pResources->GetSprites() );
 	for ( CMapView *pView : GetViews() )
 	{
 		if ( auto *p3D = qobject_cast<CMapView3D *>( pView ) )

@@ -18,6 +18,7 @@
 #include "map/MapView.h"
 #include "map/Raster.h"
 #include "map/Scene.h"
+#include "map/Sprites.h"
 
 class CMapDocument;
 
@@ -27,6 +28,7 @@ struct MapFrame_t
 	std::shared_ptr<const xv::map::CScene> m_pScene;
 	std::shared_ptr<const xv::map::CMapMesh> m_pEntityMesh;
 	std::shared_ptr<const xv::map::CMapMesh> m_pPropMesh;
+	std::shared_ptr<const xv::map::CMapMesh> m_pSpriteMesh; // facing this frame's camera
 	std::shared_ptr<const std::vector<xv::map::RasterMaterial_t>> m_pMaterials;
 	std::shared_ptr<const void> m_pTextures; // keeps the materials' textures alive
 	std::shared_ptr<const xv::sky::CCube> m_pSky;
@@ -60,6 +62,8 @@ public:
 	void SetSky( std::shared_ptr<const xv::sky::CCube> pSky );
 	// The props placed in the world, and the entities they draw: those show no box.
 	void SetProps( std::shared_ptr<const xv::map::CMapMesh> pProps, std::vector<std::uint32_t> objects );
+	// The entities drawn as sprites, tinted by their own colours: those show no box either.
+	void SetSprites( std::shared_ptr<const std::vector<xv::map::SpritePlacement_t>> pSprites );
 
 private:
 	void Rebuild();
@@ -72,4 +76,8 @@ private:
 	std::uint64_t m_nGeneration = 0;
 	MapFrame_t m_Frame;
 	std::vector<std::uint32_t> m_PropObjects; // sorted
+	std::shared_ptr<const std::vector<xv::map::SpritePlacement_t>> m_pSprites;
+	std::vector<std::uint32_t> m_SpriteObjects; // sorted
+	xv::map::Point_t m_SpritesRight{};          // the camera the sprite mesh faces
+	xv::map::Point_t m_SpritesUp{};
 };

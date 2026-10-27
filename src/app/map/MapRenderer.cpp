@@ -76,6 +76,8 @@ MaterialUniforms_t MaterialUniforms( const xv::map::RasterMaterial_t *pMaterial,
 	u.m_Kind[ 2 ] = shade.m_pBase2 && !shade.m_pBase2->m_Mips.empty() ? 1.0f : 0.0f;
 	u.m_Kind[ 3 ] = bSelectionOnly ? 1.0f : 0.0f;
 	u.m_Extra[ 0 ] = shade.m_bSky ? 1.0f : 0.0f;
+	u.m_Extra[ 1 ] = shade.m_bTinted ? 1.0f : 0.0f;
+	u.m_Extra[ 2 ] = shade.m_bUnlit ? 1.0f : 0.0f;
 	return u;
 }
 

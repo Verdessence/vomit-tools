@@ -42,6 +42,7 @@ struct EntityVisual_t
 	std::string m_szSprite;               // a material to draw facing the camera
 	double m_flSpriteScale = 0.25;
 	Color_t m_SpriteTint{ 255, 255, 255 };
+	bool m_bSpriteAdditive = false;       // sprite(): its rendermode adds it (glow, additive)
 
 	bool m_bDecal = false;                // decal(): the "texture" key projected on the faces near it
 	bool m_bOverlay = false;              // overlay(): an info_overlay

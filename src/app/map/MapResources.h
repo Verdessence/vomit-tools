@@ -19,6 +19,7 @@
 #include "map/Materials.h"
 #include "map/Raster.h"
 #include "map/Scene.h"
+#include "map/Sprites.h"
 #include "sky/Sky.h"
 #include "vfs/Vfs.h"
 
@@ -44,6 +45,8 @@ public:
 	// entities they draw (which then show no box).
 	[[nodiscard]] std::shared_ptr<const xv::map::CMapMesh> GetProps() const { return m_pProps; }
 	[[nodiscard]] const std::vector<std::uint32_t> &GetPropObjects() const { return m_PropObjects; }
+	// The entities shown as sprites, with their materials' sizes.
+	[[nodiscard]] std::shared_ptr<const std::vector<xv::map::SpritePlacement_t>> GetSprites() const { return m_pSprites; }
 	[[nodiscard]] int GetModelsLoaded() const { return m_nModels; }
 	[[nodiscard]] int GetModelsTotal() const { return m_nModelsTotal; }
 	[[nodiscard]] int GetLoaded() const { return m_nLoaded; }
@@ -64,6 +67,8 @@ private:
 		std::shared_ptr<xv::map::RasterTexture_t> m_pBase2;
 		bool m_bMissing = false;
 		bool m_bTool = false;
+		bool m_bSprite = false; // drawn unlit, tinted by its entity, blended
+		bool m_bAdditive = false; // a sprite added rather than blended by its alpha
 	};
 
 	void Run( std::shared_ptr<const xv::map::CScene> pScene, xv::vfs::CGameInfo game, int nMaxSize, int nGeneration );
@@ -79,6 +84,7 @@ private:
 	std::shared_ptr<const xv::sky::CCube> m_pSky;
 	std::shared_ptr<const xv::map::CMapMesh> m_pProps;
 	std::vector<std::uint32_t> m_PropObjects;
+	std::shared_ptr<const std::vector<xv::map::SpritePlacement_t>> m_pSprites;
 	int m_nModels = 0;
 	int m_nModelsTotal = 0;
 	int m_nLoaded = 0;

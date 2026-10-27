@@ -167,8 +167,14 @@ std::optional<std::array<float, 4>> ShadeFragment( const ShadeMaterial_t &materi
 		color[ 0 ] *= material.m_vecColor.m_flX;
 		color[ 1 ] *= material.m_vecColor.m_flY;
 		color[ 2 ] *= material.m_vecColor.m_flZ;
+		if ( material.m_bTinted )
+		{
+			color[ 0 ] *= input.m_vecObjectColor.m_flX;
+			color[ 1 ] *= input.m_vecObjectColor.m_flY;
+			color[ 2 ] *= input.m_vecObjectColor.m_flZ;
+		}
 		color[ 3 ] = material.m_bTranslucent || material.m_bAdditive ? color[ 3 ] * material.m_flAlpha : material.m_flAlpha;
-		if ( options.m_nMode == RasterMode_t::RASTER_MODE_LIGHTMAP_GRID )
+		if ( options.m_nMode == RasterMode_t::RASTER_MODE_LIGHTMAP_GRID && !material.m_bUnlit )
 		{
 			// Every other luxel darker, so the lightmap's resolution shows on the face.
 			const int nU = static_cast<int>( std::floor( input.m_Luxel[ 0 ] ) );
@@ -179,7 +185,7 @@ std::optional<std::array<float, 4>> ShadeFragment( const ShadeMaterial_t &materi
 			color[ 2 ] *= flShade;
 		}
 	}
-	if ( options.m_nMode == RasterMode_t::RASTER_MODE_FLAT || options.m_nMode == RasterMode_t::RASTER_MODE_TEXTURED_SHADED )
+	if ( ( options.m_nMode == RasterMode_t::RASTER_MODE_FLAT || options.m_nMode == RasterMode_t::RASTER_MODE_TEXTURED_SHADED ) && !material.m_bUnlit )
 	{
 		const float flShade = FaceShade( input.m_vecNormal, options.m_vecFaceShade );
 		color[ 0 ] *= flShade;

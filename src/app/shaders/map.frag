@@ -27,7 +27,7 @@ layout(std140, binding = 1) uniform Material {
 	vec4 options; // alpha test reference (below 0: none), see-through (1 blended, 2 additive), blend to base2, missing
 	vec4 size;    // the base texture's size, then base2's, in texels
 	vec4 kind;    // 1: the object's colour (entity boxes), has a base texture, has base2
-	vec4 extra;   // 1: a sky face, showing the map's sky
+	vec4 extra;   // 1: a sky face, showing the map's sky; times the object's colour; unlit
 } material;
 
 layout(binding = 2) uniform sampler2D base;
@@ -118,13 +118,16 @@ void main() {
 			discard;
 		}
 		color.rgb *= material.color.rgb;
+		if (material.extra.y > 0.5) {
+			color.rgb *= v_state.rgb;
+		}
 		color.a = material.options.y > 0.5 ? color.a * material.color.a : material.color.a;
-		if (mode == MODE_LIGHTMAP_GRID) {
+		if (mode == MODE_LIGHTMAP_GRID && material.extra.z < 0.5) {
 			ivec2 square = ivec2(floor(v_luxel));
 			color.rgb *= ((square.x + square.y) & 1) != 0 ? frame.mode.z : 1.0;
 		}
 	}
-	if (mode == MODE_FLAT || mode == MODE_TEXTURED_SHADED) {
+	if ((mode == MODE_FLAT || mode == MODE_TEXTURED_SHADED) && material.extra.z < 0.5) {
 		color.rgb *= faceShade(n);
 	}
 	int flags = int(v_state.a * 255.0 + 0.5);

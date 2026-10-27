@@ -12,6 +12,7 @@
 
 #include "map/Materials.h"
 #include "map/Props.h"
+#include "map/Sprites.h"
 #include "map/Vmf.h"
 #include "model/Model.h"
 #include "texture/Vtf.h"
@@ -107,6 +108,7 @@ void CMapResources::Start( std::shared_ptr<const xv::map::CScene> pScene, std::o
 	m_pSky.reset();
 	m_pProps.reset();
 	m_PropObjects.clear();
+	m_pSprites.reset();
 	m_nModels = 0;
 	m_nModelsTotal = 0;
 	m_nLoaded = 0;
@@ -157,7 +159,9 @@ void CMapResources::Run( std::shared_ptr<const xv::map::CScene> pScene, xv::vfs:
 	// Each material's base texture size, for placing models' texture coordinates.
 	const std::size_t nMaterials = pScene->m_Map.m_Materials.size();
 	std::vector<std::array<int, 2>> sizes( nMaterials + 1, { 128, 128 } );
-	auto load = [ & ]( const std::vector<std::pair<std::uint32_t, std::string>> &todo ) {
+	std::vector<bool> drawable( nMaterials + 1, false );
+	std::vector<bool> additive( nMaterials + 1, false ); // sprites' materials that add
+	auto load = [ & ]( const std::vector<std::pair<std::uint32_t, std::string>> &todo, bool bSprites ) {
 		for ( std::size_t nStart = 0; nStart < todo.size() && !m_bStop; nStart += BATCH )
 		{
 			const std::size_t nEnd = std::min( todo.size(), nStart + BATCH );
@@ -169,6 +173,8 @@ void CMapResources::Run( std::shared_ptr<const xv::map::CScene> pScene, xv::vfs:
 				Loaded_t &loaded = batch[ i ];
 				const auto &[ nMaterial, szName ] = todo[ nStart + i ];
 				loaded.m_nMaterial = nMaterial;
+				loaded.m_bSprite = bSprites;
+				loaded.m_bAdditive = bSprites && nMaterial < additive.size() && additive[ nMaterial ];
 				loaded.m_Info = xv::map::ReadMaterialInfo( szName, read );
 				loaded.m_bTool = IsToolMaterial( loaded.m_Info, szName );
 				if ( !loaded.m_Info.m_szTexture.empty() )
@@ -200,6 +206,7 @@ void CMapResources::Run( std::shared_ptr<const xv::map::CScene> pScene, xv::vfs:
 				if ( loaded.m_pBase && loaded.m_nMaterial < sizes.size() )
 				{
 					sizes[ loaded.m_nMaterial ] = { loaded.m_pBase->m_nWidth, loaded.m_pBase->m_nHeight };
+					drawable[ loaded.m_nMaterial ] = !loaded.m_bMissing;
 				}
 			}
 			post( [ this, batch = std::move( batch ) ]() mutable { Take( std::move( batch ) ); } );
@@ -223,11 +230,66 @@ void CMapResources::Run( std::shared_ptr<const xv::map::CScene> pScene, xv::vfs:
 	{
 		todo.emplace_back( n, pScene->m_Map.m_Materials[ n ] );
 	}
-	load( todo );
+	load( todo, false );
+
+	// The table keeps one place after the map's own materials for the entity boxes'; the
+	// sprites' and the props' come after it.
+	auto nNext = static_cast<std::uint32_t>( nMaterials + 1 );
+
+	// Sprites next: few and small, and they show where the lights are. Their materials get
+	// places of their own, as they draw unlit and tinted.
+	std::vector<xv::map::SpritePlacement_t> sprites;
+	std::vector<double> scales;
+	std::map<std::string, std::uint32_t, std::less<>> spriteIndex;
+	todo.clear();
+	for ( std::size_t e = 0; e < pScene->m_Entities.size(); e++ )
+	{
+		const xv::map::EntityVisual_t &visual = pScene->m_Entities[ e ];
+		if ( !visual.m_bPoint || visual.m_szSprite.empty() )
+		{
+			continue;
+		}
+		// A sprite that adds and one that blends need materials of their own.
+		const std::string szMaterial = xv::map::NormalizeMaterial( visual.m_szSprite );
+		const auto [ it, bAdded ] = spriteIndex.try_emplace( szMaterial + ( visual.m_bSpriteAdditive ? "+" : "" ), nNext );
+		if ( bAdded )
+		{
+			additive.resize( nNext + 1, false );
+			additive[ nNext ] = visual.m_bSpriteAdditive;
+			todo.emplace_back( nNext++, szMaterial );
+		}
+		xv::map::SpritePlacement_t sprite;
+		sprite.m_nObject = pScene->EntityObject( e );
+		sprite.m_nMaterial = it->second;
+		sprite.m_Origin = visual.m_Origin;
+		sprite.m_Tint = { visual.m_SpriteTint.m_nR, visual.m_SpriteTint.m_nG, visual.m_SpriteTint.m_nB };
+		sprites.push_back( sprite );
+		scales.push_back( visual.m_flSpriteScale );
+	}
+	post( [ this, nMore = static_cast<int>( todo.size() ) ] { m_nTotal += nMore; } );
+	sizes.resize( nNext, { 128, 128 } );
+	drawable.resize( nNext, false );
+	load( todo, true );
+	if ( !m_bStop && !sprites.empty() )
+	{
+		for ( std::size_t i = 0; i < sprites.size(); i++ )
+		{
+			xv::map::SpritePlacement_t &sprite = sprites[ i ];
+			sprite.m_TextureSize = sizes[ sprite.m_nMaterial ];
+			sprite.m_flHalfWidth = sprite.m_TextureSize[ 0 ] * scales[ i ] * 0.5;
+			sprite.m_flHalfHeight = sprite.m_TextureSize[ 1 ] * scales[ i ] * 0.5;
+		}
+		// A sprite the game doesn't have leaves its entity's box.
+		std::erase_if( sprites, [ & ]( const xv::map::SpritePlacement_t &sprite ) { return !drawable[ sprite.m_nMaterial ]; } );
+		auto pSprites = std::make_shared<const std::vector<xv::map::SpritePlacement_t>>( std::move( sprites ) );
+		post( [ this, pSprites ] {
+			m_pSprites = pSprites;
+			emit Arrived();
+		} );
+	}
 
 	// Then the props: each model once, the materials of theirs the map doesn't use yet, and
-	// all of them placed in one mesh. The table keeps one place after the map's own materials
-	// for the entity boxes'.
+	// all of them placed in one mesh.
 	const xv::map::PropList_t list = xv::map::ListProps( *pScene );
 	std::vector<xv::map::PropModel_t> models( list.m_Keys.size() );
 	std::map<std::string, std::uint32_t, std::less<>> indexOf;
@@ -236,7 +298,6 @@ void CMapResources::Run( std::shared_ptr<const xv::map::CScene> pScene, xv::vfs:
 		indexOf.try_emplace( pScene->m_Map.m_Materials[ n ], n );
 	}
 	todo.clear();
-	auto nNext = static_cast<std::uint32_t>( nMaterials + 1 );
 	const xv::model::Reader_t readModel = [ &fileSystem ]( std::string_view szPath ) { return fileSystem.Read( szPath ); };
 	int nModels = 0;
 	for ( std::size_t k = 0; k < list.m_Keys.size() && !m_bStop; k++ )
@@ -271,7 +332,8 @@ void CMapResources::Run( std::shared_ptr<const xv::map::CScene> pScene, xv::vfs:
 		m_nModelsTotal = nKeys;
 	} );
 	sizes.resize( nNext, { 128, 128 } );
-	load( todo );
+	drawable.resize( nNext, false );
+	load( todo, false );
 	if ( !m_bStop && !list.m_Entities.empty() )
 	{
 		for ( xv::map::PropModel_t &prop : models )
@@ -340,6 +402,15 @@ void CMapResources::Take( std::vector<Loaded_t> batch )
 		shade.m_vecColor = info.m_vecColor;
 		material.m_bNoCull = info.m_bNoCull;
 		shade.m_bSky = info.IsSky();
+		shade.m_bTinted = loaded.m_bSprite;
+		shade.m_bUnlit = loaded.m_bSprite;
+		if ( loaded.m_bSprite )
+		{
+			// Hammer blends sprites whatever their material says.
+			shade.m_bAdditive = loaded.m_bAdditive || info.m_bAdditive;
+			shade.m_bTranslucent = !shade.m_bAdditive;
+			shade.m_bAlphaTest = false;
+		}
 		material.m_bTool = loaded.m_bTool;
 		m_Current[ loaded.m_nMaterial ] = material;
 		if ( loaded.m_pBase )
