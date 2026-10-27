@@ -34,6 +34,8 @@ add_library(vomit_tools_core STATIC
         map/Materials.h
         map/Mesh.cpp
         map/Mesh.h
+        map/Scene.cpp
+        map/Scene.h
         map/Vmf.cpp
         map/Vmf.h
         material/Material.cpp

@@ -53,6 +53,7 @@
 #include <QVBoxLayout>
 
 #include "DebugLog.h"
+#include "EditorTab.h"
 #include "AboutDialog.h"
 #include "BuildInfo.h"
 #include "FileActions.h"
@@ -67,6 +68,7 @@
 #include "ParticleDocument.h"
 #include "ParticleSearch.h"
 #include "Preferences.h"
+#include "map/MapEditor.h"
 #include "PreferencesDialog.h"
 #include "PremiumDialog.h"
 #include "QtPaths.h"
@@ -429,6 +431,10 @@ CMainWindow::CMainWindow( QWidget *pParent, xv::audio::CEngine::Output_t nAudio 
 		{
 			OpenModelFile( szPath );
 		}
+		else if ( szPath.endsWith( u".vmf", Qt::CaseInsensitive ) )
+		{
+			OpenMapFile( szPath );
+		}
 		else if ( const QString szMdl = GameModelForCompanion( szPath ); !szMdl.isEmpty() )
 		{
 			OpenModelFile( szMdl );
@@ -485,6 +491,7 @@ CMainWindow::CMainWindow( QWidget *pParent, xv::audio::CEngine::Output_t nAudio 
 				: pParticles                                                                       ? pParticles->GetDocument()->GetUndoStack()
 				: pTexture                                                                         ? pTexture->GetDocument()->GetUndoStack()
 				: qobject_cast<CModelEditor *>( m_pTabs->currentWidget() )                         ? qobject_cast<CModelEditor *>( m_pTabs->currentWidget() )->GetDocument()->GetUndoStack()
+				: AsEditorTab( m_pTabs->currentWidget() )                                          ? AsEditorTab( m_pTabs->currentWidget() )->GetUndoStack()
 																								   : nullptr );
 		UpdateTitle();
 	} );
@@ -619,7 +626,7 @@ void CMainWindow::BuildMenus( QAction *pSearchPathsToggle )
 		}
 	} );
 	pFile->addAction( tr( "&Close Tab" ), QKeySequence::Close, this, [ this ] {
-		if ( GetCurrentDetails() || GetCurrentEditor() || GetCurrentSky() || GetCurrentParticles() || GetCurrentTexture() || GetCurrentMaterial() || qobject_cast<CModelEditor *>( m_pTabs->currentWidget() ) || qobject_cast<CVpkEditor *>( m_pTabs->currentWidget() ) )
+		if ( GetCurrentDetails() || GetCurrentEditor() || GetCurrentSky() || GetCurrentParticles() || GetCurrentTexture() || GetCurrentMaterial() || qobject_cast<CModelEditor *>( m_pTabs->currentWidget() ) || qobject_cast<CVpkEditor *>( m_pTabs->currentWidget() ) || AsEditorTab( m_pTabs->currentWidget() ) )
 		{
 			CloseTab( m_pTabs->currentIndex() );
 		}
@@ -872,7 +879,7 @@ void CMainWindow::ChooseFiles()
 	const QString szStart = LastFolderOr( m_pFolders->GetFolder().isEmpty() && m_Game ? ToQString( m_Game->m_GameDir ) : m_pFolders->GetFolder() );
 	const QStringList files = AskOpenFiles( this, tr( "Open File" ), szStart,
 		tr( "Soundscapes and soundscripts (*.txt);;Detail files (*.vbsp);;Sounds (*.wav *.mp3);;Textures (*.vtf);;Models (*.mdl *.vvd *.vtx *.phy *.ani);;Sky faces and textures (*.vmt *.vtf *.png *.tga *.jpg *.jpeg *.bmp *.psd *.hdr);;Particles (*.pcf *.dmx);;"
-			"KeyValues (*.txt *.vmt *.vdf *.res);;Archives and maps (*.vpk *.bsp *.gcf *.gma *.pak *.wad *.xzp *.zip);;Game info (gameinfo.txt);;All files (*)" ) );
+			"KeyValues (*.txt *.vmt *.vdf *.res);;Hammer maps (*.vmf);;Archives and maps (*.vpk *.bsp *.gcf *.gma *.pak *.wad *.xzp *.zip);;Game info (gameinfo.txt);;All files (*)" ) );
 	OpenPaths( files );
 }
 
@@ -1328,6 +1335,11 @@ bool CMainWindow::OpenGame( const QString &szGameInfoPath )
 			{
 				return false;
 			}
+			IEditorTab *pTab = AsEditorTab( m_pTabs->widget( i ) );
+			if ( pTab && pTab->IsFromGame() && !CloseTab( i ) )
+			{
+				return false;
+			}
 		}
 	}
 	DebugLog() << "opening the game" << szGameInfoPath;
@@ -1386,6 +1398,10 @@ void CMainWindow::Remount()
 		else if ( auto *pBrowser = qobject_cast<CModelBrowser *>( m_pTabs->widget( i ) ) )
 		{
 			pBrowser->SetGame( *m_Game );
+		}
+		else if ( IEditorTab *pTab = AsEditorTab( m_pTabs->widget( i ) ) )
+		{
+			pTab->GameChanged( &*m_Game );
 		}
 	}
 	if ( !szSelected.isEmpty() )
@@ -1607,6 +1623,10 @@ void CMainWindow::PreviewGameFile( const QString &szPath, const QString &szSourc
 	{
 		pView = WithEditButton( pView, tr( "This is a detail file." ), tr( "Open in Details Editor" ), [ this, szPath ] { OpenDetailFile( szPath ); } );
 	}
+	else if ( szPath.endsWith( u".vmf", Qt::CaseInsensitive ) )
+	{
+		pView = WithEditButton( pView, tr( "This is a Hammer map." ), tr( "Open Map Viewer" ), [ this, szPath ] { OpenMapFile( szPath ); } );
+	}
 	else if ( const FileKind_t nKind = xv::sound::FileKindForPath( szPath.toStdString() ); nKind != FileKind_t::FILE_KIND_UNKNOWN )
 	{
 		pView = WithEditButton( pView, tr( "This is a %1 file." ).arg( KindName( nKind ) ), tr( "Open in Editor" ), [ this, szPath ] { OpenSoundFile( szPath ); } );
@@ -1700,6 +1720,10 @@ void CMainWindow::PreviewDiskFile( const QString &szPath )
 	{
 		pView = WithEditButton( pView, tr( "This is a detail file." ), tr( "Open in Details Editor" ), [ this, szPath ] { OpenDiskFile( szPath ); } );
 	}
+	else if ( info.suffix().compare( u"vmf", Qt::CaseInsensitive ) == 0 )
+	{
+		pView = WithEditButton( pView, tr( "This is a Hammer map." ), tr( "Open Map Viewer" ), [ this, szPath ] { OpenDiskFile( szPath ); } );
+	}
 	else if ( info.suffix().compare( u"mdl", Qt::CaseInsensitive ) == 0 )
 	{
 		pView = WithEditButton( pView, tr( "This is a model." ), tr( "Open Model Viewer" ), [ this, szPath ] { OpenModelFile( szPath ); } );
@@ -1763,6 +1787,11 @@ void CMainWindow::OpenDiskFile( const QString &szPath )
 	if ( info.suffix().compare( u"mdl", Qt::CaseInsensitive ) == 0 )
 	{
 		OpenModelFile( info.absoluteFilePath() );
+		return;
+	}
+	if ( info.suffix().compare( u"vmf", Qt::CaseInsensitive ) == 0 )
+	{
+		OpenMapFile( info.absoluteFilePath() );
 		return;
 	}
 	if ( const QString szMdl = DiskModelForCompanion( info.absoluteFilePath() ); !szMdl.isEmpty() )
@@ -2974,6 +3003,22 @@ bool CMainWindow::ConfirmClose( CParticleEditor *pEditor )
 //-----------------------------------------------------------------------------
 bool CMainWindow::CloseTab( int nIndex )
 {
+	if ( IEditorTab *pTab = AsEditorTab( m_pTabs->widget( nIndex ) ) )
+	{
+		if ( !pTab->ConfirmClose() )
+		{
+			return false;
+		}
+		pTab->StopWork();
+		if ( QUndoStack *pStack = pTab->GetUndoStack() )
+		{
+			m_pUndoGroup->removeStack( pStack );
+		}
+		QWidget *pWidget = m_pTabs->widget( nIndex );
+		m_pTabs->removeTab( nIndex );
+		pWidget->deleteLater();
+		return true;
+	}
 	if ( auto *pBrowser = qobject_cast<CModelBrowser *>( m_pTabs->widget( nIndex ) ) )
 	{
 		m_pTabs->removeTab( nIndex );
@@ -3077,6 +3122,11 @@ void CMainWindow::closeEvent( QCloseEvent *pEvent )
 {
 	for ( int i = 0; i < m_pTabs->count(); ++i )
 	{
+		if ( IEditorTab *pTab = AsEditorTab( m_pTabs->widget( i ) ); pTab && !pTab->ConfirmClose() )
+		{
+			pEvent->ignore();
+			return;
+		}
 		if ( auto *pPackage = qobject_cast<CVpkEditor *>( m_pTabs->widget( i ) ); pPackage && !ConfirmClose( pPackage ) )
 		{
 			pEvent->ignore();
@@ -3122,6 +3172,13 @@ void CMainWindow::closeEvent( QCloseEvent *pEvent )
 		}
 	}
 	SaveSession();
+	for ( int i = 0; i < m_pTabs->count(); i++ )
+	{
+		if ( IEditorTab *pTab = AsEditorTab( m_pTabs->widget( i ) ) )
+		{
+			pTab->StopWork();
+		}
+	}
 	m_pPlayer->Stop();
 	pEvent->accept();
 }
@@ -3135,6 +3192,10 @@ QString CMainWindow::SessionEntryFor( int nIndex ) const
 		return !disk.empty() ? QStringLiteral( "%1\tdisk\t%2" ).arg( QLatin1String( pszKind ), ToQString( disk ) ) : QStringLiteral( "%1\tgame\t%2" ).arg( QLatin1String( pszKind ), szGamePath );
 	};
 	QWidget *pTab = m_pTabs->widget( nIndex );
+	if ( const IEditorTab *pEditorTab = AsEditorTab( pTab ) )
+	{
+		return pEditorTab->GetSessionEntry();
+	}
 	if ( auto *pModel = qobject_cast<CModelEditor *>( pTab ); pModel && !pModel->GetOrigin().isEmpty() )
 	{
 		return entry( "model", QFileInfo( pModel->GetOrigin() ).isAbsolute() ? ToPath( pModel->GetOrigin() ) : fs::path{}, pModel->GetPath() );
@@ -3296,6 +3357,10 @@ void CMainWindow::RestoreSessionEntry( const QString &szEntry )
 	{
 		OpenModelFile( szPath );
 	}
+	else if ( szKind == u"map" )
+	{
+		OpenMapFile( szPath );
+	}
 	else if ( szKind == u"detail" )
 	{
 		OpenDetailFile( szPath );
@@ -3399,6 +3464,10 @@ void CMainWindow::UpdateTitle()
 	else if ( auto *pModel = qobject_cast<CModelEditor *>( m_pTabs->currentWidget() ) )
 	{
 		szTitle.prepend( m_pTabs->tabText( m_pTabs->indexOf( pModel ) ) + QStringLiteral( " — " ) );
+	}
+	else if ( const IEditorTab *pTab = AsEditorTab( m_pTabs->currentWidget() ) )
+	{
+		szTitle.prepend( pTab->GetTabTitle() + QStringLiteral( " — " ) );
 	}
 	setWindowTitle( szTitle );
 }
@@ -4848,4 +4917,53 @@ CModelEditor *CMainWindow::OpenModelFile( const QString &szPath )
 		else if(szNormalized.find('/')==std::string::npos)candidate=file.parent_path()/xv::vfs::FromUtf8(szNormalized);
 		if(!candidate.empty())if(auto bytes=ReadDiskFile(ToQString(xv::vfs::FindCaseInsensitive(candidate)))){const auto data=AsBytes(*bytes);return std::vector<std::byte>(data.begin(),data.end());}
 		return m_Game?m_pFileSystem->Read(szFile):std::nullopt; }, szOrigin );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: A map from disk (an absolute path) or from the game. Its materials, models and
+//          game data come from the mounted game, if any.
+//-----------------------------------------------------------------------------
+CMapEditor *CMainWindow::OpenMapFile( const QString &szPath )
+{
+	const bool bDisk = QFileInfo( szPath ).isAbsolute();
+	const QString szOrigin = bDisk ? QFileInfo( szPath ).absoluteFilePath() : QString::fromStdString( xv::vfs::NormalizePath( szPath.toStdString() ) );
+	for ( int i = 0; i < m_pTabs->count(); i++ )
+	{
+		if ( auto *pMap = qobject_cast<CMapEditor *>( m_pTabs->widget( i ) ); pMap && pMap->GetPath() == szOrigin )
+		{
+			m_pTabs->setCurrentWidget( pMap );
+			return pMap;
+		}
+	}
+	CMapDocument::Source_t source;
+	source.m_szName = QFileInfo( szOrigin ).fileName();
+	if ( bDisk )
+	{
+		const auto data = ReadDiskFile( szOrigin );
+		if ( !data )
+		{
+			QMessageBox::warning( this, tr( "Cannot open" ), tr( "Could not read %1." ).arg( QDir::toNativeSeparators( szOrigin ) ) );
+			return nullptr;
+		}
+		source.m_Text.assign( data->begin(), data->end() );
+		source.m_DiskPath = ToPath( szOrigin );
+	}
+	else
+	{
+		const auto bytes = m_Game ? m_pFileSystem->Read( szOrigin.toStdString() ) : std::nullopt;
+		if ( !bytes )
+		{
+			QMessageBox::warning( this, tr( "Cannot open" ), tr( "Could not read %1." ).arg( szOrigin ) );
+			return nullptr;
+		}
+		source.m_Text.assign( reinterpret_cast<const char *>( bytes->data() ), reinterpret_cast<const char *>( bytes->data() + bytes->size() ) );
+	}
+	source.m_Game = m_Game;
+	auto *pEditor = new CMapEditor( szOrigin, !bDisk );
+	connect( pEditor, &CMapEditor::StatusMessage, this, [ this ]( const QString &szText ) { statusBar()->showMessage( szText, 8000 ); } );
+	const int nIndex = m_pTabs->addTab( pEditor, pEditor->GetTabTitle() );
+	m_pTabs->setTabToolTip( nIndex, bDisk ? QDir::toNativeSeparators( szOrigin ) : szOrigin );
+	m_pTabs->setCurrentIndex( nIndex );
+	pEditor->Load( std::move( source ) );
+	return pEditor;
 }

@@ -139,7 +139,23 @@ add_library(vomit_tools_ui STATIC
         VfsModel.cpp
         VfsModel.h
         VpkEditor.cpp
-        VpkEditor.h)
+        VpkEditor.h
+        EditorTab.h
+        map/MapConstants.h
+        map/MapDocument.cpp
+        map/MapDocument.h
+        map/MapEditor.cpp
+        map/MapEditor.h
+        map/MapKeys.cpp
+        map/MapKeys.h
+        map/MapPanes.cpp
+        map/MapPanes.h
+        map/MapView.cpp
+        map/MapView.h
+        map/MapView2D.cpp
+        map/MapView2D.h
+        map/MapView3D.cpp
+        map/MapView3D.h)
 target_include_directories(vomit_tools_ui PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
 # The version and `git describe` shown in Help → About. Regenerated at every build so the commit
 # stays current; the file is only rewritten (and recompiled) when it changes.

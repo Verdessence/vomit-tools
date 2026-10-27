@@ -25,6 +25,7 @@
 #include "vfs/Steam.h"
 #include "vfs/Vfs.h"
 
+class CMapEditor;
 class CModelBrowser;
 class CModelEditor;
 class CDetailDocument;
@@ -78,6 +79,9 @@ public:
 	void OpenFolder( const QString &szFolder );
 	void OpenDiskFile( const QString &szPath );
 	CModelEditor *OpenModelFile( const QString &szPath );
+	// Opens a Hammer map (.vmf), from disk (an absolute path) or the mounted game, in the map
+	// viewer; the tab it already has, if open.
+	CMapEditor *OpenMapFile( const QString &szPath );
 	// The tab of every model in the game; null without a game.
 	CModelBrowser *OpenModelBrowser();
 	// Opens a soundscape or soundscript from the mounted game in an editor tab.
