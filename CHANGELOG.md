@@ -23,6 +23,17 @@
   view draws in software, which cuts a big map's memory to a fraction.
 - Mouselook (Z) keeps the pointer where it is and puts the cursor back there when it ends: on
   Wayland through the compositor's pointer constraints, elsewhere by warping it.
+- Checked against Hammer++ by hand, and changed to match: groups get a colour each, centre handles
+  are yellow, broken solids are tinted red with their edges drawn over everything, models show
+  textured in the 2D views (a selected one as its edges), the 3D camera shows in the 2D views as
+  a pyramid out to the view's shape, the camera starts where it was when the map was last closed
+  (or at the origin), and textures can be filtered bilinear, trilinear or anisotropically (2× to
+  16×; 4× by default).
+- Preferences → Maps is in tabs, and nearly every value the views draw with is there: colours,
+  sizes, zoom steps, the 3D camera's steps and the tints, with a button back to Hammer++'s.
+- Closing a map gives its memory back: a 50 MB map left about half of what it took with the app,
+  and now leaves little beyond what the graphics driver keeps. Building it allocates a fortieth as
+  often and is a quarter faster.
 
 ## 0.7.0 — The Model (2026-10-27)
 
