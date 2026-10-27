@@ -26,7 +26,23 @@
 #include "map/ViewCamera.h"
 
 class CGpuView;
+class CMapView3D;
+class QPainter;
 class QTimer;
+
+class CMapOverlay3D : public QWidget
+{
+	Q_OBJECT
+
+public:
+	explicit CMapOverlay3D( CMapView3D &view );
+
+protected:
+	void paintEvent( QPaintEvent *pEvent ) override;
+
+private:
+	CMapView3D &m_View;
+};
 
 class CMapView3D : public CMapView
 {
@@ -59,6 +75,8 @@ public:
 	[[nodiscard]] double GetSpeed() const { return m_flSpeed; }
 	// The frame the view draws next: the document's state with this view's camera and look.
 	[[nodiscard]] MapFrame_t MakeFrame( QSize size );
+	// The statistics and focus frame, over the picture.
+	void PaintLabels( QPainter &painter );
 
 protected:
 	void paintEvent( QPaintEvent *pEvent ) override;
@@ -73,6 +91,8 @@ protected:
 
 private:
 	void SetUseGpu( bool bOn );
+	// Puts the camera where the map's own active camera is, without drawing.
+	void PlaceCamera();
 	void Changed();
 	void RequestRender();
 	void WorkerLoop();
@@ -85,6 +105,7 @@ private:
 	xv::map::CViewCamera m_Camera;
 	const void *m_pCameraFor = nullptr; // the scene the camera was placed for
 	CGpuView *m_pGpu = nullptr;
+	CMapOverlay3D *m_pOverlay = nullptr;
 
 	// Software drawing.
 	std::thread m_Worker;

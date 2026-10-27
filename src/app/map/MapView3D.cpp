@@ -22,6 +22,9 @@
 #include "map/MapConstants.h"
 #include "map/MapDocument.h"
 #include "map/MapEditor.h"
+#include "Graphics.h"
+#include "GpuView.h"
+#include "map/MapRenderer.h"
 
 namespace
 {
@@ -39,6 +42,27 @@ QImage ToQImage( const xv::texture::CImage &image )
 }
 
 } // namespace
+
+//-----------------------------------------------------------------------------
+// Purpose: Labels over the graphics card's picture, where QPainter can't draw on it.
+//-----------------------------------------------------------------------------
+CMapOverlay3D::CMapOverlay3D( CMapView3D &view )
+	: QWidget( &view ),
+	  m_View( view )
+{
+	setAttribute( Qt::WA_TransparentForMouseEvents );
+	setAttribute( Qt::WA_NoSystemBackground );
+	setFocusPolicy( Qt::NoFocus );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+void CMapOverlay3D::paintEvent( QPaintEvent * )
+{
+	QPainter painter( this );
+	m_View.PaintLabels( painter );
+}
 
 //-----------------------------------------------------------------------------
 // Purpose:
@@ -63,7 +87,7 @@ CMapView3D::CMapView3D( CMapEditor &editor, MapViewType_t nType, QWidget *pParen
 		RequestRender();
 	} );
 	m_Worker = std::thread( [ this ] { WorkerLoop(); } );
-	SetUseGpu( false );
+	SetUseGpu( CGraphics::Instance().IsGpu() );
 	ResetCamera();
 }
 
@@ -83,10 +107,32 @@ CMapView3D::~CMapView3D()
 //-----------------------------------------------------------------------------
 // Purpose:
 //-----------------------------------------------------------------------------
-void CMapView3D::SetUseGpu( bool )
+void CMapView3D::SetUseGpu( bool bOn )
 {
-	// The graphics card's renderer comes in with CMapRenderer; until then, software.
+	delete m_pGpu;
 	m_pGpu = nullptr;
+#ifdef VOMIT_TOOLS_GPU
+	if ( bOn )
+	{
+		m_pGpu = new CGpuView( std::make_unique<CMapRenderer>( [ this ]( QSize size ) { return MakeFrame( size ); } ), this );
+		m_pGpu->setAttribute( Qt::WA_TransparentForMouseEvents );
+		m_pGpu->setFocusPolicy( Qt::NoFocus );
+		m_pGpu->setGeometry( rect() );
+		m_pGpu->show();
+		// A card that fails draws in software from then on.
+		connect( m_pGpu, &QRhiWidget::renderFailed, this, [ this ] { QTimer::singleShot( 0, this, [ this ] { SetUseGpu( false ); } ); } );
+		m_pOverlay = new CMapOverlay3D( *this );
+		m_pOverlay->setGeometry( rect() );
+		m_pOverlay->show();
+		m_pOverlay->raise();
+		return;
+	}
+#else
+	(void)bOn;
+#endif
+	delete m_pOverlay;
+	m_pOverlay = nullptr;
+	RequestRender();
 }
 
 //-----------------------------------------------------------------------------
@@ -119,7 +165,7 @@ xv::map::RasterMode_t CMapView3D::GetMode() const
 //-----------------------------------------------------------------------------
 // Purpose: The map's active camera, or Hammer's start without one: the origin, facing north.
 //-----------------------------------------------------------------------------
-void CMapView3D::ResetCamera()
+void CMapView3D::PlaceCamera()
 {
 	const xv::map::CScene *pScene = GetDocument().GetScene();
 	m_pCameraFor = pScene;
@@ -132,6 +178,14 @@ void CMapView3D::ResetCamera()
 		const xv::map::Camera_t &camera = pScene->m_Map.m_Cameras[ static_cast<std::size_t>( nActive ) ];
 		m_Camera.LookAt( camera.m_Position, camera.m_Look );
 	}
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+void CMapView3D::ResetCamera()
+{
+	PlaceCamera();
 	Changed();
 }
 
@@ -158,14 +212,9 @@ void CMapView3D::Changed()
 //-----------------------------------------------------------------------------
 MapFrame_t CMapView3D::MakeFrame( QSize size )
 {
-	if ( GetDocument().GetScene() != m_pCameraFor )
+	if ( GetDocument().GetScene() != m_pCameraFor && GetDocument().GetScene() )
 	{
-		const xv::map::CViewCamera kept = m_Camera;
-		ResetCamera();
-		if ( !GetDocument().GetScene() )
-		{
-			m_Camera = kept;
-		}
+		PlaceCamera();
 	}
 	xv::map::CViewCamera camera = m_Camera;
 	camera.m_nWidth = std::max( 1, size.width() );
@@ -186,7 +235,11 @@ void CMapView3D::RequestRender()
 {
 	if ( m_pGpu )
 	{
-		update();
+		m_pGpu->update();
+		if ( m_pOverlay )
+		{
+			m_pOverlay->update();
+		}
 		return;
 	}
 	const qreal flRatio = devicePixelRatioF();
@@ -199,9 +252,11 @@ void CMapView3D::RequestRender()
 	{
 		return;
 	}
+	// Made before taking the lock: making it can come back here.
+	MapFrame_t frame = MakeFrame( size );
 	{
 		const std::lock_guard lock( m_Mutex );
-		m_Pending = MakeFrame( size );
+		m_Pending = std::move( frame );
 	}
 	m_Wake.notify_all();
 }
@@ -256,6 +311,10 @@ QImage CMapView3D::RenderNow( QSize size )
 //-----------------------------------------------------------------------------
 void CMapView3D::paintEvent( QPaintEvent * )
 {
+	if ( m_pGpu )
+	{
+		return; // the card draws, the overlay labels
+	}
 	QPainter painter( this );
 	if ( m_Image.isNull() )
 	{
@@ -266,10 +325,19 @@ void CMapView3D::paintEvent( QPaintEvent * )
 		painter.setRenderHint( QPainter::SmoothPixmapTransform, false );
 		painter.drawImage( rect(), m_Image );
 	}
+	PaintLabels( painter );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: What goes over the picture: the statistics (O) and the focus frame.
+//-----------------------------------------------------------------------------
+void CMapView3D::PaintLabels( QPainter &painter )
+{
 	if ( m_bStatistics )
 	{
 		painter.setPen( Qt::white );
-		painter.drawText( rect().adjusted( 0, 4, -8, 0 ), Qt::AlignRight | Qt::AlignTop, tr( "%1 ms a frame%2" ).arg( m_flRenderMs, 0, 'f', 1 ).arg( m_bReduced ? tr( " (half size while moving)" ) : QString{} ) );
+		const QString szText = m_pGpu ? tr( "graphics card" ) : tr( "%1 ms a frame in software%2" ).arg( m_flRenderMs, 0, 'f', 1 ).arg( m_bReduced ? tr( " (half size while moving)" ) : QString{} );
+		painter.drawText( rect().adjusted( 0, 4, -8, 0 ), Qt::AlignRight | Qt::AlignTop, szText );
 	}
 	if ( hasFocus() )
 	{
@@ -284,6 +352,14 @@ void CMapView3D::paintEvent( QPaintEvent * )
 void CMapView3D::resizeEvent( QResizeEvent *pEvent )
 {
 	CMapView::resizeEvent( pEvent );
+	if ( m_pGpu )
+	{
+		m_pGpu->setGeometry( rect() );
+	}
+	if ( m_pOverlay )
+	{
+		m_pOverlay->setGeometry( rect() );
+	}
 	RequestRender();
 }
 

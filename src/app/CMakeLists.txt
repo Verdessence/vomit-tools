@@ -152,6 +152,8 @@ add_library(vomit_tools_ui STATIC
         map/MapPanes.h
         map/MapRenderData.cpp
         map/MapRenderData.h
+        map/MapRenderer.cpp
+        map/MapRenderer.h
         map/MapView.cpp
         map/MapView.h
         map/MapView2D.cpp
@@ -192,6 +194,15 @@ if(Qt6_VERSION VERSION_GREATER_EQUAL 6.7 AND TARGET Qt6::ShaderTools AND TARGET 
             PREFIX "/shaders"
             BASE shaders
             FILES shaders/particle.vert shaders/particle.frag shaders/fullscreen.vert shaders/sky.frag shaders/material.frag shaders/model.vert shaders/model.frag)
+    # The map's shaders read a state texture by object number (texelFetch) and take that number as
+    # an integer attribute, which needs OpenGL 3.3 or GLES 3; older OpenGL draws maps in software.
+    qt_add_shaders(vomit_tools_ui "vomit_tools_map_shaders"
+            PREFIX "/shaders"
+            BASE shaders
+            GLSL "300es,330"
+            HLSL 50
+            MSL 12
+            FILES shaders/map.vert shaders/map.frag shaders/mapline.vert shaders/mapline.frag)
     target_link_libraries(vomit_tools_ui PRIVATE Qt6::GuiPrivate)
     target_compile_definitions(vomit_tools_ui PUBLIC VOMIT_TOOLS_GPU)
     message(STATUS "vomit-tools: previews on the graphics card")

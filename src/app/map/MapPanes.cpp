@@ -37,7 +37,7 @@ CMapPane::CMapPane( CMapEditor &editor, MapViewType_t nType, QWidget *pParent )
 	m_pCaption->setAutoRaise( true );
 	m_pCaption->setFocusPolicy( Qt::NoFocus );
 	m_pCaption->setToolTip( tr( "What this pane shows; click to change it" ) );
-	m_pCaption->setStyleSheet( QStringLiteral( "QToolButton { color: white; background: transparent; border: none; padding: 1px 4px; }"
+	m_pCaption->setStyleSheet( QStringLiteral( "QToolButton { color: white; background: rgba(0, 0, 0, 110); border: none; padding: 1px 4px; }"
 											   "QToolButton:hover { color: yellow; }" ) );
 	connect( m_pCaption, &QToolButton::clicked, this, &CMapPane::ShowMenu );
 	SetType( nType );
