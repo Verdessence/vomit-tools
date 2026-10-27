@@ -12,6 +12,7 @@
 #include <unordered_map>
 
 #include "Preferences.h"
+#include "kv1/Kv1.h"
 #include "map/MapResources.h"
 #include "map/MapConstants.h"
 #include "map/MapDocument.h"
@@ -81,6 +82,7 @@ xv::map::RasterScene_t MapFrame_t::MakeScene() const
 	if ( m_pPropMesh )
 	{
 		scene.m_Meshes.push_back( m_pPropMesh.get() );
+		scene.m_Models.push_back( m_pPropMesh.get() );
 		if ( !m_bModelEdges )
 		{
 			scene.m_NoWireframe.push_back( m_pPropMesh.get() );
@@ -93,6 +95,10 @@ xv::map::RasterScene_t MapFrame_t::MakeScene() const
 	if ( m_pSpriteMesh )
 	{
 		scene.m_Meshes.push_back( m_pSpriteMesh.get() );
+	}
+	if ( m_pModelBoxMesh )
+	{
+		scene.m_Meshes.push_back( m_pModelBoxMesh.get() );
 	}
 	if ( m_pMaterials )
 	{
@@ -123,6 +129,31 @@ QColor MapGroupColor( int nGroupId )
 	const double flHue = std::fmod( static_cast<double>( static_cast<std::uint32_t>( nGroupId ) * 2654435761u ) / 4294967296.0 + 0.1, 1.0 );
 	const QColor color = QColor::fromHsvF( static_cast<float>( flHue ), 0.65f, 1.0f );
 	return QColor{ color.red(), color.green(), color.blue() }; // as 8-bit RGB, which is what is drawn
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: A prop's edges are its shape; on a model that only stands for an entity (a player
+//          start, an NPC), they are a mass of triangles over everything, and its box says more.
+//-----------------------------------------------------------------------------
+bool MapSelectedModelEdges( const xv::map::CScene &scene, std::uint32_t nObject )
+{
+	if ( nObject >= scene.GetObjectCount() || scene.IsSolidObject( nObject ) )
+	{
+		return true;
+	}
+	const std::size_t nEntity = scene.GetIndex( nObject );
+	if ( scene.m_Entities[ nEntity ].m_szModel.empty() )
+	{
+		return true;
+	}
+	switch ( CPreferences::Instance().GetMapPreferences().m_nSelectedModels )
+	{
+		case MapSelectedModels_t::MAP_SELECTED_MODELS_EDGES: return true;
+		case MapSelectedModels_t::MAP_SELECTED_MODELS_BOX: return false;
+		case MapSelectedModels_t::MAP_SELECTED_MODELS_PROPS: break;
+	}
+	const std::string_view szClass = scene.m_Map.m_Entities[ nEntity ].GetClassname();
+	return szClass.size() > 5 && xv::kv1::EqualsIgnoreCase( szClass.substr( 0, 5 ), "prop_" );
 }
 
 //-----------------------------------------------------------------------------
@@ -241,6 +272,7 @@ void CMapRenderData::Rebuild()
 	}
 	m_Frame.m_pScene = m_Document.GetSharedScene();
 	m_PropObjects.clear();
+	m_PropBounds.clear();
 	m_pSprites.reset();
 	m_pReceivedSprites.reset();
 	m_SpriteObjects.clear();
@@ -386,7 +418,20 @@ void CMapRenderData::SetProps( std::shared_ptr<const xv::map::CMapMesh> pProps, 
 	m_Frame.m_pPropMesh = std::move( pProps );
 	m_PropObjects = std::move( objects );
 	std::ranges::sort( m_PropObjects );
+	m_PropBounds.assign( m_PropObjects.size(), {} );
+	if ( m_Frame.m_pPropMesh )
+	{
+		for ( const xv::map::MeshVertex_t &vertex : m_Frame.m_pPropMesh->m_Vertices )
+		{
+			const auto it = std::ranges::lower_bound( m_PropObjects, vertex.m_nObject );
+			if ( it != m_PropObjects.end() && *it == vertex.m_nObject )
+			{
+				m_PropBounds[ static_cast<std::size_t>( it - m_PropObjects.begin() ) ].Add( xv::map::ToPoint( vertex.m_vecPosition ) );
+			}
+		}
+	}
 	BuildEntityBoxes();
+	m_nStateFor = ~0ull; // which selected entities are models changed
 	m_nGeneration++;
 }
 
@@ -501,9 +546,10 @@ MapFrame_t CMapRenderData::Snapshot( const xv::map::CViewCamera &camera, const x
 	{
 		Rebuild();
 	}
-	if ( pScene && m_nStateFor != m_Document.GetStateGeneration() )
+	if ( pScene && ( m_nStateFor != m_Document.GetStateGeneration() || m_nStateRevision != CPreferences::Instance().GetMapRevision() ) )
 	{
 		m_nStateFor = m_Document.GetStateGeneration();
+		m_nStateRevision = CPreferences::Instance().GetMapRevision();
 		auto pFlags = std::make_shared<std::vector<std::uint8_t>>( pScene->GetObjectCount(), 0 );
 		for ( const xv::map::PlacedInstance_t &placed : pScene->m_Instances )
 		{
@@ -527,6 +573,20 @@ MapFrame_t CMapRenderData::Snapshot( const xv::map::CViewCamera &camera, const x
 			nFlags |= pScene->IsSolidObject( n ) && !pScene->m_Solids[ pScene->GetIndex( n ) ].IsValid() ? xv::map::RASTER_OBJECT_INVALID : 0;
 			( *pFlags )[ n ] = nFlags;
 		}
+		// Selected models that show their box: flagged, and their boxes' edges in a mesh of their own.
+		auto pBoxes = std::make_shared<xv::map::CMapMesh>();
+		for ( const std::uint32_t n : m_Document.GetSelection() )
+		{
+			const auto it = std::ranges::lower_bound( m_PropObjects, n );
+			if ( it != m_PropObjects.end() && *it == n && !MapSelectedModelEdges( *pScene, n ) )
+			{
+				( *pFlags )[ n ] |= xv::map::RASTER_OBJECT_BOXED;
+				const xv::map::Box_t &model = m_PropBounds[ static_cast<std::size_t>( it - m_PropObjects.begin() ) ];
+				AddBox( *pBoxes, model.IsEmpty() ? m_Document.GetObjectBounds( n ) : model, n );
+			}
+		}
+		pBoxes->m_Indices.clear();
+		m_Frame.m_pModelBoxMesh = pBoxes->m_Lines.empty() ? nullptr : std::move( pBoxes );
 		m_Frame.m_pFlags = pFlags;
 		m_nGeneration++;
 	}

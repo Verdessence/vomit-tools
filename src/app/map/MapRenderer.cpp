@@ -57,9 +57,10 @@ struct SkyUniforms_t
 static_assert( sizeof( xv::map::MeshVertex_t ) == 48, "map.vert reads the vertex layout as it is" );
 
 //-----------------------------------------------------------------------------
-// Purpose: A material's uniforms, as map.frag reads them.
+// Purpose: A material's uniforms, as map.frag reads them (and mapline.vert, for the edges: only
+//          the selection's, and whether they are a models' mesh's).
 //-----------------------------------------------------------------------------
-MaterialUniforms_t MaterialUniforms( const xv::map::RasterMaterial_t *pMaterial, bool bSelectionOnly )
+MaterialUniforms_t MaterialUniforms( const xv::map::RasterMaterial_t *pMaterial, bool bSelectionOnly, bool bModels = false )
 {
 	MaterialUniforms_t u{};
 	const xv::map::ShadeMaterial_t shade = pMaterial ? pMaterial->m_Shade : xv::map::ShadeMaterial_t{};
@@ -78,7 +79,7 @@ MaterialUniforms_t MaterialUniforms( const xv::map::RasterMaterial_t *pMaterial,
 	u.m_Size[ 3 ] = static_cast<float>( shade.m_pBase2 ? shade.m_pBase2->m_nHeight : 1 );
 	u.m_Kind[ 0 ] = pMaterial && pMaterial->m_bObjectColor ? 1.0f : 0.0f;
 	u.m_Kind[ 1 ] = shade.m_pBase && shade.m_pBase->GetMipCount() > 0 ? 1.0f : 0.0f;
-	u.m_Kind[ 2 ] = shade.m_pBase2 && shade.m_pBase2->GetMipCount() > 0 ? 1.0f : 0.0f;
+	u.m_Kind[ 2 ] = ( shade.m_pBase2 && shade.m_pBase2->GetMipCount() > 0 ) || bModels ? 1.0f : 0.0f;
 	u.m_Kind[ 3 ] = bSelectionOnly ? 1.0f : 0.0f;
 	u.m_Extra[ 0 ] = shade.m_bSky ? 1.0f : 0.0f;
 	u.m_Extra[ 1 ] = shade.m_bTinted ? 1.0f : 0.0f;
@@ -121,6 +122,8 @@ void CMapRenderer::Release()
 	m_Materials.clear();
 	m_LinesAll = {};
 	m_LinesSelected = {};
+	m_ModelLinesAll = {};
+	m_ModelLinesSelected = {};
 	m_Meshes.clear();
 	m_pFrame.reset();
 	m_pState.reset();
@@ -246,6 +249,8 @@ void CMapRenderer::UploadState( const MapFrame_t &frame, QRhiResourceUpdateBatch
 		m_pMaterialsFor = nullptr;
 		m_LinesAll = {};
 		m_LinesSelected = {};
+		m_ModelLinesAll = {};
+		m_ModelLinesSelected = {};
 	}
 	if ( frame.m_pFlags.get() != m_pStateFlags || frame.m_pFlatColors.get() != m_pStateColors )
 	{
@@ -473,6 +478,8 @@ void CMapRenderer::UploadMaterials( const MapFrame_t &frame, QRhiResourceUpdateB
 		// Everything binds the sky's faces.
 		m_LinesAll.m_pBindings.reset();
 		m_LinesSelected.m_pBindings.reset();
+		m_ModelLinesAll.m_pBindings.reset();
+		m_ModelLinesSelected.m_pBindings.reset();
 		m_pMaterialsFor = nullptr;
 	}
 	if ( !m_LinesAll.m_pBindings )
@@ -481,6 +488,10 @@ void CMapRenderer::UploadMaterials( const MapFrame_t &frame, QRhiResourceUpdateB
 		MakeBindings( m_LinesAll, m_pWhite.get(), m_pWhite.get(), nullptr, nullptr );
 		uniforms( m_LinesSelected, MaterialUniforms( nullptr, true ) );
 		MakeBindings( m_LinesSelected, m_pWhite.get(), m_pWhite.get(), nullptr, nullptr );
+		uniforms( m_ModelLinesAll, MaterialUniforms( nullptr, false, true ) );
+		MakeBindings( m_ModelLinesAll, m_pWhite.get(), m_pWhite.get(), nullptr, nullptr );
+		uniforms( m_ModelLinesSelected, MaterialUniforms( nullptr, true, true ) );
+		MakeBindings( m_ModelLinesSelected, m_pWhite.get(), m_pWhite.get(), nullptr, nullptr );
 	}
 	if ( frame.m_Options.m_Shade.m_bMipBlend != m_bMipBlend )
 	{
@@ -785,13 +796,14 @@ void CMapRenderer::Render( QRhiCommandBuffer *pCommands, QRhiRenderTarget *pTarg
 		faces( frame.m_Camera, false );
 	}
 	// Edges: the wireframe's, then broken solids' and the selection's over everything.
-	auto edges = [ & ]( Material_t &material, bool bWireframe ) {
+	auto edges = [ & ]( Material_t &material, Material_t &models, bool bWireframe ) {
 		pCommands->setGraphicsPipeline( m_pLines.get() );
 		pBound = nullptr;
 		for ( std::size_t nMesh = 0; nMesh < scene.m_Meshes.size(); nMesh++ )
 		{
-			bind( material.m_pBindings.get(), isAsRead( nMesh ) );
 			const xv::map::CMapMesh &mesh = *scene.m_Meshes[ nMesh ];
+			const bool bModels = std::ranges::find( scene.m_Models, &mesh ) != scene.m_Models.end();
+			bind( ( bModels ? models : material ).m_pBindings.get(), isAsRead( nMesh ) );
 			if ( !m_Meshes[ nMesh ].m_pLines || !m_Meshes[ nMesh ].m_pVertices || ( bWireframe && std::ranges::find( scene.m_NoWireframe, &mesh ) != scene.m_NoWireframe.end() ) )
 			{
 				continue;
@@ -804,9 +816,9 @@ void CMapRenderer::Render( QRhiCommandBuffer *pCommands, QRhiRenderTarget *pTarg
 	};
 	if ( shade.m_nMode == xv::map::RasterMode_t::RASTER_MODE_WIREFRAME )
 	{
-		edges( m_LinesAll, true );
+		edges( m_LinesAll, m_ModelLinesAll, true );
 	}
-	edges( m_LinesSelected, false );
+	edges( m_LinesSelected, m_ModelLinesSelected, false );
 	if ( bSky )
 	{
 		pCommands->setGraphicsPipeline( m_pAlpha.get() );

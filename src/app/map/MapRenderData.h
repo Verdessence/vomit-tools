@@ -31,6 +31,7 @@ struct MapFrame_t
 	std::shared_ptr<const xv::map::CMapMesh> m_pPropMesh;
 	std::shared_ptr<const xv::map::CMapMesh> m_pOverlayMesh;
 	std::shared_ptr<const xv::map::CMapMesh> m_pSpriteMesh; // facing this frame's camera
+	std::shared_ptr<const xv::map::CMapMesh> m_pModelBoxMesh; // the boxes selected models show instead of their edges
 	std::shared_ptr<const std::vector<xv::map::RasterMaterial_t>> m_pMaterials;
 	std::shared_ptr<const void> m_pTextures; // keeps the materials' textures alive
 	std::shared_ptr<const xv::sky::CCube> m_pSky;
@@ -51,6 +52,10 @@ struct MapFrame_t
 [[nodiscard]] std::vector<std::array<std::uint8_t, 3>> MapLineColors( const xv::map::CScene &scene, const MapViewSettings_t &settings );
 // The colour a group is given when groups get one each (Preferences > Maps).
 [[nodiscard]] QColor MapGroupColor( int nGroupId );
+// Whether an object drawn by a model shows the model's edges when selected, or its box
+// (Preferences > Maps: props show their edges, other entities their box). Anything else shows
+// its edges.
+[[nodiscard]] bool MapSelectedModelEdges( const xv::map::CScene &scene, std::uint32_t nObject );
 
 class CMapRenderData
 {
@@ -92,11 +97,13 @@ private:
 	const xv::map::CMapMesh *m_pBuiltMesh = nullptr; // the mesh as read of the map it was built for
 	std::uint32_t m_nEntityMaterial = 0;            // where entity boxes' material is in the table
 	std::uint64_t m_nStateFor = ~0ull;
+	std::uint64_t m_nStateRevision = ~0ull; // the preferences' revision the flags follow
 	std::pair<bool, std::uint64_t> m_LineColorsFor{}; // group colours on, and the preferences' revision
 	std::uint64_t m_nGeneration = 0;
 	std::uint64_t m_nFlatFor = ~0ull; // the preferences' revision the flat colours follow
 	MapFrame_t m_Frame;
 	std::vector<std::uint32_t> m_PropObjects; // sorted
+	std::vector<xv::map::Box_t> m_PropBounds; // each one's model, where it stands
 	std::shared_ptr<const std::vector<xv::map::SpritePlacement_t>> m_pReceivedSprites;
 	std::shared_ptr<const std::vector<xv::map::SpritePlacement_t>> m_pSprites; // those drawn
 	bool m_bSpritesShown = true;

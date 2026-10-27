@@ -17,6 +17,9 @@
 - **Saving** writes the map back as it was read, changing only what was edited: untouched parts
   stay byte for byte, so diffs against Hammer's saves stay small. The previous file is kept as a
   `.vmx`, as Hammer does.
+- A selected prop shows its triangles; other entities drawn by a model (player starts, NPCs) show
+  their box instead of a mass of triangles over everything. Preferences → Maps → 3D View can show
+  every model's edges, or every model's box.
 - Brushes (with Hammer++'s exact vertices), displacements with their blended materials, entities
   as their FGD draws them (boxes, models, sprites tinted by their light, helper spheres), overlays
   and decals on their faces, `func_instance` contents tinted orange, the 2D sky on sky faces and

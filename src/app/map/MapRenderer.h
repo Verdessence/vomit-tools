@@ -96,6 +96,8 @@ private:
 	const void *m_pMaterialsFor = nullptr;
 	Material_t m_LinesAll;       // the wireframe's edges
 	Material_t m_LinesSelected;  // the selection's
+	Material_t m_ModelLinesAll;  // the same for the models' mesh, where boxed objects' edges aren't the selection's
+	Material_t m_ModelLinesSelected;
 	std::unique_ptr<QRhiBuffer> m_pFrame;
 	std::unique_ptr<QRhiTexture> m_pState;
 	std::unique_ptr<QRhiTexture> m_pLineColors;

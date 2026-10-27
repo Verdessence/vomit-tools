@@ -49,6 +49,7 @@ void ForEachMapPreference( Preferences_t &map, Visit_t &&pfnVisit )
 	pfnVisit( "maps/skybox3D", map.m_bSkybox3D );
 	pfnVisit( "maps/sprites", map.m_bSprites );
 	pfnVisit( "maps/wireframeModels", map.m_bWireframeModels );
+	pfnVisit( "maps/selectedModels", map.m_nSelectedModels );
 	pfnVisit( "maps/arrowsNudge", map.m_bArrowsNudge );
 	pfnVisit( "maps/textureLock", map.m_bTextureLock );
 	pfnVisit( "maps/hideSmallGrid", map.m_bHideSmallGrid );

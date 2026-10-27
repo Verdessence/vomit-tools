@@ -33,6 +33,7 @@ enum RasterObject_t : std::uint8_t
 	RASTER_OBJECT_INSTANCE = 1u << 3, // a func_instance's contents: tinted
 	RASTER_OBJECT_SKYBOX = 1u << 4,   // in the 3D skybox's room: drawn again behind the world
 	RASTER_OBJECT_EDITED = 1u << 5,   // drawn from the edit mesh: its shape in the meshes as read is old
+	RASTER_OBJECT_BOXED = 1u << 6,    // a model that, selected, shows its box rather than its own edges
 };
 
 // A material as the renderers use it, from MaterialInfo_t and the textures read for it.
@@ -57,6 +58,7 @@ struct RasterScene_t
 	std::vector<const CMapMesh *> m_Meshes;            // the map's, then entity boxes and the like
 	std::vector<const CMapMesh *> m_NoWireframe;       // of those, the ones whose edges the wireframe view leaves out
 	std::vector<const CMapMesh *> m_AsRead;            // of those, the ones from before any edit (edited objects' old shapes)
+	std::vector<const CMapMesh *> m_Models;            // of those, the models': a boxed object's edges there aren't the selection's
 	std::span<const RasterMaterial_t> m_Materials;     // by the meshes' material indices
 	std::span<const std::uint8_t> m_ObjectFlags;       // RasterObject_t bits, by object
 	std::span<const std::array<std::uint8_t, 3>> m_ObjectColors; // flat colours, by object
@@ -88,6 +90,17 @@ struct RasterOptions_t
 		return false;
 	}
 	return ( nFlags & RASTER_OBJECT_EDITED ) == 0 || std::find( scene.m_AsRead.begin(), scene.m_AsRead.end(), pMesh ) == scene.m_AsRead.end();
+}
+
+// Whether an object's lines in pMesh are drawn as the selection's edges (over everything): it is
+// selected, and pMesh isn't a model mesh it is boxed in.
+[[nodiscard]] inline bool IsSelectionEdge( const RasterScene_t &scene, const CMapMesh *pMesh, std::uint8_t nFlags )
+{
+	if ( ( nFlags & RASTER_OBJECT_SELECTED ) == 0 )
+	{
+		return false;
+	}
+	return ( nFlags & RASTER_OBJECT_BOXED ) == 0 || std::find( scene.m_Models.begin(), scene.m_Models.end(), pMesh ) == scene.m_Models.end();
 }
 
 // Draws into out, sized to the camera's image.

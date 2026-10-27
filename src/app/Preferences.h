@@ -36,6 +36,15 @@ enum class MapTextureFilter_t
 	MAP_TEXTURE_FILTER_ANISOTROPIC_16X,
 };
 
+// What a selected model shows over everything in the 3D views, and in the 2D views instead of its
+// picture: its edges, or its box. Hammer++ shows every model's edges.
+enum class MapSelectedModels_t
+{
+	MAP_SELECTED_MODELS_PROPS, // the edges of props (prop_ entities), the box of other models
+	MAP_SELECTED_MODELS_EDGES,
+	MAP_SELECTED_MODELS_BOX,
+};
+
 // How many samples an anisotropic filter takes at most; 1 for the others.
 [[nodiscard]] int MapAnisotropy( MapTextureFilter_t nFilter );
 
@@ -89,6 +98,7 @@ struct MapPreferences_t
 	bool m_bSkybox3D = true;
 	bool m_bSprites = true;          // iconsprites and env_sprites drawn as such (else as boxes)
 	bool m_bWireframeModels = true;  // props' edges in the wireframe view
+	MapSelectedModels_t m_nSelectedModels = MapSelectedModels_t::MAP_SELECTED_MODELS_PROPS;
 
 	// Editing.
 	bool m_bArrowsNudge = true;      // arrow keys move the selection (Hammer++'s Nudge)

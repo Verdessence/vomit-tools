@@ -699,7 +699,7 @@ void CRasterizer::Run()
 				continue;
 			}
 			// Selected and broken solids' edges come later, over everything.
-			const bool bLater = ( nFlags & RASTER_OBJECT_INVALID ) != 0 || ( m_Options.m_bSelectionEdges && ( nFlags & RASTER_OBJECT_SELECTED ) != 0 );
+			const bool bLater = ( nFlags & RASTER_OBJECT_INVALID ) != 0 || ( m_Options.m_bSelectionEdges && IsSelectionEdge( m_Scene, pMesh, nFlags ) );
 			if ( bWireframe && !bLater )
 			{
 				const std::array<std::uint8_t, 3> color = a.m_nObject < m_Scene.m_LineColors.size() ? m_Scene.m_LineColors[ a.m_nObject ] : std::array<std::uint8_t, 3>{ 255, 255, 255 };
@@ -722,7 +722,7 @@ void CRasterizer::Run()
 		{
 			const MeshVertex_t &a = pMesh->m_Vertices[ pMesh->m_Lines[ i ] ];
 			const std::uint8_t nFlags = FlagsOf( a.m_nObject );
-			const bool bSelected = m_Options.m_bSelectionEdges && ( nFlags & RASTER_OBJECT_SELECTED ) != 0;
+			const bool bSelected = m_Options.m_bSelectionEdges && IsSelectionEdge( m_Scene, pMesh, nFlags );
 			if ( IsDrawn( m_Scene, pMesh, nFlags ) && ( nFlags & RASTER_OBJECT_INVALID ) != 0 && !bSelected )
 			{
 				AddLine( ToPoint( a.m_vecPosition ), ToPoint( pMesh->m_Vertices[ pMesh->m_Lines[ i + 1 ] ].m_vecPosition ), m_Options.m_InvalidEdge, true );
@@ -735,7 +735,7 @@ void CRasterizer::Run()
 		{
 			const MeshVertex_t &a = pMesh->m_Vertices[ pMesh->m_Lines[ i ] ];
 			const std::uint8_t nFlags = FlagsOf( a.m_nObject );
-			if ( IsDrawn( m_Scene, pMesh, nFlags ) && ( nFlags & RASTER_OBJECT_SELECTED ) != 0 )
+			if ( IsDrawn( m_Scene, pMesh, nFlags ) && IsSelectionEdge( m_Scene, pMesh, nFlags ) )
 			{
 				AddLine( ToPoint( a.m_vecPosition ), ToPoint( pMesh->m_Vertices[ pMesh->m_Lines[ i + 1 ] ].m_vecPosition ), bWireframe ? std::array<std::uint8_t, 3>{ 255, 0, 0 } : m_Options.m_SelectionEdge, true );
 			}

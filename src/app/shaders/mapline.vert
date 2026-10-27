@@ -26,7 +26,7 @@ layout(std140, binding = 1) uniform Material {
 	vec4 color;
 	vec4 options;
 	vec4 size;
-	vec4 kind; // w: 1 to draw only the selection's and broken solids' edges
+	vec4 kind; // z: 1 for a models' mesh; w: 1 to draw only the selection's and broken solids' edges
 } material;
 
 layout(binding = 4) uniform sampler2D stateTexture;
@@ -38,7 +38,10 @@ void main() {
 	ivec2 at = ivec2(n % width, n / width);
 	int flags = int(texelFetch(stateTexture, at, 0).a * 255.0 + 0.5);
 	bool shown = (flags & 1) != 0 && (frame.pass.y < 0.5 || (flags & 32) == 0);
-	bool selected = (flags & 2) != 0 && frame.mode.w > 0.5;
+	// A model that shows its box when selected (flag 64) draws its own edges as unselected ones
+	// in a models' mesh; its box, in a mesh of its own, is the selection's.
+	bool boxed = (flags & 64) != 0 && material.kind.z > 0.5;
+	bool selected = (flags & 2) != 0 && !boxed && frame.mode.w > 0.5;
 	bool invalid = (flags & 4) != 0;
 	bool onTop = selected || invalid;
 	bool selectionOnly = material.kind.w > 0.5;
