@@ -164,7 +164,16 @@ private:
 	bool Corners( const TriangleRef_t &ref, std::array<ClipVertex_t, 3> &corners ) const;
 	void DrawTriangle( const TriangleRef_t &ref, int nTop, int nBottom, bool bBlend );
 	void FillTriangle( const ScreenVertex_t &a, const ScreenVertex_t &b, const ScreenVertex_t &c, const TriangleRef_t &ref, std::uint32_t nObject, int nTop, int nBottom, bool bBlend );
-	void DrawLine( Point_t from, Point_t to, std::array<std::uint8_t, 3> color, bool bOnTop );
+	// A line on screen: pixel x and y, and depth, at each end.
+	struct ScreenLine_t
+	{
+		std::array<double, 3> m_From{};
+		std::array<double, 3> m_To{};
+		std::array<std::uint8_t, 3> m_Color{};
+		bool m_bOnTop = false; // over everything; else depth tested
+	};
+	void AddLine( Point_t from, Point_t to, std::array<std::uint8_t, 3> color, bool bOnTop );
+	void DrawLines();
 
 	const RasterScene_t &m_Scene;
 	const CViewCamera &m_Camera;
@@ -178,6 +187,7 @@ private:
 	std::vector<TriangleRef_t> m_Blended;
 	std::vector<std::vector<std::uint32_t>> m_OpaqueBands; // per band: indices into m_Opaque
 	std::vector<std::vector<std::uint32_t>> m_BlendedBands;
+	std::vector<ScreenLine_t> m_Lines; // in drawing order
 	int m_nBandHeight = 1;
 };
 
@@ -222,7 +232,7 @@ void CRasterizer::Gather()
 		const CMapMesh &mesh = *m_Scene.m_Meshes[ nMesh ];
 		for ( const MeshBatch_t &batch : mesh.m_Batches )
 		{
-			if ( batch.m_nChunk < mesh.m_Chunks.size() && !m_Camera.CanSee( mesh.m_Chunks[ batch.m_nChunk ].m_Bounds ) )
+			if ( batch.m_nChunk < mesh.m_Chunks.size() && ( !m_Camera.CanSee( mesh.m_Chunks[ batch.m_nChunk ].m_Bounds ) || ( m_bSkyPass && !mesh.m_Chunks[ batch.m_nChunk ].m_Bounds.Intersects( m_Options.m_SkyboxRoom ) ) ) )
 			{
 				continue;
 			}
@@ -495,9 +505,9 @@ void CRasterizer::FillTriangle( const ScreenVertex_t &a, const ScreenVertex_t &b
 }
 
 //-----------------------------------------------------------------------------
-// Purpose: A one-pixel line, clipped at the near plane; depth tested unless bOnTop.
+// Purpose: A one-pixel line to draw, clipped at the near plane; depth tested unless bOnTop.
 //-----------------------------------------------------------------------------
-void CRasterizer::DrawLine( Point_t from, Point_t to, std::array<std::uint8_t, 3> color, bool bOnTop )
+void CRasterizer::AddLine( Point_t from, Point_t to, std::array<std::uint8_t, 3> color, bool bOnTop )
 {
 	std::array<double, 4> a = Transform( m_Matrix, ToVec3( from ) );
 	std::array<double, 4> b = Transform( m_Matrix, ToVec3( to ) );
@@ -521,35 +531,102 @@ void CRasterizer::DrawLine( Point_t from, Point_t to, std::array<std::uint8_t, 3
 	auto screen = [ & ]( const std::array<double, 4> &c ) {
 		return std::array<double, 3>{ ( c[ 0 ] / c[ 3 ] + 1.0 ) * 0.5 * m_Out.m_nWidth, ( 1.0 - c[ 1 ] / c[ 3 ] ) * 0.5 * m_Out.m_nHeight, c[ 2 ] / c[ 3 ] * 0.5 + 0.5 };
 	};
-	const std::array<double, 3> p0 = screen( a );
-	const std::array<double, 3> p1 = screen( b );
-	const double flSteps = std::ceil( std::max( std::abs( p1[ 0 ] - p0[ 0 ] ), std::abs( p1[ 1 ] - p0[ 1 ] ) ) );
-	if ( !std::isfinite( flSteps ) || flSteps > 1e5 )
+	ScreenLine_t line{ screen( a ), screen( b ), color, bOnTop };
+	if ( std::isfinite( line.m_From[ 0 ] ) && std::isfinite( line.m_From[ 1 ] ) && std::isfinite( line.m_To[ 0 ] ) && std::isfinite( line.m_To[ 1 ] ) )
 	{
-		return;
+		m_Lines.push_back( line );
 	}
-	const int nSteps = std::max( 1, static_cast<int>( flSteps ) );
-	for ( int i = 0; i <= nSteps; i++ )
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: The lines added, a pixel a step, in the order they were added. Each band of rows is
+//          drawn on its own thread, and each line only where it crosses the band.
+//-----------------------------------------------------------------------------
+void CRasterizer::DrawLines()
+{
+	// The part of a line (as 0-1 along it) within x0-x1 and y0-y1, if any.
+	auto within = []( const ScreenLine_t &line, double x0, double x1, double y0, double y1 ) -> std::optional<std::array<double, 2>> {
+		double t0 = 0.0;
+		double t1 = 1.0;
+		const double dx = line.m_To[ 0 ] - line.m_From[ 0 ];
+		const double dy = line.m_To[ 1 ] - line.m_From[ 1 ];
+		for ( const auto &[ flP, flQ ] : { std::pair{ -dx, line.m_From[ 0 ] - x0 }, std::pair{ dx, x1 - line.m_From[ 0 ] }, std::pair{ -dy, line.m_From[ 1 ] - y0 }, std::pair{ dy, y1 - line.m_From[ 1 ] } } )
+		{
+			if ( flP == 0.0 )
+			{
+				if ( flQ < 0.0 )
+				{
+					return std::nullopt;
+				}
+				continue;
+			}
+			const double t = flQ / flP;
+			( flP < 0.0 ? t0 : t1 ) = flP < 0.0 ? std::max( t0, t ) : std::min( t1, t );
+		}
+		return t0 <= t1 ? std::optional<std::array<double, 2>>{ { t0, t1 } } : std::nullopt;
+	};
+	const std::size_t nBands = m_OpaqueBands.size();
+	std::vector<std::vector<std::uint32_t>> bands( nBands );
+	for ( std::uint32_t i = 0; i < m_Lines.size(); i++ )
 	{
-		const double t = static_cast<double>( i ) / nSteps;
-		const int x = static_cast<int>( std::floor( p0[ 0 ] + ( p1[ 0 ] - p0[ 0 ] ) * t ) );
-		const int y = static_cast<int>( std::floor( p0[ 1 ] + ( p1[ 1 ] - p0[ 1 ] ) * t ) );
-		if ( x < 0 || y < 0 || x >= m_Out.m_nWidth || y >= m_Out.m_nHeight )
+		const ScreenLine_t &line = m_Lines[ i ];
+		const auto range = within( line, -1.0, m_Out.m_nWidth + 1.0, -1.0, m_Out.m_nHeight + 1.0 );
+		if ( !range )
 		{
 			continue;
 		}
-		const double flZ = p0[ 2 ] + ( p1[ 2 ] - p0[ 2 ] ) * t;
-		// Lines sit on faces; a little depth pulls them in front of their own.
-		if ( !bOnTop && flZ - 1e-5 > m_Depth[ static_cast<std::size_t>( y ) * static_cast<std::size_t>( m_Out.m_nWidth ) + static_cast<std::size_t>( x ) ] )
+		const double flY0 = line.m_From[ 1 ] + ( line.m_To[ 1 ] - line.m_From[ 1 ] ) * ( *range )[ 0 ];
+		const double flY1 = line.m_From[ 1 ] + ( line.m_To[ 1 ] - line.m_From[ 1 ] ) * ( *range )[ 1 ];
+		const int nFirst = std::clamp( static_cast<int>( std::floor( std::min( flY0, flY1 ) ) ) / m_nBandHeight, 0, static_cast<int>( nBands ) - 1 );
+		const int nLast = std::clamp( static_cast<int>( std::floor( std::max( flY0, flY1 ) ) ) / m_nBandHeight, 0, static_cast<int>( nBands ) - 1 );
+		for ( int b = nFirst; b <= nLast; b++ )
 		{
-			continue;
+			bands[ static_cast<std::size_t>( b ) ].push_back( i );
 		}
-		std::uint8_t *p = m_Out.Pixel( x, y );
-		p[ 0 ] = color[ 0 ];
-		p[ 1 ] = color[ 1 ];
-		p[ 2 ] = color[ 2 ];
-		p[ 3 ] = 255;
 	}
+	ParallelFor( nBands, 1, [ & ]( std::size_t nBegin, std::size_t nEnd ) {
+		for ( std::size_t band = nBegin; band < nEnd; band++ )
+		{
+			const int nTop = static_cast<int>( band ) * m_nBandHeight;
+			const int nBottom = std::min( m_Out.m_nHeight, nTop + m_nBandHeight );
+			for ( const std::uint32_t i : bands[ band ] )
+			{
+				const ScreenLine_t &line = m_Lines[ i ];
+				const std::array<double, 3> &p0 = line.m_From;
+				const std::array<double, 3> &p1 = line.m_To;
+				const auto range = within( line, -1.0, m_Out.m_nWidth + 1.0, nTop - 1.0, nBottom + 1.0 );
+				if ( !range )
+				{
+					continue;
+				}
+				// A step a pixel along the whole line, taking only the steps in this band.
+				const double flSteps = std::max( 1.0, std::ceil( std::max( std::abs( p1[ 0 ] - p0[ 0 ] ), std::abs( p1[ 1 ] - p0[ 1 ] ) ) ) );
+				const auto nFirst = static_cast<long long>( std::floor( ( *range )[ 0 ] * flSteps ) );
+				const auto nLast = static_cast<long long>( std::ceil( ( *range )[ 1 ] * flSteps ) );
+				for ( long long n = nFirst; n <= nLast; n++ )
+				{
+					const double t = static_cast<double>( n ) / flSteps;
+					const int x = static_cast<int>( std::floor( p0[ 0 ] + ( p1[ 0 ] - p0[ 0 ] ) * t ) );
+					const int y = static_cast<int>( std::floor( p0[ 1 ] + ( p1[ 1 ] - p0[ 1 ] ) * t ) );
+					if ( x < 0 || y < nTop || x >= m_Out.m_nWidth || y >= nBottom )
+					{
+						continue;
+					}
+					const double flZ = p0[ 2 ] + ( p1[ 2 ] - p0[ 2 ] ) * t;
+					// Lines sit on faces; a little depth pulls them in front of their own.
+					if ( !line.m_bOnTop && flZ - 1e-5 > m_Depth[ static_cast<std::size_t>( y ) * static_cast<std::size_t>( m_Out.m_nWidth ) + static_cast<std::size_t>( x ) ] )
+					{
+						continue;
+					}
+					std::uint8_t *p = m_Out.Pixel( x, y );
+					p[ 0 ] = line.m_Color[ 0 ];
+					p[ 1 ] = line.m_Color[ 1 ];
+					p[ 2 ] = line.m_Color[ 2 ];
+					p[ 3 ] = 255;
+				}
+			}
+		}
+	} );
 }
 
 //-----------------------------------------------------------------------------
@@ -614,7 +691,7 @@ void CRasterizer::Run()
 			if ( bWireframe && !bSelected )
 			{
 				const std::array<std::uint8_t, 3> color = a.m_nObject < m_Scene.m_LineColors.size() ? m_Scene.m_LineColors[ a.m_nObject ] : std::array<std::uint8_t, 3>{ 255, 255, 255 };
-				DrawLine( ToPoint( a.m_vecPosition ), ToPoint( b.m_vecPosition ), color, true );
+				AddLine( ToPoint( a.m_vecPosition ), ToPoint( b.m_vecPosition ), color, true );
 			}
 		}
 	}
@@ -622,7 +699,7 @@ void CRasterizer::Run()
 	{
 		if ( !line.m_bOnTop )
 		{
-			DrawLine( line.m_From, line.m_To, line.m_Color, false );
+			AddLine( line.m_From, line.m_To, line.m_Color, false );
 		}
 	}
 	// The selection's edges, over everything (Hammer++'s SelectionNoZ).
@@ -634,7 +711,7 @@ void CRasterizer::Run()
 			const std::uint8_t nFlags = FlagsOf( a.m_nObject );
 			if ( ( nFlags & RASTER_OBJECT_SHOWN ) != 0 && ( nFlags & RASTER_OBJECT_SELECTED ) != 0 )
 			{
-				DrawLine( ToPoint( a.m_vecPosition ), ToPoint( pMesh->m_Vertices[ pMesh->m_Lines[ i + 1 ] ].m_vecPosition ), bWireframe ? std::array<std::uint8_t, 3>{ 255, 0, 0 } : m_Options.m_SelectionEdge, true );
+				AddLine( ToPoint( a.m_vecPosition ), ToPoint( pMesh->m_Vertices[ pMesh->m_Lines[ i + 1 ] ].m_vecPosition ), bWireframe ? std::array<std::uint8_t, 3>{ 255, 0, 0 } : m_Options.m_SelectionEdge, true );
 			}
 		}
 	}
@@ -642,9 +719,10 @@ void CRasterizer::Run()
 	{
 		if ( line.m_bOnTop )
 		{
-			DrawLine( line.m_From, line.m_To, line.m_Color, true );
+			AddLine( line.m_From, line.m_To, line.m_Color, true );
 		}
 	}
+	DrawLines();
 }
 
 } // namespace

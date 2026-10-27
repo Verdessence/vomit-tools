@@ -70,6 +70,7 @@ struct RasterOptions_t
 	// The 3D skybox, drawn first from here (map::SkyboxCamera): its objects behind everything,
 	// showing where the world's sky faces are, as the game shows it. Textured views only.
 	std::optional<CViewCamera> m_SkyboxCamera;
+	Box_t m_SkyboxRoom; // only what reaches into it is drawn in the skybox's pass
 };
 
 // Draws into out, sized to the camera's image.

@@ -655,7 +655,7 @@ void CMapRenderer::Render( QRhiCommandBuffer *pCommands, QRhiRenderTarget *pTarg
 			for ( const xv::map::MeshBatch_t &batch : mesh.m_Batches )
 			{
 				const bool bChunk = batch.m_nChunk < mesh.m_Chunks.size();
-				if ( bChunk && !camera.CanSee( mesh.m_Chunks[ batch.m_nChunk ].m_Bounds ) )
+				if ( bChunk && ( !camera.CanSee( mesh.m_Chunks[ batch.m_nChunk ].m_Bounds ) || ( bSkyPass && !mesh.m_Chunks[ batch.m_nChunk ].m_Bounds.Intersects( frame.m_Options.m_SkyboxRoom ) ) ) )
 				{
 					continue;
 				}

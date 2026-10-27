@@ -402,6 +402,7 @@ MapFrame_t CMapRenderData::Snapshot( const xv::map::CViewCamera &camera, const x
 	if ( settings.m_bSkybox3D && pScene && pScene->m_Skybox3D )
 	{
 		frame.m_Options.m_SkyboxCamera = xv::map::SkyboxCamera( camera, *pScene->m_Skybox3D );
+		frame.m_Options.m_SkyboxRoom = pScene->m_Skybox3D->m_Room;
 	}
 	frame.m_nGeneration = m_nGeneration;
 	return frame;
