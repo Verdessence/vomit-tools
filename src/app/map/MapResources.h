@@ -9,6 +9,8 @@
 #pragma once
 
 #include <atomic>
+#include <functional>
+#include <map>
 #include <memory>
 #include <optional>
 #include <thread>
@@ -17,6 +19,8 @@
 #include <QObject>
 
 #include "map/Materials.h"
+#include "map/Props.h"
+#include "model/Model.h"
 #include "map/Raster.h"
 #include "map/Scene.h"
 #include "map/Sprites.h"
@@ -46,6 +50,9 @@ public:
 	// Reads materials of the scene an edit brought in (indices past those it had at Start) into
 	// their places; false when they don't fit the places kept for them (Start again then).
 	[[nodiscard]] bool LoadMaterials( std::shared_ptr<const xv::map::CScene> pScene, const std::vector<std::uint32_t> &materials );
+	// After edits to entities: their sprites and props placed again (reading what is new), in
+	// the background.
+	void Refresh( std::shared_ptr<const xv::map::CScene> pScene );
 	// Where the entity boxes' material is in the table (past the places kept for new ones).
 	[[nodiscard]] std::uint32_t GetEntityMaterial() const { return m_nEntityMaterial; }
 
@@ -94,7 +101,21 @@ private:
 		MATERIAL_USE_OVERLAYS,
 	};
 
+	// What placing sprites and props has read, kept so that edits only read what is new.
+	struct Placing_t
+	{
+		std::map<xv::map::PropKey_t, xv::map::PropModel_t> m_Models;  // by model and skin (no model: not there)
+		std::map<std::string, std::uint32_t, std::less<>> m_Places;    // table places past the map's own, by material name ("+" after a sprite's that adds)
+		std::vector<std::array<int, 2>> m_Sizes;                       // by table place: the base texture's size
+		std::vector<bool> m_Drawable;
+		std::vector<bool> m_Additive;
+		std::uint32_t m_nNext = 0;                                     // the table's next free place
+	};
+	using ReadMaterials_t = std::function<void( const std::vector<std::pair<std::uint32_t, std::string>> &, MaterialUse_t )>;
+	using Post_t = std::function<void( std::function<void()> )>;
+
 	void Run( std::shared_ptr<const xv::map::CScene> pScene, xv::vfs::CGameInfo game, int nMaxSize, bool bDecoded, int nGeneration );
+	void PlaceEntities( const xv::map::CScene &scene, Placing_t &placing, const ReadMaterials_t &readMaterials, const xv::model::Reader_t &readModel, const Post_t &post );
 	// Reads materials (their index and name) through read, textures decoded on every core.
 	[[nodiscard]] static std::vector<Loaded_t> ReadMaterials( const std::vector<std::pair<std::uint32_t, std::string>> &todo, MaterialUse_t nUse, const xv::material::Reader_t &read, int nMaxSize, bool bDecoded, const std::vector<bool> &additive );
 	void Take( std::vector<Loaded_t> batch );
@@ -104,6 +125,9 @@ private:
 	std::optional<xv::vfs::CGameInfo> m_Game;
 	int m_nMaxSize = 1024;
 	std::uint32_t m_nEntityMaterial = MAP_MATERIAL_RESERVE;
+	Placing_t m_Placing;
+	bool m_bRefreshing = false;
+	std::shared_ptr<const xv::map::CScene> m_pRefreshNext;
 	std::atomic<bool> m_bStop{ false };
 	int m_nGeneration = 0;
 	std::vector<xv::map::RasterMaterial_t> m_Current;

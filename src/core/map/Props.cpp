@@ -52,7 +52,7 @@ PropList_t ListProps( const CScene &scene )
 	for ( std::size_t e = 0; e < scene.m_Entities.size(); e++ )
 	{
 		const EntityVisual_t &visual = scene.m_Entities[ e ];
-		if ( !visual.m_bPoint || !EndsWithMdl( visual.m_szModel ) )
+		if ( !visual.m_bPoint || !EndsWithMdl( visual.m_szModel ) || scene.m_Map.m_Entities[ e ].m_bDeleted )
 		{
 			continue;
 		}

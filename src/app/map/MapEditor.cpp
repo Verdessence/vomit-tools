@@ -966,6 +966,11 @@ void CMapEditor::SceneEdited( const std::vector<std::uint32_t> &changed )
 	{
 		StartResources();
 	}
+	// Entities moved, added or deleted: their sprites and props follow.
+	else if ( pScene && std::ranges::any_of( changed, [ pScene ]( std::uint32_t n ) { return n < pScene->GetObjectCount() && !pScene->IsSolidObject( n ); } ) )
+	{
+		m_pResources->Refresh( m_pDocument->GetSharedScene() );
+	}
 	for ( CMapView *pView : GetViews() )
 	{
 		if ( auto *p2D = qobject_cast<CMapView2D *>( pView ) )
