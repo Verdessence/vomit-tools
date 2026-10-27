@@ -36,6 +36,8 @@ add_library(vomit_tools_core STATIC
         map/Mesh.h
         map/Properties.cpp
         map/Properties.h
+        map/Props.cpp
+        map/Props.h
         map/Raster.cpp
         map/Raster.h
         map/Scene.cpp

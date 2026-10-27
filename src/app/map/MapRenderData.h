@@ -26,6 +26,7 @@ struct MapFrame_t
 {
 	std::shared_ptr<const xv::map::CScene> m_pScene;
 	std::shared_ptr<const xv::map::CMapMesh> m_pEntityMesh;
+	std::shared_ptr<const xv::map::CMapMesh> m_pPropMesh;
 	std::shared_ptr<const std::vector<xv::map::RasterMaterial_t>> m_pMaterials;
 	std::shared_ptr<const void> m_pTextures; // keeps the materials' textures alive
 	std::shared_ptr<const xv::sky::CCube> m_pSky;
@@ -57,9 +58,12 @@ public:
 	[[nodiscard]] std::uint32_t GetEntityMaterial() const;
 	// The map's sky, drawn on its sky faces.
 	void SetSky( std::shared_ptr<const xv::sky::CCube> pSky );
+	// The props placed in the world, and the entities they draw: those show no box.
+	void SetProps( std::shared_ptr<const xv::map::CMapMesh> pProps, std::vector<std::uint32_t> objects );
 
 private:
 	void Rebuild();
+	void BuildEntityBoxes();
 
 	const CMapDocument &m_Document;
 	const xv::map::CScene *m_pBuiltFor = nullptr;
@@ -67,4 +71,5 @@ private:
 	std::uint64_t m_nSettingsFor = ~0ull;
 	std::uint64_t m_nGeneration = 0;
 	MapFrame_t m_Frame;
+	std::vector<std::uint32_t> m_PropObjects; // sorted
 };

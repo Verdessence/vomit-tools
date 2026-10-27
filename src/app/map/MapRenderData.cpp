@@ -6,6 +6,8 @@
 //===========================================================================//
 #include "MapRenderData.h"
 
+#include <algorithm>
+
 #include "map/MapConstants.h"
 #include "map/MapDocument.h"
 
@@ -61,6 +63,10 @@ xv::map::RasterScene_t MapFrame_t::MakeScene() const
 	if ( m_pEntityMesh )
 	{
 		scene.m_Meshes.push_back( m_pEntityMesh.get() );
+	}
+	if ( m_pPropMesh )
+	{
+		scene.m_Meshes.push_back( m_pPropMesh.get() );
 	}
 	if ( m_pMaterials )
 	{
@@ -147,23 +153,8 @@ void CMapRenderData::Rebuild()
 		return;
 	}
 	m_Frame.m_pScene = m_Document.GetSharedScene();
-	auto pEntities = std::make_shared<xv::map::CMapMesh>();
-	for ( std::size_t e = 0; e < pScene->m_Entities.size(); e++ )
-	{
-		if ( pScene->m_Entities[ e ].m_bPoint )
-		{
-			AddBox( *pEntities, pScene->GetEntityBox( e ), pScene->EntityObject( e ) );
-		}
-	}
-	xv::map::MeshBatch_t batch;
-	batch.m_nMaterial = GetEntityMaterial();
-	batch.m_nChunk = ~0u; // no area: always considered
-	batch.m_nIndexCount = static_cast<std::uint32_t>( pEntities->m_Indices.size() );
-	if ( batch.m_nIndexCount > 0 )
-	{
-		pEntities->m_Batches.push_back( batch );
-	}
-	m_Frame.m_pEntityMesh = pEntities;
+	m_PropObjects.clear();
+	BuildEntityBoxes();
 
 	auto pMaterials = std::make_shared<std::vector<xv::map::RasterMaterial_t>>( pScene->m_Map.m_Materials.size() + 1 );
 	pMaterials->back().m_bObjectColor = true;
@@ -184,6 +175,32 @@ void CMapRenderData::Rebuild()
 }
 
 //-----------------------------------------------------------------------------
+// Purpose: The boxes of point entities, but for those drawn as their model.
+//-----------------------------------------------------------------------------
+void CMapRenderData::BuildEntityBoxes()
+{
+	const xv::map::CScene *pScene = m_Document.GetScene();
+	auto pEntities = std::make_shared<xv::map::CMapMesh>();
+	for ( std::size_t e = 0; pScene && e < pScene->m_Entities.size(); e++ )
+	{
+		const std::uint32_t nObject = pScene->EntityObject( e );
+		if ( pScene->m_Entities[ e ].m_bPoint && !std::ranges::binary_search( m_PropObjects, nObject ) )
+		{
+			AddBox( *pEntities, pScene->GetEntityBox( e ), nObject );
+		}
+	}
+	xv::map::MeshBatch_t batch;
+	batch.m_nMaterial = GetEntityMaterial();
+	batch.m_nChunk = ~0u; // no area: always considered
+	batch.m_nIndexCount = static_cast<std::uint32_t>( pEntities->m_Indices.size() );
+	if ( batch.m_nIndexCount > 0 )
+	{
+		pEntities->m_Batches.push_back( batch );
+	}
+	m_Frame.m_pEntityMesh = pEntities;
+}
+
+//-----------------------------------------------------------------------------
 // Purpose:
 //-----------------------------------------------------------------------------
 void CMapRenderData::SetMaterials( std::shared_ptr<const std::vector<xv::map::RasterMaterial_t>> pMaterials, std::shared_ptr<const void> pTextures )
@@ -192,17 +209,38 @@ void CMapRenderData::SetMaterials( std::shared_ptr<const std::vector<xv::map::Ra
 	{
 		Rebuild();
 	}
-	// The map's materials, then the one entity boxes are drawn with.
+	// The map's materials, then the one entity boxes are drawn with, then the props'.
 	auto pAll = std::make_shared<std::vector<xv::map::RasterMaterial_t>>( pMaterials ? *pMaterials : std::vector<xv::map::RasterMaterial_t>{} );
-	if ( const xv::map::CScene *pScene = m_Document.GetScene() )
+	const std::uint32_t nEntity = GetEntityMaterial();
+	if ( pAll->size() <= nEntity )
 	{
-		pAll->resize( pScene->m_Map.m_Materials.size() );
+		pAll->resize( nEntity + 1 );
 	}
 	xv::map::RasterMaterial_t entity;
 	entity.m_bObjectColor = true;
-	pAll->push_back( entity );
+	( *pAll )[ nEntity ] = entity;
 	m_Frame.m_pMaterials = std::move( pAll );
 	m_Frame.m_pTextures = std::move( pTextures );
+	m_nGeneration++;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+void CMapRenderData::SetProps( std::shared_ptr<const xv::map::CMapMesh> pProps, std::vector<std::uint32_t> objects )
+{
+	if ( m_Document.GetScene() != m_pBuiltFor )
+	{
+		Rebuild();
+	}
+	if ( pProps == m_Frame.m_pPropMesh )
+	{
+		return;
+	}
+	m_Frame.m_pPropMesh = std::move( pProps );
+	m_PropObjects = std::move( objects );
+	std::ranges::sort( m_PropObjects );
+	BuildEntityBoxes();
 	m_nGeneration++;
 }
 

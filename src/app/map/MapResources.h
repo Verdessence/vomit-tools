@@ -3,7 +3,7 @@
 //
 // Purpose: The textures the 3D views draw a map with, read from the game in the background: a
 //          batch of materials at a time, the ones covering most of the map first, so the views
-//          fill in while the rest arrive. Also the sky the map names.
+//          fill in while the rest arrive. Also the sky the map names, and the props' models.
 //
 //===========================================================================//
 #pragma once
@@ -40,6 +40,12 @@ public:
 	[[nodiscard]] std::shared_ptr<const std::vector<xv::map::RasterMaterial_t>> GetMaterials() const { return m_pMaterials; }
 	[[nodiscard]] std::shared_ptr<const void> GetTextures() const { return m_pTextures; }
 	[[nodiscard]] std::shared_ptr<const xv::sky::CCube> GetSky() const { return m_pSky; }
+	// The props placed in the world, once their models and materials are read, and the
+	// entities they draw (which then show no box).
+	[[nodiscard]] std::shared_ptr<const xv::map::CMapMesh> GetProps() const { return m_pProps; }
+	[[nodiscard]] const std::vector<std::uint32_t> &GetPropObjects() const { return m_PropObjects; }
+	[[nodiscard]] int GetModelsLoaded() const { return m_nModels; }
+	[[nodiscard]] int GetModelsTotal() const { return m_nModelsTotal; }
 	[[nodiscard]] int GetLoaded() const { return m_nLoaded; }
 	[[nodiscard]] int GetTotal() const { return m_nTotal; }
 	[[nodiscard]] bool IsFinished() const { return m_bFinished; }
@@ -71,6 +77,10 @@ private:
 	std::shared_ptr<const std::vector<xv::map::RasterMaterial_t>> m_pMaterials;
 	std::shared_ptr<const void> m_pTextures;
 	std::shared_ptr<const xv::sky::CCube> m_pSky;
+	std::shared_ptr<const xv::map::CMapMesh> m_pProps;
+	std::vector<std::uint32_t> m_PropObjects;
+	int m_nModels = 0;
+	int m_nModelsTotal = 0;
 	int m_nLoaded = 0;
 	int m_nTotal = 0;
 	bool m_bFinished = false;

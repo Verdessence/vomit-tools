@@ -2,14 +2,15 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
 // Purpose: A 2D view of the map, as Hammer draws one: top (x/y), front (y/z) or side (x/z),
-//          with its grid, wireframe brushes, entity boxes and the selection, panned and zoomed
-//          as in Hammer.
+//          with its grid, wireframe brushes, entity boxes or models and the selection, panned
+//          and zoomed as in Hammer.
 //
 //===========================================================================//
 #pragma once
 
 #include <array>
 #include <cstdint>
+#include <memory>
 #include <optional>
 #include <vector>
 
@@ -17,6 +18,7 @@
 #include <QRectF>
 
 #include "map/MapView.h"
+#include "map/Mesh.h"
 
 class QScrollBar;
 
@@ -40,6 +42,8 @@ struct MapFlatObject_t
 	std::uint32_t m_nSegmentCount = 0;
 	bool m_bPointEntity = false;        // drawn as its box
 	bool m_bInvalid = false;
+	std::uint32_t m_nFirstModelLine = 0; // a prop's model: its edges in the props' mesh lines
+	std::uint32_t m_nModelLineCount = 0;
 };
 
 class CMapView2D : public CMapView
@@ -106,6 +110,7 @@ private:
 	std::vector<QLineF> m_Segments;    // in map units
 	std::vector<std::uint32_t> m_ObjectIndex; // object number -> index into m_Objects, or ~0
 	const void *m_pBuiltFor = nullptr;
+	std::shared_ptr<const xv::map::CMapMesh> m_pProps; // the props the objects were built with
 
 	QScrollBar *m_pHorizontal = nullptr;
 	QScrollBar *m_pVertical = nullptr;

@@ -7,9 +7,13 @@
 #include "MapResources.h"
 
 #include <algorithm>
+#include <map>
 #include <numeric>
 
 #include "map/Materials.h"
+#include "map/Props.h"
+#include "map/Vmf.h"
+#include "model/Model.h"
 #include "texture/Vtf.h"
 #include "util/Parallel.h"
 
@@ -98,9 +102,13 @@ void CMapResources::Start( std::shared_ptr<const xv::map::CScene> pScene, std::o
 	m_bStop = false;
 	const int nGeneration = ++m_nGeneration;
 	const std::size_t nMaterials = pScene ? pScene->m_Map.m_Materials.size() : 0;
-	m_Current.assign( nMaterials, {} );
+	m_Current.assign( nMaterials + 1, {} ); // and the place kept for the entity boxes'
 	m_Keep.clear();
 	m_pSky.reset();
+	m_pProps.reset();
+	m_PropObjects.clear();
+	m_nModels = 0;
+	m_nModelsTotal = 0;
 	m_nLoaded = 0;
 	m_nTotal = game ? static_cast<int>( nMaterials ) : 0;
 	m_bFinished = !game || !pScene;
@@ -146,8 +154,59 @@ void CMapResources::Run( std::shared_ptr<const xv::map::CScene> pScene, xv::vfs:
 		} );
 	}
 
-	// Most triangles first: what the views show most of arrives first.
+	// Each material's base texture size, for placing models' texture coordinates.
 	const std::size_t nMaterials = pScene->m_Map.m_Materials.size();
+	std::vector<std::array<int, 2>> sizes( nMaterials + 1, { 128, 128 } );
+	auto load = [ & ]( const std::vector<std::pair<std::uint32_t, std::string>> &todo ) {
+		for ( std::size_t nStart = 0; nStart < todo.size() && !m_bStop; nStart += BATCH )
+		{
+			const std::size_t nEnd = std::min( todo.size(), nStart + BATCH );
+			std::vector<Loaded_t> batch( nEnd - nStart );
+			std::vector<std::optional<std::vector<std::byte>>> base( batch.size() );
+			std::vector<std::optional<std::vector<std::byte>>> base2( batch.size() );
+			for ( std::size_t i = 0; i < batch.size(); i++ )
+			{
+				Loaded_t &loaded = batch[ i ];
+				const auto &[ nMaterial, szName ] = todo[ nStart + i ];
+				loaded.m_nMaterial = nMaterial;
+				loaded.m_Info = xv::map::ReadMaterialInfo( szName, read );
+				loaded.m_bTool = IsToolMaterial( loaded.m_Info, szName );
+				if ( !loaded.m_Info.m_szTexture.empty() )
+				{
+					base[ i ] = read( xv::material::TexturePath( loaded.m_Info.m_szTexture ) );
+				}
+				if ( loaded.m_Info.m_bBlend && !loaded.m_Info.m_szTexture2.empty() )
+				{
+					base2[ i ] = read( xv::material::TexturePath( loaded.m_Info.m_szTexture2 ) );
+				}
+			}
+			xv::ParallelFor( batch.size(), 1, [ & ]( std::size_t nBegin, std::size_t nFinish ) {
+				for ( std::size_t i = nBegin; i < nFinish; i++ )
+				{
+					if ( base[ i ] )
+					{
+						batch[ i ].m_pBase = ReadMapTexture( *base[ i ], nMaxSize );
+					}
+					if ( base2[ i ] )
+					{
+						batch[ i ].m_pBase2 = ReadMapTexture( *base2[ i ], nMaxSize );
+					}
+					// Source draws its checker for a material, or a texture, it can't find.
+					batch[ i ].m_bMissing = !batch[ i ].m_Info.m_bFound || ( !batch[ i ].m_Info.m_szTexture.empty() && !batch[ i ].m_pBase );
+				}
+			} );
+			for ( const Loaded_t &loaded : batch )
+			{
+				if ( loaded.m_pBase && loaded.m_nMaterial < sizes.size() )
+				{
+					sizes[ loaded.m_nMaterial ] = { loaded.m_pBase->m_nWidth, loaded.m_pBase->m_nHeight };
+				}
+			}
+			post( [ this, batch = std::move( batch ) ]() mutable { Take( std::move( batch ) ); } );
+		}
+	};
+
+	// Most triangles first: what the views show most of arrives first.
 	std::vector<std::size_t> triangles( nMaterials, 0 );
 	for ( const xv::map::MeshBatch_t &batch : pScene->m_Mesh.m_Batches )
 	{
@@ -159,45 +218,95 @@ void CMapResources::Run( std::shared_ptr<const xv::map::CScene> pScene, xv::vfs:
 	std::vector<std::uint32_t> order( nMaterials );
 	std::iota( order.begin(), order.end(), 0u );
 	std::ranges::stable_sort( order, std::greater<>{}, [ & ]( std::uint32_t n ) { return triangles[ n ]; } );
-
-	for ( std::size_t nStart = 0; nStart < order.size() && !m_bStop; nStart += BATCH )
+	std::vector<std::pair<std::uint32_t, std::string>> todo;
+	for ( const std::uint32_t n : order )
 	{
-		const std::size_t nEnd = std::min( order.size(), nStart + BATCH );
-		std::vector<Loaded_t> batch( nEnd - nStart );
-		std::vector<std::optional<std::vector<std::byte>>> base( batch.size() );
-		std::vector<std::optional<std::vector<std::byte>>> base2( batch.size() );
-		for ( std::size_t i = 0; i < batch.size(); i++ )
+		todo.emplace_back( n, pScene->m_Map.m_Materials[ n ] );
+	}
+	load( todo );
+
+	// Then the props: each model once, the materials of theirs the map doesn't use yet, and
+	// all of them placed in one mesh. The table keeps one place after the map's own materials
+	// for the entity boxes'.
+	const xv::map::PropList_t list = xv::map::ListProps( *pScene );
+	std::vector<xv::map::PropModel_t> models( list.m_Keys.size() );
+	std::map<std::string, std::uint32_t, std::less<>> indexOf;
+	for ( std::uint32_t n = 0; n < nMaterials; n++ )
+	{
+		indexOf.try_emplace( pScene->m_Map.m_Materials[ n ], n );
+	}
+	todo.clear();
+	auto nNext = static_cast<std::uint32_t>( nMaterials + 1 );
+	const xv::model::Reader_t readModel = [ &fileSystem ]( std::string_view szPath ) { return fileSystem.Read( szPath ); };
+	int nModels = 0;
+	for ( std::size_t k = 0; k < list.m_Keys.size() && !m_bStop; k++ )
+	{
+		xv::model::Selection_t selection;
+		selection.m_nSkin = list.m_Keys[ k ].m_nSkin;
+		std::optional<xv::model::CModel> model = xv::model::LoadModel( list.m_Keys[ k ].m_szModel, readModel, nullptr, selection );
+		if ( !model )
 		{
-			Loaded_t &loaded = batch[ i ];
-			loaded.m_nMaterial = order[ nStart + i ];
-			const std::string &szName = pScene->m_Map.m_Materials[ loaded.m_nMaterial ];
-			loaded.m_Info = xv::map::ReadMaterialInfo( szName, read );
-			loaded.m_bTool = IsToolMaterial( loaded.m_Info, szName );
-			if ( !loaded.m_Info.m_szTexture.empty() )
+			continue;
+		}
+		nModels++;
+		for ( std::string szMaterial : model->m_Materials )
+		{
+			if ( szMaterial.size() > 4 && szMaterial.ends_with( ".vmt" ) )
 			{
-				base[ i ] = read( xv::material::TexturePath( loaded.m_Info.m_szTexture ) );
+				szMaterial.resize( szMaterial.size() - 4 );
 			}
-			if ( loaded.m_Info.m_bBlend && !loaded.m_Info.m_szTexture2.empty() )
+			szMaterial = xv::map::NormalizeMaterial( szMaterial );
+			const auto [ it, bAdded ] = indexOf.try_emplace( szMaterial, nNext );
+			if ( bAdded )
 			{
-				base2[ i ] = read( xv::material::TexturePath( loaded.m_Info.m_szTexture2 ) );
+				todo.emplace_back( nNext++, szMaterial );
+			}
+			models[ k ].m_Materials.push_back( it->second );
+		}
+		models[ k ].m_pModel = std::make_shared<const xv::model::CModel>( std::move( *model ) );
+	}
+	post( [ this, nMore = static_cast<int>( todo.size() ), nModels, nKeys = static_cast<int>( list.m_Keys.size() ) ] {
+		m_nTotal += nMore;
+		m_nModels = nModels;
+		m_nModelsTotal = nKeys;
+	} );
+	sizes.resize( nNext, { 128, 128 } );
+	load( todo );
+	if ( !m_bStop && !list.m_Entities.empty() )
+	{
+		for ( xv::map::PropModel_t &prop : models )
+		{
+			for ( const std::uint32_t nMaterial : prop.m_Materials )
+			{
+				prop.m_TextureSizes.push_back( sizes[ nMaterial ] );
 			}
 		}
-		xv::ParallelFor( batch.size(), 1, [ & ]( std::size_t nBegin, std::size_t nFinish ) {
-			for ( std::size_t i = nBegin; i < nFinish; i++ )
+		std::vector<xv::map::PropPlacement_t> placements;
+		std::vector<std::uint32_t> drawn;
+		for ( const auto &[ nObject, nModel ] : list.m_Entities )
+		{
+			if ( !models[ nModel ].m_pModel )
 			{
-				if ( base[ i ] )
-				{
-					batch[ i ].m_pBase = ReadMapTexture( *base[ i ], nMaxSize );
-				}
-				if ( base2[ i ] )
-				{
-					batch[ i ].m_pBase2 = ReadMapTexture( *base2[ i ], nMaxSize );
-				}
-				// Source draws its checker for a material, or a texture, it can't find.
-				batch[ i ].m_bMissing = !batch[ i ].m_Info.m_bFound || ( !batch[ i ].m_Info.m_szTexture.empty() && !batch[ i ].m_pBase );
+				continue;
 			}
+			const xv::map::EntityVisual_t &visual = pScene->m_Entities[ nObject - pScene->m_Solids.size() ];
+			xv::map::PropPlacement_t placement;
+			placement.m_nObject = nObject;
+			placement.m_nModel = nModel;
+			placement.m_Origin = visual.m_Origin;
+			placement.m_Angles = visual.m_Angles;
+			// lightprop draws a light's model aimed the way its pitch key says.
+			placement.m_Angles[ 0 ] = visual.m_bInvertPitch ? -visual.m_Angles[ 0 ] : visual.m_Angles[ 0 ];
+			placement.m_flScale = visual.m_flModelScale;
+			placements.push_back( placement );
+			drawn.push_back( nObject );
+		}
+		auto pProps = std::make_shared<const xv::map::CMapMesh>( xv::map::BuildPropMesh( models, placements ) );
+		post( [ this, pProps, drawn = std::move( drawn ) ]() mutable {
+			m_pProps = pProps;
+			m_PropObjects = std::move( drawn );
+			emit Arrived();
 		} );
-		post( [ this, batch = std::move( batch ) ]() mutable { Take( std::move( batch ) ); } );
 	}
 	post( [ this ] {
 		m_bFinished = true;
@@ -214,7 +323,7 @@ void CMapResources::Take( std::vector<Loaded_t> batch )
 	{
 		if ( loaded.m_nMaterial >= m_Current.size() )
 		{
-			continue;
+			m_Current.resize( loaded.m_nMaterial + 1 );
 		}
 		const xv::map::MaterialInfo_t &info = loaded.m_Info;
 		xv::map::RasterMaterial_t material;

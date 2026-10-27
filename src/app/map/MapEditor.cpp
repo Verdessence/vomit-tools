@@ -729,11 +729,17 @@ void CMapEditor::ResourcesArrived()
 {
 	m_pRenderData->SetMaterials( m_pResources->GetMaterials(), m_pResources->GetTextures() );
 	m_pRenderData->SetSky( m_pResources->GetSky() );
+	m_pRenderData->SetProps( m_pResources->GetProps(), m_pResources->GetPropObjects() );
 	for ( CMapView *pView : GetViews() )
 	{
 		if ( auto *p3D = qobject_cast<CMapView3D *>( pView ) )
 		{
 			p3D->Redraw();
+		}
+		else
+		{
+			// The props' models, once they come.
+			pView->update();
 		}
 	}
 	UpdateGameStatus();
@@ -753,6 +759,11 @@ void CMapEditor::UpdateGameStatus()
 	else if ( !m_pResources->IsFinished() )
 	{
 		szText += tr( "; textures %1 of %2" ).arg( m_pResources->GetLoaded() ).arg( m_pResources->GetTotal() );
+	}
+	else if ( m_pResources->GetModelsLoaded() < m_pResources->GetModelsTotal() )
+	{
+		// The others show as boxes.
+		szText += tr( "; %1 of %2 models read" ).arg( m_pResources->GetModelsLoaded() ).arg( m_pResources->GetModelsTotal() );
 	}
 	m_pStatusGame->setText( szText );
 	m_pStatusGame->setToolTip( szText );
