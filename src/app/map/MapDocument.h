@@ -60,6 +60,8 @@ public:
 	[[nodiscard]] const xv::map::CScene *GetScene() const { return m_pScene.get(); }
 	[[nodiscard]] std::shared_ptr<const xv::map::CScene> GetSharedScene() const { return m_pScene; }
 	[[nodiscard]] const std::optional<xv::vfs::CGameInfo> &GetGame() const { return m_Game; }
+	// How many maps have finished loading: an edit makes a new scene, but the same map.
+	[[nodiscard]] int GetLoadCount() const { return m_nLoads; }
 	[[nodiscard]] QString GetFgdSource() const { return m_szFgdSource; }
 	// What new objects get, from the game's Hammer configuration.
 	[[nodiscard]] const xv::map::HammerDefaults_t &GetDefaults() const { return m_Defaults; }
@@ -142,6 +144,7 @@ private:
 	std::thread m_Worker;
 	std::atomic<bool> m_bStop{ false };
 	int m_nGeneration = 0;
+	int m_nLoads = 0;
 
 	std::vector<std::uint8_t> m_UserShown; // per object: its visgroups shown it
 	std::vector<std::uint8_t> m_AutoShown;

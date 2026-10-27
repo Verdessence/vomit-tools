@@ -332,6 +332,7 @@ void CMapDocument::Finish( std::shared_ptr<xv::map::CScene> pScene, QString szFg
 {
 	m_szFgdSource = std::move( szFgdSource );
 	m_Defaults = std::move( defaults );
+	m_nLoads++;
 	const std::uint32_t nObjects = pScene->GetObjectCount();
 	m_UserShown.assign( nObjects, 1 );
 	m_AutoShown.assign( nObjects, 1 );

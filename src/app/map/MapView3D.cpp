@@ -187,7 +187,7 @@ xv::map::RasterMode_t CMapView3D::GetMode() const
 void CMapView3D::PlaceCamera()
 {
 	const xv::map::CScene *pScene = GetDocument().GetScene();
-	m_pCameraFor = pScene;
+	m_nCameraLoad = GetDocument().GetLoadCount();
 	m_Camera.m_Eye = {};
 	m_Camera.m_flYaw = 0.0;
 	m_Camera.m_flPitch = 0.0;
@@ -237,7 +237,8 @@ void CMapView3D::Changed()
 //-----------------------------------------------------------------------------
 MapFrame_t CMapView3D::MakeFrame( QSize size )
 {
-	if ( GetDocument().GetScene() != m_pCameraFor && GetDocument().GetScene() )
+	// Another map, not an edit's new snapshot of this one: those keep the camera where it is.
+	if ( GetDocument().GetScene() && GetDocument().GetLoadCount() != m_nCameraLoad )
 	{
 		PlaceCamera();
 	}

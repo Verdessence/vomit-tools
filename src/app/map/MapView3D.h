@@ -121,7 +121,7 @@ private:
 
 	MapViewType_t m_nType;
 	xv::map::CViewCamera m_Camera;
-	const void *m_pCameraFor = nullptr; // the scene the camera was placed for
+	int m_nCameraLoad = -1; // the map (by the document's load count) the camera was placed for
 	CGpuView *m_pGpu = nullptr;
 	CMapOverlay3D *m_pOverlay = nullptr;
 
