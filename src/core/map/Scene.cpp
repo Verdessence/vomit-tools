@@ -14,12 +14,45 @@ namespace xv::map
 //-----------------------------------------------------------------------------
 int CScene::GetObjectEntity( std::uint32_t nObject ) const
 {
-	if ( IsSolidObject( nObject ) )
+	if ( nObject >= m_Objects.size() )
 	{
-		return m_Map.m_Solids[ nObject ].m_nEntity;
+		return -1;
 	}
-	const std::size_t nEntity = nObject - m_Solids.size();
-	return nEntity < m_Entities.size() ? static_cast<int>( nEntity ) : -1;
+	const ObjectRef_t object = m_Objects[ nObject ];
+	return object.m_bSolid ? m_Map.m_Solids[ object.m_nIndex ].m_nEntity : static_cast<int>( object.m_nIndex );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+bool CScene::IsDeleted( std::uint32_t nObject ) const
+{
+	if ( nObject >= m_Objects.size() )
+	{
+		return true;
+	}
+	const ObjectRef_t object = m_Objects[ nObject ];
+	return object.m_bSolid ? m_Map.m_Solids[ object.m_nIndex ].m_bDeleted : m_Map.m_Entities[ object.m_nIndex ].m_bDeleted;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+void CScene::NumberObjects()
+{
+	m_Objects.clear();
+	m_SolidObjects.resize( m_Map.m_Solids.size() );
+	m_EntityObjects.resize( m_Map.m_Entities.size() );
+	for ( std::uint32_t s = 0; s < m_Map.m_Solids.size(); s++ )
+	{
+		m_SolidObjects[ s ] = static_cast<std::uint32_t>( m_Objects.size() );
+		m_Objects.push_back( { true, s } );
+	}
+	for ( std::uint32_t e = 0; e < m_Map.m_Entities.size(); e++ )
+	{
+		m_EntityObjects[ e ] = static_cast<std::uint32_t>( m_Objects.size() );
+		m_Objects.push_back( { false, e } );
+	}
 }
 
 //-----------------------------------------------------------------------------
@@ -27,11 +60,8 @@ int CScene::GetObjectEntity( std::uint32_t nObject ) const
 //-----------------------------------------------------------------------------
 const EditorInfo_t &CScene::GetObjectEditor( std::uint32_t nObject ) const
 {
-	if ( IsSolidObject( nObject ) )
-	{
-		return m_Map.m_Solids[ nObject ].m_Editor;
-	}
-	return m_Map.m_Entities[ nObject - m_Solids.size() ].m_Editor;
+	const ObjectRef_t object = m_Objects[ nObject ];
+	return object.m_bSolid ? m_Map.m_Solids[ object.m_nIndex ].m_Editor : m_Map.m_Entities[ object.m_nIndex ].m_Editor;
 }
 
 //-----------------------------------------------------------------------------
@@ -51,12 +81,12 @@ Box_t CScene::GetEntityBox( std::size_t nEntity ) const
 //-----------------------------------------------------------------------------
 int CScene::GetObjectId( std::uint32_t nObject ) const
 {
-	if ( IsSolidObject( nObject ) )
+	if ( nObject >= m_Objects.size() )
 	{
-		return m_Map.m_Solids[ nObject ].m_nId;
+		return 0;
 	}
-	const std::size_t nEntity = nObject - m_Solids.size();
-	return nEntity < m_Map.m_Entities.size() ? m_Map.m_Entities[ nEntity ].m_nId : 0;
+	const ObjectRef_t object = m_Objects[ nObject ];
+	return object.m_bSolid ? m_Map.m_Solids[ object.m_nIndex ].m_nId : m_Map.m_Entities[ object.m_nIndex ].m_nId;
 }
 
 //-----------------------------------------------------------------------------
@@ -92,6 +122,7 @@ std::unique_ptr<CScene> BuildScene( CMap map, std::shared_ptr<const CFgd> pFgd, 
 	{
 		pScene->m_Entities.push_back( DescribeEntity( entity, pScene->m_pFgd.get() ) );
 	}
+	pScene->NumberObjects();
 	if ( !progress( 60, "mesh" ) )
 	{
 		return nullptr;

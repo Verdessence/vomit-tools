@@ -195,7 +195,7 @@ void CMapView2D::Rebuild()
 			continue;
 		}
 		MapFlatObject_t object;
-		object.m_nObject = i;
+		object.m_nObject = pScene->SolidObject( i );
 		object.m_bInvalid = !geometry.IsValid();
 		object.m_Bounds = QRectF{ QPointF{ geometry.m_Bounds.m_Mins[ a0 ], geometry.m_Bounds.m_Mins[ a1 ] }, QPointF{ geometry.m_Bounds.m_Maxs[ a0 ], geometry.m_Bounds.m_Maxs[ a1 ] } };
 		object.m_nFirstSegment = static_cast<std::uint32_t>( m_Segments.size() );
@@ -226,7 +226,7 @@ void CMapView2D::Rebuild()
 			m_Segments.emplace_back( static_cast<double>( key[ 0 ] ) / 16.0, static_cast<double>( key[ 1 ] ) / 16.0, static_cast<double>( key[ 2 ] ) / 16.0, static_cast<double>( key[ 3 ] ) / 16.0 );
 		}
 		object.m_nSegmentCount = static_cast<std::uint32_t>( m_Segments.size() ) - object.m_nFirstSegment;
-		m_ObjectIndex[ i ] = static_cast<std::uint32_t>( m_Objects.size() );
+		m_ObjectIndex[ object.m_nObject ] = static_cast<std::uint32_t>( m_Objects.size() );
 		m_Objects.push_back( object );
 	}
 	for ( std::size_t e = 0; e < pScene->m_Entities.size(); e++ )
@@ -692,7 +692,7 @@ void CMapView2D::PaintObjects( QPainter &painter, const QRectF &visible ) const
 		{
 			continue;
 		}
-		const xv::map::EntityVisual_t &visual = pScene->m_Entities[ pObject->m_nObject - pScene->m_Solids.size() ];
+		const xv::map::EntityVisual_t &visual = pScene->m_Entities[ pScene->GetIndex( pObject->m_nObject ) ];
 		painter.setPen( QPen{ ToColor( ( *m_pLineColors )[ pObject->m_nObject ] ), 0 } );
 		const QPointF centre = ToWidget( Flatten( visual.m_Origin ) );
 		for ( const double flRadius : visual.m_Spheres )
@@ -717,7 +717,7 @@ void CMapView2D::PaintObjects( QPainter &painter, const QRectF &visible ) const
 			{
 				continue;
 			}
-			const std::size_t nEntity = object.m_nObject - pScene->m_Solids.size();
+			const std::size_t nEntity = pScene->GetIndex( object.m_nObject );
 			const xv::map::Entity_t &entity = pScene->m_Map.m_Entities[ nEntity ];
 			const std::string_view szName = entity.GetValue( "targetname" ).empty() ? entity.GetClassname() : entity.GetValue( "targetname" );
 			const QRectF box = QRectF{ ToWidget( object.m_Bounds.topLeft() ), ToWidget( object.m_Bounds.bottomRight() ) }.normalized();

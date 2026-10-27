@@ -179,9 +179,14 @@ AutoVisgroup_t BuildAutoVisgroups( const CScene &scene )
 
 	std::vector<int> ranks( map.m_Materials.size() );
 	std::ranges::transform( map.m_Materials, ranks.begin(), []( const std::string &szMaterial ) { return ToolRank( szMaterial ); } );
-	for ( std::uint32_t n = 0; n < map.m_Solids.size(); n++ )
+	for ( std::uint32_t s = 0; s < map.m_Solids.size(); s++ )
 	{
-		const Solid_t &solid = map.m_Solids[ n ];
+		const Solid_t &solid = map.m_Solids[ s ];
+		const std::uint32_t n = scene.SolidObject( s );
+		if ( solid.m_bDeleted )
+		{
+			continue;
+		}
 		bool bAllTools = !solid.m_Sides.empty();
 		bool bDisplacement = false;
 		int nBest = static_cast<int>( TOOL_GROUPS.size() );
@@ -214,6 +219,10 @@ AutoVisgroup_t BuildAutoVisgroups( const CScene &scene )
 		const Entity_t &entity = map.m_Entities[ i ];
 		const std::string_view szClass = entity.GetClassname();
 		const std::uint32_t nObject = scene.EntityObject( i );
+		if ( entity.m_bDeleted )
+		{
+			continue;
+		}
 		if ( !entity.m_Solids.empty() )
 		{
 			brushEntity( szClass, nObject );

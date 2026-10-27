@@ -357,7 +357,7 @@ void CMapResources::Run( std::shared_ptr<const xv::map::CScene> pScene, xv::vfs:
 			{
 				keys.push_back( list.m_Keys[ nKey ] );
 			}
-			const xv::map::EntityVisual_t &visual = inner.m_Entities[ nInner - inner.m_Solids.size() ];
+			const xv::map::EntityVisual_t &visual = inner.m_Entities[ inner.GetIndex( nInner ) ];
 			std::array<double, 3> angles = visual.m_Angles;
 			// lightprop draws a light's model aimed the way its pitch key says.
 			angles[ 0 ] = visual.m_bInvertPitch ? -angles[ 0 ] : angles[ 0 ];

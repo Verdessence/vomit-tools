@@ -89,7 +89,7 @@ std::vector<Box_t> ObjectBounds( const CScene &scene )
 	std::vector<Box_t> bounds( scene.GetObjectCount() );
 	for ( std::size_t s = 0; s < scene.m_Solids.size(); s++ )
 	{
-		bounds[ s ] = scene.m_Solids[ s ].m_Bounds;
+		bounds[ scene.SolidObject( s ) ] = scene.m_Solids[ s ].m_Bounds;
 	}
 	for ( std::size_t e = 0; e < scene.m_Entities.size(); e++ )
 	{

@@ -206,7 +206,7 @@ void CMapDocument::Changed( bool bVisibility )
 //-----------------------------------------------------------------------------
 bool CMapDocument::IsShown( std::uint32_t nObject ) const
 {
-	if ( !m_pScene || nObject >= m_UserShown.size() )
+	if ( !m_pScene || nObject >= m_UserShown.size() || m_pScene->IsDeleted( nObject ) )
 	{
 		return false;
 	}
@@ -217,7 +217,7 @@ bool CMapDocument::IsShown( std::uint32_t nObject ) const
 	}
 	if ( m_pScene->IsSolidObject( nObject ) )
 	{
-		const int nEntity = m_pScene->m_Map.m_Solids[ nObject ].m_nEntity;
+		const int nEntity = m_pScene->m_Map.m_Solids[ m_pScene->GetIndex( nObject ) ].m_nEntity;
 		return nEntity < 0 || own( m_pScene->EntityObject( static_cast<std::size_t>( nEntity ) ) );
 	}
 	return true;
@@ -468,7 +468,7 @@ std::vector<std::uint32_t> CMapDocument::Expand( std::uint32_t nObject ) const
 		into.push_back( m_pScene->EntityObject( static_cast<std::size_t>( nEntity ) ) );
 		for ( const std::uint32_t nSolid : m_pScene->m_Map.m_Entities[ static_cast<std::size_t>( nEntity ) ].m_Solids )
 		{
-			into.push_back( nSolid );
+			into.push_back( m_pScene->SolidObject( nSolid ) );
 		}
 	};
 	withEntity( nObject, objects );
@@ -505,7 +505,7 @@ std::vector<std::uint32_t> CMapDocument::Expand( std::uint32_t nObject ) const
 			for ( std::uint32_t n = 0; n < m_pScene->GetObjectCount(); n++ )
 			{
 				const int nGroup = m_pScene->GetObjectEditor( n ).m_nGroup;
-				if ( nGroup != 0 && groups.contains( topGroup( nGroup ) ) )
+				if ( nGroup != 0 && !m_pScene->IsDeleted( n ) && groups.contains( topGroup( nGroup ) ) )
 				{
 					objects.push_back( n );
 					withEntity( n, objects );
@@ -528,9 +528,9 @@ xv::map::Box_t CMapDocument::GetObjectBounds( std::uint32_t nObject ) const
 	}
 	if ( m_pScene->IsSolidObject( nObject ) )
 	{
-		return m_pScene->m_Solids[ nObject ].m_Bounds;
+		return m_pScene->m_Solids[ m_pScene->GetIndex( nObject ) ].m_Bounds;
 	}
-	const std::size_t nEntity = nObject - m_pScene->m_Solids.size();
+	const std::size_t nEntity = m_pScene->GetIndex( nObject );
 	if ( m_pScene->m_Entities[ nEntity ].m_bPoint )
 	{
 		return m_pScene->GetEntityBox( nEntity );

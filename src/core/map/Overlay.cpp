@@ -389,7 +389,7 @@ CMapMesh BuildOverlayMesh( const CScene &scene, std::span<const OverlayMaterial_
 		for ( std::size_t s = 0; s < scene.m_Solids.size(); s++ )
 		{
 			const SolidGeometry_t &geometry = scene.m_Solids[ s ];
-			if ( !geometry.m_Bounds.Intersects( reach ) )
+			if ( scene.m_Map.m_Solids[ s ].m_bDeleted || !geometry.m_Bounds.Intersects( reach ) )
 			{
 				continue;
 			}

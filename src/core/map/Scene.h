@@ -29,8 +29,19 @@
 namespace xv::map
 {
 
+// What an object number stands for: a solid or an entity of the map, by its index.
+struct ObjectRef_t
+{
+	bool m_bSolid = true;
+	std::uint32_t m_nIndex = 0;
+};
+
 // A copy is a snapshot: copies share everything until one changes it (see CSharedVector), so an
 // edit makes a new scene for little, and threads go on reading the one they were given.
+//
+// Views number what can be picked as objects. As read, the solids come first, then the entities;
+// what edits add is numbered after everything there was, and what they delete keeps its number
+// (the object is marked deleted), so a number means the same object for the map's lifetime.
 class CScene
 {
 public:
@@ -50,12 +61,22 @@ public:
 	std::optional<Skybox3D_t> m_Skybox3D;   // the room around the sky_camera, if there is one
 	// How far the map may reach on each axis: the FGD's @mapsize (Source's 16384 without one).
 	double m_flWorldLimit = 16384.0;
+	std::vector<ObjectRef_t> m_Objects;         // by object number
+	std::vector<std::uint32_t> m_SolidObjects;  // by solid: its object number
+	std::vector<std::uint32_t> m_EntityObjects; // by entity: its object number
 
 	[[nodiscard]] const CMapMesh &GetMesh() const { return *m_pMesh; }
 	[[nodiscard]] const CMapMesh &GetInstanceMesh() const { return *m_pInstanceMesh; }
-	[[nodiscard]] std::uint32_t GetObjectCount() const { return static_cast<std::uint32_t>( m_Solids.size() + m_Entities.size() ); }
-	[[nodiscard]] std::uint32_t EntityObject( std::size_t nEntity ) const { return static_cast<std::uint32_t>( m_Solids.size() + nEntity ); }
-	[[nodiscard]] bool IsSolidObject( std::uint32_t nObject ) const { return nObject < m_Solids.size(); }
+	[[nodiscard]] std::uint32_t GetObjectCount() const { return static_cast<std::uint32_t>( m_Objects.size() ); }
+	[[nodiscard]] std::uint32_t EntityObject( std::size_t nEntity ) const { return m_EntityObjects[ nEntity ]; }
+	[[nodiscard]] std::uint32_t SolidObject( std::size_t nSolid ) const { return m_SolidObjects[ nSolid ]; }
+	[[nodiscard]] bool IsSolidObject( std::uint32_t nObject ) const { return nObject < m_Objects.size() && m_Objects[ nObject ].m_bSolid; }
+	// The solid or entity an object is (its index in m_Map.m_Solids or m_Map.m_Entities).
+	[[nodiscard]] std::uint32_t GetIndex( std::uint32_t nObject ) const { return m_Objects[ nObject ].m_nIndex; }
+	// Whether an object was deleted (its number is not used again).
+	[[nodiscard]] bool IsDeleted( std::uint32_t nObject ) const;
+	// Numbers the solids, then the entities, as a scene is numbered when it is read.
+	void NumberObjects();
 	// The entity an object is, or owns it (a brush entity's solid); -1 for world solids.
 	[[nodiscard]] int GetObjectEntity( std::uint32_t nObject ) const;
 	// The editor notes of an object: a solid's own, or its entity's.

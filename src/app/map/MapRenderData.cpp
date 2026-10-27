@@ -170,7 +170,7 @@ std::vector<std::array<std::uint8_t, 3>> MapLineColors( const xv::map::CScene &s
 		const int nEntity = scene.GetObjectEntity( n );
 		const xv::map::EditorInfo_t &editor = nEntity >= 0 ? map.m_Entities[ static_cast<std::size_t>( nEntity ) ].m_Editor : scene.GetObjectEditor( n );
 		std::optional<QColor> grouped = bGroups ? groupColor( editor.m_nGroup ) : std::nullopt;
-		if ( scene.IsSolidObject( n ) && !scene.m_Solids[ n ].IsValid() )
+		if ( scene.IsSolidObject( n ) && !scene.m_Solids[ scene.GetIndex( n ) ].IsValid() )
 		{
 			color = preferences.m_Colors.m_Invalid;
 		}
@@ -261,7 +261,7 @@ void CMapRenderData::UpdateFlatColors()
 		xv::map::Color_t color = pScene->GetObjectEditor( n ).m_Color;
 		if ( !pScene->IsSolidObject( n ) )
 		{
-			const xv::map::EntityVisual_t &visual = pScene->m_Entities[ n - pScene->m_Solids.size() ];
+			const xv::map::EntityVisual_t &visual = pScene->m_Entities[ pScene->GetIndex( n ) ];
 			color = visual.m_bClassColor ? visual.m_Color : xv::map::Color_t{ static_cast<std::uint8_t>( entity.red() ), static_cast<std::uint8_t>( entity.green() ), static_cast<std::uint8_t>( entity.blue() ) };
 		}
 		( *pFlat )[ n ] = { color.m_nR, color.m_nG, color.m_nB };
@@ -488,7 +488,7 @@ MapFrame_t CMapRenderData::Snapshot( const xv::map::CViewCamera &camera, const x
 		{
 			std::uint8_t nFlags = ( *pFlags )[ n ] | ( m_Document.IsShown( n ) ? xv::map::RASTER_OBJECT_SHOWN : 0 );
 			nFlags |= m_Document.IsSelected( n ) ? xv::map::RASTER_OBJECT_SELECTED : 0;
-			nFlags |= pScene->IsSolidObject( n ) && !pScene->m_Solids[ n ].IsValid() ? xv::map::RASTER_OBJECT_INVALID : 0;
+			nFlags |= pScene->IsSolidObject( n ) && !pScene->m_Solids[ pScene->GetIndex( n ) ].IsValid() ? xv::map::RASTER_OBJECT_INVALID : 0;
 			( *pFlags )[ n ] = nFlags;
 		}
 		m_Frame.m_pFlags = pFlags;
