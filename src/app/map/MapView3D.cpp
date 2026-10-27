@@ -87,6 +87,7 @@ CMapView3D::CMapView3D( CMapEditor &editor, MapViewType_t nType, QWidget *pParen
 	m_Camera.m_flFar = CPreferences::Instance().GetMapPreferences().m_flRenderDistance;
 	m_pTick = new QTimer( this );
 	m_pTick->setInterval( TICK_MS );
+	m_pTick->setTimerType( Qt::PreciseTimer );
 	connect( m_pTick, &QTimer::timeout, this, &CMapView3D::Tick );
 	m_pSettle = new QTimer( this );
 	m_pSettle->setSingleShot( true );
@@ -124,7 +125,11 @@ void CMapView3D::SetUseGpu( bool bOn )
 #ifdef VOMIT_TOOLS_GPU
 	if ( bOn )
 	{
-		m_pGpu = new CGpuView( std::make_unique<CMapRenderer>( [ this ]( QSize size ) { return MakeFrame( size ); } ), this );
+		m_pGpu = new CGpuView( std::make_unique<CMapRenderer>( [ this ]( QSize size ) {
+			StepFlight();
+			return MakeFrame( size );
+		} ),
+			this );
 		m_pGpu->setAttribute( Qt::WA_TransparentForMouseEvents );
 		m_pGpu->setFocusPolicy( Qt::NoFocus );
 		m_pGpu->setGeometry( rect() );
@@ -675,7 +680,17 @@ void CMapView3D::keyPressEvent( QKeyEvent *pEvent )
 			{
 				m_flSpeed = 0.0;
 				m_Clock.start();
-				m_pTick->start();
+				// On the graphics card the camera moves once a frame, by the time since the last
+				// one, so it moves as smoothly as the display shows it; a timer of its own beats
+				// against the display's refresh and judders.
+				if ( m_pGpu )
+				{
+					m_pGpu->update();
+				}
+				else
+				{
+					m_pTick->start();
+				}
 			}
 			m_Held.push_back( *nAction );
 		}
@@ -768,6 +783,22 @@ void CMapView3D::Fly( double flSeconds )
 		m_Camera.m_Eye = xv::map::Add( m_Camera.m_Eye, xv::map::Scale( xv::map::Normalized( vecMove ), m_flSpeed * flSeconds ) );
 		Changed();
 	}
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: The card's frame is about to be made: held keys move the camera by the time since the
+//          last one, and ask for the next frame.
+//-----------------------------------------------------------------------------
+void CMapView3D::StepFlight()
+{
+	if ( m_Held.empty() )
+	{
+		return;
+	}
+	const double flSeconds = std::min( 0.1, static_cast<double>( m_Clock.nsecsElapsed() ) / 1e9 );
+	m_Clock.restart();
+	Fly( flSeconds );
+	m_pGpu->update();
 }
 
 //-----------------------------------------------------------------------------

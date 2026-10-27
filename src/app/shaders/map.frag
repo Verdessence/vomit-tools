@@ -13,8 +13,8 @@ layout(location = 5) in vec3 v_world;
 layout(location = 0) out vec4 fragColor;
 
 layout(std140, binding = 0) uniform Frame {
-	mat4 viewProjection;
-	vec4 eye;
+	mat4 viewProjection; // looking from the origin: positions go in relative to the eye
+	vec4 eye;            // the eye, to float precision, and the rest of it in eyeLow
 	vec4 mode;          // draw mode, selection tint, darker luxels, 1 when the selection's edges show
 	vec4 selection;     // rgb
 	vec4 selectionEdge; // rgb
@@ -23,6 +23,7 @@ layout(std140, binding = 0) uniform Frame {
 	vec4 instance;      // rgb, and how much of it func_instances' contents take
 	vec4 pass;          // 1: the 3D skybox, drawn from its own camera first
 	vec4 invalid;       // rgb, and how much of it broken solids' faces take
+	vec4 eyeLow;        // what float precision leaves of the eye after eye
 } frame;
 
 layout(std140, binding = 1) uniform Material {

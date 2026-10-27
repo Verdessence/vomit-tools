@@ -103,6 +103,8 @@ private:
 	void RequestRender();
 	void WorkerLoop();
 	void Tick();
+	// The card's frames move the camera while keys are held.
+	void StepFlight();
 	void SetMouselook( bool bOn );
 	// Turns the camera by a mouse movement, at the preferences' speed.
 	void Look( QPointF delta );

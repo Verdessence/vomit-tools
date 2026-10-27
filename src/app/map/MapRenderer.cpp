@@ -33,6 +33,7 @@ struct FrameUniforms_t
 	float m_Instance[ 4 ];
 	float m_Pass[ 4 ];
 	float m_Invalid[ 4 ];
+	float m_EyeLow[ 4 ];
 };
 
 struct MaterialUniforms_t
@@ -628,12 +629,18 @@ void CMapRenderer::Render( QRhiCommandBuffer *pCommands, QRhiRenderTarget *pTarg
 	const bool bSky = frame.m_Options.m_SkyboxCamera && shade.m_nMode != xv::map::RasterMode_t::RASTER_MODE_FLAT && shade.m_nMode != xv::map::RasterMode_t::RASTER_MODE_WIREFRAME;
 	auto uniformsFor = [ & ]( const xv::map::CViewCamera &camera, bool bSkyPass ) {
 		FrameUniforms_t uniforms{};
-		const std::array<float, 16> matrix = camera.GetViewProjection();
+		// The shaders take positions relative to the eye (see map.vert), so the matrix looks from
+		// the origin.
+		xv::map::CViewCamera atOrigin = camera;
+		atOrigin.m_Eye = {};
+		const std::array<float, 16> matrix = atOrigin.GetViewProjection();
 		const QMatrix4x4 viewProjection = m_pRhi->clipSpaceCorrMatrix() * QMatrix4x4( matrix.data() ).transposed();
 		std::memcpy( uniforms.m_ViewProjection, viewProjection.constData(), sizeof uniforms.m_ViewProjection );
-		uniforms.m_Eye[ 0 ] = static_cast<float>( camera.m_Eye[ 0 ] );
-		uniforms.m_Eye[ 1 ] = static_cast<float>( camera.m_Eye[ 1 ] );
-		uniforms.m_Eye[ 2 ] = static_cast<float>( camera.m_Eye[ 2 ] );
+		for ( std::size_t i = 0; i < 3; i++ )
+		{
+			uniforms.m_Eye[ i ] = static_cast<float>( camera.m_Eye[ i ] );
+			uniforms.m_EyeLow[ i ] = static_cast<float>( camera.m_Eye[ i ] - static_cast<double>( uniforms.m_Eye[ i ] ) );
+		}
 		uniforms.m_Mode[ 0 ] = static_cast<float>( static_cast<int>( shade.m_nMode ) );
 		uniforms.m_Mode[ 1 ] = shade.m_flSelectionTint;
 		uniforms.m_Mode[ 2 ] = shade.m_flLuxelShade;

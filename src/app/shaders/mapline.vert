@@ -9,8 +9,8 @@ layout(location = 5) in uint object;
 layout(location = 0) flat out vec4 v_color;
 
 layout(std140, binding = 0) uniform Frame {
-	mat4 viewProjection;
-	vec4 eye;
+	mat4 viewProjection; // looking from the origin: positions go in relative to the eye
+	vec4 eye;            // the eye, to float precision, and the rest of it in eyeLow
 	vec4 mode;          // draw mode, selection tint, darker luxels, 1 when the selection's edges show
 	vec4 selection;     // rgb
 	vec4 selectionEdge; // rgb
@@ -19,6 +19,7 @@ layout(std140, binding = 0) uniform Frame {
 	vec4 instance;      // rgb, and how much of it func_instances' contents take
 	vec4 pass;          // 1: the 3D skybox, drawn from its own camera first
 	vec4 invalid;       // rgb, and how much of it broken solids' faces take
+	vec4 eyeLow;        // what float precision leaves of the eye after eye
 } frame;
 
 layout(std140, binding = 1) uniform Material {
@@ -46,5 +47,6 @@ void main() {
 	// solids' are in their own colour.
 	v_color = selected ? (wireframe ? vec4(1.0, 0.0, 0.0, 1.0) : vec4(frame.selectionEdge.rgb, 1.0)) : invalid ? vec4(frame.invalid.rgb, 1.0) : vec4(texelFetch(lineTexture, at, 0).rgb, 1.0);
 	bool drawn = shown && (selectionOnly ? onTop : !onTop);
-	gl_Position = drawn ? frame.viewProjection * vec4(position, 1.0) : vec4(2.0, 2.0, 2.0, 1.0);
+	// Relative to the eye, as map.vert's faces are.
+	gl_Position = drawn ? frame.viewProjection * vec4((position - frame.eye.xyz) - frame.eyeLow.xyz, 1.0) : vec4(2.0, 2.0, 2.0, 1.0);
 }
