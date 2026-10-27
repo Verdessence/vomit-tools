@@ -22,6 +22,10 @@ namespace xv::map
 // The map's text with every edit since it was read (see Map.h's edit marks).
 [[nodiscard]] std::string WriteVmf( const CMap &map );
 
+// A map with nothing in it yet, as Hammer++ starts one: its version, view settings, an empty
+// world with the keys Hammer++ gives a new one, no cameras and the cordon off. Hammer's line ends.
+[[nodiscard]] std::string NewVmf();
+
 // Objects written out whole as Hammer writes them: from their name to their closing brace,
 // their lines indented one tab further than szIndent (the indentation of the line they start on).
 [[nodiscard]] std::string WriteSolid( const CMap &map, const Solid_t &solid, std::string_view szIndent );

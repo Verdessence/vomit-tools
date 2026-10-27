@@ -17,6 +17,7 @@
 - **Saving** writes the map back as it was read, changing only what was edited: untouched parts
   stay byte for byte, so diffs against Hammer's saves stay small. The previous file is kept as a
   `.vmx`, as Hammer does.
+- **File → New → Map (VMF)** starts an empty map, as Hammer++ starts one; saving asks where it goes.
 - A selected prop shows its triangles; other entities drawn by a model (player starts, NPCs) show
   their box instead of a mass of triangles over everything. Preferences → Maps → 3D View can show
   every model's edges, or every model's box.
@@ -48,6 +49,11 @@
 - Closing a map gives its memory back: a 50 MB map left about half of what it took with the app,
   and now leaves little beyond what the graphics driver keeps. Building it allocates a fortieth as
   often and is a quarter faster.
+
+### Also
+- The File menu is shorter: **New** holds everything that makes something (maps, particles,
+  skyboxes, detail files, soundscapes, soundscripts, textures), **Open** holds File, Folder, Game
+  and Recent. VPKs and compiled maps open through Open → File; Open Sky moved to the Game menu.
 
 ## 0.7.0 — The Model (2026-10-27)
 

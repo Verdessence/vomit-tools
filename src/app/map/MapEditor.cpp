@@ -1205,7 +1205,15 @@ void CMapEditor::SnapSelection()
 //-----------------------------------------------------------------------------
 QString CMapEditor::GetTabTitle() const
 {
-	return ( m_pDocument->IsModified() ? QStringLiteral( "*" ) : QString{} ) + QFileInfo{ m_szPath }.fileName();
+	return ( m_pDocument->IsModified() ? QStringLiteral( "*" ) : QString{} ) + GetFileName();
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: A new map is "Untitled" until it is saved.
+//-----------------------------------------------------------------------------
+QString CMapEditor::GetFileName() const
+{
+	return m_szPath.isEmpty() ? tr( "Untitled" ) : QFileInfo{ m_szPath }.fileName();
 }
 
 //-----------------------------------------------------------------------------
@@ -1225,17 +1233,17 @@ bool CMapEditor::ConfirmClose()
 	{
 		return true;
 	}
-	const auto nAnswer = QMessageBox::question( this, tr( "Save Changes" ), tr( "%1 has changes that aren't saved. Save them?" ).arg( QFileInfo{ m_szPath }.fileName() ), QMessageBox::Save | QMessageBox::Discard | QMessageBox::Cancel, QMessageBox::Save );
+	const auto nAnswer = QMessageBox::question( this, tr( "Save Changes" ), tr( "%1 has changes that aren't saved. Save them?" ).arg( GetFileName() ), QMessageBox::Save | QMessageBox::Discard | QMessageBox::Cancel, QMessageBox::Save );
 	return nAnswer == QMessageBox::Discard || ( nAnswer == QMessageBox::Save && Save() );
 }
 
 //-----------------------------------------------------------------------------
-// Purpose: Over the file it was read from; a map from the game's files is saved as a file of
-//          its own (Save As).
+// Purpose: Over the file it was read from; a map from the game's files, or a new one, is saved
+//          as a file of its own (Save As).
 //-----------------------------------------------------------------------------
 bool CMapEditor::Save()
 {
-	if ( m_bFromGame || !m_pDocument->IsLoaded() )
+	if ( m_bFromGame || m_szPath.isEmpty() || !m_pDocument->IsLoaded() )
 	{
 		return m_pDocument->IsLoaded() && SaveAs();
 	}
@@ -1258,7 +1266,9 @@ bool CMapEditor::SaveAs()
 	{
 		return false;
 	}
-	const QString szStart = m_bFromGame ? QFileInfo{ m_szPath }.fileName() : m_szPath;
+	// A bare name starts in the folder the last file window finished in.
+	const QString szStart = m_szPath.isEmpty() ? QStringLiteral( "untitled.vmf" ) : m_bFromGame ? QFileInfo{ m_szPath }.fileName()
+																								: m_szPath;
 	const QString szFile = AskSaveFile( this, tr( "Save Map As" ), szStart, tr( "Hammer maps (*.vmf)" ) );
 	if ( szFile.isEmpty() )
 	{
@@ -1324,6 +1334,10 @@ void CMapEditor::SceneEdited( const std::vector<std::uint32_t> &changed )
 //-----------------------------------------------------------------------------
 QString CMapEditor::GetSessionEntry() const
 {
+	if ( m_szPath.isEmpty() )
+	{
+		return {}; // a new map has nothing to open again
+	}
 	return QStringLiteral( "map\t%1\t%2" ).arg( m_bFromGame ? QStringLiteral( "game" ) : QStringLiteral( "disk" ), m_szPath );
 }
 
@@ -1444,13 +1458,14 @@ QString CMapEditor::GetCameraKey() const
 }
 
 //-----------------------------------------------------------------------------
-// Purpose: Keeps where the 3D camera is, as Hammer++ keeps it in the map when it saves (this
-//          viewer saves nothing, so it goes in the settings). Only the most recent maps' are kept.
+// Purpose: Keeps where the 3D camera is, as Hammer++ keeps it in the map when it saves; here it
+//          goes in the settings, so a map that isn't saved keeps one too. Only the most recent
+//          maps' are kept, and none for a map that has no file yet.
 //-----------------------------------------------------------------------------
 void CMapEditor::RememberCamera() const
 {
 	const std::optional<xv::map::CViewCamera> camera = GetCamera();
-	if ( !camera || !m_pDocument->IsLoaded() )
+	if ( !camera || !m_pDocument->IsLoaded() || m_szPath.isEmpty() )
 	{
 		return;
 	}
@@ -1476,7 +1491,7 @@ void CMapEditor::RememberCamera() const
 //-----------------------------------------------------------------------------
 std::optional<xv::map::CViewCamera> CMapEditor::RecallCamera() const
 {
-	const QVariantList entry = QSettings{}.value( GetCameraKey() ).toList();
+	const QVariantList entry = m_szPath.isEmpty() ? QVariantList{} : QSettings{}.value( GetCameraKey() ).toList();
 	if ( entry.size() < 6 )
 	{
 		return std::nullopt;

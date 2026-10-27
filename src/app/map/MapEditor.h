@@ -40,7 +40,7 @@ class CMapEditor : public QWidget, public IEditorTab
 	Q_OBJECT
 
 public:
-	// szPath is the file on disk, or its path in the game when bFromGame.
+	// szPath is the file on disk, or its path in the game when bFromGame; empty for a new map.
 	CMapEditor( const QString &szPath, bool bFromGame, QWidget *pParent = nullptr );
 	~CMapEditor() override;
 
@@ -137,6 +137,7 @@ private:
 	void RememberCamera() const;
 	[[nodiscard]] std::optional<xv::map::CViewCamera> RecallCamera() const;
 	[[nodiscard]] QString GetCameraKey() const;
+	[[nodiscard]] QString GetFileName() const;
 	void PreferencesChanged();
 	[[nodiscard]] CMapPane *PaneOf( const CMapView *pView ) const;
 

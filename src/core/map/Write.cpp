@@ -915,4 +915,29 @@ std::string WriteEntity( const CMap &map, const Entity_t &entity, std::string_vi
 	return CWriter{ map }.Entity( entity, szIndent );
 }
 
+//-----------------------------------------------------------------------------
+// Purpose: What Hammer++ writes for a map it has just made and saved, except the editor's build
+//          (which isn't Hammer's here).
+//-----------------------------------------------------------------------------
+std::string NewVmf()
+{
+	std::string szText = "versioninfo\n{\n\t\"editorversion\" \"400\"\n\t\"editorbuild\" \"0\"\n\t\"mapversion\" \"0\"\n\t\"formatversion\" \"100\"\n\t\"prefab\" \"0\"\n}\n"
+						 "visgroups\n{\n}\n"
+						 "viewsettings\n{\n\t\"bSnapToGrid\" \"1\"\n\t\"bShowGrid\" \"1\"\n\t\"bShowLogicalGrid\" \"0\"\n\t\"nGridSpacing\" \"64\"\n}\n"
+						 "world\n{\n\t\"id\" \"1\"\n\t\"mapversion\" \"0\"\n\t\"classname\" \"worldspawn\"\n\t\"detailmaterial\" \"detail/detailsprites\"\n\t\"detailvbsp\" \"detail.vbsp\"\n\t\"maxpropscreenwidth\" \"-1\"\n\t\"skyname\" \"sky_day01_01\"\n}\n"
+						 "cameras\n{\n\t\"activecamera\" \"-1\"\n}\n"
+						 "cordons\n{\n\t\"active\" \"0\"\n}\n";
+	std::string szOut;
+	szOut.reserve( szText.size() * 2 );
+	for ( const char ch : szText )
+	{
+		if ( ch == '\n' )
+		{
+			szOut += '\r';
+		}
+		szOut += ch;
+	}
+	return szOut;
+}
+
 } // namespace xv::map

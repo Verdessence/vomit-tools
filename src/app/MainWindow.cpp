@@ -69,6 +69,7 @@
 #include "ParticleSearch.h"
 #include "Preferences.h"
 #include "map/MapEditor.h"
+#include "map/Write.h"
 #include "PreferencesDialog.h"
 #include "PremiumDialog.h"
 #include "QtPaths.h"
@@ -542,23 +543,26 @@ CMainWindow::~CMainWindow() = default;
 void CMainWindow::BuildMenus( QAction *pSearchPathsToggle )
 {
 	auto *pFile = menuBar()->addMenu( tr( "&File" ) );
-	pFile->addAction( tr( "&Open File…" ), QKeySequence::Open, this, &CMainWindow::ChooseFiles );
-	pFile->addAction( tr( "Open &Folder…" ), QKeySequence{ Qt::CTRL | Qt::SHIFT | Qt::Key_O }, this, &CMainWindow::ChooseFolder );
-	pFile->addAction( tr( "Open V&PK or Map…" ), this, &CMainWindow::ChoosePackage );
-	auto *pGames = pFile->addMenu( tr( "Open &Game" ) );
+	auto *pNew = pFile->addMenu( tr( "&New" ) );
+	pNew->setObjectName( QStringLiteral( "fileNewMenu" ) );
+	pNew->addAction( tr( "&Map (VMF)" ), this, [ this ] { NewMap(); } );
+	pNew->addAction( tr( "&Particle File…" ), this, &CMainWindow::NewParticleFile );
+	pNew->addAction( tr( "S&kybox" ), this, [ this ] { NewSky(); } );
+	pNew->addAction( tr( "&Detail File…" ), this, [ this ] { NewDetailFile(); } );
+	pNew->addAction( tr( "&Soundscape File…" ), this, [ this ] { NewSoundFile( FileKind_t::FILE_KIND_SOUNDSCAPE ); } );
+	pNew->addAction( tr( "Sound&script File…" ), this, [ this ] { NewSoundFile( FileKind_t::FILE_KIND_SOUNDSCRIPT ); } );
+	pNew->addSeparator();
+	pNew->addAction( tr( "&VTF from Pictures…" ), this, &CMainWindow::ChooseNewTexture );
+	pNew->addAction( tr( "Con&vert a Folder of Textures…" ), this, &CMainWindow::ChooseBatchConvert );
+	// Archives and compiled maps open through File… too: its chooser lists them.
+	auto *pOpen = pFile->addMenu( tr( "&Open" ) );
+	pOpen->setObjectName( QStringLiteral( "fileOpenMenu" ) );
+	pOpen->addAction( tr( "&File…" ), QKeySequence::Open, this, &CMainWindow::ChooseFiles );
+	pOpen->addAction( tr( "F&older…" ), QKeySequence{ Qt::CTRL | Qt::SHIFT | Qt::Key_O }, this, &CMainWindow::ChooseFolder );
+	auto *pGames = pOpen->addMenu( tr( "&Game" ) );
 	connect( pGames, &QMenu::aboutToShow, this, [ this, pGames ] { FillGameMenu( pGames ); } );
-	auto *pRecent = pFile->addMenu( tr( "Open &Recent" ) );
+	auto *pRecent = pOpen->addMenu( tr( "&Recent" ) );
 	connect( pRecent, &QMenu::aboutToShow, this, [ this, pRecent ] { FillRecentMenu( pRecent ); } );
-	pFile->addSeparator();
-	pFile->addAction( tr( "New &Soundscape File…" ), this, [ this ] { NewSoundFile( FileKind_t::FILE_KIND_SOUNDSCAPE ); } );
-	pFile->addAction( tr( "New Sound&script File…" ), this, [ this ] { NewSoundFile( FileKind_t::FILE_KIND_SOUNDSCRIPT ); } );
-	pFile->addAction( tr( "New S&kybox" ), this, [ this ] { NewSky(); } );
-	pFile->addAction( tr( "New Detail File…" ), this, [ this ] { NewDetailFile(); } );
-	pFile->addAction( tr( "New &Particle File…" ), this, &CMainWindow::NewParticleFile );
-	pFile->addAction( tr( "Create &VTF from Pictures…" ), this, &CMainWindow::ChooseNewTexture );
-	pFile->addAction( tr( "Con&vert a Folder of Textures…" ), this, &CMainWindow::ChooseBatchConvert );
-	auto *pSkies = pFile->addMenu( tr( "Open Sk&y from Game" ) );
-	connect( pSkies, &QMenu::aboutToShow, this, [ this, pSkies ] { FillSkyMenu( pSkies ); } );
 	pFile->addSeparator();
 	// For a sky, saving is exporting its VTFs and VMTs.
 	pFile->addAction( tr( "&Save" ), QKeySequence::Save, this, [ this ] {
@@ -672,6 +676,9 @@ void CMainWindow::BuildMenus( QAction *pSearchPathsToggle )
 	pGame->addSeparator();
 	QAction *pModelBrowser = pGame->addAction( tr( "Browse M&odels" ), QKeySequence( Qt::CTRL | Qt::SHIFT | Qt::Key_M ), this, &CMainWindow::OpenModelBrowser );
 	pModelBrowser->setObjectName( QStringLiteral( "modelBrowserAction" ) );
+	auto *pSkies = pGame->addMenu( tr( "Open &Sky" ) );
+	pSkies->setObjectName( QStringLiteral( "gameSkyMenu" ) );
+	connect( pSkies, &QMenu::aboutToShow, this, [ this, pSkies ] { FillSkyMenu( pSkies ); } );
 	auto *pManifests = pGame->addMenu( tr( "Generate &Manifest" ) );
 	pManifests->addAction( tr( "&Soundscapes…" ), this, [ this ] { GenerateManifest( CManifestDialog::Format_t::FORMAT_SOUNDSCAPES ); } );
 	pManifests->addAction( tr( "Sound&scripts…" ), this, [ this ] { GenerateManifest( CManifestDialog::Format_t::FORMAT_SOUNDSCRIPTS ); } );
@@ -902,22 +909,6 @@ void CMainWindow::ChooseFolder()
 	if ( !szFolder.isEmpty() )
 	{
 		OpenFolder( szFolder );
-	}
-}
-
-//-----------------------------------------------------------------------------
-// Purpose: File > Open VPK, starting in the last folder used, else the mounted game's folder,
-//          where its VPKs are.
-//-----------------------------------------------------------------------------
-void CMainWindow::ChoosePackage()
-{
-	const QString szStart = LastFolderOr( m_Game ? ToQString( m_Game->m_GameDir ) : !m_pFolders->GetFolder().isEmpty() ? m_pFolders->GetFolder()
-																													   : QDir::homePath() );
-	const QString szFile = AskOpenFile( this, tr( "Open VPK" ), szStart,
-		tr( "VPKs (*.vpk);;Maps (*.bsp);;All archives (*.vpk *.bsp *.gcf *.gma *.pak *.wad *.xzp *.zip);;All files (*)" ) );
-	if ( !szFile.isEmpty() )
-	{
-		OpenPackage( szFile );
 	}
 }
 
@@ -4973,6 +4964,37 @@ CMapEditor *CMainWindow::OpenMapFile( const QString &szPath )
 		source.m_Fgds.push_back( ToPath( szFgd ) );
 	}
 	auto *pEditor = new CMapEditor( szOrigin, !bDisk );
+	AddMapTab( pEditor );
+	pEditor->Load( std::move( source ) );
+	return pEditor;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: File > New > Map: a map with nothing in it yet, for the mounted game, in a tab of its
+//          own; saving it asks where it goes.
+//-----------------------------------------------------------------------------
+CMapEditor *CMainWindow::NewMap()
+{
+	CMapDocument::Source_t source;
+	const std::string szText = xv::map::NewVmf();
+	source.m_Text.assign( szText.begin(), szText.end() );
+	source.m_Game = m_Game;
+	for ( const QString &szFgd : CPreferences::Instance().GetMapPreferences().m_Fgds )
+	{
+		source.m_Fgds.push_back( ToPath( szFgd ) );
+	}
+	auto *pEditor = new CMapEditor( QString{}, false );
+	source.m_szName = pEditor->GetTabTitle();
+	AddMapTab( pEditor );
+	pEditor->Load( std::move( source ) );
+	return pEditor;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: A map tab added and shown, its messages, undo and title joined to the window's.
+//-----------------------------------------------------------------------------
+void CMainWindow::AddMapTab( CMapEditor *pEditor )
+{
 	connect( pEditor, &CMapEditor::StatusMessage, this, [ this ]( const QString &szText ) { statusBar()->showMessage( szText, 8000 ); } );
 	m_pUndoGroup->addStack( pEditor->GetUndoStack() );
 	connect( pEditor, &CMapEditor::TitleChanged, this, [ this, pEditor ] {
@@ -4983,8 +5005,6 @@ CMapEditor *CMainWindow::OpenMapFile( const QString &szPath )
 		SaveSession();
 	} );
 	const int nIndex = m_pTabs->addTab( pEditor, pEditor->GetTabTitle() );
-	m_pTabs->setTabToolTip( nIndex, bDisk ? QDir::toNativeSeparators( szOrigin ) : szOrigin );
+	m_pTabs->setTabToolTip( nIndex, pEditor->IsFromGame() ? pEditor->GetPath() : QDir::toNativeSeparators( pEditor->GetPath() ) );
 	m_pTabs->setCurrentIndex( nIndex );
-	pEditor->Load( std::move( source ) );
-	return pEditor;
 }

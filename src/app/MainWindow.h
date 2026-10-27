@@ -82,6 +82,8 @@ public:
 	// Opens a Hammer map (.vmf), from disk (an absolute path) or the mounted game, in the map
 	// viewer; the tab it already has, if open.
 	CMapEditor *OpenMapFile( const QString &szPath );
+	// File > New > Map.
+	CMapEditor *NewMap();
 	// The tab of every model in the game; null without a game.
 	CModelBrowser *OpenModelBrowser();
 	// Opens a soundscape or soundscript from the mounted game in an editor tab.
@@ -161,12 +163,12 @@ private:
 	[[nodiscard]] QLabel *BuildFooter();
 	void FillGameMenu( QMenu *pMenu );
 	void FillRecentMenu( QMenu *pMenu );
+	void AddMapTab( CMapEditor *pEditor );
 	void FillSkyMenu( QMenu *pMenu );
 	void AddRecent( const QString &szPath );
 	void ChooseGameInfo();
 	void ChooseFiles();
 	void ChooseFolder();
-	void ChoosePackage();
 	// Asks which map, then generates its <map>_particles.txt.
 	void ChooseMapParticles();
 	void AutoMountFor( const QString &szPath );
