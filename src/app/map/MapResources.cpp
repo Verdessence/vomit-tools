@@ -46,7 +46,7 @@ bool IsToolMaterial( const xv::map::MaterialInfo_t &info, std::string_view szNam
 //-----------------------------------------------------------------------------
 // Purpose:
 //-----------------------------------------------------------------------------
-std::shared_ptr<xv::map::RasterTexture_t> ReadMapTexture( std::span<const std::byte> vtf, int nMaxSize )
+std::shared_ptr<xv::map::RasterTexture_t> ReadMapTexture( std::span<const std::byte> vtf, int nMaxSize, bool bDecode )
 {
 	const auto file = xv::texture::ReadVtf( vtf );
 	if ( !file || file->m_Info.m_nWidth <= 0 || file->m_Info.m_nHeight <= 0 )
@@ -64,16 +64,39 @@ std::shared_ptr<xv::map::RasterTexture_t> ReadMapTexture( std::span<const std::b
 	{
 		nFirst++;
 	}
+	const xv::texture::VtfFormat_t nFormat = file->m_Info.m_nFormat;
+	const bool bCompressed = nFormat == xv::texture::VtfFormat_t::DXT1 || nFormat == xv::texture::VtfFormat_t::DXT1_ONEBITALPHA || nFormat == xv::texture::VtfFormat_t::DXT3 || nFormat == xv::texture::VtfFormat_t::DXT5;
 	for ( int nMip = nFirst; nMip < file->m_Info.m_nMipCount; nMip++ )
 	{
-		std::optional<xv::texture::CImage> image = file->Decode( nMip );
-		if ( !image || image->Empty() )
+		const int nWidth = std::max( 1, file->m_Info.m_nWidth >> nMip );
+		const int nHeight = std::max( 1, file->m_Info.m_nHeight >> nMip );
+		if ( bCompressed )
 		{
-			break;
+			const std::span<const std::byte> data = file->Image( nMip );
+			if ( data.size() < xv::texture::ImageSize( nFormat, nWidth, nHeight ) )
+			{
+				break;
+			}
+			pTexture->m_Compressed.push_back( { nWidth, nHeight, std::vector<std::byte>( data.begin(), data.end() ) } );
+			pTexture->m_nCompressedFormat = nFormat;
 		}
-		pTexture->m_Mips.push_back( std::move( *image ) );
+		if ( bDecode || !bCompressed )
+		{
+			std::optional<xv::texture::CImage> image = file->Decode( nMip );
+			if ( !image || image->Empty() )
+			{
+				break;
+			}
+			pTexture->m_Mips.push_back( std::move( *image ) );
+		}
 	}
-	return pTexture->m_Mips.empty() ? nullptr : pTexture;
+	// Both sets go down the same mips, or the card's would say one thing and software another.
+	if ( !pTexture->m_Mips.empty() && !pTexture->m_Compressed.empty() && pTexture->m_Mips.size() != pTexture->m_Compressed.size() )
+	{
+		pTexture->m_Compressed.resize( std::min( pTexture->m_Mips.size(), pTexture->m_Compressed.size() ) );
+		pTexture->m_Mips.resize( pTexture->m_Compressed.size() );
+	}
+	return pTexture->GetMipCount() == 0 ? nullptr : pTexture;
 }
 
 //-----------------------------------------------------------------------------
@@ -107,10 +130,11 @@ void CMapResources::Stop()
 //-----------------------------------------------------------------------------
 // Purpose:
 //-----------------------------------------------------------------------------
-void CMapResources::Start( std::shared_ptr<const xv::map::CScene> pScene, std::optional<xv::vfs::CGameInfo> game, int nMaxSize )
+void CMapResources::Start( std::shared_ptr<const xv::map::CScene> pScene, std::optional<xv::vfs::CGameInfo> game, int nMaxSize, bool bDecoded )
 {
 	Stop();
 	m_bStop = false;
+	m_bDecoded = bDecoded;
 	const int nGeneration = ++m_nGeneration;
 	const std::size_t nMaterials = pScene ? pScene->m_Materials.size() : 0;
 	m_Current.assign( nMaterials + 1, {} ); // and the place kept for the entity boxes'
@@ -133,14 +157,14 @@ void CMapResources::Start( std::shared_ptr<const xv::map::CScene> pScene, std::o
 		emit Finished();
 		return;
 	}
-	m_Worker = std::thread( [ this, pScene = std::move( pScene ), game = std::move( *game ), nMaxSize, nGeneration ] { Run( pScene, game, nMaxSize, nGeneration ); } );
+	m_Worker = std::thread( [ this, pScene = std::move( pScene ), game = std::move( *game ), nMaxSize, bDecoded, nGeneration ] { Run( pScene, game, nMaxSize, bDecoded, nGeneration ); } );
 }
 
 //-----------------------------------------------------------------------------
 // Purpose: The worker: mounts the game for itself, then reads materials a batch at a time,
 //          reading files one by one and decoding the batch's textures on every core.
 //-----------------------------------------------------------------------------
-void CMapResources::Run( std::shared_ptr<const xv::map::CScene> pScene, xv::vfs::CGameInfo game, int nMaxSize, int nGeneration )
+void CMapResources::Run( std::shared_ptr<const xv::map::CScene> pScene, xv::vfs::CGameInfo game, int nMaxSize, bool bDecoded, int nGeneration )
 {
 	const auto post = [ this, nGeneration ]( auto pfnCall ) {
 		QMetaObject::invokeMethod(
@@ -205,11 +229,11 @@ void CMapResources::Run( std::shared_ptr<const xv::map::CScene> pScene, xv::vfs:
 				{
 					if ( base[ i ] )
 					{
-						batch[ i ].m_pBase = ReadMapTexture( *base[ i ], nMaxSize );
+						batch[ i ].m_pBase = ReadMapTexture( *base[ i ], nMaxSize, bDecoded );
 					}
 					if ( base2[ i ] )
 					{
-						batch[ i ].m_pBase2 = ReadMapTexture( *base2[ i ], nMaxSize );
+						batch[ i ].m_pBase2 = ReadMapTexture( *base2[ i ], nMaxSize, bDecoded );
 					}
 					// Source draws its checker for a material, or a texture, it can't find.
 					batch[ i ].m_bMissing = !batch[ i ].m_Info.m_bFound || ( !batch[ i ].m_Info.m_szTexture.empty() && !batch[ i ].m_pBase );

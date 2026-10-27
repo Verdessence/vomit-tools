@@ -33,7 +33,10 @@ public:
 
 	// Reads every material of the scene from the game; without a game, nothing is read and
 	// materials draw plain. nMaxSize caps a texture's largest side (smaller mips are kept).
-	void Start( std::shared_ptr<const xv::map::CScene> pScene, std::optional<xv::vfs::CGameInfo> game, int nMaxSize );
+	// bDecoded: the textures are also decoded for drawing in software (the card draws from the
+	// VTFs' own DXT mips, which take a fraction of the memory).
+	void Start( std::shared_ptr<const xv::map::CScene> pScene, std::optional<xv::vfs::CGameInfo> game, int nMaxSize, bool bDecoded );
+	[[nodiscard]] bool IsDecoded() const { return m_bDecoded; }
 	void Stop();
 
 	// The map's materials as drawn now (one per material of the map), and what keeps their
@@ -74,7 +77,7 @@ private:
 		bool m_bOverlay = false;  // an overlay's or a decal's: blended by its alpha
 	};
 
-	void Run( std::shared_ptr<const xv::map::CScene> pScene, xv::vfs::CGameInfo game, int nMaxSize, int nGeneration );
+	void Run( std::shared_ptr<const xv::map::CScene> pScene, xv::vfs::CGameInfo game, int nMaxSize, bool bDecoded, int nGeneration );
 	void Take( std::vector<Loaded_t> batch );
 
 	std::thread m_Worker;
@@ -94,7 +97,10 @@ private:
 	int m_nLoaded = 0;
 	int m_nTotal = 0;
 	bool m_bFinished = false;
+	bool m_bDecoded = true;
 };
 
 // A texture for drawing from a VTF: mips from the largest within nMaxSize down to the smallest.
-[[nodiscard]] std::shared_ptr<xv::map::RasterTexture_t> ReadMapTexture( std::span<const std::byte> vtf, int nMaxSize );
+// A DXT texture keeps those mips as they are for the card; bDecode also decodes them (any other
+// format is decoded regardless, there being nothing smaller to keep).
+[[nodiscard]] std::shared_ptr<xv::map::RasterTexture_t> ReadMapTexture( std::span<const std::byte> vtf, int nMaxSize, bool bDecode = true );

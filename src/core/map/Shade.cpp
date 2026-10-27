@@ -69,16 +69,16 @@ std::array<float, 4> MissingChecker( float u, float v )
 //-----------------------------------------------------------------------------
 bool HasMipChain( const RasterTexture_t &texture )
 {
-	if ( texture.m_Mips.empty() )
+	if ( texture.GetMipCount() == 0 )
 	{
 		return false;
 	}
 	std::size_t nLevels = 1;
-	for ( int w = texture.m_Mips.front().m_nWidth, h = texture.m_Mips.front().m_nHeight; w > 1 || h > 1; w = std::max( 1, w / 2 ), h = std::max( 1, h / 2 ) )
+	for ( int w = texture.GetTopWidth(), h = texture.GetTopHeight(); w > 1 || h > 1; w = std::max( 1, w / 2 ), h = std::max( 1, h / 2 ) )
 	{
 		nLevels++;
 	}
-	return texture.m_Mips.size() >= nLevels;
+	return texture.GetMipCount() >= nLevels;
 }
 
 //-----------------------------------------------------------------------------

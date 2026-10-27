@@ -130,7 +130,10 @@ void CMapView3D::SetUseGpu( bool bOn )
 		m_pGpu->setGeometry( rect() );
 		m_pGpu->show();
 		// A card that fails draws in software from then on.
-		connect( m_pGpu, &QRhiWidget::renderFailed, this, [ this ] { QTimer::singleShot( 0, this, [ this ] { SetUseGpu( false ); } ); } );
+		connect( m_pGpu, &QRhiWidget::renderFailed, this, [ this ] { QTimer::singleShot( 0, this, [ this ] {
+																		 SetUseGpu( false );
+																		 m_Editor.RendererChanged();
+																	 } ); } );
 		m_pOverlay = new CMapOverlay3D( *this );
 		m_pOverlay->setGeometry( rect() );
 		m_pOverlay->show();

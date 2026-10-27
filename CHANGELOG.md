@@ -19,6 +19,8 @@
 - The 2D views keep their picture between repaints, so turning or flying the camera no longer
   redraws every brush three times over; on a 50 MB map a camera move went from about 50 ms of
   main-thread work to under 1 ms. O in a 3D view shows where each frame's time goes.
+- Textures stay in the VTF's own DXT form for the graphics card and are only decoded when a
+  view draws in software, which cuts a big map's memory to a fraction.
 - Mouselook (Z) keeps the pointer where it is and puts the cursor back there when it ends: on
   Wayland through the compositor's pointer constraints, elsewhere by warping it.
 

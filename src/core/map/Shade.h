@@ -9,11 +9,13 @@
 #pragma once
 
 #include <array>
+#include <cstddef>
 #include <optional>
 #include <vector>
 
 #include "sky/Sky.h"
 #include "texture/Image.h"
+#include "texture/Vtf.h"
 #include "util/Vec3.h"
 
 namespace xv::map
@@ -30,13 +32,32 @@ enum class RasterMode_t
 
 // A texture as both renderers get it: its mipmaps, largest first, and the full size the map's
 // texture coordinates are measured against (the VTF's own, before any was dropped).
+// One of a texture's mips as the VTF stores it (DXT), for a graphics card to take as it is.
+struct CompressedMip_t
+{
+	int m_nWidth = 0;
+	int m_nHeight = 0;
+	std::vector<std::byte> m_Data;
+};
+
+// A texture for drawing. The card draws from the VTF's own DXT mips; software from the decoded
+// ones, which are only made when something draws in software (they are 4 to 8 times bigger).
 struct RasterTexture_t
 {
-	std::vector<texture::CImage> m_Mips;
-	int m_nWidth = 0;
+	std::vector<texture::CImage> m_Mips;          // decoded, from the largest kept down
+	std::vector<CompressedMip_t> m_Compressed;    // the same mips as the VTF has them, when DXT
+	texture::VtfFormat_t m_nCompressedFormat = texture::VtfFormat_t::VTF_FORMAT_NONE;
+	int m_nWidth = 0;                             // the VTF's own size (the mips kept may start below it)
 	int m_nHeight = 0;
 	bool m_bClampS = false;
 	bool m_bClampT = false;
+
+	// The largest mip kept, from whichever set there is.
+	[[nodiscard]] int GetTopWidth() const { return !m_Mips.empty() ? m_Mips.front().m_nWidth : !m_Compressed.empty() ? m_Compressed.front().m_nWidth
+																													 : 0; }
+	[[nodiscard]] int GetTopHeight() const { return !m_Mips.empty() ? m_Mips.front().m_nHeight : !m_Compressed.empty() ? m_Compressed.front().m_nHeight
+																													   : 0; }
+	[[nodiscard]] std::size_t GetMipCount() const { return !m_Mips.empty() ? m_Mips.size() : m_Compressed.size(); }
 };
 
 // Whether a texture's mips run from its top level down to 1 by 1. Those that stop short (NOMIP

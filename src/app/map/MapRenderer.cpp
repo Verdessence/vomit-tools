@@ -15,6 +15,7 @@
 #include <rhi/qrhi.h>
 
 #include "map/MapConstants.h"
+#include "texture/Vtf.h"
 
 namespace
 {
@@ -74,8 +75,8 @@ MaterialUniforms_t MaterialUniforms( const xv::map::RasterMaterial_t *pMaterial,
 	u.m_Size[ 2 ] = static_cast<float>( shade.m_pBase2 ? shade.m_pBase2->m_nWidth : 1 );
 	u.m_Size[ 3 ] = static_cast<float>( shade.m_pBase2 ? shade.m_pBase2->m_nHeight : 1 );
 	u.m_Kind[ 0 ] = pMaterial && pMaterial->m_bObjectColor ? 1.0f : 0.0f;
-	u.m_Kind[ 1 ] = shade.m_pBase && !shade.m_pBase->m_Mips.empty() ? 1.0f : 0.0f;
-	u.m_Kind[ 2 ] = shade.m_pBase2 && !shade.m_pBase2->m_Mips.empty() ? 1.0f : 0.0f;
+	u.m_Kind[ 1 ] = shade.m_pBase && shade.m_pBase->GetMipCount() > 0 ? 1.0f : 0.0f;
+	u.m_Kind[ 2 ] = shade.m_pBase2 && shade.m_pBase2->GetMipCount() > 0 ? 1.0f : 0.0f;
 	u.m_Kind[ 3 ] = bSelectionOnly ? 1.0f : 0.0f;
 	u.m_Extra[ 0 ] = shade.m_bSky ? 1.0f : 0.0f;
 	u.m_Extra[ 1 ] = shade.m_bTinted ? 1.0f : 0.0f;
@@ -276,19 +277,53 @@ void CMapRenderer::UploadState( const MapFrame_t &frame, QRhiResourceUpdateBatch
 //-----------------------------------------------------------------------------
 QRhiTexture *CMapRenderer::Upload( const xv::map::RasterTexture_t &texture, std::unique_ptr<QRhiTexture> &pTexture, QRhiResourceUpdateBatch *pUpdates )
 {
-	if ( texture.m_Mips.empty() || texture.m_Mips.front().Empty() )
+	if ( texture.GetMipCount() == 0 || texture.GetTopWidth() <= 0 )
 	{
 		return m_pWhite.get();
 	}
-	const xv::texture::CImage &top = texture.m_Mips.front();
+	const QSize top{ texture.GetTopWidth(), texture.GetTopHeight() };
 	const bool bMips = xv::map::HasMipChain( texture );
-	pTexture.reset( m_pRhi->newTexture( QRhiTexture::RGBA8, { top.m_nWidth, top.m_nHeight }, 1, bMips ? QRhiTexture::MipMapped : QRhiTexture::Flags{} ) );
+	const int nLevels = bMips ? m_pRhi->mipLevelsForSize( top ) : 1;
+	// The VTF's own DXT mips when the card takes them, else the decoded ones (decoded here when
+	// nothing else did: a card that can't take DXT is rare).
+	QRhiTexture::Format nFormat = QRhiTexture::RGBA8;
+	switch ( texture.m_nCompressedFormat )
+	{
+		case xv::texture::VtfFormat_t::DXT1:
+		case xv::texture::VtfFormat_t::DXT1_ONEBITALPHA: nFormat = QRhiTexture::BC1; break;
+		case xv::texture::VtfFormat_t::DXT3: nFormat = QRhiTexture::BC2; break;
+		case xv::texture::VtfFormat_t::DXT5: nFormat = QRhiTexture::BC3; break;
+		default: break;
+	}
+	const bool bCompressed = !texture.m_Compressed.empty() && nFormat != QRhiTexture::RGBA8 && m_pRhi->isTextureFormatSupported( nFormat, bMips ? QRhiTexture::MipMapped : QRhiTexture::Flags{} );
+	std::vector<xv::texture::CImage> decoded;
+	if ( !bCompressed && texture.m_Mips.empty() )
+	{
+		for ( const xv::map::CompressedMip_t &mip : texture.m_Compressed )
+		{
+			std::optional<xv::texture::CImage> image = xv::texture::DecodeImage( texture.m_nCompressedFormat, mip.m_nWidth, mip.m_nHeight, mip.m_Data );
+			if ( !image )
+			{
+				return m_pWhite.get();
+			}
+			decoded.push_back( std::move( *image ) );
+		}
+	}
+	pTexture.reset( m_pRhi->newTexture( bCompressed ? nFormat : QRhiTexture::RGBA8, top, 1, bMips ? QRhiTexture::MipMapped : QRhiTexture::Flags{} ) );
 	pTexture->create();
-	const int nLevels = bMips ? m_pRhi->mipLevelsForSize( { top.m_nWidth, top.m_nHeight } ) : 1;
 	QList<QRhiTextureUploadEntry> entries;
 	for ( int nLevel = 0; nLevel < nLevels; nLevel++ )
 	{
-		const xv::texture::CImage &image = texture.m_Mips[ static_cast<std::size_t>( nLevel ) ];
+		const auto i = static_cast<std::size_t>( nLevel );
+		if ( bCompressed )
+		{
+			const xv::map::CompressedMip_t &mip = texture.m_Compressed[ i ];
+			QRhiTextureSubresourceUploadDescription description( mip.m_Data.data(), static_cast<quint32>( mip.m_Data.size() ) );
+			description.setSourceSize( { mip.m_nWidth, mip.m_nHeight } );
+			entries.append( QRhiTextureUploadEntry( 0, nLevel, description ) );
+			continue;
+		}
+		const xv::texture::CImage &image = decoded.empty() ? texture.m_Mips[ i ] : decoded[ i ];
 		QRhiTextureSubresourceUploadDescription description( image.m_Pixels.data(), static_cast<quint32>( image.m_Pixels.size() ) );
 		description.setSourceSize( { image.m_nWidth, image.m_nHeight } );
 		entries.append( QRhiTextureUploadEntry( 0, nLevel, description ) );

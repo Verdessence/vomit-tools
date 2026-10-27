@@ -365,7 +365,7 @@ void CMapEditor::Loaded()
 	{
 		pGrid->setChecked( m_Settings.m_bShowGrid );
 	}
-	m_pResources->Start( m_pDocument->GetSharedScene(), m_pDocument->GetGame(), m_nTextureSize );
+	StartResources();
 	UpdateGameStatus();
 	std::size_t nErrors = 0;
 	for ( const xv::map::Diagnostic_t &diagnostic : scene.m_Map.m_Diagnostics )
@@ -576,7 +576,7 @@ void CMapEditor::PreferencesChanged()
 	}
 	if ( nTextureSize != m_nTextureSize && m_pDocument->IsLoaded() )
 	{
-		m_pResources->Start( m_pDocument->GetSharedScene(), m_pDocument->GetGame(), m_nTextureSize );
+		StartResources();
 	}
 	SettingsChanged();
 }
@@ -768,7 +768,7 @@ void CMapEditor::GameChanged( const xv::vfs::CGameInfo *pGame )
 	m_pDocument->SetGame( pGame ? std::optional<xv::vfs::CGameInfo>{ *pGame } : std::nullopt );
 	if ( m_pDocument->IsLoaded() )
 	{
-		m_pResources->Start( m_pDocument->GetSharedScene(), m_pDocument->GetGame(), m_nTextureSize );
+		StartResources();
 	}
 }
 
@@ -851,6 +851,46 @@ std::optional<xv::map::CViewCamera> CMapEditor::GetCamera() const
 		}
 	}
 	return std::nullopt;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Whether any 3D view draws in software, which needs the textures decoded (the card
+//          takes the VTFs' DXT mips as they are, at a fraction of the memory). Tests that compare
+//          the two set VOMIT_TOOLS_DECODE_TEXTURES.
+//-----------------------------------------------------------------------------
+bool CMapEditor::NeedsDecodedTextures() const
+{
+	if ( qEnvironmentVariableIsSet( "VOMIT_TOOLS_DECODE_TEXTURES" ) )
+	{
+		return true;
+	}
+	for ( CMapView *pView : GetViews() )
+	{
+		if ( const auto *p3D = qobject_cast<const CMapView3D *>( pView ); p3D && !p3D->IsUsingGpu() )
+		{
+			return true;
+		}
+	}
+	return false;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+void CMapEditor::StartResources()
+{
+	m_pResources->Start( m_pDocument->GetSharedScene(), m_pDocument->GetGame(), m_nTextureSize, NeedsDecodedTextures() );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+void CMapEditor::RendererChanged()
+{
+	if ( m_pDocument->IsLoaded() && !m_pResources->IsDecoded() && NeedsDecodedTextures() )
+	{
+		StartResources();
+	}
 }
 
 //-----------------------------------------------------------------------------

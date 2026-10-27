@@ -65,6 +65,8 @@ public:
 	void ShowCursor( const QString &szAt );
 	void ShowZoom( double flZoom );
 	void CameraMoved( CMapView *pView );
+	// A 3D view changed how it draws (the card's drawing failed): software needs the textures decoded.
+	void RendererChanged();
 
 	// IEditorTab
 	[[nodiscard]] QString GetTabTitle() const override;
@@ -86,6 +88,8 @@ private:
 	void GoToBrush();
 	void ShowProperties();
 	void TakePreferences();
+	[[nodiscard]] bool NeedsDecodedTextures() const;
+	void StartResources();
 	void PreferencesChanged();
 	[[nodiscard]] CMapPane *PaneOf( const CMapView *pView ) const;
 
