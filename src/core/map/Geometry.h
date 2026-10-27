@@ -130,6 +130,9 @@ struct TextureAxis_t
 	double m_flScale = 0.25;
 };
 
+// Where p falls on a face's texture in texels, before dividing by the texture's size.
+[[nodiscard]] std::array<double, 2> TexelCoord( Point_t p, const TextureAxis_t &u, const TextureAxis_t &v );
+
 // Where p falls on a face's texture, in texture widths (Hammer's maths: the world position
 // along the axis, divided by the scale, plus the shift, over the texture's size in pixels).
 [[nodiscard]] std::array<double, 2> TextureCoord( Point_t p, const TextureAxis_t &u, const TextureAxis_t &v, int nWidth, int nHeight );

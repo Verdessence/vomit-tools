@@ -19,11 +19,21 @@ add_library(vomit_tools_core STATIC
         map/Brushes.h
         map/Displacement.cpp
         map/Displacement.h
+        map/Entities.cpp
+        map/Entities.h
+        map/Fgd.cpp
+        map/Fgd.h
+        map/GameConfig.cpp
+        map/GameConfig.h
         map/Geometry.cpp
         map/Geometry.h
         map/Io.cpp
         map/Io.h
         map/Map.h
+        map/Materials.cpp
+        map/Materials.h
+        map/Mesh.cpp
+        map/Mesh.h
         map/Vmf.cpp
         map/Vmf.h
         material/Material.cpp

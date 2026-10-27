@@ -248,12 +248,21 @@ std::optional<std::vector<Polygon_t>> IntersectHalfSpaces( std::span<const Plane
 //-----------------------------------------------------------------------------
 // Purpose:
 //-----------------------------------------------------------------------------
-std::array<double, 2> TextureCoord( Point_t p, const TextureAxis_t &u, const TextureAxis_t &v, int nWidth, int nHeight )
+std::array<double, 2> TexelCoord( Point_t p, const TextureAxis_t &u, const TextureAxis_t &v )
 {
 	// A zero scale would put the texture at infinity; reading it as 1 keeps the face drawable.
 	const double flUScale = u.m_flScale != 0.0 ? u.m_flScale : 1.0;
 	const double flVScale = v.m_flScale != 0.0 ? v.m_flScale : 1.0;
-	return { ( Dot( p, u.m_Axis ) / flUScale + u.m_flShift ) / std::max( nWidth, 1 ), ( Dot( p, v.m_Axis ) / flVScale + v.m_flShift ) / std::max( nHeight, 1 ) };
+	return { Dot( p, u.m_Axis ) / flUScale + u.m_flShift, Dot( p, v.m_Axis ) / flVScale + v.m_flShift };
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+std::array<double, 2> TextureCoord( Point_t p, const TextureAxis_t &u, const TextureAxis_t &v, int nWidth, int nHeight )
+{
+	const std::array<double, 2> texel = TexelCoord( p, u, v );
+	return { texel[ 0 ] / std::max( nWidth, 1 ), texel[ 1 ] / std::max( nHeight, 1 ) };
 }
 
 } // namespace xv::map
