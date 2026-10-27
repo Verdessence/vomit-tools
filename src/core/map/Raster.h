@@ -65,6 +65,7 @@ struct RasterOptions_t
 {
 	ShadeOptions_t m_Shade;
 	std::array<std::uint8_t, 3> m_Background{ 30, 30, 30 };
+	bool m_bTransparent = false; // the background left see-through (alpha 0), to draw over something else
 	bool m_bToolTextures = true;
 	bool m_bSelectionEdges = true;
 	std::array<std::uint8_t, 3> m_SelectionEdge{ 255, 255, 0 };

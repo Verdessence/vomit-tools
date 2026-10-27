@@ -116,7 +116,7 @@ struct ShadeOptions_t
 };
 
 // Bilinear between texels, trilinear between mips (or the nearest mip without bMipBlend); u and v
-// in texture widths (wrapping).
+// in texture widths (wrapping). DXT mips are read as they are when there are no decoded ones.
 [[nodiscard]] std::array<float, 4> SampleTexture( const RasterTexture_t &texture, float u, float v, float flLod, bool bMipBlend = true );
 // A texture as the shaded modes sample it, at texel position texel (in the texture's full-size
 // texels) with the point's gradient: one sample at the gradient's mip level, or, with anisotropy,

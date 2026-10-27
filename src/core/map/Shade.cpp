@@ -8,6 +8,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 
 namespace xv::map
 {
@@ -16,12 +17,14 @@ namespace
 {
 
 //-----------------------------------------------------------------------------
-// Purpose: One mip level, bilinear, with the GPU's texel centres (coordinate * size - 0.5).
+// Purpose: One mip level, bilinear, with the GPU's texel centres (coordinate * size - 0.5);
+//          pfnTexel( x, y ) gives a texel's RGBA.
 //-----------------------------------------------------------------------------
-std::array<float, 4> SampleMip( const texture::CImage &image, float u, float v, bool bClampS, bool bClampT )
+template <class Texel_t>
+std::array<float, 4> SampleMip( int nWidth, int nHeight, float u, float v, bool bClampS, bool bClampT, Texel_t &&pfnTexel )
 {
-	const float flX = u * static_cast<float>( image.m_nWidth ) - 0.5f;
-	const float flY = v * static_cast<float>( image.m_nHeight ) - 0.5f;
+	const float flX = u * static_cast<float>( nWidth ) - 0.5f;
+	const float flY = v * static_cast<float>( nHeight ) - 0.5f;
 	const float flX0 = std::floor( flX );
 	const float flY0 = std::floor( flY );
 	const float fx = flX - flX0;
@@ -34,14 +37,14 @@ std::array<float, 4> SampleMip( const texture::CImage &image, float u, float v, 
 		const int m = n % nSize;
 		return m < 0 ? m + nSize : m;
 	};
-	const int x0 = wrap( static_cast<int>( flX0 ), image.m_nWidth, bClampS );
-	const int x1 = wrap( static_cast<int>( flX0 ) + 1, image.m_nWidth, bClampS );
-	const int y0 = wrap( static_cast<int>( flY0 ), image.m_nHeight, bClampT );
-	const int y1 = wrap( static_cast<int>( flY0 ) + 1, image.m_nHeight, bClampT );
-	const std::uint8_t *a = image.Pixel( x0, y0 );
-	const std::uint8_t *b = image.Pixel( x1, y0 );
-	const std::uint8_t *c = image.Pixel( x0, y1 );
-	const std::uint8_t *d = image.Pixel( x1, y1 );
+	const int x0 = wrap( static_cast<int>( flX0 ), nWidth, bClampS );
+	const int x1 = wrap( static_cast<int>( flX0 ) + 1, nWidth, bClampS );
+	const int y0 = wrap( static_cast<int>( flY0 ), nHeight, bClampT );
+	const int y1 = wrap( static_cast<int>( flY0 ) + 1, nHeight, bClampT );
+	const std::array<std::uint8_t, 4> a = pfnTexel( x0, y0 );
+	const std::array<std::uint8_t, 4> b = pfnTexel( x1, y0 );
+	const std::array<std::uint8_t, 4> c = pfnTexel( x0, y1 );
+	const std::array<std::uint8_t, 4> d = pfnTexel( x1, y1 );
 	std::array<float, 4> out{};
 	for ( std::size_t i = 0; i < 4; i++ )
 	{
@@ -50,6 +53,106 @@ std::array<float, 4> SampleMip( const texture::CImage &image, float u, float v, 
 		out[ i ] = ( flTop + ( flBottom - flTop ) * fy ) / 255.0f;
 	}
 	return out;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: A 5:6:5 colour as 8 bits a channel.
+//-----------------------------------------------------------------------------
+std::array<int, 3> Expand565( unsigned nColor )
+{
+	const unsigned r = ( nColor >> 11 ) & 31;
+	const unsigned g = ( nColor >> 5 ) & 63;
+	const unsigned b = nColor & 31;
+	return { static_cast<int>( ( r << 3 ) | ( r >> 2 ) ), static_cast<int>( ( g << 2 ) | ( g >> 4 ) ), static_cast<int>( ( b << 3 ) | ( b >> 2 ) ) };
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: A texel of a DXT mip, decoded from its 4x4 block alone (S3TC): a colour half of two
+//          5:6:5 end colours and a 2-bit index a texel, after DXT3's 4-bit alphas or DXT5's two
+//          end alphas with 3-bit indices.
+//-----------------------------------------------------------------------------
+std::array<std::uint8_t, 4> CompressedTexel( const CompressedMip_t &mip, texture::VtfFormat_t nFormat, int x, int y )
+{
+	const bool bAlphaBlock = nFormat == texture::VtfFormat_t::DXT3 || nFormat == texture::VtfFormat_t::DXT5;
+	const std::size_t nBlockSize = bAlphaBlock ? 16 : 8;
+	const std::size_t nBlock = static_cast<std::size_t>( y / 4 ) * static_cast<std::size_t>( ( mip.m_nWidth + 3 ) / 4 ) + static_cast<std::size_t>( x / 4 );
+	if ( ( nBlock + 1 ) * nBlockSize > mip.m_Data.size() )
+	{
+		return { 255, 0, 255, 255 };
+	}
+	const auto *p = reinterpret_cast<const std::uint8_t *>( mip.m_Data.data() ) + nBlock * nBlockSize;
+	const int nTexel = ( y & 3 ) * 4 + ( x & 3 );
+	int nAlpha = 255;
+	if ( nFormat == texture::VtfFormat_t::DXT3 )
+	{
+		nAlpha = ( ( p[ nTexel / 2 ] >> ( ( nTexel & 1 ) * 4 ) ) & 15 ) * 17;
+	}
+	else if ( nFormat == texture::VtfFormat_t::DXT5 )
+	{
+		const int a0 = p[ 0 ];
+		const int a1 = p[ 1 ];
+		std::uint64_t nBits = 0;
+		for ( int i = 0; i < 6; i++ )
+		{
+			nBits |= static_cast<std::uint64_t>( p[ 2 + i ] ) << ( 8 * i );
+		}
+		const int nIndex = static_cast<int>( ( nBits >> ( 3 * nTexel ) ) & 7 );
+		if ( nIndex == 0 || nIndex == 1 )
+		{
+			nAlpha = nIndex == 0 ? a0 : a1;
+		}
+		else if ( a0 > a1 )
+		{
+			nAlpha = ( ( 8 - nIndex ) * a0 + ( nIndex - 1 ) * a1 ) / 7;
+		}
+		else
+		{
+			nAlpha = nIndex == 6 ? 0 : nIndex == 7 ? 255
+												   : ( ( 6 - nIndex ) * a0 + ( nIndex - 1 ) * a1 ) / 5;
+		}
+	}
+	const std::uint8_t *c = p + ( bAlphaBlock ? 8 : 0 );
+	const unsigned nColor0 = c[ 0 ] | ( c[ 1 ] << 8 );
+	const unsigned nColor1 = c[ 2 ] | ( c[ 3 ] << 8 );
+	const unsigned nIndices = c[ 4 ] | ( c[ 5 ] << 8 ) | ( c[ 6 ] << 16 ) | ( static_cast<unsigned>( c[ 7 ] ) << 24 );
+	const unsigned nIndex = ( nIndices >> ( 2 * nTexel ) ) & 3;
+	const std::array<int, 3> e0 = Expand565( nColor0 );
+	const std::array<int, 3> e1 = Expand565( nColor1 );
+	std::array<int, 3> rgb{};
+	// DXT1 with the first colour not above the second has three colours and transparent black.
+	const bool bFour = bAlphaBlock || nColor0 > nColor1;
+	for ( std::size_t i = 0; i < 3; i++ )
+	{
+		switch ( nIndex )
+		{
+			case 0: rgb[ i ] = e0[ i ]; break;
+			case 1: rgb[ i ] = e1[ i ]; break;
+			case 2: rgb[ i ] = bFour ? ( 2 * e0[ i ] + e1[ i ] ) / 3 : ( e0[ i ] + e1[ i ] ) / 2; break;
+			default: rgb[ i ] = bFour ? ( e0[ i ] + 2 * e1[ i ] ) / 3 : 0; break;
+		}
+	}
+	if ( !bFour && nIndex == 3 )
+	{
+		nAlpha = 0;
+	}
+	return { static_cast<std::uint8_t>( rgb[ 0 ] ), static_cast<std::uint8_t>( rgb[ 1 ] ), static_cast<std::uint8_t>( rgb[ 2 ] ), static_cast<std::uint8_t>( nAlpha ) };
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: A mip level of whichever set the texture has: decoded, or DXT read as it is.
+//-----------------------------------------------------------------------------
+std::array<float, 4> SampleLevel( const RasterTexture_t &texture, std::size_t nLevel, float u, float v )
+{
+	if ( !texture.m_Mips.empty() )
+	{
+		const texture::CImage &image = texture.m_Mips[ nLevel ];
+		return SampleMip( image.m_nWidth, image.m_nHeight, u, v, texture.m_bClampS, texture.m_bClampT, [ & ]( int x, int y ) {
+			const std::uint8_t *p = image.Pixel( x, y );
+			return std::array<std::uint8_t, 4>{ p[ 0 ], p[ 1 ], p[ 2 ], p[ 3 ] };
+		} );
+	}
+	const CompressedMip_t &mip = texture.m_Compressed[ nLevel ];
+	return SampleMip( mip.m_nWidth, mip.m_nHeight, u, v, texture.m_bClampS, texture.m_bClampT, [ & ]( int x, int y ) { return CompressedTexel( mip, texture.m_nCompressedFormat, x, y ); } );
 }
 
 //-----------------------------------------------------------------------------
@@ -86,26 +189,27 @@ bool HasMipChain( const RasterTexture_t &texture )
 //-----------------------------------------------------------------------------
 std::array<float, 4> SampleTexture( const RasterTexture_t &texture, float u, float v, float flLod, bool bMipBlend )
 {
-	if ( texture.m_Mips.empty() )
+	const std::size_t nLevels = texture.GetMipCount();
+	if ( nLevels == 0 )
 	{
 		return { 1.0f, 1.0f, 1.0f, 1.0f };
 	}
 	// The mips kept may start below the texture's own size; lod 0 is the full size.
-	const float flSkipped = std::log2( static_cast<float>( std::max( texture.m_nWidth, 1 ) ) / static_cast<float>( std::max( texture.m_Mips.front().m_nWidth, 1 ) ) );
-	float flLevel = HasMipChain( texture ) ? std::clamp( flLod - flSkipped, 0.0f, static_cast<float>( texture.m_Mips.size() - 1 ) ) : 0.0f;
+	const float flSkipped = std::log2( static_cast<float>( std::max( texture.m_nWidth, 1 ) ) / static_cast<float>( std::max( texture.GetTopWidth(), 1 ) ) );
+	float flLevel = HasMipChain( texture ) ? std::clamp( flLod - flSkipped, 0.0f, static_cast<float>( nLevels - 1 ) ) : 0.0f;
 	if ( !bMipBlend )
 	{
 		flLevel = std::floor( flLevel + 0.5f );
 	}
 	const auto nLow = static_cast<std::size_t>( flLevel );
-	const std::size_t nHigh = std::min( nLow + 1, texture.m_Mips.size() - 1 );
+	const std::size_t nHigh = std::min( nLow + 1, nLevels - 1 );
 	const float t = flLevel - static_cast<float>( nLow );
-	const std::array<float, 4> a = SampleMip( texture.m_Mips[ nLow ], u, v, texture.m_bClampS, texture.m_bClampT );
+	const std::array<float, 4> a = SampleLevel( texture, nLow, u, v );
 	if ( t <= 0.0f || nHigh == nLow )
 	{
 		return a;
 	}
-	const std::array<float, 4> b = SampleMip( texture.m_Mips[ nHigh ], u, v, texture.m_bClampS, texture.m_bClampT );
+	const std::array<float, 4> b = SampleLevel( texture, nHigh, u, v );
 	std::array<float, 4> out{};
 	for ( std::size_t i = 0; i < 4; i++ )
 	{

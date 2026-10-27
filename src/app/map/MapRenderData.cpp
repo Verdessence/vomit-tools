@@ -426,6 +426,18 @@ void CMapRenderData::SetSky( std::shared_ptr<const xv::sky::CCube> pSky )
 //-----------------------------------------------------------------------------
 // Purpose:
 //-----------------------------------------------------------------------------
+MapFrame_t CMapRenderData::GetShared()
+{
+	if ( m_Document.GetScene() != m_pBuiltFor )
+	{
+		Rebuild();
+	}
+	return m_Frame;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
 std::shared_ptr<const std::vector<std::array<std::uint8_t, 3>>> CMapRenderData::GetLineColors( const MapViewSettings_t &settings )
 {
 	const xv::map::CScene *pScene = m_Document.GetScene();

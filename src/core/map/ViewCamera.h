@@ -28,6 +28,13 @@ public:
 	double m_flFar = 32768.0;
 	int m_nWidth = 1;
 	int m_nHeight = 1;
+	// Above 0: an orthographic view (a 2D view's), this many pixels a unit, looking from m_Eye.
+	double m_flOrthoScale = 0.0;
+
+	[[nodiscard]] bool IsOrthographic() const { return m_flOrthoScale > 0.0; }
+	// A view straight along an axis: centre in the middle of the image, the whole map's depth
+	// (up to flDepth either side of it) in front.
+	void LookAlongAxis( Point_t centre, Point_t forward, double flScale, double flDepth );
 
 	[[nodiscard]] Point_t GetForward() const;
 	[[nodiscard]] Point_t GetRight() const;

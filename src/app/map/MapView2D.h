@@ -103,6 +103,10 @@ private:
 	// only draws over it. Made again when what it shows changes.
 	void PaintLayer();
 	void PaintGrid( class QPainter &painter, const QRectF &visible ) const;
+	// Props big enough on screen, textured (Preferences > Maps), drawn in software from this axis.
+	void PaintModels( QPainter &painter, const QRectF &visible ) const;
+	// Whether a prop is drawn textured rather than as its edges or box.
+	[[nodiscard]] bool IsTexturedModel( const MapFlatObject_t &object, const QRectF &box ) const;
 	void PaintObjects( QPainter &painter, const QRectF &visible ) const;
 	void PaintSelection( QPainter &painter ) const;
 	void PaintCamera( QPainter &painter ) const;
@@ -141,6 +145,7 @@ private:
 	{
 		const void *m_pScene = nullptr;
 		const void *m_pProps = nullptr;
+		const void *m_pMaterials = nullptr; // textures arriving draw the models again
 		std::uint64_t m_nState = ~0ull;
 		MapViewSettings_t m_Settings;
 		QPointF m_Center;

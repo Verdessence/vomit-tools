@@ -67,6 +67,22 @@ void CViewCamera::LookAt( Point_t eye, Point_t target )
 }
 
 //-----------------------------------------------------------------------------
+// Purpose: Source's angles for the axis (yaw, and pitch straight up or down), with the eye far
+//          enough back that everything is in front of it.
+//-----------------------------------------------------------------------------
+void CViewCamera::LookAlongAxis( Point_t centre, Point_t forward, double flScale, double flDepth )
+{
+	m_flOrthoScale = flScale;
+	m_flPitch = forward[ 2 ] < -0.5 ? 90.0 : forward[ 2 ] > 0.5 ? -90.0
+																: 0.0;
+	// Looking up or down, the yaw sets which way right is: +X, as the top view shows it.
+	m_flYaw = std::abs( forward[ 2 ] ) > 0.5 ? 90.0 : std::atan2( forward[ 1 ], forward[ 0 ] ) / DEGREES;
+	m_flNear = 1.0;
+	m_flFar = 2.0 * flDepth + 2.0;
+	m_Eye = Subtract( centre, Scale( GetForward(), flDepth + 1.0 ) );
+}
+
+//-----------------------------------------------------------------------------
 // Purpose: The horizontal field of view sets x; y follows the image's shape.
 //-----------------------------------------------------------------------------
 std::array<double, 2> CViewCamera::GetFocal() const
@@ -92,15 +108,31 @@ std::array<float, 16> CViewCamera::GetViewProjection() const
 		{ u[ 0 ], u[ 1 ], u[ 2 ], -Dot( u, m_Eye ) },
 		{ -f[ 0 ], -f[ 1 ], -f[ 2 ], Dot( f, m_Eye ) },
 	};
-	const double flA = -( fa + n ) / ( fa - n );
-	const double flB = -2.0 * fa * n / ( fa - n );
 	double rows[ 4 ][ 4 ] = {};
-	for ( int c = 0; c < 4; c++ )
+	if ( IsOrthographic() )
 	{
-		rows[ 0 ][ c ] = flFx * view[ 0 ][ c ];
-		rows[ 1 ][ c ] = flFy * view[ 1 ][ c ];
-		rows[ 2 ][ c ] = flA * view[ 2 ][ c ] + ( c == 3 ? flB : 0.0 );
-		rows[ 3 ][ c ] = -view[ 2 ][ c ];
+		// OpenGL's orthographic projection: w stays 1.
+		const double flSx = 2.0 * m_flOrthoScale / std::max( m_nWidth, 1 );
+		const double flSy = 2.0 * m_flOrthoScale / std::max( m_nHeight, 1 );
+		for ( int c = 0; c < 4; c++ )
+		{
+			rows[ 0 ][ c ] = flSx * view[ 0 ][ c ];
+			rows[ 1 ][ c ] = flSy * view[ 1 ][ c ];
+			rows[ 2 ][ c ] = -2.0 / ( fa - n ) * view[ 2 ][ c ] + ( c == 3 ? -( fa + n ) / ( fa - n ) : 0.0 );
+			rows[ 3 ][ c ] = c == 3 ? 1.0 : 0.0;
+		}
+	}
+	else
+	{
+		const double flA = -( fa + n ) / ( fa - n );
+		const double flB = -2.0 * fa * n / ( fa - n );
+		for ( int c = 0; c < 4; c++ )
+		{
+			rows[ 0 ][ c ] = flFx * view[ 0 ][ c ];
+			rows[ 1 ][ c ] = flFy * view[ 1 ][ c ];
+			rows[ 2 ][ c ] = flA * view[ 2 ][ c ] + ( c == 3 ? flB : 0.0 );
+			rows[ 3 ][ c ] = -view[ 2 ][ c ];
+		}
 	}
 	std::array<float, 16> matrix{};
 	for ( int c = 0; c < 4; c++ )
@@ -124,6 +156,11 @@ std::optional<std::array<double, 3>> CViewCamera::Project( Point_t p ) const
 	{
 		return std::nullopt;
 	}
+	if ( IsOrthographic() )
+	{
+		const double flZ = ( flDepth - m_flNear ) / ( m_flFar - m_flNear );
+		return std::array<double, 3>{ Dot( d, GetRight() ) * m_flOrthoScale + 0.5 * m_nWidth, 0.5 * m_nHeight - Dot( d, GetUp() ) * m_flOrthoScale, flZ };
+	}
 	const auto [ flFx, flFy ] = GetFocal();
 	const double flX = flFx * Dot( d, GetRight() ) / flDepth;
 	const double flY = flFy * Dot( d, GetUp() ) / flDepth;
@@ -137,6 +174,11 @@ std::optional<std::array<double, 3>> CViewCamera::Project( Point_t p ) const
 //-----------------------------------------------------------------------------
 std::pair<Point_t, Point_t> CViewCamera::Ray( double x, double y ) const
 {
+	if ( IsOrthographic() )
+	{
+		const Point_t from = Add( Add( m_Eye, Scale( GetRight(), ( x - 0.5 * m_nWidth ) / m_flOrthoScale ) ), Scale( GetUp(), ( 0.5 * m_nHeight - y ) / m_flOrthoScale ) );
+		return { from, GetForward() };
+	}
 	const auto [ flFx, flFy ] = GetFocal();
 	const double flNx = ( x / std::max( m_nWidth, 1 ) ) * 2.0 - 1.0;
 	const double flNy = 1.0 - ( y / std::max( m_nHeight, 1 ) ) * 2.0;
@@ -157,6 +199,26 @@ bool CViewCamera::CanSee( const Box_t &box ) const
 	const Point_t f = GetForward();
 	const Point_t r = GetRight();
 	const Point_t u = GetUp();
+	std::array<Point_t, 8> corners;
+	for ( std::size_t i = 0; i < 8; i++ )
+	{
+		corners[ i ] = { ( i & 1 ) ? box.m_Maxs[ 0 ] : box.m_Mins[ 0 ], ( i & 2 ) ? box.m_Maxs[ 1 ] : box.m_Mins[ 1 ], ( i & 4 ) ? box.m_Maxs[ 2 ] : box.m_Mins[ 2 ] };
+	}
+	if ( IsOrthographic() )
+	{
+		// Out when every corner is beyond the same side of the image's rectangle.
+		const double flHalfWidth = 0.5 * m_nWidth / m_flOrthoScale;
+		const double flHalfHeight = 0.5 * m_nHeight / m_flOrthoScale;
+		for ( const auto &[ axis, flHalf ] : { std::pair{ r, flHalfWidth }, std::pair{ u, flHalfHeight } } )
+		{
+			const auto along = [ &, axis = axis ]( const Point_t &p ) { return Dot( Subtract( p, m_Eye ), axis ); };
+			if ( std::ranges::all_of( corners, [ & ]( const Point_t &p ) { return along( p ) > flHalf; } ) || std::ranges::all_of( corners, [ & ]( const Point_t &p ) { return along( p ) < -flHalf; } ) )
+			{
+				return false;
+			}
+		}
+		return true;
+	}
 	const auto [ flFx, flFy ] = GetFocal();
 	// Inward normals of the side planes, through the eye.
 	const std::array<Point_t, 4> sides = {
@@ -165,11 +227,6 @@ bool CViewCamera::CanSee( const Box_t &box ) const
 		Normalized( Add( Scale( f, 1.0 / flFy ), u ) ),
 		Normalized( Subtract( Scale( f, 1.0 / flFy ), u ) ),
 	};
-	std::array<Point_t, 8> corners;
-	for ( std::size_t i = 0; i < 8; i++ )
-	{
-		corners[ i ] = { ( i & 1 ) ? box.m_Maxs[ 0 ] : box.m_Mins[ 0 ], ( i & 2 ) ? box.m_Maxs[ 1 ] : box.m_Mins[ 1 ], ( i & 4 ) ? box.m_Maxs[ 2 ] : box.m_Mins[ 2 ] };
-	}
 	auto allOutside = [ & ]( auto &&distance ) {
 		return std::ranges::all_of( corners, [ & ]( const Point_t &p ) { return distance( Subtract( p, m_Eye ) ) < 0.0; } );
 	};

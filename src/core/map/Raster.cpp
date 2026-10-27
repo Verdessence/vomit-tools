@@ -217,7 +217,8 @@ bool CRasterizer::Corners( const TriangleRef_t &ref, std::array<ClipVertex_t, 3>
 	}
 	// Faces are wound clockwise seen from outside, so this points out of the front.
 	const Point_t vecFront = Cross( Subtract( world[ 2 ], world[ 0 ] ), Subtract( world[ 1 ], world[ 0 ] ) );
-	return Dot( vecFront, Subtract( m_Camera.m_Eye, world[ 0 ] ) ) > 0.0;
+	const Point_t toEye = m_Camera.IsOrthographic() ? Scale( m_Camera.GetForward(), -1.0 ) : Subtract( m_Camera.m_Eye, world[ 0 ] );
+	return Dot( vecFront, toEye ) > 0.0;
 }
 
 //-----------------------------------------------------------------------------
@@ -651,7 +652,7 @@ void CRasterizer::Run()
 			m_Out.m_Pixels[ i * 4 ] = m_Options.m_Background[ 0 ];
 			m_Out.m_Pixels[ i * 4 + 1 ] = m_Options.m_Background[ 1 ];
 			m_Out.m_Pixels[ i * 4 + 2 ] = m_Options.m_Background[ 2 ];
-			m_Out.m_Pixels[ i * 4 + 3 ] = 255;
+			m_Out.m_Pixels[ i * 4 + 3 ] = m_Options.m_bTransparent ? 0 : 255;
 		}
 	}
 	m_Depth.assign( nPixels, 1.0f );

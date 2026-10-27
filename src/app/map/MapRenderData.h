@@ -57,6 +57,9 @@ class CMapRenderData
 public:
 	explicit CMapRenderData( const CMapDocument &document );
 
+	// What frames share, as it stands, without a camera or per-view state (the 2D views draw props
+	// from it).
+	[[nodiscard]] MapFrame_t GetShared();
 	// The frame for a camera, from what the document shows now.
 	[[nodiscard]] MapFrame_t Snapshot( const xv::map::CViewCamera &camera, const xv::map::RasterOptions_t &options, const MapViewSettings_t &settings );
 	// Each object's line colour (MapLineColors), made again when the settings or preferences

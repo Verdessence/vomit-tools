@@ -459,6 +459,80 @@ double CMapView2D::GetWorldLimit() const
 }
 
 //-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+bool CMapView2D::IsTexturedModel( const MapFlatObject_t &object, const QRectF &box ) const
+{
+	return object.m_nModelLineCount > 0 && m_Editor.GetSettings().m_bModels2D && Look().m_bTexturedModels2D && std::max( box.width(), box.height() ) >= Look().m_nModelsFromPixels;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: The props big enough to show their models, drawn textured by the software renderer
+//          looking straight along this view's axis, over the grid and under every line.
+//          Selected ones are left to PaintObjects, which draws their edges.
+//-----------------------------------------------------------------------------
+void CMapView2D::PaintModels( QPainter &painter, const QRectF &visible ) const
+{
+	const CMapDocument &document = GetDocument();
+	const xv::map::CScene *pScene = document.GetScene();
+	if ( !pScene || !m_pProps || !m_Editor.GetSettings().m_bModels2D || !Look().m_bTexturedModels2D )
+	{
+		return;
+	}
+	const MapFrame_t frame = m_Editor.GetRenderData().GetShared();
+	if ( !frame.m_pPropMesh || !frame.m_pMaterials )
+	{
+		return;
+	}
+	std::vector<std::uint8_t> flags( pScene->GetObjectCount(), 0 );
+	bool bAny = false;
+	for ( const MapFlatObject_t &object : m_Objects )
+	{
+		if ( object.m_nModelLineCount == 0 || !Overlaps( object.m_Bounds, visible ) || !document.IsShown( object.m_nObject ) || document.IsSelected( object.m_nObject ) )
+		{
+			continue;
+		}
+		const QRectF box = QRectF{ ToWidget( object.m_Bounds.topLeft() ), ToWidget( object.m_Bounds.bottomRight() ) }.normalized();
+		if ( IsTexturedModel( object, box ) )
+		{
+			flags[ object.m_nObject ] = xv::map::RASTER_OBJECT_SHOWN;
+			bAny = true;
+		}
+	}
+	if ( !bAny )
+	{
+		return;
+	}
+	const qreal flRatio = devicePixelRatioF();
+	xv::map::Point_t centre{};
+	centre[ static_cast<std::size_t>( GetAxis( 0 ) ) ] = m_Center.x();
+	centre[ static_cast<std::size_t>( GetAxis( 1 ) ) ] = m_Center.y();
+	const xv::map::Point_t forward = m_nType == MapViewType_t::MAP_VIEW_TYPE_FRONT ? xv::map::Point_t{ -1, 0, 0 } : m_nType == MapViewType_t::MAP_VIEW_TYPE_SIDE ? xv::map::Point_t{ 0, 1, 0 }
+																																								 : xv::map::Point_t{ 0, 0, -1 };
+	xv::map::CViewCamera camera;
+	camera.m_nWidth = std::max( 1, static_cast<int>( std::lround( width() * flRatio ) ) );
+	camera.m_nHeight = std::max( 1, static_cast<int>( std::lround( height() * flRatio ) ) );
+	camera.LookAlongAxis( centre, forward, m_flZoom * flRatio, GetWorldLimit() * 2.0 );
+	xv::map::RasterScene_t scene;
+	scene.m_Meshes = { frame.m_pPropMesh.get() };
+	scene.m_Materials = *frame.m_pMaterials;
+	scene.m_ObjectFlags = flags;
+	if ( frame.m_pFlatColors )
+	{
+		scene.m_ObjectColors = *frame.m_pFlatColors;
+	}
+	xv::map::RasterOptions_t options;
+	options.m_Shade.m_nMode = xv::map::RasterMode_t::RASTER_MODE_TEXTURED;
+	options.m_bTransparent = true;
+	options.m_bSelectionEdges = false;
+	xv::texture::CImage image;
+	xv::map::RenderView( scene, camera, options, image );
+	QImage picture( image.m_Pixels.data(), image.m_nWidth, image.m_nHeight, image.m_nWidth * 4, QImage::Format_RGBA8888 );
+	picture.setDevicePixelRatio( flRatio );
+	painter.drawImage( QPointF{ 0, 0 }, picture );
+}
+
+//-----------------------------------------------------------------------------
 // Purpose: Every shown object in view, in batches of one colour; broken solids over the rest
 //          (Hammer++ draws them over everything), and selected ones last, on top.
 //-----------------------------------------------------------------------------
@@ -516,9 +590,11 @@ void CMapView2D::PaintObjects( QPainter &painter, const QRectF &visible ) const
 			const xv::CVec3 &b = instances.m_Vertices[ instances.m_Lines[ nLine + 1 ] ].m_vecPosition;
 			contents.m_Lines.emplace_back( ToWidget( Flatten( { a.m_flX, a.m_flY, a.m_flZ } ) ), ToWidget( Flatten( { b.m_flX, b.m_flY, b.m_flZ } ) ) );
 		}
-		// A prop big enough on screen shows its model's edges (Shift+M), else its box.
+		// A prop big enough on screen shows its model (Shift+M): textured (PaintModels) unless it is
+		// selected, when Hammer++ shows its edges; else its box.
 		const bool bModel = object.m_nModelLineCount > 0 && settings.m_bModels2D && std::max( box.width(), box.height() ) >= look.m_nModelsFromPixels;
-		if ( bModel )
+		const bool bTextured = bModel && !bSelected && IsTexturedModel( object, box );
+		if ( bModel && !bTextured )
 		{
 			const xv::map::CMapMesh &props = *m_pProps;
 			for ( std::uint32_t k = 0; k < object.m_nModelLineCount; k++ )
@@ -529,7 +605,7 @@ void CMapView2D::PaintObjects( QPainter &painter, const QRectF &visible ) const
 				batch.m_Lines.emplace_back( ToWidget( Flatten( { a.m_flX, a.m_flY, a.m_flZ } ) ), ToWidget( Flatten( { b.m_flX, b.m_flY, b.m_flZ } ) ) );
 			}
 		}
-		else if ( object.m_bPointEntity && object.m_nInstanceLineCount == 0 )
+		else if ( !bModel && object.m_bPointEntity && object.m_nInstanceLineCount == 0 )
 		{
 			batch.m_Boxes.push_back( box.adjusted( 0.5, 0.5, -0.5, -0.5 ) );
 		}
@@ -767,6 +843,7 @@ void CMapView2D::PaintLayer()
 	LayerKey_t key;
 	key.m_pScene = m_pBuiltFor;
 	key.m_pProps = m_pProps.get();
+	key.m_pMaterials = m_Editor.GetRenderData().GetShared().m_pMaterials.get();
 	key.m_nState = GetDocument().GetStateGeneration();
 	key.m_Settings = m_Editor.GetSettings();
 	key.m_Center = m_Center;
@@ -789,6 +866,7 @@ void CMapView2D::PaintLayer()
 	QPainter painter( &m_Layer );
 	const QRectF visible = GetVisible();
 	PaintGrid( painter, visible );
+	PaintModels( painter, visible );
 	PaintObjects( painter, visible );
 }
 
