@@ -16,6 +16,11 @@
   Properties with SmartEdit's names. Game data comes from Hammer++'s or Hammer's configuration for
   the game, or from Preferences → Maps, which also holds the views' settings.
 - Large maps open in about a second: a 50 MB map reads in a quarter of a second.
+- The 2D views keep their picture between repaints, so turning or flying the camera no longer
+  redraws every brush three times over; on a 50 MB map a camera move went from about 50 ms of
+  main-thread work to under 1 ms. O in a 3D view shows where each frame's time goes.
+- Mouselook (Z) keeps the pointer where it is and puts the cursor back there when it ends: on
+  Wayland through the compositor's pointer constraints, elsewhere by warping it.
 
 ## 0.7.0 — The Model (2026-10-27)
 
