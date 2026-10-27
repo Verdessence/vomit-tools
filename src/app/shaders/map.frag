@@ -19,7 +19,7 @@ layout(std140, binding = 0) uniform Frame {
 	vec4 selection;     // rgb
 	vec4 selectionEdge; // rgb
 	vec4 faceShade;     // xyz
-	vec4 state;         // the state texture's width
+	vec4 state;         // the state texture's width, and the most samples anisotropic filtering takes
 	vec4 instance;      // rgb, and how much of it func_instances' contents take
 	vec4 pass;          // 1: the 3D skybox, drawn from its own camera first
 	vec4 invalid;       // rgb, and how much of it broken solids' faces take
@@ -90,11 +90,44 @@ vec3 skyColour(vec3 d) {
 	return textureLod(skyFace5, shown, 0.0).rgb;
 }
 
+// A texture at a texel position (in its full-size texels) as xv::map::SampleFiltered samples it:
+// once at the gradient's mip level, or with anisotropy up to that many times along the pixel's
+// footprint at a finer level, averaged.
+vec4 sampleFiltered(sampler2D tex, vec2 texel, vec2 size, vec2 across, vec2 down) {
+	vec2 full = max(size, vec2(1.0));
+	float most = frame.state.y;
+	if (most <= 1.0) {
+		return texture(tex, texel / full);
+	}
+	float lengthAcross = length(across);
+	float lengthDown = length(down);
+	float major = max(lengthAcross, lengthDown);
+	float minor = min(lengthAcross, lengthDown);
+	vec2 axis = lengthAcross >= lengthDown ? across : down;
+	float count = max(1.0, minor > 0.0 ? min(ceil(major / minor), most) : most);
+	float span = max(major / count, minor);
+	// The level in the texture as uploaded, which may start below its full size.
+	float lod = (span > 1.0 ? log2(span) : 0.0) - log2(full.x / float(textureSize(tex, 0).x));
+	vec4 sum = vec4(0.0);
+	for (int i = 0; i < 16; i++) {
+		if (float(i) >= count) {
+			break;
+		}
+		float t = (float(i) + 0.5) / count - 0.5;
+		sum += textureLod(tex, (texel + axis * t) / full, lod);
+	}
+	return sum / count;
+}
+
 float faceShade(vec3 n) {
 	return n.x * n.x * frame.faceShade.x + n.y * n.y * frame.faceShade.y + n.z * n.z * frame.faceShade.z;
 }
 
 void main() {
+	// How far the texture moves a pixel across and down, taken here where every pixel of the
+	// quad runs the same code.
+	vec2 across = dFdx(v_texel);
+	vec2 down = dFdy(v_texel);
 	float mode = material.kind.x > 0.5 ? MODE_FLAT : frame.mode.x;
 	vec4 color = vec4(v_state.rgb, 1.0);
 	vec3 n = normalize(v_normal);
@@ -109,9 +142,9 @@ void main() {
 			ivec2 square = ivec2(floor(uv * 4.0));
 			color = ((square.x + square.y) & 1) == 0 ? vec4(1.0, 0.0, 1.0, 1.0) : vec4(0.0, 0.0, 0.0, 1.0);
 		} else if (material.kind.y > 0.5) {
-			color = texture(base, uv);
+			color = sampleFiltered(base, v_texel, material.size.xy, across, down);
 			if (material.options.z > 0.5 && material.kind.z > 0.5) {
-				vec4 second = texture(base2, v_texel / max(material.size.zw, vec2(1.0)));
+				vec4 second = sampleFiltered(base2, v_texel, material.size.zw, across, down);
 				color = mix(color, second, v_blend);
 			}
 		} else {

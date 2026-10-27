@@ -254,6 +254,8 @@ MapFrame_t CMapView3D::MakeFrame( QSize size )
 	options.m_SelectionEdge = bytes( colors.m_SelectionEdge3D );
 	options.m_Shade.m_vecInvalid = vector( colors.m_Invalid );
 	options.m_Shade.m_flInvalidTint = static_cast<float>( preferences.m_flInvalidTint );
+	options.m_Shade.m_bMipBlend = preferences.m_nTextureFilter != MapTextureFilter_t::MAP_TEXTURE_FILTER_BILINEAR;
+	options.m_Shade.m_nAnisotropy = MapAnisotropy( preferences.m_nTextureFilter );
 	options.m_InvalidEdge = bytes( colors.m_Invalid );
 	MapFrame_t frame = m_Editor.GetRenderData().Snapshot( camera, options, m_Editor.GetSettings() );
 	frame.m_bModelEdges = preferences.m_bWireframeModels;

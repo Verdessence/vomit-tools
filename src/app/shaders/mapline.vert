@@ -15,7 +15,7 @@ layout(std140, binding = 0) uniform Frame {
 	vec4 selection;     // rgb
 	vec4 selectionEdge; // rgb
 	vec4 faceShade;     // xyz
-	vec4 state;         // the state texture's width
+	vec4 state;         // the state texture's width, and the most samples anisotropic filtering takes
 	vec4 instance;      // rgb, and how much of it func_instances' contents take
 	vec4 pass;          // 1: the 3D skybox, drawn from its own camera first
 	vec4 invalid;       // rgb, and how much of it broken solids' faces take

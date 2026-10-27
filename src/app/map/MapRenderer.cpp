@@ -139,6 +139,10 @@ void CMapRenderer::Release()
 	{
 		pSampler.reset();
 	}
+	for ( auto &pSampler : m_NearestMipSamplers )
+	{
+		pSampler.reset();
+	}
 	m_pNearest.reset();
 	m_pSkyFaces.reset();
 	m_pAlpha.reset();
@@ -175,6 +179,8 @@ void CMapRenderer::Initialize( QRhi *pRhi, QRhiRenderTarget * )
 			m_Samplers[ i ]->create();
 			m_TopSamplers[ i ].reset( m_pRhi->newSampler( QRhiSampler::Linear, QRhiSampler::Linear, QRhiSampler::None, s, t ) );
 			m_TopSamplers[ i ]->create();
+			m_NearestMipSamplers[ i ].reset( m_pRhi->newSampler( QRhiSampler::Linear, QRhiSampler::Linear, QRhiSampler::Nearest, s, t ) );
+			m_NearestMipSamplers[ i ]->create();
 		}
 		m_pNearest.reset( m_pRhi->newSampler( QRhiSampler::Nearest, QRhiSampler::Nearest, QRhiSampler::None, QRhiSampler::ClampToEdge, QRhiSampler::ClampToEdge ) );
 		m_pNearest->create();
@@ -341,7 +347,11 @@ QRhiTexture *CMapRenderer::Upload( const xv::map::RasterTexture_t &texture, std:
 QRhiSampler *CMapRenderer::SamplerFor( const xv::map::RasterTexture_t *pTexture ) const
 {
 	const std::size_t nIndex = pTexture ? ( pTexture->m_bClampS ? 1u : 0u ) + ( pTexture->m_bClampT ? 2u : 0u ) : 0u;
-	return pTexture && !xv::map::HasMipChain( *pTexture ) ? m_TopSamplers[ nIndex ].get() : m_Samplers[ nIndex ].get();
+	if ( pTexture && !xv::map::HasMipChain( *pTexture ) )
+	{
+		return m_TopSamplers[ nIndex ].get();
+	}
+	return m_bMipBlend ? m_Samplers[ nIndex ].get() : m_NearestMipSamplers[ nIndex ].get();
 }
 
 //-----------------------------------------------------------------------------
@@ -469,6 +479,12 @@ void CMapRenderer::UploadMaterials( const MapFrame_t &frame, QRhiResourceUpdateB
 		MakeBindings( m_LinesAll, m_pWhite.get(), m_pWhite.get(), nullptr, nullptr );
 		uniforms( m_LinesSelected, MaterialUniforms( nullptr, true ) );
 		MakeBindings( m_LinesSelected, m_pWhite.get(), m_pWhite.get(), nullptr, nullptr );
+	}
+	if ( frame.m_Options.m_Shade.m_bMipBlend != m_bMipBlend )
+	{
+		// The materials bind their samplers.
+		m_bMipBlend = frame.m_Options.m_Shade.m_bMipBlend;
+		m_pMaterialsFor = nullptr;
 	}
 	if ( frame.m_pMaterials.get() == m_pMaterialsFor )
 	{
@@ -633,6 +649,7 @@ void CMapRenderer::Render( QRhiCommandBuffer *pCommands, QRhiRenderTarget *pTarg
 		uniforms.m_FaceShade[ 1 ] = shade.m_vecFaceShade.m_flY;
 		uniforms.m_FaceShade[ 2 ] = shade.m_vecFaceShade.m_flZ;
 		uniforms.m_State[ 0 ] = static_cast<float>( m_nStateWidth );
+		uniforms.m_State[ 1 ] = static_cast<float>( shade.m_nAnisotropy );
 		uniforms.m_Instance[ 0 ] = shade.m_vecInstance.m_flX;
 		uniforms.m_Instance[ 1 ] = shade.m_vecInstance.m_flY;
 		uniforms.m_Instance[ 2 ] = shade.m_vecInstance.m_flZ;

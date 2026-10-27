@@ -91,6 +91,7 @@ struct ShadeInput_t
 	float m_flBlend = 0.0f;                    // displacement alpha, 0-1
 	CVec3 m_vecNormal{ 0, 0, 1 };
 	float m_flLod = 0.0f;                      // mip level, fractional
+	std::array<float, 4> m_Gradient{};         // texels the point moves a pixel right (u, v) and down (u, v)
 	CVec3 m_vecObjectColor{ 1, 1, 1 };         // the flat colour (Hammer's editor colour), 0-1
 	CVec3 m_vecDirection{ 1, 0, 0 };           // from the eye to the point (for the sky)
 	bool m_bSelected = false;
@@ -107,13 +108,21 @@ struct ShadeOptions_t
 	float m_flInstanceTint = 0.35f;
 	CVec3 m_vecInvalid{ 1.0f, 0.0f, 0.0f };    // broken solids' faces go this far toward red (Hammer++)
 	float m_flInvalidTint = 0.5f;
+	bool m_bMipBlend = true;                   // trilinear: between mips; else the nearest mip (bilinear)
+	int m_nAnisotropy = 1;                     // samples along a pixel's footprint at most (anisotropic filtering)
 	CVec3 m_vecFaceShade{ 0.65f, 0.8f, 1.0f }; // brightness of faces facing along x, y and z
 	float m_flLuxelShade = 0.75f;              // the lightmap grid's darker squares
 	const sky::CCube *m_pSky = nullptr;        // Hammer++'s 2D skybox on sky faces; null: none
 };
 
-// Bilinear between texels, trilinear between mips; u and v in texture widths (wrapping).
-[[nodiscard]] std::array<float, 4> SampleTexture( const RasterTexture_t &texture, float u, float v, float flLod );
+// Bilinear between texels, trilinear between mips (or the nearest mip without bMipBlend); u and v
+// in texture widths (wrapping).
+[[nodiscard]] std::array<float, 4> SampleTexture( const RasterTexture_t &texture, float u, float v, float flLod, bool bMipBlend = true );
+// A texture as the shaded modes sample it, at texel position texel (in the texture's full-size
+// texels) with the point's gradient: one sample at the gradient's mip level, or, with anisotropy,
+// up to that many along the footprint's long side at a finer level, averaged. map.frag's
+// SampleFiltered does the same.
+[[nodiscard]] std::array<float, 4> SampleFiltered( const RasterTexture_t &texture, std::array<float, 2> texel, const ShadeInput_t &input, const ShadeOptions_t &options );
 // The fixed light Hammer's shaded modes use: by how much a face looks along each axis.
 [[nodiscard]] float FaceShade( CVec3 vecNormal, CVec3 vecShade );
 // RGBA 0-1; nullopt where alpha testing throws the point away.

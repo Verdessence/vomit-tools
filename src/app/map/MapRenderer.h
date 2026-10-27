@@ -105,6 +105,8 @@ private:
 	const xv::sky::CCube *m_pSkyFor = nullptr;
 	std::array<std::unique_ptr<QRhiSampler>, 4> m_Samplers; // repeat or clamp in s and t
 	std::array<std::unique_ptr<QRhiSampler>, 4> m_TopSamplers; // the same, top level only: OpenGL reads a texture without mips as black through a mip filter
+	std::array<std::unique_ptr<QRhiSampler>, 4> m_NearestMipSamplers; // the same, from the nearest mip (bilinear filtering)
+	bool m_bMipBlend = true; // trilinear, else bilinear: the materials' bindings follow it
 	std::unique_ptr<QRhiSampler> m_pNearest;
 	const void *m_pStateFlags = nullptr;
 	const void *m_pStateColors = nullptr;

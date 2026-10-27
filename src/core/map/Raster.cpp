@@ -465,8 +465,13 @@ void CRasterizer::FillTriangle( const ScreenVertex_t &a, const ScreenVertex_t &b
 			input.m_Texel = { static_cast<float>( values[ 0 ] ), static_cast<float>( values[ 1 ] ) };
 			if ( bMips )
 			{
-				const double flRho = std::max( std::hypot( ( flUx - values[ 0 ] * flWx ) / flInvW, ( flVx - values[ 1 ] * flWx ) / flInvW ), std::hypot( ( flUy - values[ 0 ] * flWy ) / flInvW, ( flVy - values[ 1 ] * flWy ) / flInvW ) );
+				const double flDuDx = ( flUx - values[ 0 ] * flWx ) / flInvW;
+				const double flDvDx = ( flVx - values[ 1 ] * flWx ) / flInvW;
+				const double flDuDy = ( flUy - values[ 0 ] * flWy ) / flInvW;
+				const double flDvDy = ( flVy - values[ 1 ] * flWy ) / flInvW;
+				const double flRho = std::max( std::hypot( flDuDx, flDvDx ), std::hypot( flDuDy, flDvDy ) );
 				input.m_flLod = flRho > 1.0 ? static_cast<float>( std::log2( flRho ) ) : 0.0f;
+				input.m_Gradient = { static_cast<float>( flDuDx ), static_cast<float>( flDvDx ), static_cast<float>( flDuDy ), static_cast<float>( flDvDy ) };
 			}
 			input.m_Luxel = { static_cast<float>( values[ 2 ] ), static_cast<float>( values[ 3 ] ) };
 			input.m_flBlend = static_cast<float>( values[ 4 ] );

@@ -84,7 +84,7 @@ bool HasMipChain( const RasterTexture_t &texture )
 //-----------------------------------------------------------------------------
 // Purpose:
 //-----------------------------------------------------------------------------
-std::array<float, 4> SampleTexture( const RasterTexture_t &texture, float u, float v, float flLod )
+std::array<float, 4> SampleTexture( const RasterTexture_t &texture, float u, float v, float flLod, bool bMipBlend )
 {
 	if ( texture.m_Mips.empty() )
 	{
@@ -92,7 +92,11 @@ std::array<float, 4> SampleTexture( const RasterTexture_t &texture, float u, flo
 	}
 	// The mips kept may start below the texture's own size; lod 0 is the full size.
 	const float flSkipped = std::log2( static_cast<float>( std::max( texture.m_nWidth, 1 ) ) / static_cast<float>( std::max( texture.m_Mips.front().m_nWidth, 1 ) ) );
-	const float flLevel = HasMipChain( texture ) ? std::clamp( flLod - flSkipped, 0.0f, static_cast<float>( texture.m_Mips.size() - 1 ) ) : 0.0f;
+	float flLevel = HasMipChain( texture ) ? std::clamp( flLod - flSkipped, 0.0f, static_cast<float>( texture.m_Mips.size() - 1 ) ) : 0.0f;
+	if ( !bMipBlend )
+	{
+		flLevel = std::floor( flLevel + 0.5f );
+	}
 	const auto nLow = static_cast<std::size_t>( flLevel );
 	const std::size_t nHigh = std::min( nLow + 1, texture.m_Mips.size() - 1 );
 	const float t = flLevel - static_cast<float>( nLow );
@@ -108,6 +112,47 @@ std::array<float, 4> SampleTexture( const RasterTexture_t &texture, float u, flo
 		out[ i ] = a[ i ] + ( b[ i ] - a[ i ] ) * t;
 	}
 	return out;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: The footprint's long side is the larger of the two gradients; the samples spread
+//          along it, each at the level its share of the side (or the short side) needs.
+//-----------------------------------------------------------------------------
+std::array<float, 4> SampleFiltered( const RasterTexture_t &texture, std::array<float, 2> texel, const ShadeInput_t &input, const ShadeOptions_t &options )
+{
+	const float flWidth = static_cast<float>( std::max( texture.m_nWidth, 1 ) );
+	const float flHeight = static_cast<float>( std::max( texture.m_nHeight, 1 ) );
+	if ( options.m_nAnisotropy <= 1 )
+	{
+		return SampleTexture( texture, texel[ 0 ] / flWidth, texel[ 1 ] / flHeight, input.m_flLod, options.m_bMipBlend );
+	}
+	const std::array<float, 2> across{ input.m_Gradient[ 0 ], input.m_Gradient[ 1 ] };
+	const std::array<float, 2> down{ input.m_Gradient[ 2 ], input.m_Gradient[ 3 ] };
+	const float flAcross = std::hypot( across[ 0 ], across[ 1 ] );
+	const float flDown = std::hypot( down[ 0 ], down[ 1 ] );
+	const float flMajor = std::max( flAcross, flDown );
+	const float flMinor = std::min( flAcross, flDown );
+	const std::array<float, 2> &axis = flAcross >= flDown ? across : down;
+	const float flMost = static_cast<float>( options.m_nAnisotropy );
+	const float flCount = std::max( 1.0f, flMinor > 0.0f ? std::min( std::ceil( flMajor / flMinor ), flMost ) : flMost );
+	const float flSpan = std::max( flMajor / flCount, flMinor );
+	const float flLod = flSpan > 1.0f ? std::log2( flSpan ) : 0.0f;
+	std::array<float, 4> sum{};
+	const int nCount = static_cast<int>( flCount );
+	for ( int i = 0; i < nCount; i++ )
+	{
+		const float t = ( static_cast<float>( i ) + 0.5f ) / flCount - 0.5f;
+		const std::array<float, 4> sample = SampleTexture( texture, ( texel[ 0 ] + axis[ 0 ] * t ) / flWidth, ( texel[ 1 ] + axis[ 1 ] * t ) / flHeight, flLod );
+		for ( std::size_t c = 0; c < 4; c++ )
+		{
+			sum[ c ] += sample[ c ];
+		}
+	}
+	for ( float &flChannel : sum )
+	{
+		flChannel /= flCount;
+	}
+	return sum;
 }
 
 //-----------------------------------------------------------------------------
@@ -143,13 +188,11 @@ std::optional<std::array<float, 4>> ShadeFragment( const ShadeMaterial_t &materi
 		}
 		else if ( material.m_pBase )
 		{
-			color = SampleTexture( *material.m_pBase, u, v, input.m_flLod );
+			color = SampleFiltered( *material.m_pBase, input.m_Texel, input, options );
 			if ( material.m_bBlend && material.m_pBase2 )
 			{
 				// The second texture uses the same texture coordinates, scaled to its own size.
-				const float u2 = input.m_Texel[ 0 ] / static_cast<float>( std::max( material.m_pBase2->m_nWidth, 1 ) );
-				const float v2 = input.m_Texel[ 1 ] / static_cast<float>( std::max( material.m_pBase2->m_nHeight, 1 ) );
-				const std::array<float, 4> second = SampleTexture( *material.m_pBase2, u2, v2, input.m_flLod );
+				const std::array<float, 4> second = SampleFiltered( *material.m_pBase2, input.m_Texel, input, options );
 				for ( std::size_t i = 0; i < 4; i++ )
 				{
 					color[ i ] += ( second[ i ] - color[ i ] ) * input.m_flBlend;
