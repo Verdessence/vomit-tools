@@ -84,5 +84,6 @@ inline constexpr float MAX_SPEED_TIME = 0.5f;     // seconds to reach it
 inline constexpr float WHEEL_STEP = 64.0f;        // units a wheel notch moves the camera
 inline constexpr float PAN_SCALE = 1.0f;          // units a pixel of right-drag moves
 inline constexpr float FACE_SHADE[ 3 ] = { 0.65f, 0.8f, 1.0f }; // textured shaded: by facing X, Y, Z
+inline constexpr float LIGHTMAP_GRID_SHADE = 0.75f; // the lightmap grid's darker squares: how bright
 
 } // namespace mapstyle

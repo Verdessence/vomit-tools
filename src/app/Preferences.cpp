@@ -45,6 +45,7 @@ void ForEachMapPreference( Preferences_t &map, Visit_t &&pfnVisit )
 	pfnVisit( "maps/selectionTint", map.m_flSelectionTint );
 	pfnVisit( "maps/invalidTint", map.m_flInvalidTint );
 	pfnVisit( "maps/instanceTint", map.m_flInstanceTint );
+	pfnVisit( "maps/lightmapGridShade", map.m_flLightmapGridShade );
 	pfnVisit( "maps/skybox3D", map.m_bSkybox3D );
 	pfnVisit( "maps/sprites", map.m_bSprites );
 	pfnVisit( "maps/wireframeModels", map.m_bWireframeModels );

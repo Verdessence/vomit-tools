@@ -253,6 +253,7 @@ MapFrame_t CMapView3D::MakeFrame( QSize size )
 	options.m_Shade.m_vecSelection = vector( colors.m_Selection3D );
 	options.m_Shade.m_flSelectionTint = static_cast<float>( preferences.m_flSelectionTint );
 	options.m_Shade.m_vecFaceShade = { mapstyle::FACE_SHADE[ 0 ], mapstyle::FACE_SHADE[ 1 ], mapstyle::FACE_SHADE[ 2 ] };
+	options.m_Shade.m_flLuxelShade = static_cast<float>( preferences.m_flLightmapGridShade );
 	options.m_Shade.m_vecInstance = vector( colors.m_Instance );
 	options.m_Shade.m_flInstanceTint = static_cast<float>( preferences.m_flInstanceTint );
 	options.m_Background = bytes( colors.m_Background3D );

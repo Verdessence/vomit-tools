@@ -84,6 +84,7 @@ struct MapPreferences_t
 	double m_flSelectionTint = mapstyle::SELECTION_TINT; // how far selected faces go toward the selection colour
 	double m_flInvalidTint = mapstyle::INVALID_TINT;     // and broken solids' toward the invalid one
 	double m_flInstanceTint = mapstyle::INSTANCE_TINT_AMOUNT;
+	double m_flLightmapGridShade = mapstyle::LIGHTMAP_GRID_SHADE; // 1: no checkerboard
 	bool m_bSkybox3D = true;
 	bool m_bSprites = true;          // iconsprites and env_sprites drawn as such (else as boxes)
 	bool m_bWireframeModels = true;  // props' edges in the wireframe view

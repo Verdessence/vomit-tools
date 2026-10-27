@@ -473,6 +473,7 @@ QWidget *CPreferencesDialog::BuildMapsPage()
 		pForm->addRow( tr( "Selection tint" ), spin( QStringLiteral( "preferencesMapSelectionTint" ), current.m_flSelectionTint, 0, 1, 0.05, 2, []( MapPreferences_t &p, double fl ) { p.m_flSelectionTint = fl; } ) );
 		pForm->addRow( tr( "Broken solids' tint" ), spin( QStringLiteral( "preferencesMapInvalidTint" ), current.m_flInvalidTint, 0, 1, 0.05, 2, []( MapPreferences_t &p, double fl ) { p.m_flInvalidTint = fl; } ) );
 		pForm->addRow( tr( "Instances' tint" ), spin( QStringLiteral( "preferencesMapInstanceTint" ), current.m_flInstanceTint, 0, 1, 0.05, 2, []( MapPreferences_t &p, double fl ) { p.m_flInstanceTint = fl; } ) );
+		pForm->addRow( tr( "Lightmap grid's darker squares" ), spin( QStringLiteral( "preferencesMapLightmapGridShade" ), current.m_flLightmapGridShade, 0, 1, 0.05, 2, []( MapPreferences_t &p, double fl ) { p.m_flLightmapGridShade = fl; } ) );
 		pLayout->addLayout( pForm );
 		pLayout->addWidget( check( QStringLiteral( "preferencesMapSkybox3D" ), tr( "Draw the 3D skybox" ), current.m_bSkybox3D, []( MapPreferences_t &p, bool b ) { p.m_bSkybox3D = b; } ) );
 		pLayout->addWidget( check( QStringLiteral( "preferencesMapSprites" ), tr( "Draw sprites (else entities' boxes)" ), current.m_bSprites, []( MapPreferences_t &p, bool b ) { p.m_bSprites = b; } ) );
