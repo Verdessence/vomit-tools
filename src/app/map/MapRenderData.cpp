@@ -350,6 +350,13 @@ MapFrame_t CMapRenderData::Snapshot( const xv::map::CViewCamera &camera, const x
 		{
 			( *pFlags )[ placed.m_nObject ] = xv::map::RASTER_OBJECT_INSTANCE;
 		}
+		if ( pScene->m_Skybox3D )
+		{
+			for ( const std::uint32_t n : pScene->m_Skybox3D->m_Objects )
+			{
+				( *pFlags )[ n ] |= xv::map::RASTER_OBJECT_SKYBOX;
+			}
+		}
 		for ( std::uint32_t n = 0; n < pScene->GetObjectCount(); n++ )
 		{
 			std::uint8_t nFlags = ( *pFlags )[ n ] | ( m_Document.IsShown( n ) ? xv::map::RASTER_OBJECT_SHOWN : 0 );
@@ -390,6 +397,12 @@ MapFrame_t CMapRenderData::Snapshot( const xv::map::CViewCamera &camera, const x
 	frame.m_Options = options;
 	frame.m_Options.m_bToolTextures = settings.m_bToolTextures;
 	frame.m_Options.m_Shade.m_pSky = frame.m_pSky.get();
+	// Hammer++ draws the 3D skybox by default; Alt+V turns it off.
+	frame.m_Options.m_SkyboxCamera.reset();
+	if ( settings.m_bSkybox3D && pScene && pScene->m_Skybox3D )
+	{
+		frame.m_Options.m_SkyboxCamera = xv::map::SkyboxCamera( camera, *pScene->m_Skybox3D );
+	}
 	frame.m_nGeneration = m_nGeneration;
 	return frame;
 }

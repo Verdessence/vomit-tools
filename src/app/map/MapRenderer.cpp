@@ -30,6 +30,7 @@ struct FrameUniforms_t
 	float m_FaceShade[ 4 ];
 	float m_State[ 4 ];
 	float m_Instance[ 4 ];
+	float m_Pass[ 4 ];
 };
 
 struct MaterialUniforms_t
@@ -137,6 +138,9 @@ void CMapRenderer::Release()
 		pSampler.reset();
 	}
 	m_pNearest.reset();
+	m_pSkyFaces.reset();
+	m_pAlpha.reset();
+	m_pNoBindings.reset();
 	m_pMaterialsFor = nullptr;
 	m_pStateFlags = nullptr;
 	m_pStateColors = nullptr;
@@ -157,7 +161,9 @@ void CMapRenderer::Initialize( QRhi *pRhi, QRhiRenderTarget * )
 	}
 	if ( !m_pFrame )
 	{
-		m_pFrame.reset( m_pRhi->newBuffer( QRhiBuffer::Dynamic, QRhiBuffer::UniformBuffer, sizeof( FrameUniforms_t ) ) );
+		// Two frames' uniforms: the world's, and the 3D skybox's camera's.
+		m_nFrameStride = m_pRhi->ubufAligned( sizeof( FrameUniforms_t ) );
+		m_pFrame.reset( m_pRhi->newBuffer( QRhiBuffer::Dynamic, QRhiBuffer::UniformBuffer, m_nFrameStride * 2 ) );
 		m_pFrame->create();
 		for ( std::size_t i = 0; i < m_Samplers.size(); i++ )
 		{
@@ -309,7 +315,7 @@ void CMapRenderer::MakeBindings( Material_t &material, QRhiTexture *pBase, QRhiT
 	const auto both = QRhiShaderResourceBinding::VertexStage | QRhiShaderResourceBinding::FragmentStage;
 	material.m_pBindings.reset( m_pRhi->newShaderResourceBindings() );
 	material.m_pBindings->setBindings( {
-		QRhiShaderResourceBinding::uniformBuffer( 0, both, m_pFrame.get() ),
+		QRhiShaderResourceBinding::uniformBufferWithDynamicOffset( 0, both, m_pFrame.get(), sizeof( FrameUniforms_t ) ),
 		QRhiShaderResourceBinding::uniformBuffer( 1, both, material.m_pUniforms.get() ),
 		QRhiShaderResourceBinding::sampledTexture( 2, QRhiShaderResourceBinding::FragmentStage, pBase, SamplerFor( pBaseTexture ) ),
 		QRhiShaderResourceBinding::sampledTexture( 3, QRhiShaderResourceBinding::FragmentStage, pBase2, SamplerFor( pBase2Texture ) ),
@@ -489,9 +495,20 @@ void CMapRenderer::MakePipelines( QRhiRenderTarget *pTarget )
 			pPipeline->setCullMode( QRhiGraphicsPipeline::Back );
 		}
 		pPipeline->setDepthTest( !bLines );
-		pPipeline->setDepthWrite( !bLines && nBlend == 0 );
+		pPipeline->setDepthWrite( !bLines && ( nBlend == 0 || nBlend == 3 ) );
 		pPipeline->setDepthOp( QRhiGraphicsPipeline::Less );
-		if ( nBlend != 0 )
+		if ( nBlend == 3 )
+		{
+			// Sky faces over a 3D skybox: the skybox where it drew (alpha 1), the sky elsewhere.
+			QRhiGraphicsPipeline::TargetBlend blend;
+			blend.enable = true;
+			blend.srcColor = QRhiGraphicsPipeline::OneMinusDstAlpha;
+			blend.dstColor = QRhiGraphicsPipeline::DstAlpha;
+			blend.srcAlpha = QRhiGraphicsPipeline::One;
+			blend.dstAlpha = QRhiGraphicsPipeline::Zero;
+			pPipeline->setTargetBlends( { blend } );
+		}
+		else if ( nBlend != 0 )
 		{
 			QRhiGraphicsPipeline::TargetBlend blend;
 			blend.enable = true;
@@ -512,6 +529,19 @@ void CMapRenderer::MakePipelines( QRhiRenderTarget *pTarget )
 	m_pBlended = make( 1, false );
 	m_pAdditive = make( 2, false );
 	m_pLines = make( 0, true );
+	m_pSkyFaces = make( 3, false );
+
+	m_pNoBindings.reset( m_pRhi->newShaderResourceBindings() );
+	m_pNoBindings->create();
+	m_pAlpha.reset( m_pRhi->newGraphicsPipeline() );
+	m_pAlpha->setShaderStages( { { QRhiShaderStage::Vertex, LoadShader( QStringLiteral( ":/shaders/mapalpha.vert.qsb" ) ) }, { QRhiShaderStage::Fragment, LoadShader( QStringLiteral( ":/shaders/mapalpha.frag.qsb" ) ) } } );
+	QRhiGraphicsPipeline::TargetBlend alphaOnly;
+	alphaOnly.colorWrite = QRhiGraphicsPipeline::A;
+	m_pAlpha->setTargetBlends( { alphaOnly } );
+	m_pAlpha->setSampleCount( pTarget->sampleCount() );
+	m_pAlpha->setShaderResourceBindings( m_pNoBindings.get() );
+	m_pAlpha->setRenderPassDescriptor( pTarget->renderPassDescriptor() );
+	m_pAlpha->create();
 }
 
 //-----------------------------------------------------------------------------
@@ -530,37 +560,54 @@ void CMapRenderer::Render( QRhiCommandBuffer *pCommands, QRhiRenderTarget *pTarg
 		MakePipelines( pTarget );
 	}
 
-	FrameUniforms_t uniforms{};
-	const std::array<float, 16> matrix = frame.m_Camera.GetViewProjection();
-	const QMatrix4x4 viewProjection = m_pRhi->clipSpaceCorrMatrix() * QMatrix4x4( matrix.data() ).transposed();
-	std::memcpy( uniforms.m_ViewProjection, viewProjection.constData(), sizeof uniforms.m_ViewProjection );
-	uniforms.m_Eye[ 0 ] = static_cast<float>( frame.m_Camera.m_Eye[ 0 ] );
-	uniforms.m_Eye[ 1 ] = static_cast<float>( frame.m_Camera.m_Eye[ 1 ] );
-	uniforms.m_Eye[ 2 ] = static_cast<float>( frame.m_Camera.m_Eye[ 2 ] );
+	// The world's frame, and the 3D skybox's when it is drawn: textured views only.
 	const xv::map::ShadeOptions_t &shade = frame.m_Options.m_Shade;
-	uniforms.m_Mode[ 0 ] = static_cast<float>( static_cast<int>( shade.m_nMode ) );
-	uniforms.m_Mode[ 1 ] = shade.m_flSelectionTint;
-	uniforms.m_Mode[ 2 ] = shade.m_flLuxelShade;
-	uniforms.m_Selection[ 0 ] = shade.m_vecSelection.m_flX;
-	uniforms.m_Selection[ 1 ] = shade.m_vecSelection.m_flY;
-	uniforms.m_Selection[ 2 ] = shade.m_vecSelection.m_flZ;
-	for ( std::size_t i = 0; i < 3; i++ )
+	const bool bSky = frame.m_Options.m_SkyboxCamera && shade.m_nMode != xv::map::RasterMode_t::RASTER_MODE_FLAT && shade.m_nMode != xv::map::RasterMode_t::RASTER_MODE_WIREFRAME;
+	auto uniformsFor = [ & ]( const xv::map::CViewCamera &camera, bool bSkyPass ) {
+		FrameUniforms_t uniforms{};
+		const std::array<float, 16> matrix = camera.GetViewProjection();
+		const QMatrix4x4 viewProjection = m_pRhi->clipSpaceCorrMatrix() * QMatrix4x4( matrix.data() ).transposed();
+		std::memcpy( uniforms.m_ViewProjection, viewProjection.constData(), sizeof uniforms.m_ViewProjection );
+		uniforms.m_Eye[ 0 ] = static_cast<float>( camera.m_Eye[ 0 ] );
+		uniforms.m_Eye[ 1 ] = static_cast<float>( camera.m_Eye[ 1 ] );
+		uniforms.m_Eye[ 2 ] = static_cast<float>( camera.m_Eye[ 2 ] );
+		uniforms.m_Mode[ 0 ] = static_cast<float>( static_cast<int>( shade.m_nMode ) );
+		uniforms.m_Mode[ 1 ] = shade.m_flSelectionTint;
+		uniforms.m_Mode[ 2 ] = shade.m_flLuxelShade;
+		uniforms.m_Selection[ 0 ] = shade.m_vecSelection.m_flX;
+		uniforms.m_Selection[ 1 ] = shade.m_vecSelection.m_flY;
+		uniforms.m_Selection[ 2 ] = shade.m_vecSelection.m_flZ;
+		for ( std::size_t i = 0; i < 3; i++ )
+		{
+			uniforms.m_SelectionEdge[ i ] = frame.m_Options.m_SelectionEdge[ i ] / 255.0f;
+		}
+		uniforms.m_FaceShade[ 0 ] = shade.m_vecFaceShade.m_flX;
+		uniforms.m_FaceShade[ 1 ] = shade.m_vecFaceShade.m_flY;
+		uniforms.m_FaceShade[ 2 ] = shade.m_vecFaceShade.m_flZ;
+		uniforms.m_State[ 0 ] = static_cast<float>( m_nStateWidth );
+		uniforms.m_Instance[ 0 ] = shade.m_vecInstance.m_flX;
+		uniforms.m_Instance[ 1 ] = shade.m_vecInstance.m_flY;
+		uniforms.m_Instance[ 2 ] = shade.m_vecInstance.m_flZ;
+		uniforms.m_Instance[ 3 ] = shade.m_flInstanceTint;
+		uniforms.m_Pass[ 0 ] = bSkyPass ? 1.0f : 0.0f;
+		return uniforms;
+	};
+	const FrameUniforms_t world = uniformsFor( frame.m_Camera, false );
+	pUpdates->updateDynamicBuffer( m_pFrame.get(), 0, sizeof world, &world );
+	xv::map::CViewCamera skyCamera;
+	if ( bSky )
 	{
-		uniforms.m_SelectionEdge[ i ] = frame.m_Options.m_SelectionEdge[ i ] / 255.0f;
+		skyCamera = *frame.m_Options.m_SkyboxCamera;
+		skyCamera.m_nWidth = frame.m_Camera.m_nWidth;
+		skyCamera.m_nHeight = frame.m_Camera.m_nHeight;
+		const FrameUniforms_t sky = uniformsFor( skyCamera, true );
+		pUpdates->updateDynamicBuffer( m_pFrame.get(), m_nFrameStride, sizeof sky, &sky );
 	}
-	uniforms.m_FaceShade[ 0 ] = shade.m_vecFaceShade.m_flX;
-	uniforms.m_FaceShade[ 1 ] = shade.m_vecFaceShade.m_flY;
-	uniforms.m_FaceShade[ 2 ] = shade.m_vecFaceShade.m_flZ;
-	uniforms.m_State[ 0 ] = static_cast<float>( m_nStateWidth );
-	uniforms.m_Instance[ 0 ] = shade.m_vecInstance.m_flX;
-	uniforms.m_Instance[ 1 ] = shade.m_vecInstance.m_flY;
-	uniforms.m_Instance[ 2 ] = shade.m_vecInstance.m_flZ;
-	uniforms.m_Instance[ 3 ] = shade.m_flInstanceTint;
-	pUpdates->updateDynamicBuffer( m_pFrame.get(), 0, sizeof uniforms, &uniforms );
 
+	// Under a 3D skybox the picture starts see-through: what the skybox draws is opaque, and
+	// the world's sky faces show the sky only where it is still see-through.
 	const auto &background = frame.m_Options.m_Background;
-	pCommands->beginPass( pTarget, QColor( background[ 0 ], background[ 1 ], background[ 2 ] ), { 1.0f, 0 }, pUpdates );
-	pCommands->setViewport( { 0, 0, static_cast<float>( size.width() ), static_cast<float>( size.height() ) } );
+	pCommands->beginPass( pTarget, QColor( background[ 0 ], background[ 1 ], background[ 2 ], bSky ? 0 : 255 ), { 1.0f, 0 }, pUpdates );
 	m_nDrawCalls = 0;
 	const xv::map::RasterScene_t scene = frame.MakeScene();
 	auto materialOf = [ &scene ]( std::uint32_t n ) -> const xv::map::RasterMaterial_t * { return n < scene.m_Materials.size() ? &scene.m_Materials[ n ] : nullptr; };
@@ -570,9 +617,14 @@ void CMapRenderer::Render( QRhiCommandBuffer *pCommands, QRhiRenderTarget *pTarg
 		const xv::map::MeshBatch_t *m_pBatch;
 		double m_flDistance;
 	};
-	std::vector<Later_t> later;
 	QRhiShaderResourceBindings *pBound = nullptr;
 	QRhiGraphicsPipeline *pPipeline = nullptr;
+	quint32 nFrameOffset = 0;
+	auto bind = [ & ]( QRhiShaderResourceBindings *pBindings ) {
+		const QRhiCommandBuffer::DynamicOffset offset( 0, nFrameOffset );
+		pCommands->setShaderResources( pBindings, 1, &offset );
+		pBound = pBindings;
+	};
 	auto draw = [ & ]( std::size_t nMesh, const xv::map::MeshBatch_t &batch, QRhiGraphicsPipeline *pWanted ) {
 		if ( pPipeline != pWanted )
 		{
@@ -583,16 +635,16 @@ void CMapRenderer::Render( QRhiCommandBuffer *pCommands, QRhiRenderTarget *pTarg
 		QRhiShaderResourceBindings *pBindings = batch.m_nMaterial < m_Materials.size() ? m_Materials[ batch.m_nMaterial ].m_pBindings.get() : m_LinesAll.m_pBindings.get();
 		if ( pBindings != pBound )
 		{
-			pCommands->setShaderResources( pBindings );
-			pBound = pBindings;
+			bind( pBindings );
 		}
 		const QRhiCommandBuffer::VertexInput input( m_Meshes[ nMesh ].m_pVertices.get(), 0 );
 		pCommands->setVertexInput( 0, 1, &input, m_Meshes[ nMesh ].m_pIndices.get(), 0, QRhiCommandBuffer::IndexUInt32 );
 		pCommands->drawIndexed( batch.m_nIndexCount, 1, batch.m_nFirstIndex );
 		m_nDrawCalls++;
 	};
-	if ( shade.m_nMode != xv::map::RasterMode_t::RASTER_MODE_WIREFRAME )
-	{
+	// Every face in view of camera: opaque ones, then see-through ones far to near.
+	auto faces = [ & ]( const xv::map::CViewCamera &camera, bool bSkyPass ) {
+		std::vector<Later_t> later;
 		for ( std::size_t nMesh = 0; nMesh < scene.m_Meshes.size(); nMesh++ )
 		{
 			const xv::map::CMapMesh &mesh = *scene.m_Meshes[ nMesh ];
@@ -603,7 +655,7 @@ void CMapRenderer::Render( QRhiCommandBuffer *pCommands, QRhiRenderTarget *pTarg
 			for ( const xv::map::MeshBatch_t &batch : mesh.m_Batches )
 			{
 				const bool bChunk = batch.m_nChunk < mesh.m_Chunks.size();
-				if ( bChunk && !frame.m_Camera.CanSee( mesh.m_Chunks[ batch.m_nChunk ].m_Bounds ) )
+				if ( bChunk && !camera.CanSee( mesh.m_Chunks[ batch.m_nChunk ].m_Bounds ) )
 				{
 					continue;
 				}
@@ -614,11 +666,12 @@ void CMapRenderer::Render( QRhiCommandBuffer *pCommands, QRhiRenderTarget *pTarg
 				}
 				if ( shade.m_nMode != xv::map::RasterMode_t::RASTER_MODE_FLAT && IsSeeThrough( pMaterial ) )
 				{
-					const xv::map::Point_t centre = bChunk ? mesh.m_Chunks[ batch.m_nChunk ].m_Bounds.GetCenter() : frame.m_Camera.m_Eye;
-					later.push_back( { nMesh, &batch, xv::map::Length( xv::map::Subtract( centre, frame.m_Camera.m_Eye ) ) } );
+					const xv::map::Point_t centre = bChunk ? mesh.m_Chunks[ batch.m_nChunk ].m_Bounds.GetCenter() : camera.m_Eye;
+					later.push_back( { nMesh, &batch, xv::map::Length( xv::map::Subtract( centre, camera.m_Eye ) ) } );
 					continue;
 				}
-				draw( nMesh, batch, m_pOpaque.get() );
+				const bool bSkyFace = bSky && !bSkyPass && pMaterial && pMaterial->m_Shade.m_bSky;
+				draw( nMesh, batch, bSkyFace ? m_pSkyFaces.get() : m_pOpaque.get() );
 			}
 		}
 		std::ranges::stable_sort( later, std::greater<>{}, &Later_t::m_flDistance );
@@ -627,11 +680,27 @@ void CMapRenderer::Render( QRhiCommandBuffer *pCommands, QRhiRenderTarget *pTarg
 			const xv::map::RasterMaterial_t *pMaterial = materialOf( batch.m_pBatch->m_nMaterial );
 			draw( batch.m_nMesh, *batch.m_pBatch, pMaterial && pMaterial->m_Shade.m_bAdditive ? m_pAdditive.get() : m_pBlended.get() );
 		}
+	};
+	const float flWidth = static_cast<float>( size.width() );
+	const float flHeight = static_cast<float>( size.height() );
+	if ( bSky )
+	{
+		// The 3D skybox first, from its own camera, kept behind everything the world draws.
+		pCommands->setViewport( { 0, 0, flWidth, flHeight, 0.5f, 1.0f } );
+		nFrameOffset = m_nFrameStride;
+		faces( skyCamera, true );
+		nFrameOffset = 0;
+		pBound = nullptr;
+	}
+	pCommands->setViewport( { 0, 0, flWidth, flHeight, 0.0f, bSky ? 0.5f : 1.0f } );
+	if ( shade.m_nMode != xv::map::RasterMode_t::RASTER_MODE_WIREFRAME )
+	{
+		faces( frame.m_Camera, false );
 	}
 	// Edges: the wireframe's, then the selection's over everything.
 	auto edges = [ & ]( Material_t &material ) {
 		pCommands->setGraphicsPipeline( m_pLines.get() );
-		pCommands->setShaderResources( material.m_pBindings.get() );
+		bind( material.m_pBindings.get() );
 		for ( std::size_t nMesh = 0; nMesh < scene.m_Meshes.size(); nMesh++ )
 		{
 			const xv::map::CMapMesh &mesh = *scene.m_Meshes[ nMesh ];
@@ -652,6 +721,13 @@ void CMapRenderer::Render( QRhiCommandBuffer *pCommands, QRhiRenderTarget *pTarg
 	if ( frame.m_Options.m_bSelectionEdges )
 	{
 		edges( m_LinesSelected );
+	}
+	if ( bSky )
+	{
+		pCommands->setGraphicsPipeline( m_pAlpha.get() );
+		pCommands->setShaderResources( m_pNoBindings.get() );
+		pCommands->setViewport( { 0, 0, flWidth, flHeight } );
+		pCommands->draw( 3 );
 	}
 	pCommands->endPass();
 	m_Held = frame;

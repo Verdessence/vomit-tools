@@ -137,11 +137,15 @@ double Edge( const ScreenVertex_t &a, const ScreenVertex_t &b, double x, double 
 class CRasterizer
 {
 public:
-	CRasterizer( const RasterScene_t &scene, const CViewCamera &camera, const RasterOptions_t &options, texture::CImage &out )
+	// With a sky mask: the 3D skybox's pass (bSkyPass) marks the pixels it draws in it; the
+	// world's pass after it keeps the picture and leaves those pixels to its sky faces.
+	CRasterizer( const RasterScene_t &scene, const CViewCamera &camera, const RasterOptions_t &options, texture::CImage &out, std::vector<std::uint8_t> *pSkyMask = nullptr, bool bSkyPass = false )
 		: m_Scene( scene ),
 		  m_Camera( camera ),
 		  m_Options( options ),
-		  m_Out( out )
+		  m_Out( out ),
+		  m_pSkyMask( pSkyMask ),
+		  m_bSkyPass( bSkyPass )
 	{
 	}
 
@@ -166,6 +170,8 @@ private:
 	const CViewCamera &m_Camera;
 	const RasterOptions_t &m_Options;
 	texture::CImage &m_Out;
+	std::vector<std::uint8_t> *m_pSkyMask = nullptr;
+	bool m_bSkyPass = false;
 	std::array<float, 16> m_Matrix{};
 	std::vector<float> m_Depth;
 	std::vector<TriangleRef_t> m_Opaque;
@@ -229,7 +235,8 @@ void CRasterizer::Gather()
 			for ( std::uint32_t i = batch.m_nFirstIndex; i < batch.m_nFirstIndex + batch.m_nIndexCount; i += 3 )
 			{
 				const MeshVertex_t &first = mesh.m_Vertices[ mesh.m_Indices[ i ] ];
-				if ( ( FlagsOf( first.m_nObject ) & RASTER_OBJECT_SHOWN ) == 0 )
+				const std::uint8_t nFlags = FlagsOf( first.m_nObject );
+				if ( ( nFlags & RASTER_OBJECT_SHOWN ) == 0 || ( m_bSkyPass && ( nFlags & RASTER_OBJECT_SKYBOX ) == 0 ) )
 				{
 					continue;
 				}
@@ -426,9 +433,16 @@ void CRasterizer::FillTriangle( const ScreenVertex_t &a, const ScreenVertex_t &b
 			const double l1 = w1 / flArea;
 			const double l2 = w2 / flArea;
 			const double flZ = l0 * a.m_flZ + l1 * b.m_flZ + l2 * c.m_flZ;
-			float &flDepth = m_Depth[ static_cast<std::size_t>( y ) * static_cast<std::size_t>( m_Out.m_nWidth ) + static_cast<std::size_t>( x ) ];
+			const std::size_t nPixel = static_cast<std::size_t>( y ) * static_cast<std::size_t>( m_Out.m_nWidth ) + static_cast<std::size_t>( x );
+			float &flDepth = m_Depth[ nPixel ];
 			if ( !( flZ < flDepth ) || flZ < 0.0 || flZ > 1.0 )
 			{
+				continue;
+			}
+			if ( m_pSkyMask && !m_bSkyPass && material.m_bSky && ( *m_pSkyMask )[ nPixel ] )
+			{
+				// The 3D skybox shows here: the sky face only hides what is behind it.
+				flDepth = static_cast<float>( flZ );
 				continue;
 			}
 			const double flInvW = l0 * a.m_flInvW + l1 * b.m_flInvW + l2 * c.m_flInvW;
@@ -472,6 +486,10 @@ void CRasterizer::FillTriangle( const ScreenVertex_t &a, const ScreenVertex_t &b
 				}
 			}
 			p[ 3 ] = 255;
+			if ( m_bSkyPass )
+			{
+				( *m_pSkyMask )[ nPixel ] = 1;
+			}
 		}
 	}
 }
@@ -541,12 +559,17 @@ void CRasterizer::Run()
 {
 	m_Matrix = m_Camera.GetViewProjection();
 	const std::size_t nPixels = static_cast<std::size_t>( m_Out.m_nWidth ) * static_cast<std::size_t>( m_Out.m_nHeight );
-	for ( std::size_t i = 0; i < nPixels; i++ )
+	// The world's pass after the 3D skybox draws over its picture.
+	const bool bOverSky = m_pSkyMask && !m_bSkyPass;
+	if ( !bOverSky )
 	{
-		m_Out.m_Pixels[ i * 4 ] = m_Options.m_Background[ 0 ];
-		m_Out.m_Pixels[ i * 4 + 1 ] = m_Options.m_Background[ 1 ];
-		m_Out.m_Pixels[ i * 4 + 2 ] = m_Options.m_Background[ 2 ];
-		m_Out.m_Pixels[ i * 4 + 3 ] = 255;
+		for ( std::size_t i = 0; i < nPixels; i++ )
+		{
+			m_Out.m_Pixels[ i * 4 ] = m_Options.m_Background[ 0 ];
+			m_Out.m_Pixels[ i * 4 + 1 ] = m_Options.m_Background[ 1 ];
+			m_Out.m_Pixels[ i * 4 + 2 ] = m_Options.m_Background[ 2 ];
+			m_Out.m_Pixels[ i * 4 + 3 ] = 255;
+		}
 	}
 	m_Depth.assign( nPixels, 1.0f );
 	const std::size_t nBands = std::clamp<std::size_t>( ThreadCount() * 4, 1, static_cast<std::size_t>( std::max( m_Out.m_nHeight, 1 ) ) );
@@ -570,6 +593,10 @@ void CRasterizer::Run()
 		}
 	} );
 
+	if ( m_bSkyPass )
+	{
+		return;
+	}
 	// Wireframe: every shown object's edges in its colour, through each other as in Hammer.
 	const bool bWireframe = m_Options.m_Shade.m_nMode == RasterMode_t::RASTER_MODE_WIREFRAME;
 	for ( const CMapMesh *pMesh : m_Scene.m_Meshes )
@@ -633,6 +660,17 @@ void RenderView( const RasterScene_t &scene, const CViewCamera &camera, const Ra
 	}
 	if ( out.Empty() )
 	{
+		return;
+	}
+	const RasterMode_t nMode = options.m_Shade.m_nMode;
+	if ( options.m_SkyboxCamera && nMode != RasterMode_t::RASTER_MODE_FLAT && nMode != RasterMode_t::RASTER_MODE_WIREFRAME )
+	{
+		std::vector<std::uint8_t> mask( static_cast<std::size_t>( out.m_nWidth ) * static_cast<std::size_t>( out.m_nHeight ), 0 );
+		CViewCamera sky = *options.m_SkyboxCamera;
+		sky.m_nWidth = camera.m_nWidth;
+		sky.m_nHeight = camera.m_nHeight;
+		CRasterizer{ scene, sky, options, out, &mask, true }.Run();
+		CRasterizer{ scene, camera, options, out, &mask, false }.Run();
 		return;
 	}
 	CRasterizer{ scene, camera, options, out }.Run();

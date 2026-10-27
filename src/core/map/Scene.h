@@ -13,6 +13,7 @@
 #include <filesystem>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <string_view>
 #include <vector>
 
@@ -22,6 +23,7 @@
 #include "map/Instance.h"
 #include "map/Map.h"
 #include "map/Mesh.h"
+#include "map/Skybox3D.h"
 #include "map/Visgroups.h"
 
 namespace xv::map
@@ -42,6 +44,7 @@ public:
 	std::vector<std::string> m_Materials;
 	std::vector<PlacedInstance_t> m_Instances;
 	CMapMesh m_InstanceMesh;                 // every instance's solids, placed, as its func_instance
+	std::optional<Skybox3D_t> m_Skybox3D;   // the room around the sky_camera, if there is one
 
 	[[nodiscard]] std::uint32_t GetObjectCount() const { return static_cast<std::uint32_t>( m_Solids.size() + m_Entities.size() ); }
 	[[nodiscard]] std::uint32_t EntityObject( std::size_t nEntity ) const { return static_cast<std::uint32_t>( m_Solids.size() + nEntity ); }

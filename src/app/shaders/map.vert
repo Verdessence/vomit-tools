@@ -27,6 +27,7 @@ layout(std140, binding = 0) uniform Frame {
 	vec4 faceShade;     // xyz
 	vec4 state;         // the state texture's width
 	vec4 instance;      // rgb, and how much of it func_instances' contents take
+	vec4 pass;          // 1: the 3D skybox, drawn from its own camera first
 } frame;
 
 layout(binding = 4) uniform sampler2D stateTexture;
@@ -41,6 +42,8 @@ void main() {
 	v_blend = blend;
 	v_normal = normal;
 	v_world = position;
-	// Not shown: outside every clip plane, so the triangle is dropped.
-	gl_Position = (flags & 1) != 0 ? frame.viewProjection * vec4(position, 1.0) : vec4(2.0, 2.0, 2.0, 1.0);
+	// Not shown (or, while the 3D skybox is drawn, not in its room): outside every clip plane, so
+	// the triangle is dropped.
+	bool shown = (flags & 1) != 0 && (frame.pass.x < 0.5 || (flags & 16) != 0);
+	gl_Position = shown ? frame.viewProjection * vec4(position, 1.0) : vec4(2.0, 2.0, 2.0, 1.0);
 }

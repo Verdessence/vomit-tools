@@ -48,6 +48,8 @@ add_library(vomit_tools_core STATIC
         map/Scene.h
         map/Shade.cpp
         map/Shade.h
+        map/Skybox3D.cpp
+        map/Skybox3D.h
         map/Sprites.cpp
         map/Sprites.h
         map/Trace.cpp

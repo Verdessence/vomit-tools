@@ -21,6 +21,7 @@ layout(std140, binding = 0) uniform Frame {
 	vec4 faceShade;     // xyz
 	vec4 state;         // the state texture's width
 	vec4 instance;      // rgb, and how much of it func_instances' contents take
+	vec4 pass;          // 1: the 3D skybox, drawn from its own camera first
 } frame;
 
 layout(std140, binding = 1) uniform Material {

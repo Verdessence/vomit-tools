@@ -99,6 +99,7 @@ std::unique_ptr<CScene> BuildScene( CMap map, std::shared_ptr<const CFgd> pFgd, 
 		return nullptr;
 	}
 	LoadInstances( *pScene, options );
+	pScene->m_Skybox3D = FindSkybox3D( *pScene );
 	for ( const SolidGeometry_t &solid : pScene->m_Solids )
 	{
 		pScene->m_Bounds.Add( solid.m_Bounds );

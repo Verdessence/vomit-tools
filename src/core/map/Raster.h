@@ -10,6 +10,7 @@
 #pragma once
 
 #include <array>
+#include <optional>
 #include <cstdint>
 #include <span>
 #include <vector>
@@ -29,6 +30,7 @@ enum RasterObject_t : std::uint8_t
 	RASTER_OBJECT_SELECTED = 1u << 1,
 	RASTER_OBJECT_INVALID = 1u << 2,
 	RASTER_OBJECT_INSTANCE = 1u << 3, // a func_instance's contents: tinted
+	RASTER_OBJECT_SKYBOX = 1u << 4,   // in the 3D skybox's room: drawn again behind the world
 };
 
 // A material as the renderers use it, from MaterialInfo_t and the textures read for it.
@@ -65,6 +67,9 @@ struct RasterOptions_t
 	bool m_bToolTextures = true;
 	bool m_bSelectionEdges = true;
 	std::array<std::uint8_t, 3> m_SelectionEdge{ 255, 255, 0 };
+	// The 3D skybox, drawn first from here (map::SkyboxCamera): its objects behind everything,
+	// showing where the world's sky faces are, as the game shows it. Textured views only.
+	std::optional<CViewCamera> m_SkyboxCamera;
 };
 
 // Draws into out, sized to the camera's image.

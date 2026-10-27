@@ -97,6 +97,10 @@ private:
 	std::unique_ptr<QRhiGraphicsPipeline> m_pBlended;
 	std::unique_ptr<QRhiGraphicsPipeline> m_pAdditive;
 	std::unique_ptr<QRhiGraphicsPipeline> m_pLines;
+	std::unique_ptr<QRhiGraphicsPipeline> m_pSkyFaces; // the world's sky faces over a 3D skybox
+	std::unique_ptr<QRhiGraphicsPipeline> m_pAlpha;    // makes the picture opaque afterwards
+	std::unique_ptr<QRhiShaderResourceBindings> m_pNoBindings;
+	quint32 m_nFrameStride = 0; // the world's frame uniforms, then the 3D skybox's
 	int m_nDrawCalls = 0;
 	// The last frame, held so nothing it points to is freed (and its address reused) while the
 	// uploads above are still compared with it.
