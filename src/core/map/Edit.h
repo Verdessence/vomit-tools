@@ -39,12 +39,14 @@ struct MapEdit_t
 	std::vector<std::pair<std::uint32_t, Entity_t>> m_Entities;
 	// The world's keys, outputs and editor notes as they are to be (its solids stay as they are).
 	std::optional<Entity_t> m_World;
-	// Groups to add (Hammer's group blocks in the world); an empty group left behind is harmless.
+	// Groups to add (Hammer's group blocks in the world), and groups an earlier edit added to take
+	// out again by id (undoing it; such groups have no text in the file).
 	std::vector<Group_t> m_Groups;
+	std::vector<int> m_RemovedGroups;
 	// The cordons as they are to be, and whether the cordon is on.
 	std::optional<std::pair<std::vector<Cordon_t>, bool>> m_Cordons;
 
-	[[nodiscard]] bool IsEmpty() const { return m_Solids.empty() && m_Entities.empty() && !m_World && m_Groups.empty() && !m_Cordons; }
+	[[nodiscard]] bool IsEmpty() const { return m_Solids.empty() && m_Entities.empty() && !m_World && m_Groups.empty() && m_RemovedGroups.empty() && !m_Cordons; }
 };
 
 inline constexpr std::uint32_t NEW_MATERIAL = ~0u;
@@ -111,6 +113,9 @@ struct PasteSpecial_t
 	Point_t m_Offset{};
 	std::array<double, 3> m_Angles{};
 	std::optional<Point_t> m_Start;
+	// What the turns are about (Hammer++'s pivot), where the pasted set is now; else its own
+	// centre. m_Start moves the point along with the set.
+	std::optional<Point_t> m_Pivot;
 	bool m_bGroup = false;
 	bool m_bUniqueNames = false;
 };

@@ -100,6 +100,114 @@ Solid_t AsNew( Solid_t solid, int &nNextId, int &nNextSide )
 	return solid;
 }
 
+//-----------------------------------------------------------------------------
+// Purpose: Whether a carver is a block: six faces, each square to an axis.
+//-----------------------------------------------------------------------------
+bool IsBlock( const SolidGeometry_t &carver )
+{
+	if ( carver.m_Faces.size() != 6 )
+	{
+		return false;
+	}
+	for ( const FaceGeometry_t &face : carver.m_Faces )
+	{
+		const Point_t &n = face.m_Plane.m_Normal;
+		if ( std::max( { std::abs( n[ 0 ] ), std::abs( n[ 1 ] ), std::abs( n[ 2 ] ) } ) < 1.0 - 1e-9 )
+		{
+			return false;
+		}
+	}
+	return true;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: The fan: space outside the carver is split into one region a face, the cone from
+//          the carver's centre through that face (bounded by the planes through the centre and
+//          the face's edges); in it the face's plane alone tells outside from inside. The piece
+//          for a face is what of the solid lies in its cone and outside its plane; the pieces
+//          don't overlap and together are everything outside. A cylinder through a wall so
+//          leaves arch segments, as Verd wants, where Hammer's slabs run across the wall.
+//-----------------------------------------------------------------------------
+std::vector<Solid_t> FanPieces( const CMap &map, const Solid_t &piece, const SolidGeometry_t &carver )
+{
+	Point_t centre{};
+	std::size_t nPoints = 0;
+	for ( const FaceGeometry_t &face : carver.m_Faces )
+	{
+		for ( const Point_t &p : face.m_Points )
+		{
+			centre = Add( centre, p );
+			nPoints++;
+		}
+	}
+	centre = Scale( centre, 1.0 / static_cast<double>( std::max<std::size_t>( nPoints, 1 ) ) );
+	std::vector<Solid_t> pieces;
+	for ( const FaceGeometry_t &face : carver.m_Faces )
+	{
+		std::optional<Solid_t> part = ClipSolid( map, piece, face.m_Plane ).m_Front;
+		Point_t middle{};
+		for ( const Point_t &p : face.m_Points )
+		{
+			middle = Add( middle, p );
+		}
+		middle = Scale( middle, 1.0 / static_cast<double>( std::max<std::size_t>( face.m_Points.size(), 1 ) ) );
+		for ( std::size_t i = 0; i < face.m_Points.size() && part; i++ )
+		{
+			// The cone's side through this edge, the face's middle behind it.
+			const Point_t &a = face.m_Points[ i ];
+			const Point_t &b = face.m_Points[ ( i + 1 ) % face.m_Points.size() ];
+			const Point_t normal = Normalized( Cross( Subtract( a, centre ), Subtract( b, centre ) ) );
+			if ( Length( normal ) < 0.5 )
+			{
+				continue;
+			}
+			Plane_t side{ normal, Dot( normal, centre ) };
+			if ( side.Distance( middle ) > 0.0 )
+			{
+				side = Flipped( side );
+			}
+			part = ClipSolid( map, *part, side ).m_Back;
+		}
+		if ( part )
+		{
+			pieces.push_back( std::move( *part ) );
+		}
+	}
+	return pieces;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: The planes a carver cuts by, facing out of it. Box first: the six sides of its
+//          box, top and bottom first (as Make Hollow's walls), then its own faces, which then
+//          only cut what is inside the box; everything outside the box is outside the carver,
+//          so the hole is the same.
+//-----------------------------------------------------------------------------
+std::vector<Plane_t> CarvingPlanes( const SolidGeometry_t &carver, CarveStyle_t nStyle )
+{
+	std::vector<Plane_t> planes;
+	if ( nStyle == CarveStyle_t::CARVE_STYLE_BOX_FIRST )
+	{
+		for ( const std::size_t nAxis : { std::size_t{ 2 }, std::size_t{ 0 }, std::size_t{ 1 } } )
+		{
+			Point_t normal{};
+			normal[ nAxis ] = 1.0;
+			planes.push_back( { normal, carver.m_Bounds.m_Maxs[ nAxis ] } );
+			normal[ nAxis ] = -1.0;
+			planes.push_back( { normal, -carver.m_Bounds.m_Mins[ nAxis ] } );
+		}
+	}
+	for ( const FaceGeometry_t &face : carver.m_Faces )
+	{
+		// A face on one of the box's sides cuts nothing more.
+		const bool bOnBox = std::ranges::any_of( planes, [ & ]( const Plane_t &plane ) { return Dot( plane.m_Normal, face.m_Plane.m_Normal ) > 1.0 - 1e-9 && std::abs( plane.m_flDistance - face.m_Plane.m_flDistance ) < ON_PLANE; } );
+		if ( !bOnBox )
+		{
+			planes.push_back( face.m_Plane );
+		}
+	}
+	return planes;
+}
+
 } // namespace
 
 //-----------------------------------------------------------------------------
@@ -211,7 +319,7 @@ MapEdit_t ClipObjects( const CScene &scene, const std::vector<std::uint32_t> &ob
 //          piece kept, what lies inside goes on to the next plane; what is inside them all is
 //          the carved hole.
 //-----------------------------------------------------------------------------
-MapEdit_t CarveObjects( const CScene &scene, const std::vector<std::uint32_t> &carvers, std::vector<std::uint32_t> *pAdded )
+MapEdit_t CarveObjects( const CScene &scene, const std::vector<std::uint32_t> &carvers, std::vector<std::uint32_t> *pAdded, const CarveOptions_t &options )
 {
 	MapEdit_t edit;
 	const CMap &map = scene.m_Map;
@@ -236,6 +344,8 @@ MapEdit_t CarveObjects( const CScene &scene, const std::vector<std::uint32_t> &c
 			{
 				continue;
 			}
+			const CarveStyle_t nStyle = options.m_nStyle != CarveStyle_t::CARVE_STYLE_AUTO ? options.m_nStyle : IsBlock( carver ) ? CarveStyle_t::CARVE_STYLE_HAMMER
+																																  : CarveStyle_t::CARVE_STYLE_FAN;
 			std::vector<Solid_t> next;
 			for ( Solid_t &piece : pieces )
 			{
@@ -246,16 +356,37 @@ MapEdit_t CarveObjects( const CScene &scene, const std::vector<std::uint32_t> &c
 					{
 						break;
 					}
-					ClipResult_t cut = ClipSolid( map, *inside, face.m_Plane );
+					inside = ClipSolid( map, *inside, face.m_Plane ).m_Back;
+				}
+				// What is left inside every plane of the carver is taken away.
+				if ( !inside )
+				{
+					next.push_back( std::move( piece ) );
+					continue;
+				}
+				bCarved = true;
+				if ( nStyle == CarveStyle_t::CARVE_STYLE_FAN )
+				{
+					for ( Solid_t &part : FanPieces( map, piece, carver ) )
+					{
+						next.push_back( std::move( part ) );
+					}
+					continue;
+				}
+				std::optional<Solid_t> rest = piece;
+				for ( const Plane_t &plane : CarvingPlanes( carver, nStyle ) )
+				{
+					if ( !rest )
+					{
+						break;
+					}
+					ClipResult_t cut = ClipSolid( map, *rest, plane );
 					if ( cut.m_Front )
 					{
 						next.push_back( std::move( *cut.m_Front ) );
-						bCarved = bCarved || cut.m_Back.has_value();
 					}
-					inside = std::move( cut.m_Back );
+					rest = std::move( cut.m_Back );
 				}
-				// What is left inside every plane of the carver is taken away.
-				bCarved = bCarved || inside.has_value();
 			}
 			pieces = std::move( next );
 		}
@@ -269,6 +400,21 @@ MapEdit_t CarveObjects( const CScene &scene, const std::vector<std::uint32_t> &c
 			gone.m_bDeleted = true;
 			edit.m_Solids.emplace_back( nSolid, std::move( gone ) );
 			continue;
+		}
+		if ( options.m_bGroup && pieces.size() > 1 )
+		{
+			// The new group sits inside the one the solid was in.
+			Group_t group;
+			group.m_nId = nNextId++;
+			group.m_Editor.m_Color = { 220, 220, 220 };
+			group.m_Editor.m_bHasColor = true;
+			group.m_Editor.m_nGroup = target.m_Editor.m_nGroup;
+			for ( Solid_t &piece : pieces )
+			{
+				piece.m_Editor.m_nGroup = group.m_nId;
+				piece.m_Editor.m_bChanged = true;
+			}
+			edit.m_Groups.push_back( group );
 		}
 		for ( std::size_t i = 0; i < pieces.size(); i++ )
 		{

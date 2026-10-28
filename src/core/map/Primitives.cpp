@@ -227,7 +227,9 @@ Solid_t MakePrimitive( const CMap &map, Primitive_t nKind, const Box_t &box, con
 
 //-----------------------------------------------------------------------------
 // Purpose: Hammer writes a new entity's keys sorted by name, whatever order the FGD gives them
-//          in, with the origin after them all (as the maps it saved show).
+//          in, with the origin after them all (as the maps it saved show). Keys whose default
+//          is empty or 0 are left out, the flags too when none is ticked (Verd: Hammer++ skips
+//          a light's "_constant_attn" and "style").
 //-----------------------------------------------------------------------------
 Entity_t MakePointEntity( const CMap &map, const CFgd *pFgd, std::string_view szClass, const Point_t &origin )
 {
@@ -254,7 +256,7 @@ Entity_t MakePointEntity( const CMap &map, const CFgd *pFgd, std::string_view sz
 			}
 			std::string szLower = key.m_szName;
 			std::ranges::transform( szLower, szLower.begin(), []( unsigned char ch ) { return static_cast<char>( std::tolower( ch ) ); } );
-			if ( szValue.empty() || szLower == "classname" || szLower == "origin" )
+			if ( szValue.empty() || szValue == "0" || szLower == "classname" || szLower == "origin" )
 			{
 				continue;
 			}

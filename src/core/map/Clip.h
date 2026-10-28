@@ -47,11 +47,25 @@ enum class ClipKeep_t
 // new solids' object numbers (splitting).
 [[nodiscard]] MapEdit_t ClipObjects( const CScene &scene, const std::vector<std::uint32_t> &objects, const Plane_t &plane, ClipKeep_t nKeep, std::vector<std::uint32_t> *pAdded );
 
+// How Carve cuts a solid it meets.
+enum class CarveStyle_t
+{
+	CARVE_STYLE_AUTO,      // slabs for a block, a fan for anything else
+	CARVE_STYLE_HAMMER,    // by the carver's faces in turn, as Hammer does: a slanted face's cut runs right across the solid
+	CARVE_STYLE_BOX_FIRST, // by the carver's box first, then its faces: no cut reaches past the carver's box
+	CARVE_STYLE_FAN,       // one piece a face, fanning out from the carver's centre: a cylinder leaves arch segments
+};
+struct CarveOptions_t
+{
+	CarveStyle_t m_nStyle = CarveStyle_t::CARVE_STYLE_AUTO;
+	bool m_bGroup = false; // each carved solid's pieces in a group of their own (Hammer++'s GroupCarve)
+};
+
 // Carve: the carvers' shapes taken out of every other solid they overlap (hidden ones too):
 // each such solid is cut by the carver's planes, the parts outside kept as solids of their
 // own (the first in the solid's place, the rest new), the part inside gone. The carvers
 // themselves stay. pAdded as above.
-[[nodiscard]] MapEdit_t CarveObjects( const CScene &scene, const std::vector<std::uint32_t> &carvers, std::vector<std::uint32_t> *pAdded );
+[[nodiscard]] MapEdit_t CarveObjects( const CScene &scene, const std::vector<std::uint32_t> &carvers, std::vector<std::uint32_t> *pAdded, const CarveOptions_t &options = {} );
 
 // Make Hollow: each selected solid replaced by walls flWallWidth thick inside its faces (a
 // negative width builds them outside), one solid a face, grouped; pAdded as above (the first

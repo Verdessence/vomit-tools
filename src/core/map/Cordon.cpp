@@ -8,6 +8,9 @@
 
 #include <algorithm>
 
+#include "kv1/Kv1.h"
+#include "map/Brushes.h"
+#include "map/Clip.h"
 #include "map/Write.h"
 
 namespace xv::map
@@ -31,6 +34,50 @@ bool Overlap( const Box_t &a, const Box_t &b )
 	return true;
 }
 
+//-----------------------------------------------------------------------------
+// Purpose: Whether two boxes share some volume (touching doesn't count).
+//-----------------------------------------------------------------------------
+bool OverlapInside( const Box_t &a, const Box_t &b )
+{
+	for ( std::size_t i = 0; i < 3; i++ )
+	{
+		if ( a.m_Maxs[ i ] <= b.m_Mins[ i ] || b.m_Maxs[ i ] <= a.m_Mins[ i ] )
+		{
+			return false;
+		}
+	}
+	return true;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: What of solid lies outside box, in convex pieces: cut by each of the box's sides in
+//          turn, the part outside kept and the part inside going on to the next side.
+//-----------------------------------------------------------------------------
+std::vector<Solid_t> OutsideBox( const CMap &map, const Solid_t &solid, const Box_t &box )
+{
+	std::vector<Solid_t> pieces;
+	std::optional<Solid_t> inside = solid;
+	for ( std::size_t nAxis = 0; nAxis < 3 && inside; nAxis++ )
+	{
+		for ( const double flSign : { 1.0, -1.0 } )
+		{
+			if ( !inside )
+			{
+				break;
+			}
+			Point_t normal{};
+			normal[ nAxis ] = flSign;
+			ClipResult_t cut = ClipSolid( map, *inside, { normal, flSign > 0.0 ? box.m_Maxs[ nAxis ] : -box.m_Mins[ nAxis ] } );
+			if ( cut.m_Front )
+			{
+				pieces.push_back( std::move( *cut.m_Front ) );
+			}
+			inside = std::move( cut.m_Back );
+		}
+	}
+	return pieces;
+}
+
 } // namespace
 
 //-----------------------------------------------------------------------------
@@ -49,6 +96,20 @@ MapEdit_t SetCordon( const CScene &scene, const std::optional<Box_t> &box, bool 
 		cordons.push_back( std::move( cordon ) );
 	}
 	edit.m_Cordons = std::make_pair( std::move( cordons ), bActive && box.has_value() );
+	return edit;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+MapEdit_t SetCordons( const CScene &scene, std::vector<Cordon_t> cordons, bool bActive )
+{
+	MapEdit_t edit;
+	for ( Cordon_t &cordon : cordons )
+	{
+		cordon.m_szName = scene.m_Map.Store( std::string{ cordon.m_szName } );
+	}
+	edit.m_Cordons = std::make_pair( std::move( cordons ), bActive );
 	return edit;
 }
 
@@ -176,10 +237,10 @@ std::vector<Solid_t> CordonWalls( const CMap &map, const Box_t &box, double flTh
 //-----------------------------------------------------------------------------
 // Purpose:
 //-----------------------------------------------------------------------------
-std::string CordonedMapText( const CScene &scene, std::string_view szMaterial )
+std::string CordonedMapText( const CScene &scene, std::string_view szMaterial, const std::optional<MapCopy_t> &copy )
 {
 	const std::vector<Box_t> boxes = ActiveCordonBoxes( scene.m_Map );
-	if ( boxes.empty() )
+	if ( boxes.empty() && !copy )
 	{
 		return WriteVmf( scene.m_Map );
 	}
@@ -187,14 +248,67 @@ std::string CordonedMapText( const CScene &scene, std::string_view szMaterial )
 	FaceDefaults_t faces;
 	faces.m_szMaterial = szMaterial;
 	std::vector<Solid_t> walls;
-	for ( const Box_t &box : boxes )
+	for ( std::size_t i = 0; i < boxes.size(); i++ )
 	{
-		for ( Solid_t &wall : CordonWalls( pCordoned->m_Map, box, 16.0, faces ) )
+		for ( Solid_t &wall : CordonWalls( pCordoned->m_Map, boxes[ i ], 16.0, faces ) )
 		{
-			walls.push_back( std::move( wall ) );
+			std::vector<Solid_t> pieces{ std::move( wall ) };
+			for ( std::size_t j = 0; j < boxes.size(); j++ )
+			{
+				if ( j == i )
+				{
+					continue;
+				}
+				std::vector<Solid_t> outside;
+				for ( const Solid_t &piece : pieces )
+				{
+					if ( !OverlapInside( BuildSolid( piece ).m_Bounds, boxes[ j ] ) )
+					{
+						outside.push_back( piece );
+						continue;
+					}
+					for ( Solid_t &kept : OutsideBox( pCordoned->m_Map, piece, boxes[ j ] ) )
+					{
+						outside.push_back( std::move( kept ) );
+					}
+				}
+				pieces = std::move( outside );
+			}
+			for ( Solid_t &piece : pieces )
+			{
+				walls.push_back( std::move( piece ) );
+			}
 		}
 	}
-	pCordoned = ApplyEdit( *pCordoned, AddObjects( *pCordoned, std::move( walls ), {}, nullptr ) );
+	MapEdit_t edit = AddObjects( *pCordoned, std::move( walls ), {}, nullptr );
+	if ( copy )
+	{
+		// The instances' files, as the way to them from where the copy is compiled.
+		for ( std::uint32_t nEntity = 0; nEntity < pCordoned->m_Map.m_Entities.size(); nEntity++ )
+		{
+			const Entity_t &entity = pCordoned->m_Map.m_Entities[ nEntity ];
+			const std::string_view szFile = entity.GetValue( "file" );
+			if ( entity.m_bDeleted || szFile.empty() || !kv1::EqualsIgnoreCase( entity.GetClassname(), "func_instance" ) )
+			{
+				continue;
+			}
+			const std::optional<std::filesystem::path> found = FindInstanceFile( szFile, copy->m_Instances );
+			if ( !found )
+			{
+				continue;
+			}
+			std::error_code error;
+			std::filesystem::path way = std::filesystem::relative( *found, copy->m_CopyFolder, error );
+			if ( error || way.empty() )
+			{
+				way = *found;
+			}
+			Entity_t moved = entity;
+			SetKeyValue( pCordoned->m_Map, moved, "file", way.generic_string() );
+			edit.m_Entities.emplace_back( nEntity, std::move( moved ) );
+		}
+	}
+	pCordoned = ApplyEdit( *pCordoned, edit );
 	return WriteVmf( pCordoned->m_Map );
 }
 

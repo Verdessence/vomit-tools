@@ -198,6 +198,10 @@ std::shared_ptr<CScene> ApplyEdit( const CScene &scene, const MapEdit_t &edit )
 		out.m_Changed.push_back( out.SolidObject( nSolid ) );
 	}
 
+	if ( !edit.m_RemovedGroups.empty() )
+	{
+		std::erase_if( map.m_Groups, [ & ]( const Group_t &group ) { return group.m_Span.m_nLength == 0 && std::ranges::find( edit.m_RemovedGroups, group.m_nId ) != edit.m_RemovedGroups.end(); } );
+	}
 	for ( const Group_t &group : edit.m_Groups )
 	{
 		map.m_Groups.push_back( group );
@@ -260,6 +264,10 @@ MapEdit_t InverseOf( const CScene &scene, const MapEdit_t &edit )
 	if ( edit.m_Cordons )
 	{
 		inverse.m_Cordons = std::make_pair( map.m_Cordons, map.m_bCordonsActive );
+	}
+	for ( const Group_t &group : edit.m_Groups )
+	{
+		inverse.m_RemovedGroups.push_back( group.m_nId );
 	}
 	for ( const auto &[ nIndex, entity ] : edit.m_Entities )
 	{
@@ -757,9 +765,10 @@ MapEdit_t PasteSpecial( const CScene &scene, std::string_view szText, const Past
 		return {};
 	}
 	const CMap &map = scene.m_Map;
-	// The set's centre, which the turns are about and which m_Start places.
+	// The set's centre, which m_Start places and the turns are about (unless there is a pivot).
 	const Box_t bounds = BoundsOfMap( *clip );
 	const Point_t centre = bounds.IsEmpty() ? Point_t{} : bounds.GetCenter();
+	const Point_t about = how.m_Pivot.value_or( centre );
 	std::set<std::string, std::less<>> taken;
 	if ( how.m_bUniqueNames )
 	{
@@ -777,9 +786,9 @@ MapEdit_t PasteSpecial( const CScene &scene, std::string_view szText, const Past
 	for ( int nCopy = 1; nCopy <= how.m_nCopies; nCopy++ )
 	{
 		const int nStep = how.m_Start ? nCopy - 1 : nCopy;
-		Transform_t transform = Transform_t::Rotation( centre, 2, how.m_Angles[ 2 ] * nStep ) * Transform_t::Rotation( centre, 1, how.m_Angles[ 1 ] * nStep ) * Transform_t::Rotation( centre, 0, how.m_Angles[ 0 ] * nStep );
+		Transform_t transform = Transform_t::Rotation( about, 2, how.m_Angles[ 2 ] * nStep ) * Transform_t::Rotation( about, 1, how.m_Angles[ 1 ] * nStep ) * Transform_t::Rotation( about, 0, how.m_Angles[ 0 ] * nStep );
 		transform = Transform_t::Translation( Add( how.m_Start ? Subtract( *how.m_Start, centre ) : Point_t{}, Scale( how.m_Offset, nStep ) ) ) * transform;
-		transform.m_Pivot = centre;
+		transform.m_Pivot = about;
 		const int nGroup = how.m_bGroup ? nFirstGroup + nCopy - 1 : 0;
 		if ( how.m_bGroup )
 		{
