@@ -12,6 +12,7 @@
 #include <utility>
 
 #include "kv1/Kv1.h"
+#include "util/Numbers.h"
 #include "map/Brushes.h"
 #include "map/Entities.h"
 #include "map/Mesh.h"
@@ -105,6 +106,14 @@ std::shared_ptr<CScene> ApplyEdit( const CScene &scene, const MapEdit_t &edit )
 	out.m_Changed.clear();
 	CMap &map = out.m_Map;
 
+	if ( edit.m_World )
+	{
+		// The world's solids are its own list, not the edit's to give.
+		std::vector<std::uint32_t> solids = std::move( map.m_World.m_Solids );
+		map.m_World = *edit.m_World;
+		map.m_World.m_Solids = std::move( solids );
+		map.m_World.m_bDeleted = false;
+	}
 	// Entities first: new solids may belong to new entities.
 	bool bSkybox = false;
 	for ( const auto &[ nIndex, entity ] : edit.m_Entities )
@@ -215,6 +224,10 @@ MapEdit_t InverseOf( const CScene &scene, const MapEdit_t &edit )
 {
 	const CMap &map = scene.m_Map;
 	MapEdit_t inverse;
+	if ( edit.m_World )
+	{
+		inverse.m_World = map.m_World;
+	}
 	for ( const auto &[ nIndex, entity ] : edit.m_Entities )
 	{
 		if ( nIndex < map.m_Entities.size() )
@@ -653,6 +666,97 @@ void SetKeyValue( const CMap &map, Entity_t &entity, std::string_view szKey, std
 		}
 	}
 	entity.m_Keys.push_back( { map.Store( std::string{ szKey } ), map.Store( std::string{ szValue } ), {} } );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+void RemoveKey( Entity_t &entity, std::string_view szKey )
+{
+	for ( EntityKey_t &key : entity.m_Keys )
+	{
+		if ( !key.m_bDeleted && kv1::EqualsIgnoreCase( key.m_szKey, szKey ) )
+		{
+			key.m_bDeleted = true;
+		}
+	}
+	// A key added since the map was read leaves no hole to keep.
+	std::erase_if( entity.m_Keys, []( const EntityKey_t &key ) { return key.m_bDeleted && key.IsNew(); } );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+void SetSpawnFlag( const CMap &map, Entity_t &entity, std::uint32_t nBit, bool bOn, std::uint32_t nDefault )
+{
+	const std::string_view szFlags = entity.GetValue( "spawnflags" );
+	std::uint32_t nFlags = entity.HasKey( "spawnflags" ) ? static_cast<std::uint32_t>( ParseNumber<long long>( szFlags ).value_or( 0 ) ) : nDefault;
+	nFlags = bOn ? ( nFlags | nBit ) : ( nFlags & ~nBit );
+	SetKeyValue( map, entity, "spawnflags", std::to_string( nFlags ) );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+void SetConnections( const CMap &map, Entity_t &entity, std::vector<Connection_t> connections )
+{
+	for ( Connection_t &connection : connections )
+	{
+		connection.m_Span = {};
+		for ( std::string_view *pText : { &connection.m_szOutput, &connection.m_szTarget, &connection.m_szInput, &connection.m_szParameter } )
+		{
+			*pText = map.Store( std::string{ *pText } );
+		}
+	}
+	entity.m_Connections = std::move( connections );
+	entity.m_bConnectionsChanged = true;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+void SetComments( const CMap &map, Entity_t &entity, std::string_view szComments )
+{
+	if ( entity.m_Editor.m_szComments == szComments )
+	{
+		return;
+	}
+	entity.m_Editor.m_szComments = map.Store( std::string{ szComments } );
+	entity.m_Editor.m_bChanged = true;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+MapEdit_t EditEntities( const CScene &scene, const std::vector<std::uint32_t> &objects, const std::function<void( Entity_t & )> &pfnEdit )
+{
+	MapEdit_t edit;
+	std::vector<std::uint32_t> done;
+	for ( const std::uint32_t n : objects )
+	{
+		const int nEntity = scene.GetObjectEntity( n );
+		if ( nEntity < 0 || std::ranges::find( done, static_cast<std::uint32_t>( nEntity ) ) != done.end() )
+		{
+			continue;
+		}
+		done.push_back( static_cast<std::uint32_t>( nEntity ) );
+		Entity_t entity = scene.m_Map.m_Entities[ static_cast<std::size_t>( nEntity ) ];
+		pfnEdit( entity );
+		edit.m_Entities.emplace_back( static_cast<std::uint32_t>( nEntity ), std::move( entity ) );
+	}
+	return edit;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+MapEdit_t EditWorld( const CScene &scene, const std::function<void( Entity_t & )> &pfnEdit )
+{
+	MapEdit_t edit;
+	Entity_t world = scene.m_Map.m_World;
+	pfnEdit( world );
+	edit.m_World = std::move( world );
+	return edit;
 }
 
 //-----------------------------------------------------------------------------

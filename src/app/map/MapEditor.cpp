@@ -25,6 +25,8 @@
 #include <QToolBar>
 #include <QClipboard>
 #include <QComboBox>
+#include <QDialog>
+#include <QDialogButtonBox>
 #include <QCompleter>
 #include <QFormLayout>
 #include <QLineEdit>
@@ -1372,7 +1374,9 @@ void CMapEditor::SceneEdited( const std::vector<std::uint32_t> &changed )
 	{
 		m_nMaterialsRead = static_cast<std::uint32_t>( pScene->m_Materials.size() );
 	}
-	if ( !added.empty() && !m_pResources->LoadMaterials( m_pDocument->GetSharedScene(), added ) )
+	// Another sky (Map Properties): everything is read again, the sky with it.
+	const bool bSkyChanged = pScene && std::string_view{ m_szSkyRead } != pScene->m_Map.m_World.GetValue( "skyname" );
+	if ( bSkyChanged || ( !added.empty() && !m_pResources->LoadMaterials( m_pDocument->GetSharedScene(), added ) ) )
 	{
 		StartResources();
 	}
@@ -1395,6 +1399,32 @@ void CMapEditor::SceneEdited( const std::vector<std::uint32_t> &changed )
 	}
 	m_pProperties->Refresh();
 	UpdateStatus();
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Hammer opens the world's properties as a window; so does this.
+//-----------------------------------------------------------------------------
+void CMapEditor::ShowMapProperties()
+{
+	if ( !m_pDocument->IsLoaded() )
+	{
+		return;
+	}
+	auto *pDialog = new QDialog( this );
+	pDialog->setObjectName( QStringLiteral( "mapPropertiesDialog" ) );
+	pDialog->setWindowTitle( tr( "Map Properties" ) );
+	pDialog->setAttribute( Qt::WA_DeleteOnClose );
+	pDialog->resize( 420, 520 );
+	auto *pLayout = new QVBoxLayout( pDialog );
+	auto *pPanel = new CMapProperties( *m_pDocument );
+	pPanel->setObjectName( QStringLiteral( "mapWorldProperties" ) );
+	pPanel->SetWorld( true );
+	pLayout->addWidget( pPanel, 1 );
+	auto *pButtons = new QDialogButtonBox( QDialogButtonBox::Close );
+	connect( pButtons, &QDialogButtonBox::rejected, pDialog, &QDialog::close );
+	pLayout->addWidget( pButtons );
+	connect( m_pDocument, &CMapDocument::SceneEdited, pPanel, &CMapProperties::Refresh );
+	pDialog->show();
 }
 
 //-----------------------------------------------------------------------------
@@ -1605,6 +1635,10 @@ bool CMapEditor::NeedsDecodedTextures() const
 //-----------------------------------------------------------------------------
 void CMapEditor::StartResources()
 {
+	if ( const xv::map::CScene *pScene = m_pDocument->GetScene() )
+	{
+		m_szSkyRead = std::string{ pScene->m_Map.m_World.GetValue( "skyname" ) };
+	}
 	const xv::map::CScene *pScene = m_pDocument->GetScene();
 	m_nMaterialsRead = pScene ? static_cast<std::uint32_t>( pScene->m_Materials.size() ) : 0;
 	m_pResources->Start( m_pDocument->GetSharedScene(), m_pDocument->GetGame(), m_nTextureSize, NeedsDecodedTextures() );

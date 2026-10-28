@@ -16,6 +16,12 @@
 - **A gizmo in the 3D views** (Hammer++'s): arrows, rings or scale axes at the selection, dragged
   along an axis to move, turn or stretch it; G, R and E pick what it does, right-click goes round
   them, X hides it, J puts it on the entity's own axes, X/Y/Z during a drag pick the axis.
+- **Object Properties edits:** a key's value typed or picked (choices as their names, with
+  SmartEdit), the class retyped, flags ticked, outputs added, changed and deleted (the class's
+  outputs and the target's inputs offered; a target nothing answers to in red), comments, and
+  with SmartEdit off the raw keys added, renamed and removed. Each is one step to undo; typing
+  with several entities selected sets them all. **Map → Map Properties** does the same for the
+  world (the sky, the detail material…), and the sky is read again when it changes.
 - **Block tool** (Shift+B): drag a box in a 2D view, pull its handles in the others, Enter (or the
   right button's Create Object) makes a block with the current texture. **Entity tool** (Shift+E):
   click in 2D and press Enter, or click a surface in 3D to stand the entity on it, with the class

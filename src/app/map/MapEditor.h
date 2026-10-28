@@ -104,6 +104,8 @@ public:
 	// the side normal faces.
 	void PlaceEntityOn( const xv::map::Point_t &point, const xv::map::Point_t &normal );
 	// What new blocks' faces get, and the class the entity tool places.
+	// Map > Map Properties: the world's keys (the sky) in a window of their own.
+	void ShowMapProperties();
 	[[nodiscard]] QString GetCurrentMaterial() const;
 	[[nodiscard]] QString GetEntityClass() const;
 	// A 3D view changed how it draws (the card's drawing failed): software needs the textures decoded.
@@ -178,6 +180,7 @@ private:
 	std::vector<std::pair<QAction *, const bool *>> m_SettingActions; // toggles and what they show
 	int m_nTextureSize = 1024;
 	std::uint32_t m_nMaterialsRead = 0; // the scene's materials the resources were given
+	std::string m_szSkyRead;            // the skyname the resources were started with
 	QSplitter *m_pSidePanel = nullptr;
 	CMapFilterControl *m_pFilter = nullptr;
 	CMapProperties *m_pProperties = nullptr;

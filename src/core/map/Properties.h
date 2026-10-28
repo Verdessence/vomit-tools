@@ -27,6 +27,8 @@ struct PropertyRow_t
 	std::string m_szValue;       // as stored; empty where the entities differ
 	std::string m_szShown;       // as listed: with SmartEdit, a choice's name for its value
 	std::string m_szHelp;        // the FGD's description of the key
+	std::string m_szType;        // the FGD's type, lower case ("choices", "integer", "angle"...); empty when unknown
+	std::vector<std::pair<std::string, std::string>> m_Choices; // choices: value and name
 	bool m_bDiffers = false;     // the selected entities don't agree
 	bool m_bDefault = false;     // no entity has the key: the FGD's default is shown
 };
@@ -66,6 +68,8 @@ struct PropertySheet_t
 	bool m_bKnownClass = false;     // the FGD has the class
 	std::vector<PropertyRow_t> m_Rows;
 	std::vector<PropertyFlag_t> m_Flags;
+	std::uint32_t m_nFlagsDefault = 0;   // the flags the game data ticks by default
+	std::vector<std::string> m_OutputNames; // the class's outputs, for new ones
 	std::vector<PropertyConnection_t> m_Outputs;
 	std::vector<PropertyConnection_t> m_Inputs;
 	std::string m_szComments;       // the editor's comments, for one entity
@@ -73,6 +77,10 @@ struct PropertySheet_t
 
 // The sheet for the selected objects (a brush entity's solids stand for their entity).
 [[nodiscard]] PropertySheet_t DescribeSelection( const CScene &scene, const std::vector<std::uint32_t> &objects, bool bSmartEdit );
+// The sheet for the world (Hammer's Map Properties): its keys by the FGD's worldspawn class; no
+// inputs, and its outputs' object is WORLD_OBJECT.
+inline constexpr std::uint32_t WORLD_OBJECT = ~0u;
+[[nodiscard]] PropertySheet_t DescribeWorld( const CScene &scene, bool bSmartEdit );
 
 // Whether an output's target names the entity: names compare ignoring case, and a target ending
 // in '*' takes every name that starts with the rest, as the game matches them.

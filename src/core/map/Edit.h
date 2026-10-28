@@ -14,7 +14,9 @@
 #pragma once
 
 #include <cstdint>
+#include <functional>
 #include <memory>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -34,8 +36,10 @@ struct MapEdit_t
 	// added) by its spelling, m_szMaterial.
 	std::vector<std::pair<std::uint32_t, Solid_t>> m_Solids;
 	std::vector<std::pair<std::uint32_t, Entity_t>> m_Entities;
+	// The world's keys, outputs and editor notes as they are to be (its solids stay as they are).
+	std::optional<Entity_t> m_World;
 
-	[[nodiscard]] bool IsEmpty() const { return m_Solids.empty() && m_Entities.empty(); }
+	[[nodiscard]] bool IsEmpty() const { return m_Solids.empty() && m_Entities.empty() && !m_World; }
 };
 
 inline constexpr std::uint32_t NEW_MATERIAL = ~0u;
@@ -90,5 +94,18 @@ struct ObjectSet_t
 
 // Sets an entity's key (adding it if it has none), keeping the value in map's store.
 void SetKeyValue( const CMap &map, Entity_t &entity, std::string_view szKey, std::string_view szValue );
+// Takes a key out (it is marked deleted, so the others keep their places in the file).
+void RemoveKey( Entity_t &entity, std::string_view szKey );
+// One of the spawnflags bits on or off (the key added when there is none; nDefault is what
+// the game data ticks by default, which an entity without the key has).
+void SetSpawnFlag( const CMap &map, Entity_t &entity, std::uint32_t nBit, bool bOn, std::uint32_t nDefault );
+// The entity's outputs replaced, their text kept in map's store.
+void SetConnections( const CMap &map, Entity_t &entity, std::vector<Connection_t> connections );
+// The editor block's comments.
+void SetComments( const CMap &map, Entity_t &entity, std::string_view szComments );
+// An edit that changes the selected entities (those of the objects, a brush entity's solids
+// standing for it; the world when bWorld) by pfnEdit, each as it is now.
+[[nodiscard]] MapEdit_t EditEntities( const CScene &scene, const std::vector<std::uint32_t> &objects, const std::function<void( Entity_t & )> &pfnEdit );
+[[nodiscard]] MapEdit_t EditWorld( const CScene &scene, const std::function<void( Entity_t & )> &pfnEdit );
 
 } // namespace xv::map

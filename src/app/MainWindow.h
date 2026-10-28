@@ -84,6 +84,7 @@ public:
 	CMapEditor *OpenMapFile( const QString &szPath );
 	// File > New > Map.
 	CMapEditor *NewMap();
+	[[nodiscard]] CMapEditor *GetCurrentMap() const;
 	// The tab of every model in the game; null without a game.
 	CModelBrowser *OpenModelBrowser();
 	// Opens a soundscape or soundscript from the mounted game in an editor tab.
@@ -165,6 +166,9 @@ private:
 	void FillRecentMenu( QMenu *pMenu );
 	void AddMapTab( CMapEditor *pEditor );
 	void FillSkyMenu( QMenu *pMenu );
+	// The Map menu shows while a map tab is current.
+	void UpdateMapMenu();
+	QMenu *m_pMapMenu = nullptr;
 	void AddRecent( const QString &szPath );
 	void ChooseGameInfo();
 	void ChooseFiles();

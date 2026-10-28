@@ -84,35 +84,18 @@ bool TargetMatches( std::string_view szTarget, std::string_view szName )
 //-----------------------------------------------------------------------------
 // Purpose:
 //-----------------------------------------------------------------------------
-PropertySheet_t DescribeSelection( const CScene &scene, const std::vector<std::uint32_t> &objects, bool bSmartEdit )
+namespace
+{
+
+//-----------------------------------------------------------------------------
+// Purpose: The sheet for some entities, each with the object number its outputs are listed
+//          under; bInputs lists what fires at them from anywhere in the map.
+//-----------------------------------------------------------------------------
+PropertySheet_t DescribeEntities( const CScene &scene, const std::vector<const Entity_t *> &entities, const std::vector<std::uint32_t> &objects, bool bSmartEdit, bool bInputs )
 {
 	PropertySheet_t sheet;
 	const CMap &map = scene.m_Map;
-	std::vector<std::size_t> indices;
-	std::vector<bool> seen( map.m_Entities.size() );
-	for ( const std::uint32_t n : objects )
-	{
-		const int nEntity = scene.GetObjectEntity( n );
-		if ( nEntity < 0 )
-		{
-			sheet.m_nWorldSolids += scene.IsSolidObject( n ) ? 1 : 0;
-		}
-		else if ( !seen[ static_cast<std::size_t>( nEntity ) ] )
-		{
-			seen[ static_cast<std::size_t>( nEntity ) ] = true;
-			indices.push_back( static_cast<std::size_t>( nEntity ) );
-		}
-	}
-	sheet.m_nEntities = indices.size();
-	if ( indices.empty() )
-	{
-		return sheet;
-	}
-	std::vector<const Entity_t *> entities;
-	for ( const std::size_t i : indices )
-	{
-		entities.push_back( &map.m_Entities[ i ] );
-	}
+	sheet.m_nEntities = entities.size();
 	const Entity_t &first = *entities.front();
 	const bool bSameClass = std::ranges::all_of( entities, [ & ]( const Entity_t *pEntity ) { return kv1::EqualsIgnoreCase( pEntity->GetClassname(), first.GetClassname() ); } );
 	const FgdClass_t *pClass = nullptr;
@@ -151,11 +134,16 @@ PropertySheet_t DescribeSelection( const CScene &scene, const std::vector<std::u
 			row.m_szKey = key.m_szName;
 			row.m_szName = key.m_szDisplayName.empty() ? key.m_szName : key.m_szDisplayName;
 			row.m_szHelp = key.m_szDescription;
+			row.m_szType = key.m_szType;
 			row.m_bDefault = std::ranges::none_of( entities, [ & ]( const Entity_t *pEntity ) { return pEntity->HasKey( key.m_szName ); } );
 			add( std::move( row ), Common( entities, key.m_szName, key.m_szDefault ) );
 			PropertyRow_t &added = sheet.m_Rows.back();
 			if ( key.m_szType == "choices" )
 			{
+				for ( const FgdChoice_t &choice : key.m_Choices )
+				{
+					added.m_Choices.emplace_back( choice.m_szValue, choice.m_szName );
+				}
 				const auto choice = std::ranges::find_if( key.m_Choices, [ & ]( const FgdChoice_t &c ) { return c.m_szValue == added.m_szValue; } );
 				added.m_szShown = choice != key.m_Choices.end() && !added.m_bDiffers ? choice->m_szName : added.m_szValue;
 			}
@@ -177,6 +165,7 @@ PropertySheet_t DescribeSelection( const CScene &scene, const std::vector<std::u
 		if ( const FgdKey_t *pKey = pClass ? pClass->FindKey( key.m_szKey ) : nullptr )
 		{
 			row.m_szHelp = pKey->m_szDescription;
+			row.m_szType = pKey->m_szType;
 		}
 		add( std::move( row ), Common( entities, key.m_szKey, {} ) );
 		done.push_back( key.m_szKey );
@@ -189,6 +178,7 @@ PropertySheet_t DescribeSelection( const CScene &scene, const std::vector<std::u
 		{
 			nDefault |= choice.m_bDefault ? static_cast<std::uint32_t>( ParseNumber<long long>( choice.m_szValue ).value_or( 0 ) ) : 0u;
 		}
+		sheet.m_nFlagsDefault = nDefault;
 		for ( const FgdChoice_t &choice : pFlagsKey->m_Choices )
 		{
 			PropertyFlag_t flag;
@@ -202,16 +192,20 @@ PropertySheet_t DescribeSelection( const CScene &scene, const std::vector<std::u
 		}
 	}
 
+	for ( const FgdIo_t &output : pClass ? pClass->m_Outputs : std::vector<FgdIo_t>{} )
+	{
+		sheet.m_OutputNames.push_back( output.m_szName );
+	}
 	for ( std::size_t k = 0; k < entities.size(); k++ )
 	{
 		for ( const Connection_t &connection : entities[ k ]->m_Connections )
 		{
-			sheet.m_Outputs.push_back( ConnectionRow( connection, connection.m_szTarget, scene.EntityObject( indices[ k ] ) ) );
+			sheet.m_Outputs.push_back( ConnectionRow( connection, connection.m_szTarget, objects[ k ] ) );
 		}
 	}
 	// The outputs anywhere in the map aimed at a selected entity's name.
 	std::vector<std::string_view> names;
-	for ( const Entity_t *pEntity : entities )
+	for ( const Entity_t *pEntity : bInputs ? entities : std::vector<const Entity_t *>{} )
 	{
 		if ( const std::string_view szName = pEntity->GetValue( "targetname" ); !szName.empty() )
 		{
@@ -235,6 +229,49 @@ PropertySheet_t DescribeSelection( const CScene &scene, const std::vector<std::u
 		sheet.m_szComments = first.m_Editor.m_szComments;
 	}
 	return sheet;
+}
+
+} // namespace
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+PropertySheet_t DescribeSelection( const CScene &scene, const std::vector<std::uint32_t> &objects, bool bSmartEdit )
+{
+	const CMap &map = scene.m_Map;
+	PropertySheet_t sheet;
+	std::vector<const Entity_t *> entities;
+	std::vector<std::uint32_t> entityObjects;
+	std::vector<bool> seen( map.m_Entities.size() );
+	for ( const std::uint32_t n : objects )
+	{
+		const int nEntity = scene.GetObjectEntity( n );
+		if ( nEntity < 0 )
+		{
+			sheet.m_nWorldSolids += scene.IsSolidObject( n ) ? 1 : 0;
+		}
+		else if ( !seen[ static_cast<std::size_t>( nEntity ) ] )
+		{
+			seen[ static_cast<std::size_t>( nEntity ) ] = true;
+			entities.push_back( &map.m_Entities[ static_cast<std::size_t>( nEntity ) ] );
+			entityObjects.push_back( scene.EntityObject( static_cast<std::size_t>( nEntity ) ) );
+		}
+	}
+	if ( entities.empty() )
+	{
+		return sheet;
+	}
+	PropertySheet_t described = DescribeEntities( scene, entities, entityObjects, bSmartEdit, true );
+	described.m_nWorldSolids = sheet.m_nWorldSolids;
+	return described;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+PropertySheet_t DescribeWorld( const CScene &scene, bool bSmartEdit )
+{
+	return DescribeEntities( scene, { &scene.m_Map.m_World }, { WORLD_OBJECT }, bSmartEdit, false );
 }
 
 } // namespace xv::map

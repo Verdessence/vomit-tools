@@ -495,6 +495,7 @@ CMainWindow::CMainWindow( QWidget *pParent, xv::audio::CEngine::Output_t nAudio 
 				: AsEditorTab( m_pTabs->currentWidget() )                                          ? AsEditorTab( m_pTabs->currentWidget() )->GetUndoStack()
 																								   : nullptr );
 		UpdateTitle();
+		UpdateMapMenu();
 	} );
 
 	auto *pSplitter = new QSplitter;
@@ -686,6 +687,23 @@ void CMainWindow::BuildMenus( QAction *pSearchPathsToggle )
 	pManifests->addAction( tr( "A &Map's Particles…" ), this, &CMainWindow::ChooseMapParticles );
 	pGame->addSeparator();
 	pGame->addAction( pSearchPathsToggle );
+
+	// Hammer's Map menu, for the map tabs only.
+	m_pMapMenu = menuBar()->addMenu( tr( "&Map" ) );
+	m_pMapMenu->setObjectName( QStringLiteral( "mapMenu" ) );
+	m_pMapMenu->addAction( tr( "Map &Properties…" ), this, [ this ] {
+		if ( CMapEditor *pMap = GetCurrentMap() )
+		{
+			pMap->ShowMapProperties();
+		}
+	} );
+	m_pMapMenu->addAction( tr( "&Go to Brush…" ), this, [ this ] {
+		if ( CMapEditor *pMap = GetCurrentMap() )
+		{
+			pMap->RunAction( MapAction_t::MAP_ACTION_GO_TO_BRUSH, pMap->GetActiveView() );
+		}
+	} );
+	m_pMapMenu->menuAction()->setVisible( false );
 
 	// Simple or regular names, everywhere and remembered.
 	auto *pView = menuBar()->addMenu( tr( "&View" ) );
@@ -4988,6 +5006,25 @@ CMapEditor *CMainWindow::NewMap()
 	AddMapTab( pEditor );
 	pEditor->Load( std::move( source ) );
 	return pEditor;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+CMapEditor *CMainWindow::GetCurrentMap() const
+{
+	return qobject_cast<CMapEditor *>( m_pTabs->currentWidget() );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+void CMainWindow::UpdateMapMenu()
+{
+	if ( m_pMapMenu )
+	{
+		m_pMapMenu->menuAction()->setVisible( GetCurrentMap() != nullptr );
+	}
 }
 
 //-----------------------------------------------------------------------------
