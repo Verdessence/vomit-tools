@@ -22,6 +22,7 @@
 
 #include "Preferences.h"
 #include "DebugLog.h"
+#include "map/Cordon.h"
 #include "map/MapPanes.h"
 #include "map/MapView2D.h"
 #include "map/MapConstants.h"
@@ -979,6 +980,28 @@ void CMapView3D::PaintTools( QPainter &painter ) const
 		}
 		painter.setPen( QPen{ CPreferences::Instance().GetMapPreferences().m_Colors.m_Pointfile, 2.0 } );
 		painter.drawLines( lines.data(), static_cast<int>( lines.size() ) );
+	}
+	if ( GetDocument().GetScene() )
+	{
+		// The cordon's box while it is on, as Hammer draws it in 3D.
+		lines.clear();
+		for ( const xv::map::Box_t &box : xv::map::ActiveCordonBoxes( GetDocument().GetScene()->m_Map ) )
+		{
+			const xv::map::Point_t &n = box.m_Mins;
+			const xv::map::Point_t &x = box.m_Maxs;
+			const xv::map::Point_t corners[ 8 ] = { { n[ 0 ], n[ 1 ], n[ 2 ] }, { x[ 0 ], n[ 1 ], n[ 2 ] }, { x[ 0 ], x[ 1 ], n[ 2 ] }, { n[ 0 ], x[ 1 ], n[ 2 ] }, { n[ 0 ], n[ 1 ], x[ 2 ] }, { x[ 0 ], n[ 1 ], x[ 2 ] }, { x[ 0 ], x[ 1 ], x[ 2 ] }, { n[ 0 ], x[ 1 ], x[ 2 ] } };
+			for ( int i = 0; i < 4; i++ )
+			{
+				line( corners[ i ], corners[ ( i + 1 ) % 4 ] );
+				line( corners[ 4 + i ], corners[ 4 + ( i + 1 ) % 4 ] );
+				line( corners[ i ], corners[ 4 + i ] );
+			}
+		}
+		if ( !lines.empty() )
+		{
+			painter.setPen( QPen{ CPreferences::Instance().GetMapPreferences().m_Colors.m_Cordon, 2.0 } );
+			painter.drawLines( lines.data(), static_cast<int>( lines.size() ) );
+		}
 	}
 	if ( gizmo )
 	{

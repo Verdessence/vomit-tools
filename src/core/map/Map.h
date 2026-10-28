@@ -257,6 +257,8 @@ public:
 	int m_nActiveCamera = -1;
 	std::vector<Cordon_t> m_Cordons;
 	bool m_bCordonsActive = false;
+	std::vector<Span_t> m_CordonSpans;    // the "cordon" and "cordons" blocks as read
+	bool m_bCordonsChanged = false;       // the writer puts a fresh "cordons" block in their place
 	std::vector<RawBlock_t> m_RawBlocks;
 	std::vector<std::string> m_Materials; // each once, lower case with '/'
 	std::vector<Span_t> m_TopBlocks;      // every top-level block, in file order

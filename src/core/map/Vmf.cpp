@@ -1054,10 +1054,12 @@ void CReader::Read()
 			nEnd = ReadCordon( nOpen, 1, cordon );
 			m_Map.m_bCordonsActive = m_Map.m_bCordonsActive || cordon.m_bActive;
 			m_Map.m_Cordons.push_back( std::move( cordon ) );
+			m_Map.m_CordonSpans.push_back( SpanOf( key.m_nOffset, nEnd ) );
 		}
 		else if ( Is( szName, "cordons" ) )
 		{
 			nEnd = ReadCordons( nOpen, 1 );
+			m_Map.m_CordonSpans.push_back( SpanOf( key.m_nOffset, nEnd ) );
 		}
 		else
 		{

@@ -23,6 +23,7 @@
 #include <QWheelEvent>
 
 #include "Preferences.h"
+#include "map/Cordon.h"
 #include "map/MapConstants.h"
 #include "map/MapDocument.h"
 #include "map/MapEditor.h"
@@ -983,14 +984,26 @@ void CMapView2D::PaintTools( QPainter &painter ) const
 		painter.setPen( QPen{ Look().m_Colors.m_Pointfile, 0 } );
 		painter.drawPolyline( line );
 	}
+	const bool bCordonTool = m_Editor.GetTool() == MapTool_t::MAP_TOOL_CORDON;
 	if ( const std::optional<xv::map::Box_t> &newBox = m_Editor.GetNewBox() )
 	{
+		const QColor &boxColor = bCordonTool ? Look().m_Colors.m_Cordon : color;
 		const QRectF box = RectOf( *newBox );
-		painter.setPen( QPen{ color, 0 } );
+		painter.setPen( QPen{ boxColor, bCordonTool ? 2.0 : 0.0 } );
 		painter.setBrush( Qt::NoBrush );
 		painter.drawRect( box );
 		PaintHandles( painter, box );
-		PaintSizes( painter, box, Flatten( newBox->m_Maxs ) - Flatten( newBox->m_Mins ), color );
+		PaintSizes( painter, box, Flatten( newBox->m_Maxs ) - Flatten( newBox->m_Mins ), boxColor );
+	}
+	if ( !bCordonTool && GetDocument().GetScene() )
+	{
+		// Hammer's thick red line round the cordon while it is on.
+		painter.setPen( QPen{ Look().m_Colors.m_Cordon, 2.0 } );
+		painter.setBrush( Qt::NoBrush );
+		for ( const xv::map::Box_t &box : xv::map::ActiveCordonBoxes( GetDocument().GetScene()->m_Map ) )
+		{
+			painter.drawRect( RectOf( box ) );
+		}
 	}
 	if ( const std::optional<CMapEditor::ClipLine_t> &clip = m_Editor.GetClipLine() )
 	{
@@ -1237,13 +1250,13 @@ void CMapView2D::mousePressEvent( QMouseEvent *pEvent )
 		}
 		return;
 	}
-	if ( nTool == MapTool_t::MAP_TOOL_BLOCK )
+	if ( nTool == MapTool_t::MAP_TOOL_BLOCK || nTool == MapTool_t::MAP_TOOL_CORDON )
 	{
 		if ( pEvent->button() == Qt::LeftButton )
 		{
 			PressBlock( at );
 		}
-		else if ( pEvent->button() == Qt::RightButton && m_Editor.GetNewBox() && RectOf( *m_Editor.GetNewBox() ).contains( at ) )
+		else if ( nTool == MapTool_t::MAP_TOOL_BLOCK && pEvent->button() == Qt::RightButton && m_Editor.GetNewBox() && RectOf( *m_Editor.GetNewBox() ).contains( at ) )
 		{
 			// Hammer's other way to make the box a block.
 			QMenu menu( this );

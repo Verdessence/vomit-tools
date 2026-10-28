@@ -928,6 +928,39 @@ std::string CWriter::Run()
 		Replace( nAt, 0, nAt == nLastEntity ? std::string{ m_szNewline } + szNewEntities : szNewEntities );
 	}
 
+	// A changed cordon: Hammer++'s "cordons" block where the first one read was (the others
+	// removed), or at the end of the file.
+	if ( m_Map.m_bCordonsChanged )
+	{
+		const std::string nl{ m_szNewline };
+		std::string szBlock = "cordons" + nl + "{" + nl + "\t" + Pair( "active", m_Map.m_bCordonsActive ? "1" : "0" ) + nl;
+		for ( const Cordon_t &cordon : m_Map.m_Cordons )
+		{
+			szBlock += "\tcordon" + nl + "\t{" + nl + "\t\t" + Pair( "name", cordon.m_szName ) + nl + "\t\t" + Pair( "active", cordon.m_bActive ? "1" : "0" ) + nl;
+			for ( const Box_t &box : cordon.m_Boxes )
+			{
+				szBlock += "\t\tbox" + nl + "\t\t{" + nl + "\t\t\t" + Pair( "mins", '(' + FormatPoint( box.m_Mins ) + ')' ) + nl + "\t\t\t" + Pair( "maxs", '(' + FormatPoint( box.m_Maxs ) + ')' ) + nl + "\t\t}" + nl;
+			}
+			szBlock += "\t}" + nl;
+		}
+		szBlock += "}" + nl;
+		if ( m_Map.m_CordonSpans.empty() )
+		{
+			const bool bEndsLine = m_szText.empty() || m_szText.back() == '\n';
+			Replace( m_szText.size(), 0, ( bEndsLine ? std::string{} : nl ) + szBlock );
+		}
+		else
+		{
+			for ( std::size_t i = 0; i < m_Map.m_CordonSpans.size(); i++ )
+			{
+				const Span_t span = m_Map.m_CordonSpans[ i ];
+				const std::size_t nStart = LineStart( span.m_nOffset );
+				const std::size_t nEnd = LineEnd( span.m_nOffset + span.m_nLength );
+				Replace( nStart, nEnd - nStart, i == 0 ? szBlock : std::string{} );
+			}
+		}
+	}
+
 	// Applied in order; where two touch the same place, the one made first goes first.
 	std::ranges::stable_sort( m_Patches, {}, &Patch_t::m_nAt );
 	std::string szOut;

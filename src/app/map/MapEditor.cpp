@@ -8,6 +8,7 @@
 
 #include "kv1/Kv1.h"
 #include "map/Check.h"
+#include "map/Cordon.h"
 #include "map/MapReports.h"
 #include "map/Materials.h"
 #include "texture/Vtf.h"
@@ -76,6 +77,7 @@ enum class MapIcon_t
 	MAP_ICON_BLOCK,
 	MAP_ICON_TEXTURE,
 	MAP_ICON_CLIP,
+	MAP_ICON_CORDON,
 };
 
 //-----------------------------------------------------------------------------
@@ -131,6 +133,13 @@ QIcon MakeIcon( MapIcon_t nIcon, const QColor &color )
 			painter.drawLine( front[ 1 ] + back, front[ 2 ] + back );
 			break;
 		}
+		case MapIcon_t::MAP_ICON_CORDON:
+			// A dashed fence round a small box.
+			painter.setPen( QPen{ color, 2.0, Qt::DashLine } );
+			painter.drawRect( QRectF{ 4, 4, 24, 24 } );
+			painter.setPen( QPen{ color, 2.0 } );
+			painter.drawRect( QRectF{ 11, 11, 10, 10 } );
+			break;
 		case MapIcon_t::MAP_ICON_CLIP:
 			// A box with a cut through it.
 			painter.drawRect( QRectF{ 6, 8, 20, 16 } );
@@ -266,6 +275,7 @@ CMapEditor::CMapEditor( const QString &szPath, bool bFromGame, QWidget *pParent 
 		{ MapTool_t::MAP_TOOL_BLOCK, MapIcon_t::MAP_ICON_BLOCK, tr( "Block Tool" ), MapAction_t::MAP_ACTION_TOOL_BLOCK },
 		{ MapTool_t::MAP_TOOL_TEXTURE, MapIcon_t::MAP_ICON_TEXTURE, tr( "Texture Application" ), MapAction_t::MAP_ACTION_TOOL_TEXTURE },
 		{ MapTool_t::MAP_TOOL_CLIP, MapIcon_t::MAP_ICON_CLIP, tr( "Clipping Tool" ), MapAction_t::MAP_ACTION_TOOL_CLIP },
+		{ MapTool_t::MAP_TOOL_CORDON, MapIcon_t::MAP_ICON_CORDON, tr( "Edit Cordon Bounds" ), MapAction_t::MAP_ACTION_TOOL_CORDON },
 	};
 	for ( const auto &tool : tools )
 	{
@@ -596,7 +606,17 @@ void CMapEditor::Loaded()
 //-----------------------------------------------------------------------------
 void CMapEditor::SetTool( MapTool_t nTool )
 {
+	// Leaving the cordon tool keeps the box it drew (Hammer: pick another tool to finish); taking
+	// it up shows the cordon there is.
+	if ( m_nTool == MapTool_t::MAP_TOOL_CORDON && nTool != MapTool_t::MAP_TOOL_CORDON )
+	{
+		CommitCordon();
+	}
 	m_nTool = nTool;
+	if ( nTool == MapTool_t::MAP_TOOL_CORDON )
+	{
+		SetNewBox( GetCordonBox() );
+	}
 	const bool bTexture = nTool == MapTool_t::MAP_TOOL_TEXTURE;
 	m_pPanelStack->setCurrentWidget( bTexture ? static_cast<QWidget *>( m_pFaceEdit ) : m_pProperties );
 	m_pPanelTitle->setText( bTexture ? tr( "Face Edit" ) : tr( "Object Properties" ) );
@@ -609,7 +629,7 @@ void CMapEditor::SetTool( MapTool_t nTool )
 		m_pFaceEdit->Refresh();
 	}
 	// What a tool was making goes with it.
-	if ( nTool != MapTool_t::MAP_TOOL_BLOCK )
+	if ( nTool != MapTool_t::MAP_TOOL_BLOCK && nTool != MapTool_t::MAP_TOOL_CORDON )
 	{
 		SetNewBox( std::nullopt );
 	}
@@ -1250,7 +1270,13 @@ bool CMapEditor::RunAction( MapAction_t nAction, CMapView *pFrom )
 			return true;
 		}
 		case MapAction_t::MAP_ACTION_ESCAPE:
-			// A box or marker being made goes first, then the selection.
+			// A box or marker being made goes first, then the selection; the cordon tool's box
+			// goes back to the cordon as saved.
+			if ( m_nTool == MapTool_t::MAP_TOOL_CORDON )
+			{
+				SetNewBox( GetCordonBox() );
+				return true;
+			}
 			if ( m_NewBox || m_EntityMarker || m_ClipLine )
 			{
 				SetNewBox( std::nullopt );
@@ -1264,6 +1290,11 @@ bool CMapEditor::RunAction( MapAction_t nAction, CMapView *pFrom )
 			m_pDocument->ClearSelection();
 			return true;
 		case MapAction_t::MAP_ACTION_ENTER:
+			if ( m_nTool == MapTool_t::MAP_TOOL_CORDON )
+			{
+				CommitCordon();
+				return true;
+			}
 			if ( m_nTool == MapTool_t::MAP_TOOL_BLOCK && m_NewBox )
 			{
 				CreateBlock();
@@ -1404,6 +1435,12 @@ bool CMapEditor::RunAction( MapAction_t nAction, CMapView *pFrom )
 				SetTool( MapTool_t::MAP_TOOL_CLIP );
 			}
 			return true;
+		case MapAction_t::MAP_ACTION_TOOL_CORDON:
+			SetTool( MapTool_t::MAP_TOOL_CORDON );
+			return true;
+		case MapAction_t::MAP_ACTION_TOGGLE_CORDON:
+			ToggleCordon();
+			return true;
 		case MapAction_t::MAP_ACTION_CARVE:
 			Carve();
 			return true;
@@ -1529,6 +1566,71 @@ void CMapEditor::SetEditMode( MapEditMode_t nMode )
 	{
 		pView->update();
 	}
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: The cordon's box as the map has it (Hammer++'s first cordon's first box).
+//-----------------------------------------------------------------------------
+std::optional<xv::map::Box_t> CMapEditor::GetCordonBox() const
+{
+	const xv::map::CScene *pScene = m_pDocument->GetScene();
+	if ( pScene )
+	{
+		for ( const xv::map::Cordon_t &cordon : pScene->m_Map.m_Cordons )
+		{
+			for ( const xv::map::Box_t &box : cordon.m_Boxes )
+			{
+				if ( !box.IsEmpty() )
+				{
+					return box;
+				}
+			}
+		}
+	}
+	return std::nullopt;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+bool CMapEditor::IsCordonActive() const
+{
+	const xv::map::CScene *pScene = m_pDocument->GetScene();
+	return pScene && pScene->m_Map.m_bCordonsActive && !xv::map::ActiveCordonBoxes( pScene->m_Map ).empty();
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: The tool's box into the map, one undo step, when it differs from the cordon there.
+//-----------------------------------------------------------------------------
+void CMapEditor::CommitCordon()
+{
+	const xv::map::CScene *pScene = m_pDocument->GetScene();
+	if ( !pScene || m_NewBox == GetCordonBox() )
+	{
+		return;
+	}
+	m_pDocument->Edit( xv::map::SetCordon( *pScene, m_NewBox, pScene->m_Map.m_bCordonsActive ), tr( "Edit Cordon" ) );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Hammer's Toggle Cordon State; nothing to turn on without a box.
+//-----------------------------------------------------------------------------
+void CMapEditor::ToggleCordon()
+{
+	const xv::map::CScene *pScene = m_pDocument->GetScene();
+	if ( !pScene )
+	{
+		return;
+	}
+	const std::optional<xv::map::Box_t> box = m_nTool == MapTool_t::MAP_TOOL_CORDON && m_NewBox ? m_NewBox : GetCordonBox();
+	if ( !box )
+	{
+		emit StatusMessage( tr( "Draw the cordon's box first (Edit Cordon Bounds)" ) );
+		return;
+	}
+	const bool bOn = !pScene->m_Map.m_bCordonsActive;
+	m_pDocument->Edit( xv::map::SetCordon( *pScene, box, bOn ), bOn ? tr( "Cordon On" ) : tr( "Cordon Off" ) );
+	emit StatusMessage( bOn ? tr( "Cordon on: only what is inside it is shown and compiled" ) : tr( "Cordon off" ) );
 }
 
 //-----------------------------------------------------------------------------

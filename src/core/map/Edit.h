@@ -41,8 +41,10 @@ struct MapEdit_t
 	std::optional<Entity_t> m_World;
 	// Groups to add (Hammer's group blocks in the world); an empty group left behind is harmless.
 	std::vector<Group_t> m_Groups;
+	// The cordons as they are to be, and whether the cordon is on.
+	std::optional<std::pair<std::vector<Cordon_t>, bool>> m_Cordons;
 
-	[[nodiscard]] bool IsEmpty() const { return m_Solids.empty() && m_Entities.empty() && !m_World && m_Groups.empty(); }
+	[[nodiscard]] bool IsEmpty() const { return m_Solids.empty() && m_Entities.empty() && !m_World && m_Groups.empty() && !m_Cordons; }
 };
 
 inline constexpr std::uint32_t NEW_MATERIAL = ~0u;

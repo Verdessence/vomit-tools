@@ -138,6 +138,8 @@ private:
 	void Run( Source_t source, int nGeneration );
 	void Finish( std::shared_ptr<xv::map::CScene> pScene, QString szFgdSource, xv::map::HammerDefaults_t defaults );
 	void Changed( bool bVisibility );
+	// m_CordonHidden from the scene's cordons, after every scene change.
+	void UpdateCordonHidden();
 
 	std::shared_ptr<const xv::map::CScene> m_pScene;
 	QUndoStack *m_pUndo = nullptr;
@@ -154,6 +156,7 @@ private:
 	std::vector<std::uint8_t> m_UserShown; // per object: its visgroups shown it
 	std::vector<std::uint8_t> m_AutoShown;
 	std::vector<std::uint8_t> m_QuickHidden;
+	std::vector<std::uint8_t> m_CordonHidden; // outside the active cordon
 	std::vector<std::uint32_t> m_Selection;
 	std::optional<std::vector<xv::map::Point_t>> m_Pointfile;
 	MapSelectMode_t m_nSelectMode = MapSelectMode_t::MAP_SELECT_MODE_GROUPS;

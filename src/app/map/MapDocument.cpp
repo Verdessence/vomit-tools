@@ -6,6 +6,8 @@
 //===========================================================================//
 #include "MapDocument.h"
 
+#include "map/Cordon.h"
+
 #include <algorithm>
 #include <fstream>
 #include <set>
@@ -147,6 +149,7 @@ void CMapDocument::ApplyEditNow( const xv::map::MapEdit_t &edit )
 		m_QuickHidden.push_back( 0 );
 	}
 	m_pScene = std::move( pScene );
+	UpdateCordonHidden();
 	std::erase_if( m_Selection, [ this ]( std::uint32_t n ) { return m_pScene->IsDeleted( n ); } );
 	m_nStateGeneration++;
 	emit SceneEdited( m_pScene->m_Changed );
@@ -181,6 +184,7 @@ void CMapDocument::EndPreview()
 	}
 	const std::vector<std::uint32_t> changed = m_pScene->m_Changed;
 	m_pScene = std::move( m_pPreviewBase );
+	UpdateCordonHidden();
 	m_nStateGeneration++;
 	emit SceneEdited( changed );
 }
@@ -356,8 +360,31 @@ void CMapDocument::Finish( std::shared_ptr<xv::map::CScene> pScene, QString szFg
 	m_Selection.clear();
 	m_pUndo->clear();
 	m_pScene = std::move( pScene );
+	UpdateCordonHidden();
 	m_nStateGeneration++;
 	emit Loaded();
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Hammer hides what the cordon leaves out while it is on; a scene that doesn't need
+//          it keeps no flags at all.
+//-----------------------------------------------------------------------------
+void CMapDocument::UpdateCordonHidden()
+{
+	m_CordonHidden.clear();
+	if ( !m_pScene || !m_pScene->m_Map.m_bCordonsActive )
+	{
+		return;
+	}
+	const std::vector<std::uint32_t> outside = xv::map::ObjectsOutsideCordon( *m_pScene );
+	if ( !outside.empty() )
+	{
+		m_CordonHidden.assign( m_pScene->GetObjectCount(), 0 );
+		for ( const std::uint32_t n : outside )
+		{
+			m_CordonHidden[ n ] = 1;
+		}
+	}
 }
 
 //-----------------------------------------------------------------------------
@@ -385,7 +412,7 @@ bool CMapDocument::IsShown( std::uint32_t nObject ) const
 	{
 		return false;
 	}
-	auto own = [ this ]( std::uint32_t n ) { return m_UserShown[ n ] && m_AutoShown[ n ] && !m_QuickHidden[ n ]; };
+	auto own = [ this ]( std::uint32_t n ) { return m_UserShown[ n ] && m_AutoShown[ n ] && !m_QuickHidden[ n ] && !( n < m_CordonHidden.size() && m_CordonHidden[ n ] ); };
 	if ( !own( nObject ) )
 	{
 		return false;

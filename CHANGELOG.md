@@ -49,6 +49,10 @@
   brushes, empty brush entities, keys the game data doesn't know, unknown classes, point classes
   with brushes, outputs to names nothing has and a missing player start, with Go to, Fix and Fix
   all, over the visible parts only when asked.
+- **Cordon** (Map > Edit Cordon Bounds, Toggle Cordon State): a box dragged like a block's;
+  while it is on, what lies outside is hidden and Run Map compiles a copy (`<map>_cordon.vmf`)
+  holding only what is inside, sealed with walls of `TOOLS/TOOLSSKYBOX`. Saved in Hammer++'s
+  `cordons` block, read from Hammer's old `cordon` block too.
 - **Block tool** (Shift+B): drag a box in a 2D view, pull its handles in the others, Enter (or the
   right button's Create Object) makes a block with the current texture; the New Objects panel's
   Objects box picks a wedge, cylinder, spike or sphere instead, with its Faces count. **Entity tool** (Shift+E):

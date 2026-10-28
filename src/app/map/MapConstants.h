@@ -9,6 +9,8 @@
 //===========================================================================//
 #pragma once
 
+#include <string_view>
+
 #include <QColor>
 
 namespace mapstyle
@@ -29,6 +31,8 @@ inline const QColor TOOL_HANDLE{ 255, 255, 255 };
 inline const QColor TOOL_SELECTION{ 255, 255, 0 };
 inline const QColor TOOL_BLOCK{ 255, 255, 255 };  // the block tool's box, the entity tool's marker
 inline const QColor POINTFILE{ 255, 0, 0 };       // a leak's line, as Hammer draws it
+inline const QColor CORDON{ 255, 0, 0 };          // the cordon's box, Hammer's thick red line
+inline constexpr std::string_view CORDON_MATERIAL = "TOOLS/TOOLSSKYBOX"; // the walls that seal a cordoned compile
 inline constexpr double ROTATION_SNAP = 15.0;      // Hammer++'s RotationDegreeSnap
 inline const QColor BACKGROUND_3D{ 30, 30, 30 };
 inline const QColor SELECTION_3D{ 220, 0, 0 };

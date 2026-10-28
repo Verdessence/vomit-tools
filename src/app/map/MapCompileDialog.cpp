@@ -29,6 +29,8 @@
 #include <QTabWidget>
 #include <QVBoxLayout>
 
+#include "map/MapConstants.h"
+#include "map/Cordon.h"
 #include "map/GameConfig.h"
 #include "map/MapEditor.h"
 
@@ -553,7 +555,7 @@ xv::map::CompileVariables_t CMapCompileDialog::GetVariables() const
 {
 	xv::map::CompileVariables_t variables;
 	const QFileInfo map( m_Editor.GetPath() );
-	variables.m_szFile = map.completeBaseName().toStdString();
+	variables.m_szFile = map.completeBaseName().toStdString() + ( m_bCordoned ? "_cordon" : "" );
 	variables.m_szPath = map.absolutePath().toStdString();
 	if ( const std::optional<xv::vfs::CGameInfo> &game = m_Editor.GetDocument().GetGame() )
 	{
@@ -603,6 +605,22 @@ bool CMapCompileDialog::Run()
 	{
 		m_pLog->appendPlainText( tr( "The map wasn't saved, so nothing was compiled." ) );
 		return false;
+	}
+	// With the cordon on, Hammer compiles a copy holding only what is inside it, sealed with
+	// walls; ours is written beside the map as <map>_cordon.vmf and compiled by that name.
+	m_bCordoned = m_Editor.IsCordonActive();
+	if ( m_bCordoned )
+	{
+		const QFileInfo map( m_Editor.GetPath() );
+		const QString szCordoned = map.absoluteDir().filePath( map.completeBaseName() + QStringLiteral( "_cordon.vmf" ) );
+		QFile file( szCordoned );
+		const std::string szText = xv::map::CordonedMapText( *m_Editor.GetDocument().GetScene(), mapstyle::CORDON_MATERIAL );
+		if ( !file.open( QIODevice::WriteOnly | QIODevice::Truncate ) || file.write( szText.data(), static_cast<qint64>( szText.size() ) ) != static_cast<qint64>( szText.size() ) )
+		{
+			m_pLog->appendPlainText( tr( "The cordoned copy %1 couldn't be written, so nothing was compiled." ).arg( szCordoned ) );
+			return false;
+		}
+		m_pLog->appendPlainText( tr( "Cordon on: compiling %1, what is inside the cordon sealed with %2." ).arg( szCordoned, QString::fromUtf8( mapstyle::CORDON_MATERIAL.data(), static_cast<qsizetype>( mapstyle::CORDON_MATERIAL.size() ) ) ) );
 	}
 	const std::vector<xv::map::ResolvedCommand_t> commands = GetCommands();
 	if ( commands.empty() )

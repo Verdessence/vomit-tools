@@ -77,6 +77,7 @@ private:
 	std::vector<xv::map::CompileSequence_t> m_Sequences;
 	xv::map::CompileReport_t m_Report;
 	QElapsedTimer m_Clock;
+	bool m_bCordoned = false; // this run compiles the <map>_cordon.vmf copy
 	bool m_bFilling = false;
 
 	QTabWidget *m_pTabs = nullptr;

@@ -44,6 +44,8 @@ add_library(vomit_tools_core STATIC
         map/Check.h
         map/Clip.cpp
         map/Clip.h
+        map/Cordon.cpp
+        map/Cordon.h
         map/Compile.cpp
         map/Compile.h
         map/Faces.cpp

@@ -163,6 +163,12 @@ public:
 	// Find Entities (Ctrl+Shift+F): the entities named exactly so selected and centred on.
 	void ShowFindEntities();
 	bool FindEntitiesByName( const QString &szName );
+	// Hammer's cordon: the box the map has, whether it is on, the tool's box committed, and
+	// Toggle Cordon State.
+	[[nodiscard]] std::optional<xv::map::Box_t> GetCordonBox() const;
+	[[nodiscard]] bool IsCordonActive() const;
+	void CommitCordon();
+	void ToggleCordon();
 	// Edit > Tie to Entity (Ctrl+T), Move to World (Ctrl+Shift+W), Group (Ctrl+G), Ungroup (Ctrl+U).
 	void TieToEntity();
 	void TieToEntity( const QString &szClass );

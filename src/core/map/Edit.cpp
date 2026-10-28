@@ -117,6 +117,12 @@ std::shared_ptr<CScene> ApplyEdit( const CScene &scene, const MapEdit_t &edit )
 		map.m_World.m_Solids = std::move( solids );
 		map.m_World.m_bDeleted = false;
 	}
+	if ( edit.m_Cordons )
+	{
+		map.m_Cordons = edit.m_Cordons->first;
+		map.m_bCordonsActive = edit.m_Cordons->second;
+		map.m_bCordonsChanged = true;
+	}
 	// Entities first: new solids may belong to new entities.
 	bool bSkybox = false;
 	for ( const auto &[ nIndex, entity ] : edit.m_Entities )
@@ -250,6 +256,10 @@ MapEdit_t InverseOf( const CScene &scene, const MapEdit_t &edit )
 	if ( edit.m_World )
 	{
 		inverse.m_World = map.m_World;
+	}
+	if ( edit.m_Cordons )
+	{
+		inverse.m_Cordons = std::make_pair( map.m_Cordons, map.m_bCordonsActive );
 	}
 	for ( const auto &[ nIndex, entity ] : edit.m_Entities )
 	{
