@@ -26,6 +26,7 @@
 #include <QToolBar>
 #include <QClipboard>
 #include <QComboBox>
+#include <QSpinBox>
 #include <QDialog>
 #include <QDialogButtonBox>
 #include <QCompleter>
@@ -67,6 +68,7 @@ enum class MapIcon_t
 	MAP_ICON_ENTITY,
 	MAP_ICON_BLOCK,
 	MAP_ICON_TEXTURE,
+	MAP_ICON_CLIP,
 };
 
 //-----------------------------------------------------------------------------
@@ -122,6 +124,12 @@ QIcon MakeIcon( MapIcon_t nIcon, const QColor &color )
 			painter.drawLine( front[ 1 ] + back, front[ 2 ] + back );
 			break;
 		}
+		case MapIcon_t::MAP_ICON_CLIP:
+			// A box with a cut through it.
+			painter.drawRect( QRectF{ 6, 8, 20, 16 } );
+			painter.setPen( QPen{ color, 2.5, Qt::DashLine, Qt::RoundCap } );
+			painter.drawLine( QPointF{ 3, 28 }, QPointF{ 29, 4 } );
+			break;
 		case MapIcon_t::MAP_ICON_TEXTURE:
 			// A face with a texture's checker on it.
 			painter.drawRect( QRectF{ 5, 5, 22, 22 } );
@@ -250,6 +258,7 @@ CMapEditor::CMapEditor( const QString &szPath, bool bFromGame, QWidget *pParent 
 		{ MapTool_t::MAP_TOOL_ENTITY, MapIcon_t::MAP_ICON_ENTITY, tr( "Entity Tool" ), MapAction_t::MAP_ACTION_TOOL_ENTITY },
 		{ MapTool_t::MAP_TOOL_BLOCK, MapIcon_t::MAP_ICON_BLOCK, tr( "Block Tool" ), MapAction_t::MAP_ACTION_TOOL_BLOCK },
 		{ MapTool_t::MAP_TOOL_TEXTURE, MapIcon_t::MAP_ICON_TEXTURE, tr( "Texture Application" ), MapAction_t::MAP_ACTION_TOOL_TEXTURE },
+		{ MapTool_t::MAP_TOOL_CLIP, MapIcon_t::MAP_ICON_CLIP, tr( "Clipping Tool" ), MapAction_t::MAP_ACTION_TOOL_CLIP },
 	};
 	for ( const auto &tool : tools )
 	{
@@ -387,7 +396,29 @@ QWidget *CMapEditor::BuildNewObjects()
 	m_pMaterial = new QLineEdit( QStringLiteral( "DEV/DEV_MEASUREGENERIC01" ) );
 	m_pMaterial->setObjectName( QStringLiteral( "mapNewMaterial" ) );
 	m_pMaterial->setToolTip( tr( "The material the block tool gives new blocks (%1)" ).arg( MapActionKey( MapAction_t::MAP_ACTION_TOOL_BLOCK ).toString( QKeySequence::NativeText ) ) );
+	// Hammer's Objects box: the block tool's shape, and its Faces box for the round ones.
+	m_pPrimitive = new QComboBox;
+	m_pPrimitive->setObjectName( QStringLiteral( "mapNewPrimitive" ) );
+	m_pPrimitive->addItem( tr( "block" ), static_cast<int>( xv::map::Primitive_t::PRIMITIVE_BLOCK ) );
+	m_pPrimitive->addItem( tr( "wedge" ), static_cast<int>( xv::map::Primitive_t::PRIMITIVE_WEDGE ) );
+	m_pPrimitive->addItem( tr( "cylinder" ), static_cast<int>( xv::map::Primitive_t::PRIMITIVE_CYLINDER ) );
+	m_pPrimitive->addItem( tr( "spike" ), static_cast<int>( xv::map::Primitive_t::PRIMITIVE_SPIKE ) );
+	m_pPrimitive->addItem( tr( "sphere" ), static_cast<int>( xv::map::Primitive_t::PRIMITIVE_SPHERE ) );
+	m_pPrimitive->setToolTip( tr( "The shape the block tool makes in its box" ) );
+	m_pSides = new QSpinBox;
+	m_pSides->setObjectName( QStringLiteral( "mapNewSides" ) );
+	m_pSides->setRange( 3, 64 );
+	m_pSides->setValue( 8 );
+	m_pSides->setToolTip( tr( "How many sides a cylinder or spike gets, and how many slices a sphere" ) );
+	auto enableSides = [ this ]() {
+		const auto nKind = static_cast<xv::map::Primitive_t>( m_pPrimitive->currentData().toInt() );
+		m_pSides->setEnabled( nKind != xv::map::Primitive_t::PRIMITIVE_BLOCK && nKind != xv::map::Primitive_t::PRIMITIVE_WEDGE );
+	};
+	connect( m_pPrimitive, &QComboBox::currentIndexChanged, this, enableSides );
+	enableSides();
 	pForm->addRow( tr( "Entity" ), m_pEntityClass );
+	pForm->addRow( tr( "Objects" ), m_pPrimitive );
+	pForm->addRow( tr( "Faces" ), m_pSides );
 	pForm->addRow( tr( "Texture" ), m_pMaterial );
 	return pBox;
 }
@@ -578,6 +609,10 @@ void CMapEditor::SetTool( MapTool_t nTool )
 	if ( nTool != MapTool_t::MAP_TOOL_ENTITY )
 	{
 		SetEntityMarker( std::nullopt );
+	}
+	if ( nTool != MapTool_t::MAP_TOOL_CLIP )
+	{
+		SetClipLine( std::nullopt );
 	}
 	for ( QAction *pAction : m_pTools->actions() )
 	{
@@ -798,6 +833,142 @@ void CMapEditor::GoToBrush()
 		return;
 	}
 	GoToObjectId( nId );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+void CMapEditor::SetClipLine( std::optional<ClipLine_t> line )
+{
+	m_ClipLine = line;
+	m_pClipPreview.reset();
+	const xv::map::CScene *pScene = m_pDocument->GetScene();
+	if ( const std::optional<xv::map::Plane_t> plane = GetClipPlane(); plane && pScene && !m_pDocument->GetSelection().empty() )
+	{
+		// What the cut would leave, for the views to outline in white.
+		const xv::map::MapEdit_t edit = xv::map::ClipObjects( *pScene, m_pDocument->GetSelection(), *plane, m_nClipMode, nullptr );
+		if ( !edit.IsEmpty() )
+		{
+			m_pClipPreview = xv::map::ApplyEdit( *pScene, edit );
+		}
+	}
+	RepaintTools();
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+void CMapEditor::SetClipMode( xv::map::ClipKeep_t nMode )
+{
+	m_nClipMode = nMode;
+	SetClipLine( m_ClipLine );
+	emit StatusMessage( nMode == xv::map::ClipKeep_t::CLIP_KEEP_FRONT ? tr( "Clip: keeping the front" ) : nMode == xv::map::ClipKeep_t::CLIP_KEEP_BACK ? tr( "Clip: keeping the back" )
+																																					   : tr( "Clip: keeping both (split)" ) );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: The plane through the line, standing on the view's plane: its normal is the line's
+//          direction turned a quarter in that plane (to the line's left as drawn), so the
+//          front is to the left of a line drawn left to right... from the line's start toward
+//          its end, the front lies to the left.
+//-----------------------------------------------------------------------------
+std::optional<xv::map::Plane_t> CMapEditor::GetClipPlane() const
+{
+	if ( !m_ClipLine )
+	{
+		return std::nullopt;
+	}
+	xv::map::Point_t axis{};
+	axis[ static_cast<std::size_t>( std::clamp( m_ClipLine->m_nAxis, 0, 2 ) ) ] = 1.0;
+	const xv::map::Point_t along = xv::map::Subtract( m_ClipLine->m_To, m_ClipLine->m_From );
+	if ( xv::map::Length( along ) < 1e-6 )
+	{
+		return std::nullopt;
+	}
+	const xv::map::Point_t normal = xv::map::Normalized( xv::map::Cross( axis, along ) );
+	return xv::map::Plane_t{ normal, xv::map::Dot( normal, m_ClipLine->m_From ) };
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+void CMapEditor::ApplyClip()
+{
+	const xv::map::CScene *pScene = m_pDocument->GetScene();
+	const std::optional<xv::map::Plane_t> plane = GetClipPlane();
+	if ( !pScene || !plane || m_pDocument->GetSelection().empty() )
+	{
+		return;
+	}
+	std::vector<std::uint32_t> after = m_pDocument->GetSelection();
+	std::vector<std::uint32_t> added;
+	xv::map::MapEdit_t edit = xv::map::ClipObjects( *pScene, m_pDocument->GetSelection(), *plane, m_nClipMode, &added );
+	if ( edit.IsEmpty() )
+	{
+		emit StatusMessage( tr( "The clip line misses the selection" ) );
+		return;
+	}
+	after.insert( after.end(), added.begin(), added.end() );
+	SetClipLine( std::nullopt );
+	m_pDocument->Edit( std::move( edit ), m_nClipMode == xv::map::ClipKeep_t::CLIP_KEEP_BOTH ? tr( "Split" ) : tr( "Clip" ), std::move( after ) );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+void CMapEditor::Carve()
+{
+	const xv::map::CScene *pScene = m_pDocument->GetScene();
+	if ( !pScene || m_pDocument->GetSelection().empty() )
+	{
+		return;
+	}
+	std::vector<std::uint32_t> added;
+	xv::map::MapEdit_t edit = xv::map::CarveObjects( *pScene, m_pDocument->GetSelection(), &added );
+	if ( edit.IsEmpty() )
+	{
+		emit StatusMessage( tr( "The selection overlaps nothing to carve" ) );
+		return;
+	}
+	m_pDocument->Edit( std::move( edit ), tr( "Carve" ), m_pDocument->GetSelection() );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Hammer's dialog: one number, the wall's width (negative builds outward).
+//-----------------------------------------------------------------------------
+void CMapEditor::MakeHollow()
+{
+	if ( m_pDocument->GetSelection().empty() )
+	{
+		return;
+	}
+	bool bOk = false;
+	const int nWidth = QInputDialog::getInt( this, tr( "Make Hollow" ), tr( "Wall width (a negative width builds the walls outside):" ), 32, -4096, 4096, 1, &bOk );
+	if ( bOk )
+	{
+		MakeHollow( nWidth );
+	}
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+void CMapEditor::MakeHollow( double flWallWidth )
+{
+	const xv::map::CScene *pScene = m_pDocument->GetScene();
+	if ( !pScene || m_pDocument->GetSelection().empty() )
+	{
+		return;
+	}
+	std::vector<std::uint32_t> after = m_pDocument->GetSelection();
+	std::vector<std::uint32_t> added;
+	xv::map::MapEdit_t edit = xv::map::HollowObjects( *pScene, m_pDocument->GetSelection(), flWallWidth, &added );
+	if ( edit.IsEmpty() )
+	{
+		return;
+	}
+	after.insert( after.end(), added.begin(), added.end() );
+	m_pDocument->Edit( std::move( edit ), tr( "Make Hollow" ), std::move( after ) );
 }
 
 //-----------------------------------------------------------------------------
@@ -1073,10 +1244,11 @@ bool CMapEditor::RunAction( MapAction_t nAction, CMapView *pFrom )
 		}
 		case MapAction_t::MAP_ACTION_ESCAPE:
 			// A box or marker being made goes first, then the selection.
-			if ( m_NewBox || m_EntityMarker )
+			if ( m_NewBox || m_EntityMarker || m_ClipLine )
 			{
 				SetNewBox( std::nullopt );
 				SetEntityMarker( std::nullopt );
+				SetClipLine( std::nullopt );
 				return true;
 			}
 			m_pDocument->ClearSelection();
@@ -1093,6 +1265,11 @@ bool CMapEditor::RunAction( MapAction_t nAction, CMapView *pFrom )
 			if ( m_nTool == MapTool_t::MAP_TOOL_ENTITY && m_EntityMarker )
 			{
 				PlaceEntity( *m_EntityMarker );
+				return true;
+			}
+			if ( m_nTool == MapTool_t::MAP_TOOL_CLIP && m_ClipLine )
+			{
+				ApplyClip();
 				return true;
 			}
 			return false;
@@ -1180,6 +1357,24 @@ bool CMapEditor::RunAction( MapAction_t nAction, CMapView *pFrom )
 			return true;
 		case MapAction_t::MAP_ACTION_TOOL_TEXTURE:
 			SetTool( MapTool_t::MAP_TOOL_TEXTURE );
+			return true;
+		case MapAction_t::MAP_ACTION_TOOL_CLIP:
+			// Shift+X again goes round Hammer's modes: keep the front, the back, both.
+			if ( m_nTool == MapTool_t::MAP_TOOL_CLIP )
+			{
+				SetClipMode( m_nClipMode == xv::map::ClipKeep_t::CLIP_KEEP_FRONT ? xv::map::ClipKeep_t::CLIP_KEEP_BACK : m_nClipMode == xv::map::ClipKeep_t::CLIP_KEEP_BACK ? xv::map::ClipKeep_t::CLIP_KEEP_BOTH
+																																											: xv::map::ClipKeep_t::CLIP_KEEP_FRONT );
+			}
+			else
+			{
+				SetTool( MapTool_t::MAP_TOOL_CLIP );
+			}
+			return true;
+		case MapAction_t::MAP_ACTION_CARVE:
+			Carve();
+			return true;
+		case MapAction_t::MAP_ACTION_HOLLOW:
+			MakeHollow();
 			return true;
 		case MapAction_t::MAP_ACTION_APPLY_TEXTURE:
 			ApplyCurrentTexture( false );
@@ -1366,10 +1561,11 @@ void CMapEditor::CreateBlock()
 	QRandomGenerator *pRandom = QRandomGenerator::global();
 	faces.m_Color = { 0, static_cast<std::uint8_t>( pRandom->bounded( 100, 256 ) ), static_cast<std::uint8_t>( pRandom->bounded( 100, 256 ) ) };
 	std::vector<std::uint32_t> added;
-	xv::map::MapEdit_t edit = xv::map::AddObjects( *pScene, { xv::map::MakeBlock( pScene->m_Map, box, faces ) }, {}, &added );
+	const auto nKind = static_cast<xv::map::Primitive_t>( m_pPrimitive->currentData().toInt() );
+	xv::map::MapEdit_t edit = xv::map::AddObjects( *pScene, { xv::map::MakePrimitive( pScene->m_Map, nKind, box, faces, m_pSides->value() ) }, {}, &added );
 	m_LastBox = box;
 	SetNewBox( std::nullopt );
-	m_pDocument->Edit( std::move( edit ), tr( "Create Block" ), std::move( added ) );
+	m_pDocument->Edit( std::move( edit ), tr( "Create %1" ).arg( m_pPrimitive->currentText() ), std::move( added ) );
 }
 
 //-----------------------------------------------------------------------------

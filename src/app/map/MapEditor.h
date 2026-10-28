@@ -19,6 +19,7 @@
 #include <QWidget>
 
 #include "EditorTab.h"
+#include "map/Clip.h"
 #include "map/Faces.h"
 #include "map/MapDocument.h"
 #include "map/MapGizmo.h"
@@ -34,6 +35,7 @@ class CMapQuadSplitter;
 class QAction;
 class QActionGroup;
 class QComboBox;
+class QSpinBox;
 class QLabel;
 class QStackedWidget;
 class QLineEdit;
@@ -117,6 +119,26 @@ public:
 	void LoadPointfile();
 	void UnloadPointfile();
 	void GoToLeak();
+	// The clipping tool's line: two points in a 2D view's plane (the axis the view doesn't show
+	// is nAxis); Hammer's three modes; Enter cuts the selection.
+	struct ClipLine_t
+	{
+		xv::map::Point_t m_From;
+		xv::map::Point_t m_To;
+		int m_nAxis = 2;
+	};
+	[[nodiscard]] const std::optional<ClipLine_t> &GetClipLine() const { return m_ClipLine; }
+	void SetClipLine( std::optional<ClipLine_t> line );
+	[[nodiscard]] xv::map::ClipKeep_t GetClipMode() const { return m_nClipMode; }
+	void SetClipMode( xv::map::ClipKeep_t nMode );
+	// The plane the line means, and the selection as the cut would leave it (for the views).
+	[[nodiscard]] std::optional<xv::map::Plane_t> GetClipPlane() const;
+	[[nodiscard]] std::shared_ptr<const xv::map::CScene> GetClipPreview() const { return m_pClipPreview; }
+	void ApplyClip();
+	// Carve (Ctrl+Shift+C) with the selection; Make Hollow (the Map menu) with a wall width.
+	void Carve();
+	void MakeHollow();
+	void MakeHollow( double flWallWidth );
 	// Edit > Tie to Entity (Ctrl+T), Move to World (Ctrl+Shift+W), Group (Ctrl+G), Ungroup (Ctrl+U).
 	void TieToEntity();
 	void TieToEntity( const QString &szClass );
@@ -210,8 +232,13 @@ private:
 	std::optional<xv::map::Box_t> m_NewBox;
 	xv::map::Box_t m_LastBox{ { 0, 0, 0 }, { 64, 64, 64 } };
 	std::optional<xv::map::Point_t> m_EntityMarker;
+	std::optional<ClipLine_t> m_ClipLine;
+	xv::map::ClipKeep_t m_nClipMode = xv::map::ClipKeep_t::CLIP_KEEP_FRONT;
+	std::shared_ptr<const xv::map::CScene> m_pClipPreview; // the selection cut, drawn in white
 	QLineEdit *m_pMaterial = nullptr;
 	QComboBox *m_pEntityClass = nullptr;
+	QComboBox *m_pPrimitive = nullptr; // the block tool's shape (Hammer's Objects box)
+	QSpinBox *m_pSides = nullptr;      // its Faces box
 	QPointer<QDialog> m_pCompileDialog;
 
 	std::array<CMapPane *, 4> m_Panes{};

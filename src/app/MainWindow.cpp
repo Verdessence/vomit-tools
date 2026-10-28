@@ -703,6 +703,18 @@ void CMainWindow::BuildMenus( QAction *pSearchPathsToggle )
 			pMap->RunAction( MapAction_t::MAP_ACTION_GO_TO_BRUSH, pMap->GetActiveView() );
 		}
 	} );
+	m_pMapMenu->addAction( tr( "Make &Hollow…" ), this, [ this ] {
+		if ( CMapEditor *pMap = GetCurrentMap() )
+		{
+			pMap->RunAction( MapAction_t::MAP_ACTION_HOLLOW, pMap->GetActiveView() );
+		}
+	} );
+	m_pMapMenu->addAction( tr( "&Carve" ), this, [ this ] {
+		if ( CMapEditor *pMap = GetCurrentMap() )
+		{
+			pMap->RunAction( MapAction_t::MAP_ACTION_CARVE, pMap->GetActiveView() );
+		}
+	} );
 	m_pMapMenu->addSeparator();
 	QAction *pRunMap = m_pMapMenu->addAction( tr( "&Run Map…" ), this, [ this ] {
 		if ( CMapEditor *pMap = GetCurrentMap() )

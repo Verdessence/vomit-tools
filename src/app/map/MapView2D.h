@@ -130,6 +130,9 @@ private:
 	[[nodiscard]] double Snap( double flValue, Qt::KeyboardModifiers modifiers ) const;
 	// A box as this view shows it, in the widget's pixels.
 	[[nodiscard]] QRectF RectOf( const xv::map::Box_t &box ) const;
+	// The clipping tool: a press starts a line (or takes one of its ends; Ctrl takes the whole).
+	void PressClip( QPointF at, Qt::KeyboardModifiers modifiers );
+	void DragClip( QPointF at, Qt::KeyboardModifiers modifiers );
 	// The block tool: a press starts a new box, moves the one there or pulls one of its handles.
 	void PressBlock( QPointF at );
 	void DragBlock( QPointF at, Qt::KeyboardModifiers modifiers );
@@ -191,6 +194,8 @@ private:
 	QPointF m_BoxDragFrom;
 	xv::map::Box_t m_BoxDragStart;
 	QPoint m_BoxHandle; // -1, 0 or 1 across and down the widget: which side or corner it pulls
+	int m_nClipDrag = -1;   // the clipping tool: which end is dragged (0, 1), or 2 for the whole line
+	QPointF m_ClipDragFrom;
 	QPoint m_PressAt;
 	double m_flPaintMs = 0.0;
 	int m_nPaints = 0;

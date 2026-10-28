@@ -43,6 +43,7 @@ enum class MapTool_t
 	MAP_TOOL_ENTITY,
 	MAP_TOOL_BLOCK,
 	MAP_TOOL_TEXTURE, // Hammer's Texture Application: faces picked in 3D, the Face Edit sheet
+	MAP_TOOL_CLIP,    // Hammer's clipping tool: a line dragged in 2D, Enter cuts the selection
 };
 
 // What the selection's handles do in the 2D views: Hammer's cycle, a click inside the selection

@@ -992,6 +992,41 @@ void CMapView2D::PaintTools( QPainter &painter ) const
 		PaintHandles( painter, box );
 		PaintSizes( painter, box, Flatten( newBox->m_Maxs ) - Flatten( newBox->m_Mins ), color );
 	}
+	if ( const std::optional<CMapEditor::ClipLine_t> &clip = m_Editor.GetClipLine() )
+	{
+		// What the cut keeps, outlined in white over everything; the line itself with its ends
+		// as handles in the view it was drawn in.
+		if ( const std::shared_ptr<const xv::map::CScene> pPreview = m_Editor.GetClipPreview() )
+		{
+			painter.setPen( QPen{ color, 2.0 } );
+			for ( const std::uint32_t nObject : pPreview->m_Changed )
+			{
+				if ( !pPreview->IsSolidObject( nObject ) || pPreview->IsDeleted( nObject ) )
+				{
+					continue;
+				}
+				for ( const xv::map::FaceGeometry_t &face : pPreview->m_Solids[ pPreview->GetIndex( nObject ) ].m_Faces )
+				{
+					for ( std::size_t i = 0; i < face.m_Points.size(); i++ )
+					{
+						painter.drawLine( ToWidget( Flatten( face.m_Points[ i ] ) ), ToWidget( Flatten( face.m_Points[ ( i + 1 ) % face.m_Points.size() ] ) ) );
+					}
+				}
+			}
+		}
+		if ( clip->m_nAxis == 3 - GetAxis( 0 ) - GetAxis( 1 ) )
+		{
+			const QPointF from = ToWidget( Flatten( clip->m_From ) );
+			const QPointF to = ToWidget( Flatten( clip->m_To ) );
+			painter.setPen( QPen{ color, 0 } );
+			painter.drawLine( from, to );
+			painter.setBrush( Look().m_Colors.m_ToolHandle );
+			painter.setPen( QPen{ Qt::black, 0 } );
+			const double h = Look().m_nHandleSize;
+			painter.drawRect( QRectF{ from.x() - h / 2, from.y() - h / 2, h, h } );
+			painter.drawRect( QRectF{ to.x() - h / 2, to.y() - h / 2, h, h } );
+		}
+	}
 	if ( const std::optional<xv::map::Point_t> &marker = m_Editor.GetEntityMarker() )
 	{
 		const QPointF at = ToWidget( Flatten( *marker ) );
@@ -1230,6 +1265,14 @@ void CMapView2D::mousePressEvent( QMouseEvent *pEvent )
 		}
 		return;
 	}
+	if ( nTool == MapTool_t::MAP_TOOL_CLIP )
+	{
+		if ( pEvent->button() == Qt::LeftButton )
+		{
+			PressClip( at, pEvent->modifiers() );
+		}
+		return;
+	}
 	if ( pEvent->button() == Qt::LeftButton )
 	{
 		m_PressAt = pEvent->position().toPoint();
@@ -1282,6 +1325,70 @@ double CMapView2D::Snap( double flValue, Qt::KeyboardModifiers modifiers ) const
 QRectF CMapView2D::RectOf( const xv::map::Box_t &box ) const
 {
 	return QRectF{ ToWidget( Flatten( box.m_Mins ) ), ToWidget( Flatten( box.m_Maxs ) ) }.normalized();
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Near one of the line's ends, that end follows the drag (Ctrl: the whole line); else
+//          a new line starts here.
+//-----------------------------------------------------------------------------
+void CMapView2D::PressClip( QPointF at, Qt::KeyboardModifiers modifiers )
+{
+	m_PressAt = at.toPoint();
+	m_ClipDragFrom = ToMap( at );
+	m_nClipDrag = -1;
+	if ( const std::optional<CMapEditor::ClipLine_t> &line = m_Editor.GetClipLine(); line && line->m_nAxis == 3 - GetAxis( 0 ) - GetAxis( 1 ) )
+	{
+		const QPointF ends[ 2 ] = { ToWidget( Flatten( line->m_From ) ), ToWidget( Flatten( line->m_To ) ) };
+		for ( int i = 0; i < 2; i++ )
+		{
+			if ( ( ends[ i ] - at ).manhattanLength() <= mapstyle::HANDLE_SIZE + mapstyle::HANDLE_SLACK )
+			{
+				m_nClipDrag = modifiers.testFlag( Qt::ControlModifier ) ? 2 : i;
+				return;
+			}
+		}
+	}
+	// A new line: both ends here until the mouse moves.
+	const QPointF from{ Snap( m_ClipDragFrom.x(), modifiers ), Snap( m_ClipDragFrom.y(), modifiers ) };
+	CMapEditor::ClipLine_t line;
+	line.m_nAxis = 3 - GetAxis( 0 ) - GetAxis( 1 );
+	line.m_From[ static_cast<std::size_t>( GetAxis( 0 ) ) ] = from.x();
+	line.m_From[ static_cast<std::size_t>( GetAxis( 1 ) ) ] = from.y();
+	line.m_To = line.m_From;
+	m_Editor.SetClipLine( line );
+	m_nClipDrag = 1;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+void CMapView2D::DragClip( QPointF at, Qt::KeyboardModifiers modifiers )
+{
+	std::optional<CMapEditor::ClipLine_t> line = m_Editor.GetClipLine();
+	if ( !line || m_nClipDrag < 0 )
+	{
+		return;
+	}
+	const auto n0 = static_cast<std::size_t>( GetAxis( 0 ) );
+	const auto n1 = static_cast<std::size_t>( GetAxis( 1 ) );
+	const QPointF map = ToMap( at );
+	if ( m_nClipDrag == 2 )
+	{
+		const QPointF delta{ Snap( map.x() - m_ClipDragFrom.x(), modifiers ), Snap( map.y() - m_ClipDragFrom.y(), modifiers ) };
+		for ( xv::map::Point_t *pEnd : { &line->m_From, &line->m_To } )
+		{
+			( *pEnd )[ n0 ] += delta.x();
+			( *pEnd )[ n1 ] += delta.y();
+		}
+		m_ClipDragFrom = m_ClipDragFrom + delta;
+	}
+	else
+	{
+		xv::map::Point_t &end = m_nClipDrag == 0 ? line->m_From : line->m_To;
+		end[ n0 ] = Snap( map.x(), modifiers );
+		end[ n1 ] = Snap( map.y(), modifiers );
+	}
+	m_Editor.SetClipLine( line );
 }
 
 //-----------------------------------------------------------------------------
@@ -1575,6 +1682,11 @@ void CMapView2D::mouseMoveEvent( QMouseEvent *pEvent )
 		DragBlock( pEvent->position(), pEvent->modifiers() );
 		return;
 	}
+	if ( m_nClipDrag >= 0 && ( pEvent->buttons() & Qt::LeftButton ) )
+	{
+		DragClip( pEvent->position(), pEvent->modifiers() );
+		return;
+	}
 	if ( m_HandleDrag && ( pEvent->buttons() & Qt::LeftButton ) )
 	{
 		PreviewHandle( pEvent->position(), pEvent->modifiers() );
@@ -1605,6 +1717,12 @@ void CMapView2D::mouseReleaseEvent( QMouseEvent *pEvent )
 	if ( m_nBoxDrag != BoxDrag_t::BOX_DRAG_NONE && pEvent->button() == Qt::LeftButton )
 	{
 		m_nBoxDrag = BoxDrag_t::BOX_DRAG_NONE;
+		m_PressAt = {};
+		return;
+	}
+	if ( m_nClipDrag >= 0 && pEvent->button() == Qt::LeftButton )
+	{
+		m_nClipDrag = -1;
 		m_PressAt = {};
 		return;
 	}

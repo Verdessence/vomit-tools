@@ -50,6 +50,9 @@ enum class MapAction_t
 	MAP_ACTION_TOOL_BLOCK,           // Shift+B
 	MAP_ACTION_TOOL_TEXTURE,         // Shift+A
 	MAP_ACTION_RUN_MAP,              // F9
+	MAP_ACTION_TOOL_CLIP,            // Shift+X (again: the next clip mode)
+	MAP_ACTION_CARVE,                // Ctrl+Shift+C
+	MAP_ACTION_HOLLOW,               // the Map menu
 	MAP_ACTION_TIE_TO_ENTITY,        // Ctrl+T
 	MAP_ACTION_MOVE_TO_WORLD,        // Ctrl+Shift+W
 	MAP_ACTION_GROUP,                // Ctrl+G

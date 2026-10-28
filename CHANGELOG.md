@@ -29,8 +29,16 @@
   justifies (L, R, Fit, T, B, C; Treat as one), aligns to the world or the face, and applies the
   current texture (Apply, the right button, or Shift+T on the selection). The **texture browser**
   (Browse…) lists the game's materials with pictures, filtered by words or to the map's own.
+- **Tie to Entity** (Ctrl+T), **Move to World** (Ctrl+Shift+W), **Group** and **Ungroup**
+  (Ctrl+G, Ctrl+U), group ignore (Ctrl+W).
+- **Clipping tool** (Shift+X): a line dragged in a 2D view cuts the selection on Enter, keeping
+  the front, the back or both (Shift+X again goes round them); the kept part is outlined in
+  white first. **Carve** (Ctrl+Shift+C) takes the selection's shape out of the brushes it
+  overlaps, in convex pieces; **Make Hollow** (Map menu) turns brushes into grouped walls of a
+  given width, inside or (negative) outside.
 - **Block tool** (Shift+B): drag a box in a 2D view, pull its handles in the others, Enter (or the
-  right button's Create Object) makes a block with the current texture. **Entity tool** (Shift+E):
+  right button's Create Object) makes a block with the current texture; the New Objects panel's
+  Objects box picks a wedge, cylinder, spike or sphere instead, with its Faces count. **Entity tool** (Shift+E):
   click in 2D and press Enter, or click a surface in 3D to stand the entity on it, with the class
   picked under New Objects. New objects get the keys and colours Hammer gives them, and the game's
   Hammer configuration's default entity, texture scale and lightmap scale.
