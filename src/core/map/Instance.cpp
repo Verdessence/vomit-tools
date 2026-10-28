@@ -257,6 +257,45 @@ Transform_t Transform_t::Shear( Point_t pivot, int nAxis, int nAlong, double flR
 }
 
 //-----------------------------------------------------------------------------
+// Purpose: Rodrigues' formula: R = cos I + sin [axis]x + (1 - cos) axis axis^T.
+//-----------------------------------------------------------------------------
+Transform_t Transform_t::RotationAbout( Point_t pivot, Point_t axis, double flDegrees )
+{
+	const Point_t k = Normalized( axis );
+	const double c = std::cos( flDegrees * DEGREES ), s = std::sin( flDegrees * DEGREES );
+	const double t = 1.0 - c;
+	Transform_t out;
+	out.m_Rotation = {
+		t * k[ 0 ] * k[ 0 ] + c, t * k[ 0 ] * k[ 1 ] - s * k[ 2 ], t * k[ 0 ] * k[ 2 ] + s * k[ 1 ],
+		t * k[ 0 ] * k[ 1 ] + s * k[ 2 ], t * k[ 1 ] * k[ 1 ] + c, t * k[ 1 ] * k[ 2 ] - s * k[ 0 ],
+		t * k[ 0 ] * k[ 2 ] - s * k[ 1 ], t * k[ 1 ] * k[ 2 ] + s * k[ 0 ], t * k[ 2 ] * k[ 2 ] + c
+	};
+	out.m_Offset = Subtract( pivot, out.Rotate( pivot ) );
+	out.m_Pivot = pivot;
+	return out;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: I + (factor - 1) axis axis^T: only the part of a point along the axis stretches.
+//-----------------------------------------------------------------------------
+Transform_t Transform_t::ScalingAlong( Point_t pivot, Point_t axis, double flFactor )
+{
+	const Point_t k = Normalized( axis );
+	const double f = flFactor - 1.0;
+	Transform_t out;
+	for ( std::size_t r = 0; r < 3; r++ )
+	{
+		for ( std::size_t c = 0; c < 3; c++ )
+		{
+			out.m_Rotation[ r * 3 + c ] = ( r == c ? 1.0 : 0.0 ) + f * k[ r ] * k[ c ];
+		}
+	}
+	out.m_Offset = Subtract( pivot, out.Rotate( pivot ) );
+	out.m_Pivot = pivot;
+	return out;
+}
+
+//-----------------------------------------------------------------------------
 // Purpose:
 //-----------------------------------------------------------------------------
 bool Transform_t::IsIdentity() const

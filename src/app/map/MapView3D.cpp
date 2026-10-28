@@ -555,6 +555,122 @@ void CMapView3D::mousePressEvent( QMouseEvent *pEvent )
 	m_LastMouse = pEvent->position().toPoint();
 	m_PressAt = m_LastMouse;
 	m_bMoved = false;
+	// On one of the gizmo's axes, the selection tool drags the selection along it.
+	if ( pEvent->button() == Qt::LeftButton && !m_bSpaceHeld && !m_bMouselook && m_Editor.GetTool() == MapTool_t::MAP_TOOL_SELECT )
+	{
+		if ( const std::optional<CMapGizmo> gizmo = GetGizmo() )
+		{
+			const int nAxis = gizmo->HitAt( GetSizedCamera(), mapstyle::GIZMO_PIXELS, pEvent->position(), mapstyle::GIZMO_SLACK );
+			if ( nAxis >= 0 )
+			{
+				m_nGizmoDrag = nAxis;
+				m_GizmoFrom = pEvent->position();
+				m_DragGizmo = gizmo;
+				m_pGizmoScene = GetDocument().GetSharedScene();
+				m_GizmoSelection = GetDocument().GetSelection();
+			}
+		}
+	}
+	// Hammer++'s right click goes round the gizmo's modes.
+	if ( pEvent->button() == Qt::RightButton && m_Editor.GetTool() == MapTool_t::MAP_TOOL_SELECT && GetGizmo() )
+	{
+		const MapGizmoMode_t nMode = m_Editor.GetGizmoMode();
+		m_Editor.SetGizmoMode( nMode == MapGizmoMode_t::MAP_GIZMO_MODE_TRANSLATE ? MapGizmoMode_t::MAP_GIZMO_MODE_ROTATE : nMode == MapGizmoMode_t::MAP_GIZMO_MODE_ROTATE ? MapGizmoMode_t::MAP_GIZMO_MODE_SCALE
+																																										  : MapGizmoMode_t::MAP_GIZMO_MODE_TRANSLATE );
+	}
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: At the selection's middle, on the world's axes or (J) a lone entity's own.
+//-----------------------------------------------------------------------------
+std::optional<CMapGizmo> CMapView3D::GetGizmo() const
+{
+	const CMapDocument &document = GetDocument();
+	const xv::map::CScene *pScene = document.GetScene();
+	if ( !m_Editor.IsGizmoShown() || !pScene || document.GetSelection().empty() )
+	{
+		return std::nullopt;
+	}
+	const xv::map::Box_t bounds = document.GetSelectionBounds();
+	if ( bounds.IsEmpty() )
+	{
+		return std::nullopt;
+	}
+	std::array<xv::map::Point_t, 3> axes{ { { 1, 0, 0 }, { 0, 1, 0 }, { 0, 0, 1 } } };
+	if ( m_Editor.IsGizmoLocal() && document.GetSelection().size() == 1 && !pScene->IsSolidObject( document.GetSelection().front() ) )
+	{
+		const xv::map::EntityVisual_t &visual = pScene->m_Entities[ pScene->GetIndex( document.GetSelection().front() ) ];
+		const xv::map::Transform_t turn = xv::map::Transform_t::FromAngles( {}, visual.m_Angles );
+		for ( xv::map::Point_t &axis : axes )
+		{
+			axis = turn.Rotate( axis );
+		}
+	}
+	CMapGizmo gizmo;
+	gizmo.Place( bounds.GetCenter(), axes );
+	gizmo.SetMode( m_Editor.GetGizmoMode() );
+	return gizmo;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+xv::map::CViewCamera CMapView3D::GetSizedCamera() const
+{
+	xv::map::CViewCamera camera = m_Camera;
+	camera.m_nWidth = std::max( 1, width() );
+	camera.m_nHeight = std::max( 1, height() );
+	return camera;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: The drag's transform shown as it goes: along the grid (Alt: free), in rotation
+//          steps (Preferences; Alt: free).
+//-----------------------------------------------------------------------------
+void CMapView3D::PreviewGizmo( QPointF at, Qt::KeyboardModifiers modifiers )
+{
+	if ( !m_DragGizmo || !m_pGizmoScene )
+	{
+		return;
+	}
+	const bool bFree = modifiers.testFlag( Qt::AltModifier );
+	const MapViewSettings_t &settings = m_Editor.GetSettings();
+	const double flGrid = bFree || !settings.m_bSnapToGrid ? 0.0 : static_cast<double>( settings.m_nGridSize );
+	const double flStep = bFree ? 0.0 : CPreferences::Instance().GetMapPreferences().m_flRotationSnap;
+	const xv::map::Transform_t transform = m_DragGizmo->Drag( GetSizedCamera(), m_nGizmoDrag, m_GizmoFrom, at, flGrid, flStep );
+	GetDocument().Preview( xv::map::TransformObjects( *m_pGizmoScene, m_GizmoSelection, transform, settings.m_bTextureLock, settings.m_bScaleLock ) );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: The drag over: the scene as it was, then (unless given up) the transform as one
+//          step to undo.
+//-----------------------------------------------------------------------------
+void CMapView3D::EndGizmo( bool bCommit, QPointF at, Qt::KeyboardModifiers modifiers )
+{
+	if ( m_nGizmoDrag < 0 )
+	{
+		return;
+	}
+	const MapViewSettings_t &settings = m_Editor.GetSettings();
+	const bool bFree = modifiers.testFlag( Qt::AltModifier );
+	const double flGrid = bFree || !settings.m_bSnapToGrid ? 0.0 : static_cast<double>( settings.m_nGridSize );
+	const double flStep = bFree ? 0.0 : CPreferences::Instance().GetMapPreferences().m_flRotationSnap;
+	const xv::map::Transform_t transform = m_DragGizmo ? m_DragGizmo->Drag( GetSizedCamera(), m_nGizmoDrag, m_GizmoFrom, at, flGrid, flStep ) : xv::map::Transform_t{};
+	const MapGizmoMode_t nMode = m_DragGizmo ? m_DragGizmo->GetMode() : MapGizmoMode_t::MAP_GIZMO_MODE_TRANSLATE;
+	if ( m_pGizmoScene )
+	{
+		GetDocument().EndPreview();
+	}
+	m_nGizmoDrag = -1;
+	m_DragGizmo.reset();
+	m_pGizmoScene.reset();
+	m_GizmoSelection.clear();
+	if ( bCommit )
+	{
+		m_Editor.TransformSelection( transform, nMode == MapGizmoMode_t::MAP_GIZMO_MODE_TRANSLATE ? tr( "Move" ) : nMode == MapGizmoMode_t::MAP_GIZMO_MODE_ROTATE ? tr( "Rotate" )
+																																								  : tr( "Scale" ) );
+	}
+	RedrawLabels();
 }
 
 //-----------------------------------------------------------------------------
@@ -574,6 +690,22 @@ void CMapView3D::mouseMoveEvent( QMouseEvent *pEvent )
 	if ( m_bMouselook && m_PointerLock.IsActive() )
 	{
 		return; // the pinned pointer's movement comes through Look() directly
+	}
+	if ( m_nGizmoDrag >= 0 && ( pEvent->buttons() & Qt::LeftButton ) )
+	{
+		PreviewGizmo( pEvent->position(), pEvent->modifiers() );
+		return;
+	}
+	if ( pEvent->buttons() == Qt::NoButton && !m_bMouselook && m_Editor.GetTool() == MapTool_t::MAP_TOOL_SELECT )
+	{
+		// The axis under the mouse lights up.
+		const std::optional<CMapGizmo> gizmo = GetGizmo();
+		const int nHover = gizmo ? gizmo->HitAt( GetSizedCamera(), mapstyle::GIZMO_PIXELS, pEvent->position(), mapstyle::GIZMO_SLACK ) : -1;
+		if ( nHover != m_nGizmoHover )
+		{
+			m_nGizmoHover = nHover;
+			RedrawLabels();
+		}
 	}
 	auto look = [ & ] { Look( delta ); };
 	if ( m_bMouselook || ( m_bSpaceHeld && ( pEvent->buttons() & Qt::LeftButton ) ) )
@@ -619,6 +751,11 @@ void CMapView3D::mouseReleaseEvent( QMouseEvent *pEvent )
 {
 	const bool bWasLeft = ( m_Dragging & Qt::LeftButton ) != 0;
 	m_Dragging = pEvent->buttons();
+	if ( m_nGizmoDrag >= 0 && pEvent->button() == Qt::LeftButton )
+	{
+		EndGizmo( true, pEvent->position(), pEvent->modifiers() );
+		return;
+	}
 	if ( !bWasLeft || m_bMoved || m_bSpaceHeld || m_bMouselook || pEvent->button() != Qt::LeftButton )
 	{
 		return;
@@ -693,13 +830,12 @@ void CMapView3D::PaintTools( QPainter &painter ) const
 {
 	const std::optional<xv::map::Box_t> &box = m_Editor.GetNewBox();
 	const std::optional<xv::map::Point_t> &marker = m_Editor.GetEntityMarker();
-	if ( !box && !marker )
+	const std::optional<CMapGizmo> gizmo = m_DragGizmo ? m_DragGizmo : GetGizmo();
+	if ( !box && !marker && !gizmo )
 	{
 		return;
 	}
-	xv::map::CViewCamera camera = m_Camera;
-	camera.m_nWidth = width();
-	camera.m_nHeight = height();
+	const xv::map::CViewCamera camera = GetSizedCamera();
 	const xv::map::Point_t forward = camera.GetForward();
 	std::vector<QLineF> lines;
 	auto line = [ & ]( xv::map::Point_t a, xv::map::Point_t b ) {
@@ -751,6 +887,30 @@ void CMapView3D::PaintTools( QPainter &painter ) const
 	painter.drawLines( lines.data(), static_cast<int>( lines.size() ) );
 	painter.setPen( QPen{ CPreferences::Instance().GetMapPreferences().m_Colors.m_ToolBlock, 1.0 } );
 	painter.drawLines( lines.data(), static_cast<int>( lines.size() ) );
+	if ( gizmo )
+	{
+		// Each axis in its colour, the one under the mouse (or being dragged) in the selection's
+		// yellow and thicker; while a drag is on, the pivot stays where the drag began.
+		const int nLit = m_nGizmoDrag >= 0 ? m_nGizmoDrag : m_nGizmoHover;
+		for ( int nAxis = 0; nAxis < 3; nAxis++ )
+		{
+			lines.clear();
+			for ( const MapGizmoLine_t &axisLine : gizmo->GetLines( camera, mapstyle::GIZMO_PIXELS ) )
+			{
+				if ( axisLine.m_nAxis == nAxis )
+				{
+					line( axisLine.m_From, axisLine.m_To );
+				}
+			}
+			const QColor color = nAxis == nLit ? CPreferences::Instance().GetMapPreferences().m_Colors.m_SelectionEdge3D : nAxis == 0 ? mapstyle::AXIS_X
+				: nAxis == 1                                                                                                          ? mapstyle::AXIS_Y
+																																	  : mapstyle::AXIS_Z;
+			painter.setPen( QPen{ QColor{ 0, 0, 0, 160 }, nAxis == nLit ? 5.0 : 4.0 } );
+			painter.drawLines( lines.data(), static_cast<int>( lines.size() ) );
+			painter.setPen( QPen{ color, nAxis == nLit ? 3.0 : 2.0 } );
+			painter.drawLines( lines.data(), static_cast<int>( lines.size() ) );
+		}
+	}
 	painter.setRenderHint( QPainter::Antialiasing, false );
 }
 
@@ -803,6 +963,14 @@ void CMapView3D::keyPressEvent( QKeyEvent *pEvent )
 		{
 			m_bSpaceHeld = true;
 		}
+		return;
+	}
+	// While an axis is dragged, X, Y and Z pick the axis instead (Hammer++'s axis locks).
+	if ( m_nGizmoDrag >= 0 && pEvent->modifiers() == Qt::NoModifier && ( pEvent->key() == Qt::Key_X || pEvent->key() == Qt::Key_Y || pEvent->key() == Qt::Key_Z ) )
+	{
+		m_nGizmoDrag = pEvent->key() == Qt::Key_X ? 0 : pEvent->key() == Qt::Key_Y ? 1
+																				   : 2;
+		PreviewGizmo( mapFromGlobal( QCursor::pos() ), QApplication::keyboardModifiers() );
 		return;
 	}
 	if ( const auto nAction = MapActionFor( *pEvent, MapKeyContext_t::MAP_KEY_CONTEXT_3D ); nAction && IsHeldMapAction( *nAction ) )
@@ -986,6 +1154,17 @@ bool CMapView3D::Run( MapAction_t nAction )
 			m_bStatistics = !m_bStatistics;
 			update();
 			return true;
+		case MapAction_t::MAP_ACTION_EDIT_MODE:
+			// Hammer++'s X in 3D: the gizmo shown or not.
+			m_Editor.SetGizmoShown( !m_Editor.IsGizmoShown() );
+			return true;
+		case MapAction_t::MAP_ACTION_ESCAPE:
+			if ( m_nGizmoDrag >= 0 )
+			{
+				EndGizmo( false, m_GizmoFrom, Qt::NoModifier );
+				return true;
+			}
+			return false;
 		case MapAction_t::MAP_ACTION_NEXT_HIT:
 		case MapAction_t::MAP_ACTION_PREVIOUS_HIT:
 		{

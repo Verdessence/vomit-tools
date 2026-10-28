@@ -45,6 +45,9 @@ struct Transform_t
 	[[nodiscard]] static Transform_t Rotation( Point_t pivot, int nAxis, double flDegrees );
 	// Slid along axis nAlong by flRatio times how far a point is from pivot along nAxis.
 	[[nodiscard]] static Transform_t Shear( Point_t pivot, int nAxis, int nAlong, double flRatio );
+	// Turned about any axis (a unit vector) through pivot, and stretched along one.
+	[[nodiscard]] static Transform_t RotationAbout( Point_t pivot, Point_t axis, double flDegrees );
+	[[nodiscard]] static Transform_t ScalingAlong( Point_t pivot, Point_t axis, double flFactor );
 	[[nodiscard]] bool IsIdentity() const;
 	[[nodiscard]] Point_t Apply( Point_t p ) const;
 	[[nodiscard]] Point_t Rotate( Point_t v ) const;

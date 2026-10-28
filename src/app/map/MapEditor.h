@@ -18,6 +18,7 @@
 
 #include "EditorTab.h"
 #include "map/MapDocument.h"
+#include "map/MapGizmo.h"
 #include "map/MapRenderData.h"
 #include "map/MapView.h"
 
@@ -53,6 +54,13 @@ public:
 	void SetTool( MapTool_t nTool );
 	[[nodiscard]] MapEditMode_t GetEditMode() const { return m_nEditMode; }
 	void SetEditMode( MapEditMode_t nMode );
+	// Hammer++'s gizmo in the 3D views: shown (X), what it does (G, R, E) and whose axes (J).
+	[[nodiscard]] bool IsGizmoShown() const { return m_bGizmo; }
+	void SetGizmoShown( bool bShown );
+	[[nodiscard]] MapGizmoMode_t GetGizmoMode() const { return m_nGizmoMode; }
+	void SetGizmoMode( MapGizmoMode_t nMode );
+	[[nodiscard]] bool IsGizmoLocal() const { return m_bGizmoLocal; }
+	void SetGizmoLocal( bool bLocal );
 	[[nodiscard]] CMapPane *GetPane( int nIndex ) const;
 	[[nodiscard]] std::vector<CMapView *> GetViews() const;
 	[[nodiscard]] CMapView *GetActiveView() const { return m_pActiveView; }
@@ -154,6 +162,9 @@ private:
 	MapViewSettings_t m_Settings;
 	MapTool_t m_nTool = MapTool_t::MAP_TOOL_SELECT;
 	MapEditMode_t m_nEditMode = MapEditMode_t::MAP_EDIT_MODE_RESIZE;
+	bool m_bGizmo = true;
+	MapGizmoMode_t m_nGizmoMode = MapGizmoMode_t::MAP_GIZMO_MODE_TRANSLATE;
+	bool m_bGizmoLocal = false;
 	std::optional<xv::map::CViewCamera> m_RememberedCamera;
 	CMapView *m_pActiveView = nullptr;
 	std::optional<xv::map::Box_t> m_NewBox;

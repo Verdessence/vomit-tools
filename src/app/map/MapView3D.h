@@ -22,6 +22,7 @@
 #include <QPointer>
 
 #include "PointerLock.h"
+#include "map/MapGizmo.h"
 #include "map/MapRenderData.h"
 #include "map/MapRenderer.h"
 #include "map/MapView.h"
@@ -89,6 +90,9 @@ public:
 	[[nodiscard]] MapFrame_t MakeFrame( QSize size );
 	// The statistics and focus frame, over the picture.
 	void PaintLabels( QPainter &painter );
+	// The gizmo at the selection, if there is one to show, and the camera at this view's size.
+	[[nodiscard]] std::optional<CMapGizmo> GetGizmo() const;
+	[[nodiscard]] xv::map::CViewCamera GetSizedCamera() const;
 
 protected:
 	void paintEvent( QPaintEvent *pEvent ) override;
@@ -115,8 +119,10 @@ private:
 	// Turns the camera by a mouse movement, at the preferences' speed.
 	void Look( QPointF delta );
 	void Select( QPointF at, bool bToggle );
-	// The block tool's box and the entity tool's marker, over the picture.
+	// The block tool's box, the entity tool's marker and the gizmo, over the picture.
 	void PaintTools( QPainter &painter ) const;
+	void PreviewGizmo( QPointF at, Qt::KeyboardModifiers modifiers );
+	void EndGizmo( bool bCommit, QPointF at, Qt::KeyboardModifiers modifiers );
 	[[nodiscard]] xv::map::RasterMode_t GetMode() const;
 
 	MapViewType_t m_nType;
@@ -155,5 +161,12 @@ private:
 	std::size_t m_nHit = 0;
 	std::size_t m_nCamera = 0; // the map's camera Page Up and Page Down went to
 	bool m_bStatistics = false;
+	// The gizmo: the axis under the mouse, and a drag on one (from where, on which scene).
+	int m_nGizmoHover = -1;
+	int m_nGizmoDrag = -1;
+	QPointF m_GizmoFrom;
+	std::optional<CMapGizmo> m_DragGizmo;
+	std::shared_ptr<const xv::map::CScene> m_pGizmoScene;
+	std::vector<std::uint32_t> m_GizmoSelection;
 	QElapsedTimer m_LogClock; // the statistics go to the debug log once a second
 };

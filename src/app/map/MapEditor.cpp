@@ -946,6 +946,10 @@ bool CMapEditor::RunAction( MapAction_t nAction, CMapView *pFrom )
 		case MapAction_t::MAP_ACTION_TOOL_CAMERA:
 			SetTool( MapTool_t::MAP_TOOL_CAMERA );
 			return true;
+		case MapAction_t::MAP_ACTION_GIZMO_TRANSLATE: SetGizmoMode( MapGizmoMode_t::MAP_GIZMO_MODE_TRANSLATE ); return true;
+		case MapAction_t::MAP_ACTION_GIZMO_ROTATE: SetGizmoMode( MapGizmoMode_t::MAP_GIZMO_MODE_ROTATE ); return true;
+		case MapAction_t::MAP_ACTION_GIZMO_SCALE: SetGizmoMode( MapGizmoMode_t::MAP_GIZMO_MODE_SCALE ); return true;
+		case MapAction_t::MAP_ACTION_GIZMO_ORIENTATION: SetGizmoLocal( !m_bGizmoLocal ); return true;
 		case MapAction_t::MAP_ACTION_TOOL_ENTITY:
 			SetTool( MapTool_t::MAP_TOOL_ENTITY );
 			return true;
@@ -1002,6 +1006,33 @@ void CMapEditor::TransformSelection( const xv::map::Transform_t &transform, cons
 		return;
 	}
 	m_pDocument->Edit( xv::map::TransformObjects( *pScene, selection, transform, m_Settings.m_bTextureLock, m_Settings.m_bScaleLock ), szName, selection );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+void CMapEditor::SetGizmoShown( bool bShown )
+{
+	m_bGizmo = bShown;
+	RepaintTools();
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+void CMapEditor::SetGizmoMode( MapGizmoMode_t nMode )
+{
+	m_nGizmoMode = nMode;
+	RepaintTools();
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+void CMapEditor::SetGizmoLocal( bool bLocal )
+{
+	m_bGizmoLocal = bLocal;
+	RepaintTools();
 }
 
 //-----------------------------------------------------------------------------

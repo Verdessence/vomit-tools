@@ -70,6 +70,8 @@ inline const QColor AXIS_X{ 255, 64, 64 };
 inline const QColor AXIS_Y{ 64, 255, 64 };
 inline const QColor AXIS_Z{ 64, 128, 255 };
 inline constexpr int GIZMO_SIZE = 28;             // the axes' length in pixels
+inline constexpr double GIZMO_PIXELS = 90.0;      // the selection gizmo's axes, on screen
+inline constexpr double GIZMO_SLACK = 7.0;        // how near the mouse must be to an axis
 inline constexpr int GIZMO_MARGIN = 14;           // from the bottom left corner
 inline const QColor OVERLAY_BACKING{ 0, 0, 0, 150 };
 

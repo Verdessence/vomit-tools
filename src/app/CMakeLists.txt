@@ -148,6 +148,8 @@ add_library(vomit_tools_ui STATIC
         map/MapEditor.h
         map/MapFilterControl.cpp
         map/MapFilterControl.h
+        map/MapGizmo.cpp
+        map/MapGizmo.h
         map/MapKeys.cpp
         map/MapKeys.h
         map/MapPanes.cpp
