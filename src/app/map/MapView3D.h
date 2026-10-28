@@ -22,6 +22,7 @@
 #include <QPointer>
 
 #include "PointerLock.h"
+#include "map/Faces.h"
 #include "map/MapGizmo.h"
 #include "map/MapRenderData.h"
 #include "map/MapRenderer.h"
@@ -92,6 +93,8 @@ public:
 	void PaintLabels( QPainter &painter );
 	// The gizmo at the selection, if there is one to show, and the camera at this view's size.
 	[[nodiscard]] std::optional<CMapGizmo> GetGizmo() const;
+	// The brush face under a widget point (the nearest hit's triangle, when it is a brush's).
+	[[nodiscard]] std::optional<xv::map::FaceRef_t> FaceAt( QPointF at );
 	[[nodiscard]] xv::map::CViewCamera GetSizedCamera() const;
 
 protected:

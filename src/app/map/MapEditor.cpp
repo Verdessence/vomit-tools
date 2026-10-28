@@ -22,6 +22,7 @@
 #include <QPainter>
 #include <QPainterPath>
 #include <QSplitter>
+#include <QStackedWidget>
 #include <QToolBar>
 #include <QClipboard>
 #include <QComboBox>
@@ -41,7 +42,9 @@
 #include "FileDialogs.h"
 #include "Preferences.h"
 #include "map/MapConstants.h"
+#include "map/MapFaceEdit.h"
 #include "map/MapFilterControl.h"
+#include "map/MaterialBrowser.h"
 #include "map/MapPanes.h"
 #include "map/MapProperties.h"
 #include "map/MapResources.h"
@@ -61,6 +64,7 @@ enum class MapIcon_t
 	MAP_ICON_CAMERA,
 	MAP_ICON_ENTITY,
 	MAP_ICON_BLOCK,
+	MAP_ICON_TEXTURE,
 };
 
 //-----------------------------------------------------------------------------
@@ -116,6 +120,14 @@ QIcon MakeIcon( MapIcon_t nIcon, const QColor &color )
 			painter.drawLine( front[ 1 ] + back, front[ 2 ] + back );
 			break;
 		}
+		case MapIcon_t::MAP_ICON_TEXTURE:
+			// A face with a texture's checker on it.
+			painter.drawRect( QRectF{ 5, 5, 22, 22 } );
+			painter.setBrush( color );
+			painter.setPen( Qt::NoPen );
+			painter.drawRect( QRectF{ 5, 5, 11, 11 } );
+			painter.drawRect( QRectF{ 16, 16, 11, 11 } );
+			break;
 	}
 	return QIcon{ pixmap };
 }
@@ -190,11 +202,18 @@ CMapEditor::CMapEditor( const QString &szPath, bool bFromGame, QWidget *pParent 
 		pBoxLayout->addWidget( pTitle );
 		pBoxLayout->addWidget( pContent, 1 );
 		m_pSidePanel->addWidget( pBox );
+		return pTitle;
 	};
 	m_pFilter = new CMapFilterControl( *m_pDocument );
 	m_pProperties = new CMapProperties( *m_pDocument );
+	m_pFaceEdit = new CMapFaceEdit( *this );
+	// Hammer opens Face Edit as a window of its own; here it takes Object Properties' place
+	// while the texture tool is on.
+	m_pPanelStack = new QStackedWidget;
+	m_pPanelStack->addWidget( m_pProperties );
+	m_pPanelStack->addWidget( m_pFaceEdit );
 	section( tr( "Filter Control" ), m_pFilter );
-	section( tr( "Object Properties" ), m_pProperties );
+	m_pPanelTitle = section( tr( "Object Properties" ), m_pPanelStack );
 	section( tr( "New Objects" ), BuildNewObjects() );
 	m_pSidePanel->setStretchFactor( 0, 2 );
 	m_pSidePanel->setStretchFactor( 1, 3 );
@@ -228,6 +247,7 @@ CMapEditor::CMapEditor( const QString &szPath, bool bFromGame, QWidget *pParent 
 		{ MapTool_t::MAP_TOOL_CAMERA, MapIcon_t::MAP_ICON_CAMERA, tr( "Camera" ), MapAction_t::MAP_ACTION_TOOL_CAMERA },
 		{ MapTool_t::MAP_TOOL_ENTITY, MapIcon_t::MAP_ICON_ENTITY, tr( "Entity Tool" ), MapAction_t::MAP_ACTION_TOOL_ENTITY },
 		{ MapTool_t::MAP_TOOL_BLOCK, MapIcon_t::MAP_ICON_BLOCK, tr( "Block Tool" ), MapAction_t::MAP_ACTION_TOOL_BLOCK },
+		{ MapTool_t::MAP_TOOL_TEXTURE, MapIcon_t::MAP_ICON_TEXTURE, tr( "Texture Application" ), MapAction_t::MAP_ACTION_TOOL_TEXTURE },
 	};
 	for ( const auto &tool : tools )
 	{
@@ -534,6 +554,17 @@ void CMapEditor::Loaded()
 void CMapEditor::SetTool( MapTool_t nTool )
 {
 	m_nTool = nTool;
+	const bool bTexture = nTool == MapTool_t::MAP_TOOL_TEXTURE;
+	m_pPanelStack->setCurrentWidget( bTexture ? static_cast<QWidget *>( m_pFaceEdit ) : m_pProperties );
+	m_pPanelTitle->setText( bTexture ? tr( "Face Edit" ) : tr( "Object Properties" ) );
+	if ( !bTexture && !m_SelectedFaces.empty() )
+	{
+		SetSelectedFaces( {} );
+	}
+	if ( bTexture )
+	{
+		m_pFaceEdit->Refresh();
+	}
 	// What a tool was making goes with it.
 	if ( nTool != MapTool_t::MAP_TOOL_BLOCK )
 	{
@@ -958,6 +989,12 @@ bool CMapEditor::RunAction( MapAction_t nAction, CMapView *pFrom )
 		case MapAction_t::MAP_ACTION_TOOL_BLOCK:
 			SetTool( MapTool_t::MAP_TOOL_BLOCK );
 			return true;
+		case MapAction_t::MAP_ACTION_TOOL_TEXTURE:
+			SetTool( MapTool_t::MAP_TOOL_TEXTURE );
+			return true;
+		case MapAction_t::MAP_ACTION_APPLY_TEXTURE:
+			ApplyCurrentTexture( false );
+			return true;
 		case MapAction_t::MAP_ACTION_ZOOM_IN_ALL:
 		case MapAction_t::MAP_ACTION_ZOOM_OUT_ALL:
 			for ( CMapView *pView : GetViews() )
@@ -1210,7 +1247,210 @@ void CMapEditor::PlaceEntityOn( const xv::map::Point_t &point, const xv::map::Po
 //-----------------------------------------------------------------------------
 QString CMapEditor::GetCurrentMaterial() const
 {
-	return m_pMaterial->text();
+	return m_pMaterial ? m_pMaterial->text() : QString{};
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Hammer writes material names in capitals; so does this.
+//-----------------------------------------------------------------------------
+void CMapEditor::SetCurrentMaterial( const QString &szMaterial )
+{
+	const QString szClean = szMaterial.trimmed().toUpper();
+	if ( szClean.isEmpty() || szClean == m_pMaterial->text() )
+	{
+		return;
+	}
+	m_pMaterial->setText( szClean );
+	m_pFaceEdit->Refresh();
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+void CMapEditor::BrowseMaterial()
+{
+	const std::optional<xv::vfs::CGameInfo> &game = m_pDocument->GetGame();
+	if ( !game )
+	{
+		emit StatusMessage( tr( "Open a game to browse its textures" ) );
+		return;
+	}
+	QStringList used;
+	for ( const std::string &szMaterial : m_pDocument->GetScene() ? m_pDocument->GetScene()->m_Materials : std::vector<std::string>{} )
+	{
+		used << QString::fromStdString( szMaterial );
+	}
+	if ( const std::optional<QString> szPicked = CMaterialBrowser::Pick( this, *game, used, GetCurrentMaterial() ) )
+	{
+		SetCurrentMaterial( *szPicked );
+	}
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+void CMapEditor::SetSelectedFaces( std::vector<xv::map::FaceRef_t> faces )
+{
+	std::ranges::sort( faces );
+	faces.erase( std::ranges::unique( faces ).begin(), faces.end() );
+	m_SelectedFaces = std::move( faces );
+	m_pFaceEdit->Refresh();
+	RepaintTools();
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+void CMapEditor::ToggleFace( const xv::map::FaceRef_t &face )
+{
+	std::vector<xv::map::FaceRef_t> faces = m_SelectedFaces;
+	if ( const auto it = std::ranges::find( faces, face ); it != faces.end() )
+	{
+		faces.erase( it );
+	}
+	else
+	{
+		faces.push_back( face );
+	}
+	SetSelectedFaces( std::move( faces ) );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+void CMapEditor::EditSelectedFaces( const QString &szName, const std::function<void( xv::map::Side_t &, const xv::map::Point_t &, const std::vector<xv::map::Point_t> & )> &pfnEdit )
+{
+	const xv::map::CScene *pScene = m_pDocument->GetScene();
+	if ( !pScene || m_SelectedFaces.empty() )
+	{
+		return;
+	}
+	xv::map::MapEdit_t edit = xv::map::EditFaces( *pScene, m_SelectedFaces, [ & ]( xv::map::Side_t &side, const std::vector<xv::map::Point_t> &points ) {
+		const std::optional<xv::map::Plane_t> plane = xv::map::PlaneFromPoints( side.m_Plane );
+		pfnEdit( side, plane ? plane->m_Normal : xv::map::Point_t{ 0, 0, 1 }, points );
+	} );
+	if ( !edit.IsEmpty() )
+	{
+		m_pDocument->Edit( std::move( edit ), szName );
+	}
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+void CMapEditor::ApplyCurrentTexture( bool bValues )
+{
+	const xv::map::CScene *pScene = m_pDocument->GetScene();
+	const std::string szMaterial = GetCurrentMaterial().trimmed().toUpper().toStdString();
+	if ( !pScene || szMaterial.empty() )
+	{
+		return;
+	}
+	const std::vector<xv::map::FaceRef_t> faces = !m_SelectedFaces.empty() ? m_SelectedFaces : xv::map::FacesOf( *pScene, m_pDocument->GetSelection() );
+	xv::map::MapEdit_t edit = xv::map::EditFaces( *pScene, faces, [ & ]( xv::map::Side_t &side, const std::vector<xv::map::Point_t> & ) {
+		xv::map::SetMaterial( pScene->m_Map, side, szMaterial );
+		if ( bValues )
+		{
+			m_pFaceEdit->ApplyValuesTo( side );
+		}
+	} );
+	if ( !edit.IsEmpty() )
+	{
+		m_pDocument->Edit( std::move( edit ), tr( "Apply Texture" ) );
+	}
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Hammer's modes: Ctrl adds or removes the face, Shift takes the whole brush
+//          (Ctrl+Shift adds it); Lift puts the face's texture and values in the sheet.
+//-----------------------------------------------------------------------------
+void CMapEditor::ClickFace( const xv::map::FaceRef_t &face, Qt::KeyboardModifiers modifiers )
+{
+	const xv::map::CScene *pScene = m_pDocument->GetScene();
+	if ( !pScene || face.m_nSolid >= pScene->m_Map.m_Solids.size() )
+	{
+		return;
+	}
+	const FaceEditMode_t nMode = m_pFaceEdit->GetMode();
+	if ( nMode == FaceEditMode_t::FACE_EDIT_MODE_APPLY || nMode == FaceEditMode_t::FACE_EDIT_MODE_APPLY_VALUES )
+	{
+		ApplyToFace( face, nMode == FaceEditMode_t::FACE_EDIT_MODE_APPLY_VALUES );
+		return;
+	}
+	if ( nMode != FaceEditMode_t::FACE_EDIT_MODE_SELECT )
+	{
+		m_pFaceEdit->LiftFrom( pScene->m_Map.m_Solids[ face.m_nSolid ].m_Sides[ face.m_nSide ] );
+	}
+	if ( nMode == FaceEditMode_t::FACE_EDIT_MODE_LIFT )
+	{
+		return;
+	}
+	std::vector<xv::map::FaceRef_t> picked{ face };
+	if ( modifiers.testFlag( Qt::ShiftModifier ) )
+	{
+		picked = xv::map::FacesOf( *pScene, { pScene->SolidObject( face.m_nSolid ) } );
+	}
+	if ( modifiers.testFlag( Qt::ControlModifier ) )
+	{
+		std::vector<xv::map::FaceRef_t> faces = m_SelectedFaces;
+		for ( const xv::map::FaceRef_t &one : picked )
+		{
+			if ( const auto it = std::ranges::find( faces, one ); it != faces.end() && picked.size() == 1 )
+			{
+				faces.erase( it );
+			}
+			else if ( it == faces.end() )
+			{
+				faces.push_back( one );
+			}
+		}
+		SetSelectedFaces( std::move( faces ) );
+		return;
+	}
+	SetSelectedFaces( std::move( picked ) );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: The right button's apply: the current texture onto the face under it.
+//-----------------------------------------------------------------------------
+void CMapEditor::ApplyToFace( const xv::map::FaceRef_t &face, bool bValues )
+{
+	const xv::map::CScene *pScene = m_pDocument->GetScene();
+	const std::string szMaterial = GetCurrentMaterial().trimmed().toUpper().toStdString();
+	if ( !pScene || szMaterial.empty() )
+	{
+		return;
+	}
+	xv::map::MapEdit_t edit = xv::map::EditFaces( *pScene, { face }, [ & ]( xv::map::Side_t &side, const std::vector<xv::map::Point_t> & ) {
+		xv::map::SetMaterial( pScene->m_Map, side, szMaterial );
+		if ( bValues )
+		{
+			m_pFaceEdit->ApplyValuesTo( side );
+		}
+	} );
+	if ( !edit.IsEmpty() )
+	{
+		m_pDocument->Edit( std::move( edit ), tr( "Apply Texture" ) );
+	}
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+std::array<int, 2> CMapEditor::GetMaterialSize( std::uint32_t nMaterial ) const
+{
+	const MapFrame_t frame = m_pRenderData->GetShared();
+	if ( frame.m_pMaterials && nMaterial < frame.m_pMaterials->size() )
+	{
+		const xv::map::ShadeMaterial_t &shade = ( *frame.m_pMaterials )[ nMaterial ].m_Shade;
+		const int nWidth = shade.m_pBase ? shade.m_pBase->m_nWidth : shade.m_nWidth;
+		const int nHeight = shade.m_pBase ? shade.m_pBase->m_nHeight : shade.m_nHeight;
+		if ( nWidth > 0 && nHeight > 0 )
+		{
+			return { nWidth, nHeight };
+		}
+	}
+	return { 128, 128 };
 }
 
 //-----------------------------------------------------------------------------
@@ -1398,6 +1638,7 @@ void CMapEditor::SceneEdited( const std::vector<std::uint32_t> &changed )
 		pView->update();
 	}
 	m_pProperties->Refresh();
+	m_pFaceEdit->Refresh();
 	UpdateStatus();
 }
 

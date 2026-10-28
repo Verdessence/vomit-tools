@@ -148,6 +148,8 @@ add_library(vomit_tools_ui STATIC
         map/MapEditor.h
         map/MapFilterControl.cpp
         map/MapFilterControl.h
+        map/MapFaceEdit.cpp
+        map/MapFaceEdit.h
         map/MapGizmo.cpp
         map/MapGizmo.h
         map/MapKeys.cpp
@@ -168,6 +170,8 @@ add_library(vomit_tools_ui STATIC
         map/MapView2D.h
         map/MapView3D.cpp
         map/MapView3D.h
+        map/MaterialBrowser.cpp
+        map/MaterialBrowser.h
         PointerLock.cpp
         PointerLock.h)
 target_include_directories(vomit_tools_ui PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")

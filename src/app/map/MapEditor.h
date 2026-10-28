@@ -17,11 +17,13 @@
 #include <QWidget>
 
 #include "EditorTab.h"
+#include "map/Faces.h"
 #include "map/MapDocument.h"
 #include "map/MapGizmo.h"
 #include "map/MapRenderData.h"
 #include "map/MapView.h"
 
+class CMapFaceEdit;
 class CMapFilterControl;
 class CMapPane;
 class CMapProperties;
@@ -31,6 +33,7 @@ class QAction;
 class QActionGroup;
 class QComboBox;
 class QLabel;
+class QStackedWidget;
 class QLineEdit;
 class QSplitter;
 class QToolBar;
@@ -107,7 +110,26 @@ public:
 	// Map > Map Properties: the world's keys (the sky) in a window of their own.
 	void ShowMapProperties();
 	[[nodiscard]] QString GetCurrentMaterial() const;
+	void SetCurrentMaterial( const QString &szMaterial );
+	// Picks the current texture from the game's materials (the texture browser).
+	void BrowseMaterial();
 	[[nodiscard]] QString GetEntityClass() const;
+
+	// The Texture Application tool's faces.
+	[[nodiscard]] const std::vector<xv::map::FaceRef_t> &GetSelectedFaces() const { return m_SelectedFaces; }
+	void SetSelectedFaces( std::vector<xv::map::FaceRef_t> faces );
+	void ToggleFace( const xv::map::FaceRef_t &face );
+	// One step to undo: pfnEdit gets each selected face's side, its plane's normal and its points.
+	void EditSelectedFaces( const QString &szName, const std::function<void( xv::map::Side_t &, const xv::map::Point_t &, const std::vector<xv::map::Point_t> & )> &pfnEdit );
+	// Shift+T: the current texture (and, bValues, the sheet's values) onto the selected faces, or
+	// every face of the selected objects when no face is.
+	void ApplyCurrentTexture( bool bValues );
+	// A click on a face with the texture tool, in the sheet's mode (Lift, Select, Apply...).
+	void ClickFace( const xv::map::FaceRef_t &face, Qt::KeyboardModifiers modifiers );
+	void ApplyToFace( const xv::map::FaceRef_t &face, bool bValues );
+	[[nodiscard]] CMapFaceEdit &GetFaceEdit() { return *m_pFaceEdit; }
+	// A material's texture size in texels (128 by 128 until it is read, as for a missing one).
+	[[nodiscard]] std::array<int, 2> GetMaterialSize( std::uint32_t nMaterial ) const;
 	// A 3D view changed how it draws (the card's drawing failed): software needs the textures decoded.
 	void RendererChanged();
 
@@ -184,6 +206,10 @@ private:
 	QSplitter *m_pSidePanel = nullptr;
 	CMapFilterControl *m_pFilter = nullptr;
 	CMapProperties *m_pProperties = nullptr;
+	CMapFaceEdit *m_pFaceEdit = nullptr;
+	QStackedWidget *m_pPanelStack = nullptr; // Object Properties, or Face Edit with the texture tool
+	QLabel *m_pPanelTitle = nullptr;
+	std::vector<xv::map::FaceRef_t> m_SelectedFaces;
 	QLabel *m_pLoading = nullptr;
 	QActionGroup *m_pTools = nullptr;
 	QActionGroup *m_pModes = nullptr;

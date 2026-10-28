@@ -571,6 +571,14 @@ void CMapView3D::mousePressEvent( QMouseEvent *pEvent )
 			}
 		}
 	}
+	// The texture tool's right click puts the current texture on the face (Alt: its values too).
+	if ( pEvent->button() == Qt::RightButton && m_Editor.GetTool() == MapTool_t::MAP_TOOL_TEXTURE )
+	{
+		if ( const auto face = FaceAt( pEvent->position() ) )
+		{
+			m_Editor.ApplyToFace( *face, pEvent->modifiers().testFlag( Qt::AltModifier ) );
+		}
+	}
 	// Hammer++'s right click goes round the gizmo's modes.
 	if ( pEvent->button() == Qt::RightButton && m_Editor.GetTool() == MapTool_t::MAP_TOOL_SELECT && GetGizmo() )
 	{
@@ -587,7 +595,7 @@ std::optional<CMapGizmo> CMapView3D::GetGizmo() const
 {
 	const CMapDocument &document = GetDocument();
 	const xv::map::CScene *pScene = document.GetScene();
-	if ( !m_Editor.IsGizmoShown() || !pScene || document.GetSelection().empty() )
+	if ( !m_Editor.IsGizmoShown() || m_Editor.GetTool() != MapTool_t::MAP_TOOL_SELECT || !pScene || document.GetSelection().empty() )
 	{
 		return std::nullopt;
 	}
@@ -772,6 +780,17 @@ void CMapView3D::mouseReleaseEvent( QMouseEvent *pEvent )
 			m_Editor.PlaceEntityOn( surface->first, surface->second );
 		}
 	}
+	else if ( m_Editor.GetTool() == MapTool_t::MAP_TOOL_TEXTURE )
+	{
+		if ( const auto face = FaceAt( pEvent->position() ) )
+		{
+			m_Editor.ClickFace( *face, pEvent->modifiers() );
+		}
+		else if ( !pEvent->modifiers().testFlag( Qt::ControlModifier ) )
+		{
+			m_Editor.SetSelectedFaces( {} );
+		}
+	}
 }
 
 //-----------------------------------------------------------------------------
@@ -786,6 +805,33 @@ std::vector<xv::map::TraceHit_t> CMapView3D::HitsAt( QPointF at )
 	}
 	const auto [ from, dir ] = frame.m_Camera.Ray( at.x(), at.y() );
 	return xv::map::TraceScene( frame.MakeScene(), m_Editor.GetSettings().m_bToolTextures, from, dir, m_Camera.m_flFar );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Only the map's own meshes (as read, and the edit mesh) map triangles back to sides.
+//-----------------------------------------------------------------------------
+std::optional<xv::map::FaceRef_t> CMapView3D::FaceAt( QPointF at )
+{
+	const MapFrame_t frame = MakeFrame( size() );
+	if ( !frame.m_pScene )
+	{
+		return std::nullopt;
+	}
+	const xv::map::RasterScene_t scene = frame.MakeScene();
+	const auto [ from, dir ] = frame.m_Camera.Ray( at.x(), at.y() );
+	const std::vector<xv::map::TraceHit_t> hits = xv::map::TraceScene( scene, m_Editor.GetSettings().m_bToolTextures, from, dir, m_Camera.m_flFar );
+	if ( hits.empty() )
+	{
+		return std::nullopt;
+	}
+	const xv::map::TraceHit_t &hit = hits.front();
+	const xv::map::CMapMesh &mesh = *scene.m_Meshes[ hit.m_nMesh ];
+	if ( ( &mesh != &frame.m_pScene->GetMesh() && &mesh != &frame.m_pScene->GetEditMesh() ) || hit.m_nTriangle >= mesh.m_TriangleFaces.size() )
+	{
+		return std::nullopt;
+	}
+	const xv::map::MeshFace_t &face = mesh.m_Faces[ mesh.m_TriangleFaces[ hit.m_nTriangle ] ];
+	return xv::map::FaceRef_t{ face.m_nSolid, face.m_nSide };
 }
 
 //-----------------------------------------------------------------------------
@@ -831,11 +877,46 @@ void CMapView3D::PaintTools( QPainter &painter ) const
 	const std::optional<xv::map::Box_t> &box = m_Editor.GetNewBox();
 	const std::optional<xv::map::Point_t> &marker = m_Editor.GetEntityMarker();
 	const std::optional<CMapGizmo> gizmo = m_DragGizmo ? m_DragGizmo : GetGizmo();
-	if ( !box && !marker && !gizmo )
+	const std::vector<xv::map::FaceRef_t> &faces = m_Editor.GetSelectedFaces();
+	if ( !box && !marker && !gizmo && faces.empty() )
 	{
 		return;
 	}
 	const xv::map::CViewCamera camera = GetSizedCamera();
+	// The texture tool's faces, tinted (over everything: a face behind another still shows).
+	if ( const xv::map::CScene *pScene = GetDocument().GetScene(); !faces.empty() && pScene )
+	{
+		QColor fill = CPreferences::Instance().GetMapPreferences().m_Colors.m_Selection3D;
+		fill.setAlpha( 110 );
+		painter.setRenderHint( QPainter::Antialiasing, true );
+		painter.setPen( QPen{ CPreferences::Instance().GetMapPreferences().m_Colors.m_SelectionEdge3D, 1.5 } );
+		painter.setBrush( fill );
+		for ( const xv::map::FaceRef_t &face : faces )
+		{
+			const xv::map::FaceGeometry_t *pFace = face.m_nSolid < pScene->m_Solids.size() ? pScene->m_Solids[ face.m_nSolid ].FindFace( face.m_nSide ) : nullptr;
+			if ( !pFace )
+			{
+				continue;
+			}
+			QPolygonF polygon;
+			for ( const xv::map::Point_t &p : pFace->m_Points )
+			{
+				const auto at = camera.Project( p );
+				if ( !at )
+				{
+					polygon.clear();
+					break;
+				}
+				polygon << QPointF{ ( *at )[ 0 ], ( *at )[ 1 ] };
+			}
+			if ( polygon.size() >= 3 )
+			{
+				painter.drawPolygon( polygon );
+			}
+		}
+		painter.setBrush( Qt::NoBrush );
+		painter.setRenderHint( QPainter::Antialiasing, false );
+	}
 	const xv::map::Point_t forward = camera.GetForward();
 	std::vector<QLineF> lines;
 	auto line = [ & ]( xv::map::Point_t a, xv::map::Point_t b ) {

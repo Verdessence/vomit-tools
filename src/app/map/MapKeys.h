@@ -48,6 +48,8 @@ enum class MapAction_t
 	MAP_ACTION_TOOL_CAMERA,          // Shift+C
 	MAP_ACTION_TOOL_ENTITY,          // Shift+E
 	MAP_ACTION_TOOL_BLOCK,           // Shift+B
+	MAP_ACTION_TOOL_TEXTURE,         // Shift+A
+	MAP_ACTION_APPLY_TEXTURE,        // Shift+T: the current texture onto the selected faces or objects
 	MAP_ACTION_NEXT_HIT,             // Page Down
 	MAP_ACTION_PREVIOUS_HIT,         // Page Up
 	MAP_ACTION_ENTER,                // Enter

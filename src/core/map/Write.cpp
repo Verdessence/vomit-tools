@@ -574,6 +574,14 @@ void CWriter::PatchSide( const Side_t &side, const Node_t &node )
 				ReplaceValue( child, std::to_string( side.m_nLightmapScale ) );
 			}
 		}
+		else if ( Is( child.m_szName, "smoothing_groups" ) )
+		{
+			std::vector<double> values;
+			if ( !ParseNumbers( child.m_szValue, 1, values ) || values[ 0 ] != side.m_nSmoothingGroups )
+			{
+				ReplaceValue( child, std::to_string( side.m_nSmoothingGroups ) );
+			}
+		}
 	}
 	// Hammer++'s exact corners follow the plane: written again when they moved, taken out when
 	// they are gone, put in after the plane when they are new.
@@ -600,6 +608,39 @@ void CWriter::PatchSide( const Side_t &side, const Node_t &node )
 	{
 		const std::string szIndent = LineIndent( pPlane->m_nAt );
 		InsertLines( LineEnd( pPlane->m_nEnd ), szIndent, PlusVertices( side.m_PlusVertices, szIndent ) );
+	}
+	// Keys Hammer always writes but a file made by hand may leave out: put in after the last
+	// key when they no longer mean their defaults.
+	const Node_t *pLast = nullptr;
+	auto has = [ & ]( std::string_view szKey ) {
+		return std::ranges::any_of( node.m_Children, [ & ]( const Node_t &child ) { return !child.m_bBlock && Is( child.m_szName, szKey ); } );
+	};
+	for ( const Node_t &child : node.m_Children )
+	{
+		pLast = child.m_bBlock ? pLast : &child;
+	}
+	std::vector<std::string> missing;
+	if ( !has( "rotation" ) && side.m_flRotation != 0.0 )
+	{
+		missing.push_back( Pair( "rotation", FormatNumber( side.m_flRotation ) ) );
+	}
+	if ( !has( "lightmapscale" ) && side.m_nLightmapScale != 16 )
+	{
+		missing.push_back( Pair( "lightmapscale", std::to_string( side.m_nLightmapScale ) ) );
+	}
+	if ( !has( "smoothing_groups" ) && side.m_nSmoothingGroups != 0 )
+	{
+		missing.push_back( Pair( "smoothing_groups", std::to_string( side.m_nSmoothingGroups ) ) );
+	}
+	if ( pLast && !missing.empty() )
+	{
+		const std::string szIndent = LineIndent( pLast->m_nAt );
+		std::string szBlock;
+		for ( std::size_t i = 0; i < missing.size(); i++ )
+		{
+			szBlock += ( i > 0 ? std::string{ m_szNewline } + szIndent : std::string{} ) + missing[ i ];
+		}
+		InsertLines( LineEnd( pLast->m_nEnd ), szIndent, szBlock );
 	}
 }
 

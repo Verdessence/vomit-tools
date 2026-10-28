@@ -22,6 +22,11 @@
   with SmartEdit off the raw keys added, renamed and removed. Each is one step to undo; typing
   with several entities selected sets them all. **Map → Map Properties** does the same for the
   world (the sky, the detail material…), and the sky is read again when it changes.
+- **Texture Application** (Shift+A): click faces in 3D (Ctrl adds, Shift takes the brush), and
+  the Face Edit sheet in the side panel sets their scale, shift, rotation and lightmap scale,
+  justifies (L, R, Fit, T, B, C; Treat as one), aligns to the world or the face, and applies the
+  current texture (Apply, the right button, or Shift+T on the selection). The **texture browser**
+  (Browse…) lists the game's materials with pictures, filtered by words or to the map's own.
 - **Block tool** (Shift+B): drag a box in a 2D view, pull its handles in the others, Enter (or the
   right button's Create Object) makes a block with the current texture. **Entity tool** (Shift+E):
   click in 2D and press Enter, or click a surface in 3D to stand the entity on it, with the class
