@@ -721,6 +721,30 @@ void CMainWindow::BuildMenus( QAction *pSearchPathsToggle )
 			pMap->RunAction( MapAction_t::MAP_ACTION_FLIP_VERTICAL, pMap->GetActiveView() );
 		}
 	} );
+	m_pMapMenu->addAction( tr( "Replace &Textures…" ), this, [ this ] {
+		if ( CMapEditor *pMap = GetCurrentMap() )
+		{
+			pMap->RunAction( MapAction_t::MAP_ACTION_REPLACE_TEXTURES, pMap->GetActiveView() );
+		}
+	} );
+	m_pMapMenu->addAction( tr( "&Find Entities…" ), this, [ this ] {
+		if ( CMapEditor *pMap = GetCurrentMap() )
+		{
+			pMap->RunAction( MapAction_t::MAP_ACTION_FIND_ENTITIES, pMap->GetActiveView() );
+		}
+	} );
+	m_pMapMenu->addAction( tr( "&Entity Report…" ), this, [ this ] {
+		if ( CMapEditor *pMap = GetCurrentMap() )
+		{
+			pMap->RunAction( MapAction_t::MAP_ACTION_ENTITY_REPORT, pMap->GetActiveView() );
+		}
+	} );
+	m_pMapMenu->addAction( tr( "Check for &Problems…" ), this, [ this ] {
+		if ( CMapEditor *pMap = GetCurrentMap() )
+		{
+			pMap->RunAction( MapAction_t::MAP_ACTION_CHECK_PROBLEMS, pMap->GetActiveView() );
+		}
+	} );
 	m_pMapMenu->addAction( tr( "Paste &Special…" ), this, [ this ] {
 		if ( CMapEditor *pMap = GetCurrentMap() )
 		{

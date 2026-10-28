@@ -7,6 +7,7 @@
 #include "Faces.h"
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <limits>
 #include <numbers>
@@ -185,6 +186,110 @@ void SetMaterial( const CMap &map, Side_t &side, std::string_view szMaterial )
 {
 	side.m_szMaterial = map.Store( std::string{ szMaterial } );
 	side.m_nMaterial = NEW_MATERIAL;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Lower case, for matching material names however they are spelt.
+//-----------------------------------------------------------------------------
+static std::string LowerName( std::string_view szText )
+{
+	std::string szLower{ szText };
+	for ( char &ch : szLower )
+	{
+		ch = static_cast<char>( std::tolower( static_cast<unsigned char>( ch ) ) );
+	}
+	return szLower;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+std::vector<FaceRef_t> FindFaces( const CScene &scene, const std::vector<std::uint32_t> &objects, std::string_view szFind, bool bPartial )
+{
+	std::vector<FaceRef_t> found;
+	const std::string szLower = LowerName( szFind );
+	if ( szLower.empty() )
+	{
+		return found;
+	}
+	std::vector<std::uint32_t> solids;
+	if ( objects.empty() )
+	{
+		for ( std::uint32_t i = 0; i < scene.m_Map.m_Solids.size(); i++ )
+		{
+			if ( !scene.m_Map.m_Solids[ i ].m_bDeleted )
+			{
+				solids.push_back( i );
+			}
+		}
+	}
+	else
+	{
+		solids = ObjectsOf( scene, objects ).m_Solids;
+	}
+	for ( const std::uint32_t nSolid : solids )
+	{
+		const Solid_t &solid = scene.m_Map.m_Solids[ nSolid ];
+		for ( std::uint32_t nSide = 0; nSide < solid.m_Sides.size(); nSide++ )
+		{
+			const std::string szMaterial = LowerName( solid.m_Sides[ nSide ].m_szMaterial );
+			if ( bPartial ? szMaterial.find( szLower ) != std::string::npos : szMaterial == szLower )
+			{
+				found.push_back( { nSolid, nSide } );
+			}
+		}
+	}
+	return found;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: A substitution keeps the name's own spelling round the part replaced; Hammer writes
+//          what was typed otherwise. Rescaling keeps the texture's world size: a 256-texel
+//          texture at 0.5 replaced by a 512 one goes to 0.25.
+//-----------------------------------------------------------------------------
+MapEdit_t ReplaceTextures( const CScene &scene, const std::vector<FaceRef_t> &faces, const ReplaceTextures_t &how, const std::function<std::array<int, 2>( std::string_view )> &pfnSize, std::size_t *pnChanged )
+{
+	std::size_t nChanged = 0;
+	const std::string szFind = LowerName( how.m_szFind );
+	MapEdit_t edit = EditFaces( scene, faces, [ & ]( Side_t &side, const std::vector<Point_t> & ) {
+		std::string szNew;
+		if ( how.m_nHow == ReplaceHow_t::REPLACE_SUBSTITUTE )
+		{
+			const std::string szLower = LowerName( side.m_szMaterial );
+			const std::size_t nAt = szFind.empty() ? std::string::npos : szLower.find( szFind );
+			if ( nAt == std::string::npos )
+			{
+				return;
+			}
+			szNew = std::string{ side.m_szMaterial };
+			szNew.replace( nAt, szFind.size(), how.m_szReplace );
+		}
+		else
+		{
+			szNew = how.m_szReplace;
+		}
+		if ( szNew.empty() || LowerName( szNew ) == LowerName( side.m_szMaterial ) )
+		{
+			return;
+		}
+		if ( how.m_bRescale && pfnSize )
+		{
+			const std::array<int, 2> was = pfnSize( side.m_szMaterial );
+			const std::array<int, 2> now = pfnSize( szNew );
+			if ( was[ 0 ] > 0 && was[ 1 ] > 0 && now[ 0 ] > 0 && now[ 1 ] > 0 )
+			{
+				side.m_UAxis.m_flScale *= static_cast<double>( was[ 0 ] ) / now[ 0 ];
+				side.m_VAxis.m_flScale *= static_cast<double>( was[ 1 ] ) / now[ 1 ];
+			}
+		}
+		SetMaterial( scene.m_Map, side, szNew );
+		nChanged++;
+	} );
+	if ( pnChanged )
+	{
+		*pnChanged = nChanged;
+	}
+	return nChanged ? edit : MapEdit_t{};
 }
 
 //-----------------------------------------------------------------------------

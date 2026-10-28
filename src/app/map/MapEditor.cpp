@@ -6,6 +6,13 @@
 //===========================================================================//
 #include "MapEditor.h"
 
+#include "kv1/Kv1.h"
+#include "map/Check.h"
+#include "map/MapReports.h"
+#include "map/Materials.h"
+#include "texture/Vtf.h"
+#include "vfs/Vfs.h"
+
 #include <algorithm>
 #include <cmath>
 #include <limits>
@@ -1312,6 +1319,18 @@ bool CMapEditor::RunAction( MapAction_t nAction, CMapView *pFrom )
 		case MapAction_t::MAP_ACTION_PASTE_SPECIAL:
 			ShowPasteSpecialDialog();
 			return true;
+		case MapAction_t::MAP_ACTION_REPLACE_TEXTURES:
+			ShowReplaceTextures();
+			return true;
+		case MapAction_t::MAP_ACTION_FIND_ENTITIES:
+			ShowFindEntities();
+			return true;
+		case MapAction_t::MAP_ACTION_ENTITY_REPORT:
+			ShowEntityReport();
+			return true;
+		case MapAction_t::MAP_ACTION_CHECK_PROBLEMS:
+			ShowCheckForProblems();
+			return true;
 		case MapAction_t::MAP_ACTION_TRANSFORM:
 			ShowTransformDialog();
 			return true;
@@ -2005,6 +2024,189 @@ void CMapEditor::PasteSpecial( xv::map::PasteSpecial_t how, bool bStartAtView )
 		return;
 	}
 	m_pDocument->Edit( std::move( edit ), tr( "Paste Special" ), std::move( added ) );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: The dialog remembers its last answers for the session.
+//-----------------------------------------------------------------------------
+void CMapEditor::ShowReplaceTextures()
+{
+	static xv::map::ReplaceTextures_t s_Last;
+	static bool s_bMarkOnly = false, s_bSelectedOnly = false, s_bHiddenToo = false;
+	CMapReplaceTexturesDialog dialog( *this );
+	if ( s_Last.m_szFind.empty() && !m_SelectedFaces.empty() && m_pDocument->GetScene() )
+	{
+		// Starts from the face under the texture tool, as Hammer's does from the current texture.
+		const xv::map::CScene &scene = *m_pDocument->GetScene();
+		const xv::map::FaceRef_t &face = m_SelectedFaces.front();
+		if ( face.m_nSolid < scene.m_Map.m_Solids.size() && face.m_nSide < scene.m_Map.m_Solids[ face.m_nSolid ].m_Sides.size() )
+		{
+			s_Last.m_szFind = std::string{ scene.m_Map.m_Solids[ face.m_nSolid ].m_Sides[ face.m_nSide ].m_szMaterial };
+		}
+	}
+	dialog.SetValues( s_Last, s_bMarkOnly, s_bSelectedOnly, s_bHiddenToo );
+	if ( dialog.exec() != QDialog::Accepted )
+	{
+		return;
+	}
+	s_Last = dialog.GetValues();
+	s_bMarkOnly = dialog.IsMarkOnly();
+	s_bSelectedOnly = dialog.IsSelectedOnly();
+	s_bHiddenToo = dialog.IsHiddenToo();
+	const std::size_t nFaces = ReplaceTextures( s_Last, s_bMarkOnly, s_bSelectedOnly, s_bHiddenToo );
+	emit StatusMessage( s_bMarkOnly ? tr( "%n face(s) marked", nullptr, static_cast<int>( nFaces ) ) : tr( "%n face(s) replaced", nullptr, static_cast<int>( nFaces ) ) );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Sizes for rescaling come from the materials the map has loaded, else from the game's
+//          files (the VMT's base texture's VTF header).
+//-----------------------------------------------------------------------------
+std::size_t CMapEditor::ReplaceTextures( const xv::map::ReplaceTextures_t &how, bool bMarkOnly, bool bSelectedOnly, bool bHiddenToo )
+{
+	const xv::map::CScene *pScene = m_pDocument->GetScene();
+	if ( !pScene || how.m_szFind.empty() )
+	{
+		return 0;
+	}
+	std::vector<std::uint32_t> objects;
+	if ( bSelectedOnly )
+	{
+		objects = m_pDocument->GetSelection();
+		if ( objects.empty() )
+		{
+			return 0;
+		}
+	}
+	else
+	{
+		for ( std::uint32_t n = 0; n < pScene->GetObjectCount(); n++ )
+		{
+			if ( !pScene->IsDeleted( n ) && ( bHiddenToo || m_pDocument->IsShown( n ) ) )
+			{
+				objects.push_back( n );
+			}
+		}
+	}
+	const bool bPartial = how.m_nHow != xv::map::ReplaceHow_t::REPLACE_EXACT;
+	std::vector<xv::map::FaceRef_t> faces = xv::map::FindFaces( *pScene, objects, how.m_szFind, bPartial );
+	if ( bMarkOnly )
+	{
+		SetSelectedFaces( faces );
+		if ( !faces.empty() )
+		{
+			SetTool( MapTool_t::MAP_TOOL_TEXTURE );
+		}
+		return faces.size();
+	}
+	std::optional<xv::vfs::CFileSystem> files;
+	if ( how.m_bRescale && m_pDocument->GetGame() )
+	{
+		files.emplace();
+		files->Mount( *m_pDocument->GetGame() );
+	}
+	auto size = [ & ]( std::string_view szName ) -> std::array<int, 2> {
+		for ( std::size_t i = 0; i < pScene->m_Materials.size(); i++ )
+		{
+			if ( xv::kv1::EqualsIgnoreCase( pScene->m_Materials[ i ], szName ) )
+			{
+				return GetMaterialSize( static_cast<std::uint32_t>( i ) );
+			}
+		}
+		if ( files )
+		{
+			const xv::material::Reader_t read = [ & ]( std::string_view szPath ) { return files->Read( szPath ); };
+			const xv::map::MaterialInfo_t info = xv::map::ReadMaterialInfo( szName, read );
+			if ( info.m_bFound && !info.m_szTexture.empty() )
+			{
+				if ( const auto data = files->Read( "materials/" + info.m_szTexture + ".vtf" ) )
+				{
+					if ( const std::optional<xv::texture::CVtf> vtf = xv::texture::ReadVtf( *data ) )
+					{
+						return { vtf->m_Info.m_nWidth, vtf->m_Info.m_nHeight };
+					}
+				}
+			}
+		}
+		return { 0, 0 };
+	};
+	std::size_t nChanged = 0;
+	xv::map::MapEdit_t edit = xv::map::ReplaceTextures( *pScene, faces, how, how.m_bRescale ? size : std::function<std::array<int, 2>( std::string_view )>{}, &nChanged );
+	if ( !edit.IsEmpty() )
+	{
+		m_pDocument->Edit( std::move( edit ), tr( "Replace Textures" ) );
+	}
+	return nChanged;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+CMapEntityReport *CMapEditor::ShowEntityReport()
+{
+	if ( !m_pEntityReport )
+	{
+		m_pEntityReport = new CMapEntityReport( *this );
+	}
+	m_pEntityReport->show();
+	m_pEntityReport->raise();
+	m_pEntityReport->activateWindow();
+	return m_pEntityReport;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+CMapCheckDialog *CMapEditor::ShowCheckForProblems()
+{
+	if ( !m_pCheck )
+	{
+		m_pCheck = new CMapCheckDialog( *this );
+	}
+	else
+	{
+		m_pCheck->Run();
+	}
+	m_pCheck->show();
+	m_pCheck->raise();
+	m_pCheck->activateWindow();
+	return m_pCheck;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+void CMapEditor::ShowFindEntities()
+{
+	bool bOk = false;
+	const QString szName = QInputDialog::getText( this, tr( "Find Entities" ), tr( "Entity name (targetname):" ), QLineEdit::Normal, QString(), &bOk ).trimmed();
+	if ( bOk && !szName.isEmpty() && !FindEntitiesByName( szName ) )
+	{
+		emit StatusMessage( tr( "No entity is named %1" ).arg( szName ) );
+	}
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+bool CMapEditor::FindEntitiesByName( const QString &szName )
+{
+	const xv::map::CScene *pScene = m_pDocument->GetScene();
+	if ( !pScene )
+	{
+		return false;
+	}
+	std::vector<std::uint32_t> found = xv::map::FindEntities( *pScene, szName.toStdString() );
+	if ( found.empty() )
+	{
+		return false;
+	}
+	m_pDocument->SetSelection( std::move( found ) );
+	const xv::map::Box_t bounds = m_pDocument->GetSelectionBounds();
+	if ( !bounds.IsEmpty() )
+	{
+		CenterViewsOn( bounds.GetCenter() );
+	}
+	return true;
 }
 
 //-----------------------------------------------------------------------------

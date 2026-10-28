@@ -41,6 +41,14 @@
   view's axes. **Paste Special** (Ctrl+Shift+V): several copies, each stepped and turned once
   more than the last, starting where the original was or at the 2D view's centre, each copy
   grouped, with entity names made unique (their outputs follow).
+- **Replace Textures** (Ctrl+Shift+R): exact, partial or substituted names, in everything or the
+  selection (hidden too), rescaled for the new texture's size, or just marking the faces found
+  for the texture tool. **Find Entities** (Ctrl+Shift+F) selects and centres on a name. The
+  **Entity Report** (Map menu) lists the map's entities filtered by kind, class and key/value,
+  picking rows selects them, with Go to and Delete. **Check for Problems** (Alt+P) finds broken
+  brushes, empty brush entities, keys the game data doesn't know, unknown classes, point classes
+  with brushes, outputs to names nothing has and a missing player start, with Go to, Fix and Fix
+  all, over the visible parts only when asked.
 - **Block tool** (Shift+B): drag a box in a 2D view, pull its handles in the others, Enter (or the
   right button's Create Object) makes a block with the current texture; the New Objects panel's
   Objects box picks a wedge, cylinder, spike or sphere instead, with its Faces count. **Entity tool** (Shift+E):

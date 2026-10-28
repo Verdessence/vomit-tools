@@ -27,6 +27,8 @@
 #include "map/MapDialogs.h"
 #include "map/MapView.h"
 
+class CMapCheckDialog;
+class CMapEntityReport;
 class CMapFaceEdit;
 class CMapFilterControl;
 class CMapPane;
@@ -150,6 +152,17 @@ public:
 	// at the active 2D view's centre.
 	void ShowPasteSpecialDialog();
 	void PasteSpecial( xv::map::PasteSpecial_t how, bool bStartAtView );
+	// Replace Textures (Ctrl+Shift+R) and what it does: the faces found replaced, or marked
+	// (selected, with the texture tool) when bMarkOnly; among the selection or everything shown
+	// (and hidden too). Returns how many faces.
+	void ShowReplaceTextures();
+	std::size_t ReplaceTextures( const xv::map::ReplaceTextures_t &how, bool bMarkOnly, bool bSelectedOnly, bool bHiddenToo );
+	// The Entity Report and Check for Problems (Alt+P) windows, one of each, beside the views.
+	CMapEntityReport *ShowEntityReport();
+	CMapCheckDialog *ShowCheckForProblems();
+	// Find Entities (Ctrl+Shift+F): the entities named exactly so selected and centred on.
+	void ShowFindEntities();
+	bool FindEntitiesByName( const QString &szName );
 	// Edit > Tie to Entity (Ctrl+T), Move to World (Ctrl+Shift+W), Group (Ctrl+G), Ungroup (Ctrl+U).
 	void TieToEntity();
 	void TieToEntity( const QString &szClass );
@@ -248,6 +261,8 @@ private:
 	std::shared_ptr<const xv::map::CScene> m_pClipPreview; // the selection cut, drawn in white
 	QLineEdit *m_pMaterial = nullptr;
 	QComboBox *m_pEntityClass = nullptr;
+	QPointer<CMapEntityReport> m_pEntityReport;
+	QPointer<CMapCheckDialog> m_pCheck;
 	QComboBox *m_pPrimitive = nullptr; // the block tool's shape (Hammer's Objects box)
 	QSpinBox *m_pSides = nullptr;      // its Faces box
 	QPointer<QDialog> m_pCompileDialog;

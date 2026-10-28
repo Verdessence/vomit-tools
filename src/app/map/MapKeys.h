@@ -68,6 +68,10 @@ enum class MapAction_t
 	MAP_ACTION_CUT,                  // Ctrl+X
 	MAP_ACTION_PASTE,                // Ctrl+V
 	MAP_ACTION_PASTE_SPECIAL,        // Ctrl+Shift+V
+	MAP_ACTION_REPLACE_TEXTURES,     // Ctrl+Shift+R
+	MAP_ACTION_FIND_ENTITIES,        // Ctrl+Shift+F
+	MAP_ACTION_ENTITY_REPORT,        // the Map menu
+	MAP_ACTION_CHECK_PROBLEMS,       // Alt+P
 	MAP_ACTION_TRANSFORM,            // Ctrl+M: the Transform dialog
 	MAP_ACTION_FLIP_HORIZONTAL,      // Ctrl+L: mirrored across the view's horizontal axis
 	MAP_ACTION_FLIP_VERTICAL,        // Ctrl+I

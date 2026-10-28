@@ -11,6 +11,8 @@
 
 #include <cstdint>
 #include <functional>
+#include <string>
+#include <array>
 #include <string_view>
 #include <vector>
 
@@ -68,6 +70,27 @@ void SetRotation( Side_t &side, const Point_t &normal, double flDegrees );
 void SetAlignment( Side_t &side, const Point_t &normal, bool bWorld );
 // The material by its spelling (looked up or added when the edit is made).
 void SetMaterial( const CMap &map, Side_t &side, std::string_view szMaterial );
+
+// Hammer's Replace Textures.
+enum class ReplaceHow_t
+{
+	REPLACE_EXACT,      // faces whose material is szFind get szReplace
+	REPLACE_PARTIAL,    // faces whose material has szFind in it get szReplace
+	REPLACE_SUBSTITUTE, // szFind inside the material's name becomes szReplace
+};
+struct ReplaceTextures_t
+{
+	std::string m_szFind;
+	std::string m_szReplace;
+	ReplaceHow_t m_nHow = ReplaceHow_t::REPLACE_EXACT;
+	bool m_bRescale = false; // the scales changed so the new texture covers what the old did
+};
+// The faces among the objects' (all the map's when objects is empty) whose material matches
+// szFind, whole or as a part, ignoring case: Hammer's "mark" action, and what a replace changes.
+[[nodiscard]] std::vector<FaceRef_t> FindFaces( const CScene &scene, const std::vector<std::uint32_t> &objects, std::string_view szFind, bool bPartial );
+// The edit replacing the faces' materials as how says; pfnSize (when given, for m_bRescale)
+// answers a material's texel size by its name. pnChanged counts the faces changed.
+[[nodiscard]] MapEdit_t ReplaceTextures( const CScene &scene, const std::vector<FaceRef_t> &faces, const ReplaceTextures_t &how, const std::function<std::array<int, 2>( std::string_view )> &pfnSize, std::size_t *pnChanged );
 
 // An edit of the faces, each as it is now: pfnEdit gets the side and its face's points (wound
 // as drawn), so it can measure the face.
