@@ -19,6 +19,7 @@
 #include <QRectF>
 #include <QSize>
 
+#include "map/Vertex.h"
 #include "map/MapView.h"
 #include "map/Mesh.h"
 #include "map/Instance.h"
@@ -133,6 +134,14 @@ private:
 	// The clipping tool: a press starts a line (or takes one of its ends; Ctrl takes the whole).
 	void PressClip( QPointF at, Qt::KeyboardModifiers modifiers );
 	void DragClip( QPointF at, Qt::KeyboardModifiers modifiers );
+	// The vertex tool: the handle under a point, a press picking or starting to drag one (Ctrl
+	// adds and removes), the drag previewing the move, the release making it (or picking the
+	// handles a box was dragged round).
+	[[nodiscard]] std::optional<xv::map::VertexRef_t> VertexHandleAt( QPointF at ) const;
+	void PressVertex( QPointF at, Qt::KeyboardModifiers modifiers );
+	void DragVertex( QPointF at, Qt::KeyboardModifiers modifiers );
+	void ReleaseVertex( QPointF at, Qt::KeyboardModifiers modifiers );
+	void PaintVertexHandles( QPainter &painter ) const;
 	// The block tool: a press starts a new box, moves the one there or pulls one of its handles.
 	void PressBlock( QPointF at );
 	void DragBlock( QPointF at, Qt::KeyboardModifiers modifiers );
@@ -195,6 +204,13 @@ private:
 	xv::map::Box_t m_BoxDragStart;
 	QPoint m_BoxHandle; // -1, 0 or 1 across and down the widget: which side or corner it pulls
 	int m_nClipDrag = -1;   // the clipping tool: which end is dragged (0, 1), or 2 for the whole line
+	// The vertex tool: a handle being dragged from where (map units), or a box being dragged round
+	// handles from where.
+	bool m_bVertexDrag = false;
+	QPointF m_VertexDragFrom;
+	xv::map::Point_t m_VertexAnchor{}; // the handle pressed, which lands on the grid
+	[[nodiscard]] xv::map::Point_t VertexOffset( QPointF at, Qt::KeyboardModifiers modifiers ) const;
+	std::optional<QPointF> m_VertexBoxFrom;
 	QPointF m_ClipDragFrom;
 	QPoint m_PressAt;
 	double m_flPaintMs = 0.0;

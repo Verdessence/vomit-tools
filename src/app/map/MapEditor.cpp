@@ -78,6 +78,7 @@ enum class MapIcon_t
 	MAP_ICON_TEXTURE,
 	MAP_ICON_CLIP,
 	MAP_ICON_CORDON,
+	MAP_ICON_VERTEX,
 };
 
 //-----------------------------------------------------------------------------
@@ -131,6 +132,17 @@ QIcon MakeIcon( MapIcon_t nIcon, const QColor &color )
 			painter.drawLine( front[ 2 ], front[ 2 ] + back );
 			painter.drawLine( front[ 0 ] + back, front[ 1 ] + back );
 			painter.drawLine( front[ 1 ] + back, front[ 2 ] + back );
+			break;
+		}
+		case MapIcon_t::MAP_ICON_VERTEX:
+		{
+			// A box with its corners marked.
+			painter.drawRect( QRectF{ 7, 7, 18, 18 } );
+			painter.setBrush( color );
+			for ( const QPointF corner : { QPointF{ 7, 7 }, QPointF{ 25, 7 }, QPointF{ 7, 25 }, QPointF{ 25, 25 } } )
+			{
+				painter.drawRect( QRectF{ corner.x() - 3, corner.y() - 3, 6, 6 } );
+			}
 			break;
 		}
 		case MapIcon_t::MAP_ICON_CORDON:
@@ -275,6 +287,7 @@ CMapEditor::CMapEditor( const QString &szPath, bool bFromGame, QWidget *pParent 
 		{ MapTool_t::MAP_TOOL_BLOCK, MapIcon_t::MAP_ICON_BLOCK, tr( "Block Tool" ), MapAction_t::MAP_ACTION_TOOL_BLOCK },
 		{ MapTool_t::MAP_TOOL_TEXTURE, MapIcon_t::MAP_ICON_TEXTURE, tr( "Texture Application" ), MapAction_t::MAP_ACTION_TOOL_TEXTURE },
 		{ MapTool_t::MAP_TOOL_CLIP, MapIcon_t::MAP_ICON_CLIP, tr( "Clipping Tool" ), MapAction_t::MAP_ACTION_TOOL_CLIP },
+		{ MapTool_t::MAP_TOOL_VERTEX, MapIcon_t::MAP_ICON_VERTEX, tr( "Vertex Tool" ), MapAction_t::MAP_ACTION_TOOL_VERTEX },
 		{ MapTool_t::MAP_TOOL_CORDON, MapIcon_t::MAP_ICON_CORDON, tr( "Edit Cordon Bounds" ), MapAction_t::MAP_ACTION_TOOL_CORDON },
 	};
 	for ( const auto &tool : tools )
@@ -640,6 +653,10 @@ void CMapEditor::SetTool( MapTool_t nTool )
 	if ( nTool != MapTool_t::MAP_TOOL_CLIP )
 	{
 		SetClipLine( std::nullopt );
+	}
+	if ( nTool != MapTool_t::MAP_TOOL_VERTEX && !m_VertexHandles.empty() )
+	{
+		SetVertexHandles( {} );
 	}
 	for ( QAction *pAction : m_pTools->actions() )
 	{
@@ -1438,6 +1455,17 @@ bool CMapEditor::RunAction( MapAction_t nAction, CMapView *pFrom )
 		case MapAction_t::MAP_ACTION_TOOL_CORDON:
 			SetTool( MapTool_t::MAP_TOOL_CORDON );
 			return true;
+		case MapAction_t::MAP_ACTION_TOOL_VERTEX:
+			// Shift+V again goes round Hammer's handle modes.
+			if ( m_nTool == MapTool_t::MAP_TOOL_VERTEX )
+			{
+				SetVertexMode( static_cast<MapVertexMode_t>( ( static_cast<int>( m_nVertexMode ) + 1 ) % 3 ) );
+			}
+			else
+			{
+				SetTool( MapTool_t::MAP_TOOL_VERTEX );
+			}
+			return true;
 		case MapAction_t::MAP_ACTION_TOGGLE_CORDON:
 			ToggleCordon();
 			return true;
@@ -1566,6 +1594,87 @@ void CMapEditor::SetEditMode( MapEditMode_t nMode )
 	{
 		pView->update();
 	}
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+void CMapEditor::SetVertexMode( MapVertexMode_t nMode )
+{
+	m_nVertexMode = nMode;
+	// Handles of the kind no longer shown go.
+	std::erase_if( m_VertexHandles, [ nMode ]( const xv::map::VertexRef_t &h ) { return ( nMode == MapVertexMode_t::MAP_VERTEX_MODE_VERTICES && h.m_bEdge ) || ( nMode == MapVertexMode_t::MAP_VERTEX_MODE_EDGES && !h.m_bEdge ); } );
+	emit StatusMessage( nMode == MapVertexMode_t::MAP_VERTEX_MODE_BOTH ? tr( "Vertex tool: vertices and edges" ) : nMode == MapVertexMode_t::MAP_VERTEX_MODE_VERTICES ? tr( "Vertex tool: vertices only" )
+																																									  : tr( "Vertex tool: edges only" ) );
+	RepaintTools();
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+void CMapEditor::SetVertexHandles( std::vector<xv::map::VertexRef_t> handles )
+{
+	std::ranges::sort( handles );
+	handles.erase( std::ranges::unique( handles ).begin(), handles.end() );
+	m_VertexHandles = std::move( handles );
+	RepaintTools();
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+void CMapEditor::ToggleVertexHandle( const xv::map::VertexRef_t &handle )
+{
+	std::vector<xv::map::VertexRef_t> handles = m_VertexHandles;
+	if ( const auto it = std::ranges::find( handles, handle ); it != handles.end() )
+	{
+		handles.erase( it );
+	}
+	else
+	{
+		handles.push_back( handle );
+	}
+	SetVertexHandles( std::move( handles ) );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: The handles keep their numbers through the move (a corner stays the same corner), so
+//          they stay picked.
+//-----------------------------------------------------------------------------
+void CMapEditor::MoveVertexHandles( const xv::map::Point_t &offset )
+{
+	const xv::map::CScene *pScene = m_pDocument->GetScene();
+	if ( !pScene || m_VertexHandles.empty() || offset == xv::map::Point_t{} )
+	{
+		return;
+	}
+	xv::map::MapEdit_t edit = xv::map::MoveHandles( *pScene, m_VertexHandles, offset );
+	if ( !edit.IsEmpty() )
+	{
+		m_pDocument->Edit( std::move( edit ), tr( "Move Vertices" ), m_pDocument->GetSelection() );
+	}
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Every solid the selection holds (a brush entity's with it), with its handles.
+//-----------------------------------------------------------------------------
+std::vector<std::pair<std::uint32_t, xv::map::SolidVertices_t>> CMapEditor::GetSelectedVertices() const
+{
+	std::vector<std::pair<std::uint32_t, xv::map::SolidVertices_t>> out;
+	const xv::map::CScene *pScene = m_pDocument->GetScene();
+	if ( !pScene )
+	{
+		return out;
+	}
+	const xv::map::ObjectSet_t set = xv::map::ObjectsOf( *pScene, m_pDocument->GetSelection() );
+	for ( const std::uint32_t nSolid : set.m_Solids )
+	{
+		if ( nSolid < pScene->m_Solids.size() )
+		{
+			out.emplace_back( pScene->SolidObject( nSolid ), xv::map::VerticesOf( pScene->m_Solids[ nSolid ] ) );
+		}
+	}
+	return out;
 }
 
 //-----------------------------------------------------------------------------

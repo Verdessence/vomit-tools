@@ -24,6 +24,7 @@
 
 #include "Preferences.h"
 #include "map/Cordon.h"
+#include "map/Vertex.h"
 #include "map/MapConstants.h"
 #include "map/MapDocument.h"
 #include "map/MapEditor.h"
@@ -984,6 +985,10 @@ void CMapView2D::PaintTools( QPainter &painter ) const
 		painter.setPen( QPen{ Look().m_Colors.m_Pointfile, 0 } );
 		painter.drawPolyline( line );
 	}
+	if ( m_Editor.GetTool() == MapTool_t::MAP_TOOL_VERTEX )
+	{
+		PaintVertexHandles( painter );
+	}
 	const bool bCordonTool = m_Editor.GetTool() == MapTool_t::MAP_TOOL_CORDON;
 	if ( const std::optional<xv::map::Box_t> &newBox = m_Editor.GetNewBox() )
 	{
@@ -1250,6 +1255,14 @@ void CMapView2D::mousePressEvent( QMouseEvent *pEvent )
 		}
 		return;
 	}
+	if ( nTool == MapTool_t::MAP_TOOL_VERTEX )
+	{
+		if ( pEvent->button() == Qt::LeftButton )
+		{
+			PressVertex( at, pEvent->modifiers() );
+		}
+		return;
+	}
 	if ( nTool == MapTool_t::MAP_TOOL_BLOCK || nTool == MapTool_t::MAP_TOOL_CORDON )
 	{
 		if ( pEvent->button() == Qt::LeftButton )
@@ -1432,6 +1445,222 @@ void CMapView2D::PressBlock( QPointF at )
 			m_nBoxDrag = BoxDrag_t::BOX_DRAG_MOVE;
 		}
 	}
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Hammer's handles: white squares on the corners, yellow on the edges' middles, the
+//          picked ones red; which kinds depends on the tool's mode.
+//-----------------------------------------------------------------------------
+void CMapView2D::PaintVertexHandles( QPainter &painter ) const
+{
+	const MapVertexMode_t nMode = m_Editor.GetVertexMode();
+	const std::vector<xv::map::VertexRef_t> &picked = m_Editor.GetVertexHandles();
+	const double flHalf = Look().m_nHandleSize / 2.0;
+	painter.setPen( QPen{ Qt::black, 0 } );
+	for ( const auto &[ nObject, handles ] : m_Editor.GetSelectedVertices() )
+	{
+		if ( nMode != MapVertexMode_t::MAP_VERTEX_MODE_VERTICES )
+		{
+			for ( std::uint32_t i = 0; i < handles.m_Edges.size(); i++ )
+			{
+				const bool bPicked = std::ranges::find( picked, xv::map::VertexRef_t{ nObject, true, i } ) != picked.end();
+				painter.setBrush( bPicked ? Look().m_Colors.m_Selection : Look().m_Colors.m_CenterHandle );
+				const QPointF at = ToWidget( Flatten( handles.EdgeMiddle( i ) ) );
+				painter.drawRect( QRectF{ at.x() - flHalf, at.y() - flHalf, flHalf * 2, flHalf * 2 } );
+			}
+		}
+		if ( nMode != MapVertexMode_t::MAP_VERTEX_MODE_EDGES )
+		{
+			for ( std::uint32_t i = 0; i < handles.m_Vertices.size(); i++ )
+			{
+				const bool bPicked = std::ranges::find( picked, xv::map::VertexRef_t{ nObject, false, i } ) != picked.end();
+				painter.setBrush( bPicked ? Look().m_Colors.m_Selection : Look().m_Colors.m_Vertex );
+				const QPointF at = ToWidget( Flatten( handles.m_Vertices[ i ] ) );
+				painter.drawRect( QRectF{ at.x() - flHalf, at.y() - flHalf, flHalf * 2, flHalf * 2 } );
+			}
+		}
+	}
+	if ( m_VertexBoxFrom && m_PressAt != QPoint{} )
+	{
+		painter.setPen( QPen{ Look().m_Colors.m_ToolSelection, 0, Qt::DotLine } );
+		painter.setBrush( Qt::NoBrush );
+		painter.drawRect( QRectF{ ToWidget( *m_VertexBoxFrom ), mapFromGlobal( QCursor::pos() ) }.normalized() );
+	}
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Corners are tried before edges, so a corner on an edge's middle (a tiny face) wins.
+//-----------------------------------------------------------------------------
+std::optional<xv::map::VertexRef_t> CMapView2D::VertexHandleAt( QPointF at ) const
+{
+	const MapVertexMode_t nMode = m_Editor.GetVertexMode();
+	const double flReach = Look().m_nHandleSize / 2.0 + mapstyle::HANDLE_SLACK;
+	auto near = [ & ]( const xv::map::Point_t &p ) {
+		const QPointF d = ToWidget( Flatten( p ) ) - at;
+		return std::abs( d.x() ) <= flReach && std::abs( d.y() ) <= flReach;
+	};
+	const auto selected = m_Editor.GetSelectedVertices();
+	if ( nMode != MapVertexMode_t::MAP_VERTEX_MODE_EDGES )
+	{
+		for ( const auto &[ nObject, handles ] : selected )
+		{
+			for ( std::uint32_t i = 0; i < handles.m_Vertices.size(); i++ )
+			{
+				if ( near( handles.m_Vertices[ i ] ) )
+				{
+					return xv::map::VertexRef_t{ nObject, false, i };
+				}
+			}
+		}
+	}
+	if ( nMode != MapVertexMode_t::MAP_VERTEX_MODE_VERTICES )
+	{
+		for ( const auto &[ nObject, handles ] : selected )
+		{
+			for ( std::uint32_t i = 0; i < handles.m_Edges.size(); i++ )
+			{
+				if ( near( handles.EdgeMiddle( i ) ) )
+				{
+					return xv::map::VertexRef_t{ nObject, true, i };
+				}
+			}
+		}
+	}
+	return std::nullopt;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: A press on a handle picks it (Ctrl: adds or removes it; a picked one stays with the
+//          others) and starts a drag of everything picked; a press elsewhere starts a box that
+//          picks the handles inside it on release, or, with nothing in it, picks the object under
+//          it to edit instead (Hammer: click another object's centre to switch).
+//-----------------------------------------------------------------------------
+void CMapView2D::PressVertex( QPointF at, Qt::KeyboardModifiers modifiers )
+{
+	m_PressAt = at.toPoint();
+	if ( const std::optional<xv::map::VertexRef_t> handle = VertexHandleAt( at ) )
+	{
+		const std::vector<xv::map::VertexRef_t> &picked = m_Editor.GetVertexHandles();
+		const bool bPicked = std::ranges::find( picked, *handle ) != picked.end();
+		if ( modifiers.testFlag( Qt::ControlModifier ) )
+		{
+			m_Editor.ToggleVertexHandle( *handle );
+		}
+		else if ( !bPicked )
+		{
+			m_Editor.SetVertexHandles( { *handle } );
+		}
+		m_bVertexDrag = std::ranges::find( m_Editor.GetVertexHandles(), *handle ) != m_Editor.GetVertexHandles().end();
+		m_VertexDragFrom = ToMap( at );
+		for ( const auto &[ nObject, handles ] : m_Editor.GetSelectedVertices() )
+		{
+			if ( nObject == handle->m_nObject )
+			{
+				m_VertexAnchor = handle->m_bEdge ? handles.EdgeMiddle( handle->m_nIndex ) : handles.m_Vertices[ handle->m_nIndex ];
+			}
+		}
+		return;
+	}
+	m_VertexBoxFrom = ToMap( at );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: How far the drag has gone along the view's axes, so that the handle pressed lands on
+//          the grid (Alt: anywhere).
+//-----------------------------------------------------------------------------
+xv::map::Point_t CMapView2D::VertexOffset( QPointF at, Qt::KeyboardModifiers modifiers ) const
+{
+	const QPointF delta = ToMap( at ) - m_VertexDragFrom;
+	const auto a0 = static_cast<std::size_t>( GetAxis( 0 ) );
+	const auto a1 = static_cast<std::size_t>( GetAxis( 1 ) );
+	xv::map::Point_t offset{};
+	offset[ a0 ] = Snap( m_VertexAnchor[ a0 ] + delta.x(), modifiers ) - m_VertexAnchor[ a0 ];
+	offset[ a1 ] = Snap( m_VertexAnchor[ a1 ] + delta.y(), modifiers ) - m_VertexAnchor[ a1 ];
+	return offset;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: The picked handles follow the mouse on the grid, previewed live.
+//-----------------------------------------------------------------------------
+void CMapView2D::DragVertex( QPointF at, Qt::KeyboardModifiers modifiers )
+{
+	if ( m_VertexBoxFrom )
+	{
+		update();
+		return;
+	}
+	if ( !m_bVertexDrag )
+	{
+		return;
+	}
+	CMapDocument &document = GetDocument();
+	if ( !m_pMoveScene )
+	{
+		if ( ( at.toPoint() - m_PressAt ).manhattanLength() < DRAG_THRESHOLD )
+		{
+			return;
+		}
+		m_pMoveScene = document.GetSharedScene();
+	}
+	document.Preview( xv::map::MoveHandles( *m_pMoveScene, m_Editor.GetVertexHandles(), VertexOffset( at, modifiers ) ) );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+void CMapView2D::ReleaseVertex( QPointF at, Qt::KeyboardModifiers modifiers )
+{
+	if ( m_VertexBoxFrom )
+	{
+		const QRectF box = QRectF{ ToWidget( *m_VertexBoxFrom ), at }.normalized();
+		m_VertexBoxFrom.reset();
+		std::vector<xv::map::VertexRef_t> picked = modifiers.testFlag( Qt::ControlModifier ) ? m_Editor.GetVertexHandles() : std::vector<xv::map::VertexRef_t>{};
+		const MapVertexMode_t nMode = m_Editor.GetVertexMode();
+		bool bAny = false;
+		for ( const auto &[ nObject, handles ] : m_Editor.GetSelectedVertices() )
+		{
+			for ( std::uint32_t i = 0; nMode != MapVertexMode_t::MAP_VERTEX_MODE_EDGES && i < handles.m_Vertices.size(); i++ )
+			{
+				if ( box.contains( ToWidget( Flatten( handles.m_Vertices[ i ] ) ) ) )
+				{
+					picked.push_back( { nObject, false, i } );
+					bAny = true;
+				}
+			}
+			for ( std::uint32_t i = 0; nMode != MapVertexMode_t::MAP_VERTEX_MODE_VERTICES && i < handles.m_Edges.size(); i++ )
+			{
+				if ( box.contains( ToWidget( Flatten( handles.EdgeMiddle( i ) ) ) ) )
+				{
+					picked.push_back( { nObject, true, i } );
+					bAny = true;
+				}
+			}
+		}
+		if ( bAny || modifiers.testFlag( Qt::ControlModifier ) )
+		{
+			m_Editor.SetVertexHandles( std::move( picked ) );
+		}
+		else if ( box.width() < DRAG_THRESHOLD && box.height() < DRAG_THRESHOLD )
+		{
+			// A click on nothing: another object to edit, or nothing.
+			if ( const auto hit = HitAt( at ) )
+			{
+				GetDocument().SetSelection( GetDocument().Expand( *hit ) );
+			}
+			m_Editor.SetVertexHandles( {} );
+		}
+		update();
+		return;
+	}
+	m_bVertexDrag = false;
+	if ( m_pMoveScene )
+	{
+		const xv::map::Point_t offset = VertexOffset( at, modifiers );
+		GetDocument().EndPreview();
+		m_pMoveScene.reset();
+		m_Editor.MoveVertexHandles( offset );
+	}
+	update();
 }
 
 //-----------------------------------------------------------------------------
@@ -1695,6 +1924,11 @@ void CMapView2D::mouseMoveEvent( QMouseEvent *pEvent )
 		DragBlock( pEvent->position(), pEvent->modifiers() );
 		return;
 	}
+	if ( ( m_bVertexDrag || m_VertexBoxFrom ) && ( pEvent->buttons() & Qt::LeftButton ) )
+	{
+		DragVertex( pEvent->position(), pEvent->modifiers() );
+		return;
+	}
 	if ( m_nClipDrag >= 0 && ( pEvent->buttons() & Qt::LeftButton ) )
 	{
 		DragClip( pEvent->position(), pEvent->modifiers() );
@@ -1736,6 +1970,12 @@ void CMapView2D::mouseReleaseEvent( QMouseEvent *pEvent )
 	if ( m_nClipDrag >= 0 && pEvent->button() == Qt::LeftButton )
 	{
 		m_nClipDrag = -1;
+		m_PressAt = {};
+		return;
+	}
+	if ( ( m_bVertexDrag || m_VertexBoxFrom ) && pEvent->button() == Qt::LeftButton )
+	{
+		ReleaseVertex( pEvent->position(), pEvent->modifiers() );
 		m_PressAt = {};
 		return;
 	}

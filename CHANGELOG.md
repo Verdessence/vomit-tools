@@ -53,6 +53,11 @@
   while it is on, what lies outside is hidden and Run Map compiles a copy (`<map>_cordon.vmf`)
   holding only what is inside, sealed with walls of `TOOLS/TOOLSSKYBOX`. Saved in Hammer++'s
   `cordons` block, read from Hammer's old `cordon` block too.
+- **Vertex tool** (Shift+V): the selected brushes' corners (white) and edges (yellow) as handles
+  in the 2D views; click or box them (Ctrl adds), drag them on the grid, each move one undo step;
+  Shift+V again shows vertices only, edges only, or both. A face bent out of flat makes Hammer's
+  "invalid solid structure", which Check for Problems reports. No face splitting (Ctrl+F) or
+  vertex scaling yet.
 - **Block tool** (Shift+B): drag a box in a 2D view, pull its handles in the others, Enter (or the
   right button's Create Object) makes a block with the current texture; the New Objects panel's
   Objects box picks a wedge, cylinder, spike or sphere instead, with its Faces count. **Entity tool** (Shift+E):

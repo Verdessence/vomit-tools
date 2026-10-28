@@ -60,6 +60,7 @@ const Binding_t BINDINGS[] = {
 	{ MapAction_t::MAP_ACTION_TOOL_TEXTURE, Qt::Key_A, Qt::ShiftModifier, BOTH },
 	{ MapAction_t::MAP_ACTION_RUN_MAP, Qt::Key_F9, Qt::NoModifier, BOTH },
 	{ MapAction_t::MAP_ACTION_TOOL_CLIP, Qt::Key_X, Qt::ShiftModifier, BOTH },
+	{ MapAction_t::MAP_ACTION_TOOL_VERTEX, Qt::Key_V, Qt::ShiftModifier, BOTH },
 	{ MapAction_t::MAP_ACTION_CARVE, Qt::Key_C, Qt::ControlModifier | Qt::ShiftModifier, BOTH },
 	{ MapAction_t::MAP_ACTION_TIE_TO_ENTITY, Qt::Key_T, Qt::ControlModifier, BOTH },
 	{ MapAction_t::MAP_ACTION_MOVE_TO_WORLD, Qt::Key_W, Qt::ControlModifier | Qt::ShiftModifier, BOTH },

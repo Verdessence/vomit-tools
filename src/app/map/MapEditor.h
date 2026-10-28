@@ -21,6 +21,7 @@
 #include "EditorTab.h"
 #include "map/Clip.h"
 #include "map/Faces.h"
+#include "map/Vertex.h"
 #include "map/MapDocument.h"
 #include "map/MapGizmo.h"
 #include "map/MapRenderData.h"
@@ -165,6 +166,16 @@ public:
 	bool FindEntitiesByName( const QString &szName );
 	// Hammer's cordon: the box the map has, whether it is on, the tool's box committed, and
 	// Toggle Cordon State.
+	// The vertex tool: which handles it shows, the handles picked (on the selected solids), and
+	// a move of them as one undo step.
+	[[nodiscard]] MapVertexMode_t GetVertexMode() const { return m_nVertexMode; }
+	void SetVertexMode( MapVertexMode_t nMode );
+	[[nodiscard]] const std::vector<xv::map::VertexRef_t> &GetVertexHandles() const { return m_VertexHandles; }
+	void SetVertexHandles( std::vector<xv::map::VertexRef_t> handles );
+	void ToggleVertexHandle( const xv::map::VertexRef_t &handle );
+	void MoveVertexHandles( const xv::map::Point_t &offset );
+	// The selected solids' corners and edges, by object.
+	[[nodiscard]] std::vector<std::pair<std::uint32_t, xv::map::SolidVertices_t>> GetSelectedVertices() const;
 	[[nodiscard]] std::optional<xv::map::Box_t> GetCordonBox() const;
 	[[nodiscard]] bool IsCordonActive() const;
 	void CommitCordon();
@@ -267,6 +278,8 @@ private:
 	std::shared_ptr<const xv::map::CScene> m_pClipPreview; // the selection cut, drawn in white
 	QLineEdit *m_pMaterial = nullptr;
 	QComboBox *m_pEntityClass = nullptr;
+	MapVertexMode_t m_nVertexMode = MapVertexMode_t::MAP_VERTEX_MODE_BOTH;
+	std::vector<xv::map::VertexRef_t> m_VertexHandles;
 	QPointer<CMapEntityReport> m_pEntityReport;
 	QPointer<CMapCheckDialog> m_pCheck;
 	QComboBox *m_pPrimitive = nullptr; // the block tool's shape (Hammer's Objects box)
