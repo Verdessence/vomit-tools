@@ -24,11 +24,24 @@ struct HammerDefaults_t
 	int m_nLightmapScale = 16;
 };
 
+// Where the game's Hammer configuration says its compilers, game and compiled maps are: hints
+// only (Wine paths from a Windows install; a file named may not be there).
+struct HammerCompilePaths_t
+{
+	std::filesystem::path m_Bsp;
+	std::filesystem::path m_Vis;
+	std::filesystem::path m_Light;
+	std::filesystem::path m_GameExe;
+	std::filesystem::path m_BspDir; // where compiled maps go (the game's maps folder)
+	std::filesystem::path m_MapDir; // where the VMFs are kept
+};
+
 struct GameFgds_t
 {
 	std::vector<std::filesystem::path> m_Files; // in the order to read them
 	std::string m_szSource;                     // where the list came from, for the user
 	HammerDefaults_t m_Defaults;
+	HammerCompilePaths_t m_Compile;
 };
 
 // gameDir is the folder that holds gameinfo.txt (".../Counter-Strike Source/cstrike").

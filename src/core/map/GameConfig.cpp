@@ -77,7 +77,7 @@ std::optional<fs::path> Resolve( const fs::path &current, const std::vector<fs::
 //-----------------------------------------------------------------------------
 // Purpose: The FGDs a Hammer config file lists for the game in gameDir, or nothing.
 //-----------------------------------------------------------------------------
-std::vector<fs::path> FgdsFromConfig( const fs::path &config, const fs::path &gameDir, const fs::path &root, HammerDefaults_t &defaults )
+std::vector<fs::path> FgdsFromConfig( const fs::path &config, const fs::path &gameDir, const fs::path &root, HammerDefaults_t &defaults, HammerCompilePaths_t &compile )
 {
 	std::ifstream stream{ config, std::ios::binary };
 	if ( !stream )
@@ -126,6 +126,13 @@ std::vector<fs::path> FgdsFromConfig( const fs::path &config, const fs::path &ga
 		if ( const kv1::CNode *pLightmap = pHammer->Find( "DefaultLightmapScale" ) )
 		{
 			defaults.m_nLightmapScale = ParseNumber<int>( pLightmap->GetValue() ).value_or( defaults.m_nLightmapScale );
+		}
+		for ( const auto &[ pszKey, pPath ] : { std::pair{ "BSP", &compile.m_Bsp }, std::pair{ "Vis", &compile.m_Vis }, std::pair{ "Light", &compile.m_Light }, std::pair{ "GameExe", &compile.m_GameExe }, std::pair{ "BSPDir", &compile.m_BspDir }, std::pair{ "MapDir", &compile.m_MapDir } } )
+		{
+			if ( const kv1::CNode *pValue = pHammer->Find( pszKey ); pValue && !pValue->GetValue().empty() )
+			{
+				*pPath = FindFileIgnoringCase( LocalPath( pValue->GetValue(), root ) );
+			}
 		}
 		std::vector<fs::path> files;
 		for ( int i = 0;; i++ )
@@ -204,7 +211,7 @@ GameFgds_t FindGameFgds( const fs::path &gameDir )
 	const fs::path hammerPlusPlus = FindFileIgnoringCase( root / "bin" / "x64" / "hammerplusplus" / "hammerplusplus_gameconfig.txt" );
 	if ( fs::exists( hammerPlusPlus, error ) )
 	{
-		found.m_Files = FgdsFromConfig( hammerPlusPlus, gameDir, root, found.m_Defaults );
+		found.m_Files = FgdsFromConfig( hammerPlusPlus, gameDir, root, found.m_Defaults, found.m_Compile );
 		if ( !found.m_Files.empty() )
 		{
 			found.m_szSource = "Hammer++'s game configuration";
@@ -220,7 +227,7 @@ GameFgds_t FindGameFgds( const fs::path &gameDir )
 	const fs::path hammer = FindFileIgnoringCase( root / "bin" / "GameConfig.txt" );
 	if ( fs::exists( hammer, error ) )
 	{
-		found.m_Files = FgdsFromConfig( hammer, gameDir, root, found.m_Defaults );
+		found.m_Files = FgdsFromConfig( hammer, gameDir, root, found.m_Defaults, found.m_Compile );
 		if ( !found.m_Files.empty() )
 		{
 			found.m_szSource = "Hammer's game configuration";

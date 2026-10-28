@@ -3,6 +3,8 @@
 // Purpose: See SourceTools.h. Tool arguments follow the locally supplied VDC tool documentation.
 //===========================================================================//
 #include "SourceTools.h"
+
+#include "map/GameConfig.h"
 #include <algorithm>
 #include "QtPaths.h"
 #include "kv1/Kv1.h"
@@ -31,7 +33,59 @@ QString Expand( QString szPath, const xv::vfs::CGameInfo &game )
 //-----------------------------------------------------------------------------
 QString SourceToolSetting( SourceTool_t nTool )
 {
-	return nTool == SourceTool_t::SOURCE_TOOL_STUDIOMDL ? QStringLiteral( "sourceTools/studiomdl" ) : QStringLiteral( "sourceTools/bspzip" );
+	return QStringLiteral( "sourceTools/" ) + SourceToolBaseName( nTool );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+QString SourceToolBaseName( SourceTool_t nTool )
+{
+	switch ( nTool )
+	{
+		case SourceTool_t::SOURCE_TOOL_STUDIOMDL: return QStringLiteral( "studiomdl" );
+		case SourceTool_t::SOURCE_TOOL_BSPZIP: return QStringLiteral( "bspzip" );
+		case SourceTool_t::SOURCE_TOOL_VBSP: return QStringLiteral( "vbsp" );
+		case SourceTool_t::SOURCE_TOOL_VVIS: return QStringLiteral( "vvis" );
+		case SourceTool_t::SOURCE_TOOL_VRAD: return QStringLiteral( "vrad" );
+		case SourceTool_t::SOURCE_TOOL_GAME: return QStringLiteral( "game" );
+	}
+	return {};
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+QString SourceToolLabel( SourceTool_t nTool )
+{
+	switch ( nTool )
+	{
+		case SourceTool_t::SOURCE_TOOL_STUDIOMDL: return QObject::tr( "studiomdl / StudioMDL++" );
+		case SourceTool_t::SOURCE_TOOL_BSPZIP: return QObject::tr( "bspzip / BSPZIP++" );
+		case SourceTool_t::SOURCE_TOOL_VBSP: return QObject::tr( "vbsp / VBSP++" );
+		case SourceTool_t::SOURCE_TOOL_VVIS: return QObject::tr( "vvis / VVIS++" );
+		case SourceTool_t::SOURCE_TOOL_VRAD: return QObject::tr( "vrad / VRAD++" );
+		case SourceTool_t::SOURCE_TOOL_GAME: return QObject::tr( "The game (cstrike.sh, hl2.sh, hl2.exe…)" );
+	}
+	return {};
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+QString BspDirSetting()
+{
+	return QStringLiteral( "sourceTools/bspDir" );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+QString FindBspDir( const xv::vfs::CGameInfo &game, const QString &szOverride )
+{
+	if ( !szOverride.trimmed().isEmpty() )
+		return QDir( szOverride.trimmed() ).absolutePath();
+	return QDir( ToQString( game.m_GameDir ) ).filePath( QStringLiteral( "maps" ) );
 }
 //-----------------------------------------------------------------------------
 // Purpose: Prefers explicit configuration, then ++ replacements and stock tools near the game.
@@ -44,15 +98,25 @@ QString FindSourceTool( SourceTool_t nTool, const xv::vfs::CGameInfo &game, cons
 	for ( const auto &entry : game.m_SearchPaths )
 		if ( std::ranges::find( entry.m_Ids, std::string( "gamebin" ) ) != entry.m_Ids.end() )
 			directories << Expand( QString::fromStdString( entry.m_szPath ), game );
+	// A game can have both bin/ and BIN/ (Counter-Strike: Source does; its Windows compilers are
+	// in BIN/x64).
 	for ( const auto &root : { game.m_GameDir, game.m_BaseDir } )
-		for ( const auto *szSuffix : { "bin/linux64", "bin/linux32", "bin/win64", "bin/x64", "bin", "" } )
+		for ( const auto *szSuffix : { "bin/linux64", "bin/linux32", "bin/win64", "bin/x64", "bin", "BIN/x64", "BIN", "" } )
 			directories << QDir( ToQString( root ) ).filePath( QString::fromUtf8( szSuffix ) );
 	directories.removeDuplicates();
-	const QString szBase = nTool == SourceTool_t::SOURCE_TOOL_STUDIOMDL ? QStringLiteral( "studiomdl" ) : QStringLiteral( "bspzip" );
+	const QString szBase = SourceToolBaseName( nTool );
 	QStringList names{ szBase + QStringLiteral( "++" ), szBase + QStringLiteral( "plusplus" ), szBase };
+	if ( nTool == SourceTool_t::SOURCE_TOOL_GAME )
+	{
+		// The game's own launcher: the mod's script (cstrike.sh), Half-Life 2's, or the exe.
+		const QString szGame = QFileInfo( ToQString( game.m_GameDir ) ).fileName();
+		names = { szGame + QStringLiteral( ".sh" ), QStringLiteral( "hl2.sh" ), QStringLiteral( "hl2_linux" ), QStringLiteral( "hl2.exe" ), szGame + QStringLiteral( ".exe" ) };
+		directories = { ToQString( game.m_BaseDir ) };
+	}
 #ifdef Q_OS_WIN
-	for ( QString &szName : names )
-		szName += QStringLiteral( ".exe" );
+	if ( nTool != SourceTool_t::SOURCE_TOOL_GAME )
+		for ( QString &szName : names )
+			szName += QStringLiteral( ".exe" );
 #endif
 	for ( const auto &szDirectory : directories )
 		for ( const auto &szName : names )
@@ -62,8 +126,17 @@ QString FindSourceTool( SourceTool_t nTool, const xv::vfs::CGameInfo &game, cons
 				return QFileInfo( path ).absoluteFilePath();
 		}
 	for ( const auto &szName : names )
-		if ( const auto path = QStandardPaths::findExecutable( szName ); !path.isEmpty() )
-			return path;
+		if ( nTool != SourceTool_t::SOURCE_TOOL_GAME )
+			if ( const auto path = QStandardPaths::findExecutable( szName ); !path.isEmpty() )
+				return path;
+	// What the game's Hammer configuration names, if it is really there.
+	const xv::map::HammerCompilePaths_t hints = xv::map::FindGameFgds( game.m_GameDir ).m_Compile;
+	const std::filesystem::path *pHint = nTool == SourceTool_t::SOURCE_TOOL_VBSP ? &hints.m_Bsp : nTool == SourceTool_t::SOURCE_TOOL_VVIS ? &hints.m_Vis
+		: nTool == SourceTool_t::SOURCE_TOOL_VRAD                                                                                         ? &hints.m_Light
+		: nTool == SourceTool_t::SOURCE_TOOL_GAME                                                                                         ? &hints.m_GameExe
+																																		  : nullptr;
+	if ( pHint && !pHint->empty() && QFileInfo( ToQString( *pHint ) ).isFile() )
+		return ToQString( *pHint );
 	return {};
 }
 //-----------------------------------------------------------------------------
@@ -158,7 +231,7 @@ bool CSourceToolRunner::Start( const QString &szProgram, const QStringList &argu
 	m_bReported = false;
 	if ( !QFileInfo( szProgram ).isFile() || !QFileInfo( szProgram ).isExecutable() )
 	{
-		Append( tr( "Choose an executable studiomdl / StudioMDL++ or bspzip / BSPZIP++ in Preferences > Source Tools.\n" ) );
+		Append( tr( "%1 isn't an executable file. Choose the tool in Preferences > Source Tools.\n" ).arg( szProgram.isEmpty() ? tr( "(nothing)" ) : szProgram ) );
 		m_bReported = true;
 		emit Finished( false );
 		return false;

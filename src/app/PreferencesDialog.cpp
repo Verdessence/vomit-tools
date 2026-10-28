@@ -629,13 +629,13 @@ QWidget *CPreferencesDialog::BuildSourceToolsPage()
 	auto *pPage = new QWidget;
 	auto *pLayout = PageLayout( pPage );
 	pLayout->addWidget( Hint( tr( "Leave a path empty to discover tools beside the current game and in PATH. Tool folders named by gameinfo.txt are checked too. Use native executables for your operating system." ) ) );
-	for ( auto nTool : { SourceTool_t::SOURCE_TOOL_STUDIOMDL, SourceTool_t::SOURCE_TOOL_BSPZIP } )
+	for ( auto nTool : SOURCE_TOOLS )
 	{
 		const auto szKey = SourceToolSetting( nTool );
-		pLayout->addWidget( new QLabel( nTool == SourceTool_t::SOURCE_TOOL_STUDIOMDL ? tr( "studiomdl / StudioMDL++" ) : tr( "bspzip / BSPZIP++" ) ) );
+		pLayout->addWidget( new QLabel( SourceToolLabel( nTool ) ) );
 		auto *pRow = new QHBoxLayout;
 		auto *pPath = new QLineEdit( QSettings{}.value( szKey ).toString() );
-		pPath->setObjectName( nTool == SourceTool_t::SOURCE_TOOL_STUDIOMDL ? QStringLiteral( "studiomdlPath" ) : QStringLiteral( "bspzipPath" ) );
+		pPath->setObjectName( SourceToolBaseName( nTool ) + QStringLiteral( "Path" ) );
 		pPath->setPlaceholderText( tr( "Automatic discovery" ) );
 		auto *pBrowse = new QPushButton( tr( "Browse…" ) );
 		pRow->addWidget( pPath, 1 );
@@ -644,7 +644,27 @@ QWidget *CPreferencesDialog::BuildSourceToolsPage()
 		connect( pPath, &QLineEdit::textChanged, pPage, [ szKey ]( const QString &szPath ) { QSettings{}.setValue( szKey, szPath.trimmed() ); } );
 		connect( pBrowse, &QPushButton::clicked, pPage, [ this, pPath ] {const auto szFile=AskOpenFile(this,tr("Select Source Tool"),pPath->text());if(!szFile.isEmpty())pPath->setText(szFile); } );
 	}
-	pLayout->addWidget( Hint( tr( "Model builds run in a temporary game directory. The compiler is supplied by you; this application does not include or download Valve or community compilers." ) ) );
+	{
+		// Hammer's $bspdir: where Run Map copies the compiled map.
+		pLayout->addWidget( new QLabel( tr( "Compiled maps go to" ) ) );
+		auto *pRow = new QHBoxLayout;
+		auto *pPath = new QLineEdit( QSettings{}.value( BspDirSetting() ).toString() );
+		pPath->setObjectName( QStringLiteral( "bspDirPath" ) );
+		pPath->setPlaceholderText( tr( "The game's maps folder" ) );
+		auto *pBrowse = new QPushButton( tr( "Browse…" ) );
+		pRow->addWidget( pPath, 1 );
+		pRow->addWidget( pBrowse );
+		pLayout->addLayout( pRow );
+		connect( pPath, &QLineEdit::textChanged, pPage, []( const QString &szPath ) { QSettings{}.setValue( BspDirSetting(), szPath.trimmed() ); } );
+		connect( pBrowse, &QPushButton::clicked, pPage, [ this, pPath ] {
+			const QString szFolder = AskFolder( this, tr( "Compiled Maps Folder" ), pPath->text() );
+			if ( !szFolder.isEmpty() )
+			{
+				pPath->setText( szFolder );
+			}
+		} );
+	}
+	pLayout->addWidget( Hint( tr( "Model builds run in a temporary game directory. The compilers and the game are supplied by you; this application does not include or download Valve or community compilers. The native VBSP++, VVIS++ and VRAD++ builds can live anywhere: point to them here." ) ) );
 	pLayout->addStretch();
 	return pPage;
 }
