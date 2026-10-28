@@ -1309,6 +1309,21 @@ bool CMapEditor::RunAction( MapAction_t nAction, CMapView *pFrom )
 		case MapAction_t::MAP_ACTION_PASTE:
 			Paste( pFrom );
 			return true;
+		case MapAction_t::MAP_ACTION_PASTE_SPECIAL:
+			ShowPasteSpecialDialog();
+			return true;
+		case MapAction_t::MAP_ACTION_TRANSFORM:
+			ShowTransformDialog();
+			return true;
+		case MapAction_t::MAP_ACTION_FLIP_HORIZONTAL:
+		case MapAction_t::MAP_ACTION_FLIP_VERTICAL:
+		{
+			const bool bVertical = nAction == MapAction_t::MAP_ACTION_FLIP_VERTICAL;
+			const auto *p2D = qobject_cast<CMapView2D *>( pFrom ? pFrom : m_pActiveView );
+			FlipSelection( p2D ? static_cast<std::size_t>( p2D->GetAxisIndex( bVertical ? 1 : 0 ) ) : bVertical ? 2
+																												: 0 );
+			return true;
+		}
 		case MapAction_t::MAP_ACTION_SELECT_ALL:
 		{
 			std::vector<std::uint32_t> all;
@@ -1867,6 +1882,129 @@ std::array<int, 2> CMapEditor::GetMaterialSize( std::uint32_t nMaterial ) const
 QString CMapEditor::GetEntityClass() const
 {
 	return m_pEntityClass->currentText();
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+void CMapEditor::ShowTransformDialog()
+{
+	if ( m_pDocument->GetSelection().empty() )
+	{
+		emit StatusMessage( tr( "Select something to transform first" ) );
+		return;
+	}
+	CMapTransformDialog dialog( this );
+	if ( dialog.exec() == QDialog::Accepted )
+	{
+		ApplyTransformValues( dialog.GetValues() );
+	}
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Turns go x, then y, then z, as Paste Special's do.
+//-----------------------------------------------------------------------------
+void CMapEditor::ApplyTransformValues( const TransformValues_t &values )
+{
+	const xv::map::Box_t bounds = m_pDocument->GetSelectionBounds();
+	if ( bounds.IsEmpty() )
+	{
+		return;
+	}
+	const xv::map::Point_t centre = bounds.GetCenter();
+	const std::array<double, 3> &v = values.m_Values;
+	switch ( values.m_nMode )
+	{
+		case TransformMode_t::TRANSFORM_MODE_ROTATE:
+		{
+			xv::map::Transform_t turn = xv::map::Transform_t::Rotation( centre, 2, v[ 2 ] ) * xv::map::Transform_t::Rotation( centre, 1, v[ 1 ] ) * xv::map::Transform_t::Rotation( centre, 0, v[ 0 ] );
+			turn.m_Pivot = centre;
+			TransformSelection( turn, tr( "Rotate" ) );
+			break;
+		}
+		case TransformMode_t::TRANSFORM_MODE_SCALE:
+			if ( v[ 0 ] != 0.0 && v[ 1 ] != 0.0 && v[ 2 ] != 0.0 )
+			{
+				TransformSelection( xv::map::Transform_t::Scaling( centre, { v[ 0 ], v[ 1 ], v[ 2 ] } ), tr( "Scale" ) );
+			}
+			else
+			{
+				emit StatusMessage( tr( "A scale of 0 would flatten the selection" ) );
+			}
+			break;
+		case TransformMode_t::TRANSFORM_MODE_MOVE:
+			TransformSelection( xv::map::Transform_t::Translation( { v[ 0 ], v[ 1 ], v[ 2 ] } ), tr( "Move" ) );
+			break;
+	}
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+void CMapEditor::FlipSelection( std::size_t nAxis )
+{
+	const xv::map::Box_t bounds = m_pDocument->GetSelectionBounds();
+	if ( bounds.IsEmpty() || nAxis > 2 )
+	{
+		return;
+	}
+	xv::map::Point_t factors{ 1, 1, 1 };
+	factors[ nAxis ] = -1;
+	TransformSelection( xv::map::Transform_t::Scaling( bounds.GetCenter(), factors ), nAxis == 2 ? tr( "Flip Vertical" ) : tr( "Flip Horizontal" ) );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: The dialog remembers its last answers for the session.
+//-----------------------------------------------------------------------------
+void CMapEditor::ShowPasteSpecialDialog()
+{
+	if ( QGuiApplication::clipboard()->text().isEmpty() )
+	{
+		emit StatusMessage( tr( "Nothing on the clipboard to paste into a map" ) );
+		return;
+	}
+	static xv::map::PasteSpecial_t s_Last;
+	static bool s_bLastAtView = false;
+	CMapPasteSpecialDialog dialog( this );
+	dialog.SetValues( s_Last, s_bLastAtView );
+	if ( dialog.exec() == QDialog::Accepted )
+	{
+		s_Last = dialog.GetValues();
+		s_bLastAtView = dialog.IsStartAtView();
+		PasteSpecial( s_Last, s_bLastAtView );
+	}
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Starting at the view's centre keeps the objects' own place along the view's depth axis.
+//-----------------------------------------------------------------------------
+void CMapEditor::PasteSpecial( xv::map::PasteSpecial_t how, bool bStartAtView )
+{
+	const xv::map::CScene *pScene = m_pDocument->GetScene();
+	const std::string szText = QGuiApplication::clipboard()->text().toStdString();
+	if ( !pScene || szText.empty() )
+	{
+		return;
+	}
+	if ( bStartAtView )
+	{
+		const xv::map::Box_t bounds = xv::map::BoundsOfText( szText );
+		xv::map::Point_t start = bounds.IsEmpty() ? xv::map::Point_t{} : bounds.GetCenter();
+		if ( const auto *p2D = qobject_cast<CMapView2D *>( m_pActiveView ) )
+		{
+			start[ static_cast<std::size_t>( p2D->GetAxisIndex( 0 ) ) ] = p2D->GetCenter().x();
+			start[ static_cast<std::size_t>( p2D->GetAxisIndex( 1 ) ) ] = p2D->GetCenter().y();
+		}
+		how.m_Start = start;
+	}
+	std::vector<std::uint32_t> added;
+	xv::map::MapEdit_t edit = xv::map::PasteSpecial( *pScene, szText, how, &added );
+	if ( edit.IsEmpty() )
+	{
+		emit StatusMessage( tr( "Nothing on the clipboard to paste into a map" ) );
+		return;
+	}
+	m_pDocument->Edit( std::move( edit ), tr( "Paste Special" ), std::move( added ) );
 }
 
 //-----------------------------------------------------------------------------

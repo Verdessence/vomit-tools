@@ -24,6 +24,7 @@
 #include "map/MapDocument.h"
 #include "map/MapGizmo.h"
 #include "map/MapRenderData.h"
+#include "map/MapDialogs.h"
 #include "map/MapView.h"
 
 class CMapFaceEdit;
@@ -139,6 +140,16 @@ public:
 	void Carve();
 	void MakeHollow();
 	void MakeHollow( double flWallWidth );
+	// Hammer's Transform dialog (Ctrl+M) and what it applies: turns about the selection's centre,
+	// scales about it, or moves. Flip mirrors across the centre along one axis (Ctrl+L: the active
+	// 2D view's horizontal one, Ctrl+I its vertical one; x and z from the 3D view).
+	void ShowTransformDialog();
+	void ApplyTransformValues( const TransformValues_t &values );
+	void FlipSelection( std::size_t nAxis );
+	// Paste Special (Ctrl+Shift+V) and what it applies; bStartAtView puts the first copy's centre
+	// at the active 2D view's centre.
+	void ShowPasteSpecialDialog();
+	void PasteSpecial( xv::map::PasteSpecial_t how, bool bStartAtView );
 	// Edit > Tie to Entity (Ctrl+T), Move to World (Ctrl+Shift+W), Group (Ctrl+G), Ungroup (Ctrl+U).
 	void TieToEntity();
 	void TieToEntity( const QString &szClass );

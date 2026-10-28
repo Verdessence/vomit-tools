@@ -703,6 +703,31 @@ void CMainWindow::BuildMenus( QAction *pSearchPathsToggle )
 			pMap->RunAction( MapAction_t::MAP_ACTION_GO_TO_BRUSH, pMap->GetActiveView() );
 		}
 	} );
+	m_pMapMenu->addAction( tr( "&Transform…" ), this, [ this ] {
+		if ( CMapEditor *pMap = GetCurrentMap() )
+		{
+			pMap->RunAction( MapAction_t::MAP_ACTION_TRANSFORM, pMap->GetActiveView() );
+		}
+	} );
+	m_pMapMenu->addAction( tr( "Flip Hori&zontal" ), this, [ this ] {
+		if ( CMapEditor *pMap = GetCurrentMap() )
+		{
+			pMap->RunAction( MapAction_t::MAP_ACTION_FLIP_HORIZONTAL, pMap->GetActiveView() );
+		}
+	} );
+	m_pMapMenu->addAction( tr( "Flip &Vertical" ), this, [ this ] {
+		if ( CMapEditor *pMap = GetCurrentMap() )
+		{
+			pMap->RunAction( MapAction_t::MAP_ACTION_FLIP_VERTICAL, pMap->GetActiveView() );
+		}
+	} );
+	m_pMapMenu->addAction( tr( "Paste &Special…" ), this, [ this ] {
+		if ( CMapEditor *pMap = GetCurrentMap() )
+		{
+			pMap->RunAction( MapAction_t::MAP_ACTION_PASTE_SPECIAL, pMap->GetActiveView() );
+		}
+	} );
+	m_pMapMenu->addSeparator();
 	m_pMapMenu->addAction( tr( "Make &Hollow…" ), this, [ this ] {
 		if ( CMapEditor *pMap = GetCurrentMap() )
 		{

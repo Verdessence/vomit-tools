@@ -67,6 +67,10 @@ enum class MapAction_t
 	MAP_ACTION_COPY,                 // Ctrl+C
 	MAP_ACTION_CUT,                  // Ctrl+X
 	MAP_ACTION_PASTE,                // Ctrl+V
+	MAP_ACTION_PASTE_SPECIAL,        // Ctrl+Shift+V
+	MAP_ACTION_TRANSFORM,            // Ctrl+M: the Transform dialog
+	MAP_ACTION_FLIP_HORIZONTAL,      // Ctrl+L: mirrored across the view's horizontal axis
+	MAP_ACTION_FLIP_VERTICAL,        // Ctrl+I
 	MAP_ACTION_SELECT_ALL,           // Ctrl+Shift+A
 	MAP_ACTION_TOGGLE_SNAP,          // Shift+W
 	MAP_ACTION_SNAP_SELECTION,       // Ctrl+B

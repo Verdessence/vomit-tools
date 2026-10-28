@@ -36,6 +36,11 @@
   white first. **Carve** (Ctrl+Shift+C) takes the selection's shape out of the brushes it
   overlaps, in convex pieces; **Make Hollow** (Map menu) turns brushes into grouped walls of a
   given width, inside or (negative) outside.
+- **Transform** (Ctrl+M): turn, scale or move the selection by typed amounts about its centre.
+  **Flip Horizontal** and **Flip Vertical** (Ctrl+L, Ctrl+I) mirror it across the active 2D
+  view's axes. **Paste Special** (Ctrl+Shift+V): several copies, each stepped and turned once
+  more than the last, starting where the original was or at the 2D view's centre, each copy
+  grouped, with entity names made unique (their outputs follow).
 - **Block tool** (Shift+B): drag a box in a 2D view, pull its handles in the others, Enter (or the
   right button's Create Object) makes a block with the current texture; the New Objects panel's
   Objects box picks a wedge, cylinder, spike or sphere instead, with its Faces count. **Entity tool** (Shift+E):

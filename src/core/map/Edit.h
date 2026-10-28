@@ -13,6 +13,7 @@
 //===========================================================================//
 #pragma once
 
+#include <array>
 #include <cstdint>
 #include <functional>
 #include <memory>
@@ -93,6 +94,25 @@ struct ObjectSet_t
 // What ObjectsToText wrote (or any VMF's objects), added to the scene moved by transform, with ids
 // of their own; pAdded as for CopyObjects. Empty when the text holds nothing.
 [[nodiscard]] MapEdit_t ObjectsFromText( const CScene &scene, std::string_view szText, const Transform_t &transform, std::vector<std::uint32_t> *pAdded );
+
+// Hammer's Paste Special: m_nCopies copies of the text's objects, each moved by m_Offset and
+// turned by m_Angles (degrees about x, y and z, about the set's own centre) once more than the
+// one before. Without m_Start the first copy is one step from where the objects were; with it,
+// the first copy's centre is put there and the steps follow. m_bGroup groups each copy;
+// m_bUniqueNames gives a copy's entities names the map doesn't have yet (a number appended, or
+// a trailing number raised), and its own outputs follow the renames.
+// The box round the text's objects (solids' shapes, point entities' origins); empty for none.
+[[nodiscard]] Box_t BoundsOfText( std::string_view szText );
+struct PasteSpecial_t
+{
+	int m_nCopies = 1;
+	Point_t m_Offset{};
+	std::array<double, 3> m_Angles{};
+	std::optional<Point_t> m_Start;
+	bool m_bGroup = false;
+	bool m_bUniqueNames = false;
+};
+[[nodiscard]] MapEdit_t PasteSpecial( const CScene &scene, std::string_view szText, const PasteSpecial_t &how, std::vector<std::uint32_t> *pAdded );
 
 // Tie to Entity: the objects' solids (world solids, and those of selected entities, which are
 // emptied) made one new brush entity of szClass, with the keys the game data gives it; pAdded

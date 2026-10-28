@@ -7,6 +7,9 @@
 #include "Edit.h"
 
 #include <algorithm>
+#include <string>
+#include <set>
+#include <cctype>
 #include <cmath>
 #include <numbers>
 #include <utility>
@@ -667,6 +670,178 @@ MapEdit_t ObjectsFromText( const CScene &scene, std::string_view szText, const T
 	}
 	// Anything the clipboard map's names point at must outlive it.
 	return AddIncoming( scene, std::move( incoming ), transform, true, pAdded );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: A name the map hasn't got: the trailing number raised (name2 -> name3), or 1 appended,
+//          until it is free; the name taken afterwards.
+//-----------------------------------------------------------------------------
+static std::string FreeName( std::string_view szName, std::set<std::string, std::less<>> &taken )
+{
+	std::size_t nDigits = 0;
+	while ( nDigits < szName.size() && std::isdigit( static_cast<unsigned char>( szName[ szName.size() - 1 - nDigits ] ) ) )
+	{
+		nDigits++;
+	}
+	const std::string_view szBase = szName.substr( 0, szName.size() - nDigits );
+	long long nNumber = 0;
+	if ( nDigits > 0 && nDigits < 18 )
+	{
+		nNumber = std::stoll( std::string{ szName.substr( szName.size() - nDigits ) } );
+	}
+	std::string szFree;
+	do
+	{
+		szFree = std::string{ szBase } + std::to_string( ++nNumber );
+	}
+	while ( taken.contains( szFree ) );
+	taken.insert( szFree );
+	return szFree;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+static Box_t BoundsOfMap( const CMap &clip )
+{
+	Box_t bounds;
+	for ( const Solid_t &solid : clip.m_Solids )
+	{
+		const SolidGeometry_t shape = BuildSolid( solid );
+		if ( shape.IsValid() )
+		{
+			bounds.Add( shape.m_Bounds );
+		}
+	}
+	for ( const Entity_t &entity : clip.m_Entities )
+	{
+		if ( entity.m_Solids.empty() )
+		{
+			if ( const std::optional<Point_t> origin = ParsePoint( entity.GetValue( "origin" ) ) )
+			{
+				bounds.Add( *origin );
+			}
+		}
+	}
+	return bounds;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+Box_t BoundsOfText( std::string_view szText )
+{
+	const std::optional<CMap> clip = ReadVmf( std::vector<char>( szText.begin(), szText.end() ) );
+	return clip ? BoundsOfMap( *clip ) : Box_t{};
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Every copy's objects go in as one batch, each copy transformed before, so the ids and
+//          object numbers come out as AddIncoming gives them; the groups take the ids after.
+//-----------------------------------------------------------------------------
+MapEdit_t PasteSpecial( const CScene &scene, std::string_view szText, const PasteSpecial_t &how, std::vector<std::uint32_t> *pAdded )
+{
+	const std::optional<CMap> clip = ReadVmf( std::vector<char>( szText.begin(), szText.end() ) );
+	if ( !clip || how.m_nCopies < 1 || ( clip->m_Solids.empty() && clip->m_Entities.empty() ) )
+	{
+		return {};
+	}
+	const CMap &map = scene.m_Map;
+	// The set's centre, which the turns are about and which m_Start places.
+	const Box_t bounds = BoundsOfMap( *clip );
+	const Point_t centre = bounds.IsEmpty() ? Point_t{} : bounds.GetCenter();
+	std::set<std::string, std::less<>> taken;
+	if ( how.m_bUniqueNames )
+	{
+		for ( const Entity_t &entity : map.m_Entities )
+		{
+			if ( const std::string_view szName = entity.GetValue( "targetname" ); !szName.empty() && !entity.m_bDeleted )
+			{
+				taken.insert( std::string{ szName } );
+			}
+		}
+	}
+	Incoming_t incoming;
+	const int nFirstGroup = scene.m_nNextObjectId + static_cast<int>( clip->m_Solids.size() + clip->m_Entities.size() ) * how.m_nCopies;
+	MapEdit_t groups;
+	for ( int nCopy = 1; nCopy <= how.m_nCopies; nCopy++ )
+	{
+		const int nStep = how.m_Start ? nCopy - 1 : nCopy;
+		Transform_t transform = Transform_t::Rotation( centre, 2, how.m_Angles[ 2 ] * nStep ) * Transform_t::Rotation( centre, 1, how.m_Angles[ 1 ] * nStep ) * Transform_t::Rotation( centre, 0, how.m_Angles[ 0 ] * nStep );
+		transform = Transform_t::Translation( Add( how.m_Start ? Subtract( *how.m_Start, centre ) : Point_t{}, Scale( how.m_Offset, nStep ) ) ) * transform;
+		transform.m_Pivot = centre;
+		const int nGroup = how.m_bGroup ? nFirstGroup + nCopy - 1 : 0;
+		if ( how.m_bGroup )
+		{
+			Group_t group;
+			group.m_nId = nGroup;
+			group.m_Editor.m_Color = { 220, 220, 220 };
+			group.m_Editor.m_bHasColor = true;
+			groups.m_Groups.push_back( group );
+		}
+		const int nFirstEntity = static_cast<int>( incoming.m_Entities.size() );
+		std::vector<std::pair<std::string, std::string_view>> renames; // old name, new (stored)
+		for ( const Entity_t &source : clip->m_Entities )
+		{
+			Entity_t entity = source;
+			Adopt( map, entity, true );
+			entity = TransformEntity( map, entity, transform );
+			if ( how.m_bUniqueNames )
+			{
+				if ( const std::string_view szName = entity.GetValue( "targetname" ); !szName.empty() )
+				{
+					if ( taken.contains( szName ) )
+					{
+						const std::string_view szNew = map.Store( FreeName( szName, taken ) );
+						renames.emplace_back( std::string{ szName }, szNew );
+						SetKeyValue( map, entity, "targetname", szNew );
+					}
+					else
+					{
+						taken.insert( std::string{ szName } );
+					}
+				}
+			}
+			if ( how.m_bGroup )
+			{
+				entity.m_Editor.m_nGroup = nGroup;
+			}
+			incoming.m_Entities.push_back( std::move( entity ) );
+		}
+		for ( std::size_t i = static_cast<std::size_t>( nFirstEntity ); i < incoming.m_Entities.size() && !renames.empty(); i++ )
+		{
+			for ( Connection_t &connection : incoming.m_Entities[ i ].m_Connections )
+			{
+				for ( const auto &[ szOld, szNew ] : renames )
+				{
+					if ( connection.m_szTarget == szOld )
+					{
+						connection.m_szTarget = szNew;
+						incoming.m_Entities[ i ].m_bConnectionsChanged = true;
+					}
+				}
+			}
+		}
+		for ( const Solid_t &source : clip->m_Solids )
+		{
+			Solid_t solid = source;
+			Adopt( map, solid, true );
+			solid = TransformSolid( solid, transform, true );
+			solid.m_bChanged = false;
+			if ( solid.m_nEntity >= 0 )
+			{
+				solid.m_nEntity += nFirstEntity;
+			}
+			if ( how.m_bGroup )
+			{
+				solid.m_Editor.m_nGroup = nGroup;
+			}
+			incoming.m_Solids.push_back( std::move( solid ) );
+		}
+	}
+	MapEdit_t edit = AddIncoming( scene, std::move( incoming ), {}, false, pAdded );
+	edit.m_Groups = std::move( groups.m_Groups );
+	return edit;
 }
 
 //-----------------------------------------------------------------------------
