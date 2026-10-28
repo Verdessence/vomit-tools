@@ -70,6 +70,7 @@ const Binding_t BINDINGS[] = {
 	{ MapAction_t::MAP_ACTION_TOGGLE_SNAP, Qt::Key_W, Qt::ShiftModifier, BOTH },
 	{ MapAction_t::MAP_ACTION_SNAP_SELECTION, Qt::Key_B, Qt::ControlModifier, BOTH },
 	{ MapAction_t::MAP_ACTION_TOGGLE_TEXTURE_LOCK, Qt::Key_L, Qt::ShiftModifier, BOTH },
+	{ MapAction_t::MAP_ACTION_EDIT_MODE, Qt::Key_X, Qt::NoModifier, BOTH },
 	{ MapAction_t::MAP_ACTION_NEXT_AXIS, Qt::Key_Tab, Qt::NoModifier, ONLY_2D },
 	// Hammer's zoom keys are the keypad's; the main row's work too, for keyboards without one.
 	{ MapAction_t::MAP_ACTION_ZOOM_IN, Qt::Key_Plus, Qt::NoModifier, ONLY_2D },

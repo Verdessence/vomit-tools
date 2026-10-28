@@ -51,6 +51,8 @@ public:
 	[[nodiscard]] const MapViewSettings_t &GetSettings() const { return m_Settings; }
 	[[nodiscard]] MapTool_t GetTool() const { return m_nTool; }
 	void SetTool( MapTool_t nTool );
+	[[nodiscard]] MapEditMode_t GetEditMode() const { return m_nEditMode; }
+	void SetEditMode( MapEditMode_t nMode );
 	[[nodiscard]] CMapPane *GetPane( int nIndex ) const;
 	[[nodiscard]] std::vector<CMapView *> GetViews() const;
 	[[nodiscard]] CMapView *GetActiveView() const { return m_pActiveView; }
@@ -73,6 +75,9 @@ public:
 	void CameraMoved( CMapView *pView );
 	// The selection moved by offset (units), or copied there (bClone); one step to undo.
 	void MoveSelection( xv::map::Point_t offset, bool bClone );
+	// The selection transformed (turned, stretched, sheared), with the locks; one step to undo,
+	// named szName in Edit > Undo.
+	void TransformSelection( const xv::map::Transform_t &transform, const QString &szName );
 
 	// The block tool's box, dragged in a 2D view and shown in every view; Enter makes it a block.
 	[[nodiscard]] const std::optional<xv::map::Box_t> &GetNewBox() const { return m_NewBox; }
@@ -148,6 +153,7 @@ private:
 	bool m_bFromGame = false;
 	MapViewSettings_t m_Settings;
 	MapTool_t m_nTool = MapTool_t::MAP_TOOL_SELECT;
+	MapEditMode_t m_nEditMode = MapEditMode_t::MAP_EDIT_MODE_RESIZE;
 	std::optional<xv::map::CViewCamera> m_RememberedCamera;
 	CMapView *m_pActiveView = nullptr;
 	std::optional<xv::map::Box_t> m_NewBox;

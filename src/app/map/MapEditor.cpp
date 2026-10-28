@@ -462,6 +462,7 @@ void CMapEditor::BuildToolBars( QVBoxLayout *pLayout )
 	toggle( tr( "Grid" ), MapAction_t::MAP_ACTION_TOGGLE_GRID, m_Settings.m_bShowGrid )->setObjectName( QStringLiteral( "mapToggleGrid" ) );
 	toggle( tr( "Snap to Grid" ), MapAction_t::MAP_ACTION_TOGGLE_SNAP, m_Settings.m_bSnapToGrid )->setObjectName( QStringLiteral( "mapToggleSnap" ) );
 	toggle( tr( "Texture Lock" ), MapAction_t::MAP_ACTION_TOGGLE_TEXTURE_LOCK, m_Settings.m_bTextureLock )->setObjectName( QStringLiteral( "mapToggleTextureLock" ) );
+	toggle( tr( "Scale Lock" ), MapAction_t::MAP_ACTION_TOGGLE_SCALE_LOCK, m_Settings.m_bScaleLock )->setObjectName( QStringLiteral( "mapToggleScaleLock" ) );
 	pBar->addSeparator();
 	toggle( tr( "Models in 2D" ), MapAction_t::MAP_ACTION_TOGGLE_MODELS_2D, m_Settings.m_bModels2D )->setObjectName( QStringLiteral( "mapToggleModels2D" ) );
 	toggle( tr( "Entity Names" ), MapAction_t::MAP_ACTION_TOGGLE_NAMES, m_Settings.m_bNames );
@@ -712,6 +713,7 @@ void CMapEditor::TakePreferences()
 	m_Settings.m_bDrawVertices = preferences.m_bDrawVertices;
 	m_Settings.m_bCenterHandles = preferences.m_bCenterHandles;
 	m_Settings.m_bTextureLock = preferences.m_bTextureLock;
+	m_Settings.m_bScaleLock = preferences.m_bScaleLock;
 	m_Settings.m_bModels2D = preferences.m_bModels2D;
 	m_Settings.m_bUseGroupColors = preferences.m_bGroupColors;
 	m_Settings.m_bSkybox3D = preferences.m_bSkybox3D;
@@ -883,6 +885,11 @@ bool CMapEditor::RunAction( MapAction_t nAction, CMapView *pFrom )
 			return true;
 		case MapAction_t::MAP_ACTION_TOGGLE_SNAP: return toggle( m_Settings.m_bSnapToGrid );
 		case MapAction_t::MAP_ACTION_TOGGLE_TEXTURE_LOCK: return toggle( m_Settings.m_bTextureLock );
+		case MapAction_t::MAP_ACTION_TOGGLE_SCALE_LOCK: return toggle( m_Settings.m_bScaleLock );
+		case MapAction_t::MAP_ACTION_EDIT_MODE:
+			SetEditMode( m_nEditMode == MapEditMode_t::MAP_EDIT_MODE_RESIZE ? MapEditMode_t::MAP_EDIT_MODE_ROTATE : m_nEditMode == MapEditMode_t::MAP_EDIT_MODE_ROTATE ? MapEditMode_t::MAP_EDIT_MODE_SHEAR
+																																									   : MapEditMode_t::MAP_EDIT_MODE_RESIZE );
+			return true;
 		case MapAction_t::MAP_ACTION_DELETE:
 			if ( !selection.empty() && m_pDocument->GetScene() )
 			{
@@ -980,7 +987,37 @@ void CMapEditor::MoveSelection( xv::map::Point_t offset, bool bClone )
 		m_pDocument->Edit( std::move( edit ), tr( "Clone" ), std::move( added ) );
 		return;
 	}
-	m_pDocument->Edit( xv::map::TransformObjects( *pScene, selection, move, m_Settings.m_bTextureLock ), tr( "Move" ), selection );
+	TransformSelection( move, tr( "Move" ) );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+void CMapEditor::TransformSelection( const xv::map::Transform_t &transform, const QString &szName )
+{
+	const xv::map::CScene *pScene = m_pDocument->GetScene();
+	const std::vector<std::uint32_t> &selection = m_pDocument->GetSelection();
+	if ( !pScene || selection.empty() || transform.IsIdentity() )
+	{
+		return;
+	}
+	m_pDocument->Edit( xv::map::TransformObjects( *pScene, selection, transform, m_Settings.m_bTextureLock, m_Settings.m_bScaleLock ), szName, selection );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Hammer's cycle of what the selection's handles do; the views draw the handles anew.
+//-----------------------------------------------------------------------------
+void CMapEditor::SetEditMode( MapEditMode_t nMode )
+{
+	if ( nMode == m_nEditMode )
+	{
+		return;
+	}
+	m_nEditMode = nMode;
+	for ( CMapView *pView : GetViews() )
+	{
+		pView->update();
+	}
 }
 
 //-----------------------------------------------------------------------------

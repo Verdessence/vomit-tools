@@ -482,6 +482,10 @@ QWidget *CPreferencesDialog::BuildMapsPage()
 		pLayout->addSpacing( 12 );
 		pLayout->addWidget( check( QStringLiteral( "preferencesMapArrowsNudge" ), tr( "Arrow keys move the selection (in the 2D views)" ), current.m_bArrowsNudge, []( MapPreferences_t &p, bool b ) { p.m_bArrowsNudge = b; } ) );
 		pLayout->addWidget( check( QStringLiteral( "preferencesMapTextureLock" ), tr( "Texture lock on when a map opens" ), current.m_bTextureLock, []( MapPreferences_t &p, bool b ) { p.m_bTextureLock = b; } ) );
+		pLayout->addWidget( check( QStringLiteral( "preferencesMapScaleLock" ), tr( "Texture scale lock on when a map opens (textures stretch with resized faces)" ), current.m_bScaleLock, []( MapPreferences_t &p, bool b ) { p.m_bScaleLock = b; } ) );
+		auto *pEditing = new QFormLayout;
+		pEditing->addRow( tr( "Rotation snaps to" ), spin( QStringLiteral( "preferencesMapRotationSnap" ), current.m_flRotationSnap, 1, 90, 1, 0, []( MapPreferences_t &p, double fl ) { p.m_flRotationSnap = fl; } ) );
+		pLayout->addLayout( pEditing );
 		pLayout->addStretch();
 	}
 

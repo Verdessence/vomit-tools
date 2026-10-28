@@ -48,10 +48,11 @@ inline constexpr std::uint32_t NEW_MATERIAL = ~0u;
 [[nodiscard]] MapEdit_t InverseOf( const CScene &scene, const MapEdit_t &edit );
 
 // A solid or entity moved, turned or scaled by transform. With texture lock the texture moves with
-// the faces, as Hammer's Texture Lock does; without it stays put in the world. A transform that
+// the faces, as Hammer's Texture Lock does; without it stays put in the world. With the scale
+// lock too, a stretch stretches the texture; without, it keeps its size. A transform that
 // mirrors turns the planes' points round, so the faces still face out. The result is marked
 // changed.
-[[nodiscard]] Solid_t TransformSolid( const Solid_t &solid, const Transform_t &transform, bool bTextureLock );
+[[nodiscard]] Solid_t TransformSolid( const Solid_t &solid, const Transform_t &transform, bool bTextureLock, bool bScaleLock = false );
 // Moves an entity's origin and turns its angles (a point entity; a brush entity's solids are
 // transformed on their own).
 [[nodiscard]] Entity_t TransformEntity( const CMap &map, const Entity_t &entity, const Transform_t &transform );
@@ -70,7 +71,7 @@ struct ObjectSet_t
 // Deletes the objects (an entity with its solids).
 [[nodiscard]] MapEdit_t DeleteObjects( const CScene &scene, const std::vector<std::uint32_t> &objects );
 // Moves, turns or scales the objects: solids by TransformSolid, entities by TransformEntity.
-[[nodiscard]] MapEdit_t TransformObjects( const CScene &scene, const std::vector<std::uint32_t> &objects, const Transform_t &transform, bool bTextureLock );
+[[nodiscard]] MapEdit_t TransformObjects( const CScene &scene, const std::vector<std::uint32_t> &objects, const Transform_t &transform, bool bTextureLock, bool bScaleLock = false );
 // Copies of the objects, transformed, with ids of their own; pAdded gets the object numbers they
 // will have once the edit is made (the copies of entities first, then of solids).
 [[nodiscard]] MapEdit_t CopyObjects( const CScene &scene, const std::vector<std::uint32_t> &objects, const Transform_t &transform, bool bTextureLock, std::vector<std::uint32_t> *pAdded );

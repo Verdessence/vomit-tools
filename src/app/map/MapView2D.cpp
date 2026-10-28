@@ -10,6 +10,7 @@
 #include <cmath>
 #include <limits>
 #include <numbers>
+#include <tuple>
 #include <unordered_map>
 
 #include <QApplication>
@@ -93,15 +94,41 @@ std::array<std::pair<QPoint, QRectF>, 8> HandlesOf( const QRectF &box )
 }
 
 //-----------------------------------------------------------------------------
-// Purpose: Hammer's handles drawn round box.
+// Purpose: Which of the eight handles an edit mode uses: resizing all of them, turning the
+//          corners, shearing the sides.
 //-----------------------------------------------------------------------------
-void PaintHandles( QPainter &painter, const QRectF &box )
+bool HandleInMode( QPoint where, MapEditMode_t nMode )
+{
+	const bool bCorner = where.x() != 0 && where.y() != 0;
+	return nMode == MapEditMode_t::MAP_EDIT_MODE_RESIZE || ( nMode == MapEditMode_t::MAP_EDIT_MODE_ROTATE ) == bCorner;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Hammer's handles drawn round box: squares to resize, circles to turn, bars to shear.
+//-----------------------------------------------------------------------------
+void PaintHandles( QPainter &painter, const QRectF &box, MapEditMode_t nMode = MapEditMode_t::MAP_EDIT_MODE_RESIZE )
 {
 	painter.setPen( QPen{ Qt::black, 0 } );
 	painter.setBrush( Look().m_Colors.m_ToolHandle );
 	for ( const auto &[ where, handle ] : HandlesOf( box ) )
 	{
-		painter.drawRect( handle );
+		if ( !HandleInMode( where, nMode ) )
+		{
+			continue;
+		}
+		switch ( nMode )
+		{
+			case MapEditMode_t::MAP_EDIT_MODE_RESIZE: painter.drawRect( handle ); break;
+			case MapEditMode_t::MAP_EDIT_MODE_ROTATE:
+				painter.setRenderHint( QPainter::Antialiasing, true );
+				painter.drawEllipse( handle.adjusted( -1, -1, 1, 1 ) );
+				painter.setRenderHint( QPainter::Antialiasing, false );
+				break;
+			case MapEditMode_t::MAP_EDIT_MODE_SHEAR:
+				// A bar along the side it slides.
+				painter.drawRect( where.x() == 0 ? handle.adjusted( -handle.width(), 0, handle.width(), 0 ) : handle.adjusted( 0, -handle.height(), 0, handle.height() ) );
+				break;
+		}
 	}
 }
 
@@ -915,7 +942,7 @@ void CMapView2D::PaintSelection( QPainter &painter ) const
 			const QRectF box = RectOf( bounds );
 			painter.fillRect( box, Look().m_Colors.m_SelectionFill );
 			dotted( box );
-			PaintHandles( painter, box );
+			PaintHandles( painter, box, m_Editor.GetEditMode() );
 			// Its size on two sides, as Hammer shows it while selecting.
 			PaintSizes( painter, box, Flatten( bounds.m_Maxs ) - Flatten( bounds.m_Mins ), Look().m_Colors.m_ToolSelection );
 		}
@@ -1191,10 +1218,23 @@ void CMapView2D::mousePressEvent( QMouseEvent *pEvent )
 	{
 		m_PressAt = pEvent->position().toPoint();
 		m_BoxFrom = ToMap( at );
-		// Inside the selection's box: a drag moves the selection (Hammer's selection tool).
+		// On one of the selection's handles, a drag resizes, turns or shears it; inside its box, a
+		// drag moves it (Hammer's selection tool).
 		const xv::map::Box_t bounds = GetDocument().GetSelectionBounds();
 		if ( !bounds.IsEmpty() && nTool == MapTool_t::MAP_TOOL_SELECT )
 		{
+			for ( const auto &[ where, handle ] : HandlesOf( RectOf( bounds ) ) )
+			{
+				if ( HandleInMode( where, m_Editor.GetEditMode() ) && handle.adjusted( -2.0, -2.0, 2.0, 2.0 ).contains( at ) )
+				{
+					m_HandleDrag = where;
+					m_nHandleMode = m_Editor.GetEditMode();
+					m_HandleFrom = ToMap( at );
+					m_DragBounds = bounds;
+					m_BoxFrom.reset();
+					return;
+				}
+			}
 			const double flSlack = 2.0 / m_flZoom;
 			const QRectF box = QRectF{ Flatten( bounds.m_Mins ), Flatten( bounds.m_Maxs ) }.normalized().adjusted( -flSlack, -flSlack, flSlack, flSlack );
 			if ( box.contains( ToMap( at ) ) )
@@ -1335,6 +1375,121 @@ void CMapView2D::DragBlock( QPointF at, Qt::KeyboardModifiers modifiers )
 }
 
 //-----------------------------------------------------------------------------
+// Purpose: Resizing pulls the side (or corner) held, the opposite one staying put, so the box's
+//          edge lands on the grid. Turning goes about the box's centre, by the angle the mouse
+//          has swept round it, in steps (Preferences). Shearing slides the side held along
+//          itself, a grid step at a time, the opposite side staying.
+//-----------------------------------------------------------------------------
+xv::map::Transform_t CMapView2D::HandleTransform( QPointF at, Qt::KeyboardModifiers modifiers ) const
+{
+	using xv::map::Point_t;
+	using xv::map::Transform_t;
+	const QPoint h = m_HandleDrag.value_or( QPoint{} );
+	const QPointF map = ToMap( at );
+	const int a0 = GetAxis( 0 );
+	const int a1 = GetAxis( 1 );
+	const int a2 = 3 - a0 - a1;
+	const auto n0 = static_cast<std::size_t>( a0 );
+	const auto n1 = static_cast<std::size_t>( a1 );
+	const xv::map::Box_t &bounds = m_DragBounds;
+	switch ( m_nHandleMode )
+	{
+		case MapEditMode_t::MAP_EDIT_MODE_RESIZE:
+		{
+			Point_t factors{ 1, 1, 1 };
+			Point_t pivot = bounds.m_Mins;
+			// Down the widget is down the view's vertical axis: the top handle pulls the maximum.
+			const std::array<std::tuple<int, std::size_t, bool, double>, 2> pulls{ { { h.x(), n0, h.x() > 0, map.x() }, { h.y(), n1, h.y() < 0, map.y() } } };
+			for ( const auto &[ nHandle, nAxis, bMaxs, flTo ] : pulls )
+			{
+				if ( nHandle == 0 )
+				{
+					continue;
+				}
+				const double flDragged = bMaxs ? bounds.m_Maxs[ nAxis ] : bounds.m_Mins[ nAxis ];
+				const double flFixed = bMaxs ? bounds.m_Mins[ nAxis ] : bounds.m_Maxs[ nAxis ];
+				const double flNew = Snap( flTo, modifiers );
+				if ( std::abs( flDragged - flFixed ) > 1e-9 && std::abs( flNew - flFixed ) > 1e-9 )
+				{
+					factors[ nAxis ] = ( flNew - flFixed ) / ( flDragged - flFixed );
+					pivot[ nAxis ] = flFixed;
+				}
+			}
+			return Transform_t::Scaling( pivot, factors );
+		}
+		case MapEditMode_t::MAP_EDIT_MODE_ROTATE:
+		{
+			const Point_t pivot = bounds.GetCenter();
+			const QPointF centre = Flatten( pivot );
+			const QPointF was = m_HandleFrom - centre;
+			const QPointF now = map - centre;
+			if ( QPointF::dotProduct( was, was ) < 1e-12 || QPointF::dotProduct( now, now ) < 1e-12 )
+			{
+				return {};
+			}
+			double flDegrees = ( std::atan2( now.y(), now.x() ) - std::atan2( was.y(), was.x() ) ) * 180.0 / std::numbers::pi;
+			if ( !modifiers.testFlag( Qt::AltModifier ) )
+			{
+				const double flStep = std::max( 1.0, Look().m_flRotationSnap );
+				flDegrees = std::round( flDegrees / flStep ) * flStep;
+			}
+			// Anticlockwise on screen is the right-hand turn about the axis out of the view only
+			// where the view's axes are a right-handed pair (x/y and y/z; x/z is the other way).
+			const double flSign = ( a0 + 1 ) % 3 == a1 ? 1.0 : -1.0;
+			return Transform_t::Rotation( pivot, a2, flSign * flDegrees );
+		}
+		case MapEditMode_t::MAP_EDIT_MODE_SHEAR:
+		{
+			if ( ( h.x() == 0 ) == ( h.y() == 0 ) )
+			{
+				return {};
+			}
+			// The held side slides along the other axis; the opposite side is the pivot.
+			const bool bAcross = h.y() != 0; // the top or bottom slides along axis 0
+			const std::size_t nAxis = bAcross ? n1 : n0;   // across which the slide grows
+			const std::size_t nAlong = bAcross ? n0 : n1;
+			const double flDelta = Snap( bAcross ? map.x() - m_HandleFrom.x() : map.y() - m_HandleFrom.y(), modifiers );
+			const double flExtent = bounds.m_Maxs[ nAxis ] - bounds.m_Mins[ nAxis ];
+			if ( flExtent <= 1e-9 )
+			{
+				return {};
+			}
+			const bool bMaxsSlides = bAcross ? h.y() < 0 : h.x() > 0;
+			Point_t pivot = bounds.m_Mins;
+			pivot[ nAxis ] = bMaxsSlides ? bounds.m_Mins[ nAxis ] : bounds.m_Maxs[ nAxis ];
+			return Transform_t::Shear( pivot, static_cast<int>( nAxis ), static_cast<int>( nAlong ), ( bMaxsSlides ? 1.0 : -1.0 ) * flDelta / flExtent );
+		}
+	}
+	return {};
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: The handle's pull shown as it goes.
+//-----------------------------------------------------------------------------
+void CMapView2D::PreviewHandle( QPointF at, Qt::KeyboardModifiers modifiers )
+{
+	CMapDocument &document = GetDocument();
+	if ( !m_pMoveScene )
+	{
+		m_pMoveScene = document.GetSharedScene();
+		m_MoveSelection = document.GetSelection();
+	}
+	const xv::map::Transform_t transform = HandleTransform( at, modifiers );
+	const MapViewSettings_t &settings = m_Editor.GetSettings();
+	document.Preview( xv::map::TransformObjects( *m_pMoveScene, m_MoveSelection, transform, settings.m_bTextureLock, settings.m_bScaleLock ) );
+	if ( m_nHandleMode == MapEditMode_t::MAP_EDIT_MODE_ROTATE )
+	{
+		const double flSign = ( GetAxis( 0 ) + 1 ) % 3 == GetAxis( 1 ) ? 1.0 : -1.0;
+		const auto &m = transform.m_Rotation;
+		// The angle back out of the matrix, in the view's plane.
+		const int a0 = GetAxis( 0 );
+		const int a1 = GetAxis( 1 );
+		const double flDegrees = flSign * std::atan2( m[ static_cast<std::size_t>( a1 * 3 + a0 ) ], m[ static_cast<std::size_t>( a0 * 3 + a0 ) ] ) * 180.0 / std::numbers::pi;
+		m_Editor.ShowCursor( QStringLiteral( "%1°" ).arg( std::lround( flDegrees ) ) );
+	}
+}
+
+//-----------------------------------------------------------------------------
 // Purpose: How far a drag that began at m_MoveFrom moves the selection: snapped so the selection's
 //          lowest corner lands on the grid (Alt moves freely), along the view's two axes.
 //-----------------------------------------------------------------------------
@@ -1383,6 +1538,7 @@ void CMapView2D::CancelMove()
 	m_pMoveScene.reset();
 	m_MoveSelection.clear();
 	m_MoveFrom.reset();
+	m_HandleDrag.reset();
 }
 
 //-----------------------------------------------------------------------------
@@ -1401,6 +1557,11 @@ void CMapView2D::mouseMoveEvent( QMouseEvent *pEvent )
 	if ( m_nBoxDrag != BoxDrag_t::BOX_DRAG_NONE && ( pEvent->buttons() & Qt::LeftButton ) )
 	{
 		DragBlock( pEvent->position(), pEvent->modifiers() );
+		return;
+	}
+	if ( m_HandleDrag && ( pEvent->buttons() & Qt::LeftButton ) )
+	{
+		PreviewHandle( pEvent->position(), pEvent->modifiers() );
 		return;
 	}
 	if ( m_MoveFrom && ( pEvent->buttons() & Qt::LeftButton ) && ( m_pMoveScene || ( pEvent->position().toPoint() - m_PressAt ).manhattanLength() >= DRAG_THRESHOLD ) )
@@ -1431,6 +1592,18 @@ void CMapView2D::mouseReleaseEvent( QMouseEvent *pEvent )
 		m_PressAt = {};
 		return;
 	}
+	if ( pEvent->button() == Qt::LeftButton && m_HandleDrag )
+	{
+		// The handle's pull, as one step to undo.
+		const xv::map::Transform_t transform = HandleTransform( pEvent->position(), pEvent->modifiers() );
+		const QString szName = m_nHandleMode == MapEditMode_t::MAP_EDIT_MODE_RESIZE ? tr( "Resize" ) : m_nHandleMode == MapEditMode_t::MAP_EDIT_MODE_ROTATE ? tr( "Rotate" )
+																																							: tr( "Shear" );
+		CancelMove();
+		m_Editor.TransformSelection( transform, szName );
+		m_PressAt = {};
+		update();
+		return;
+	}
 	if ( pEvent->button() != Qt::LeftButton || !m_BoxFrom )
 	{
 		return;
@@ -1449,6 +1622,7 @@ void CMapView2D::mouseReleaseEvent( QMouseEvent *pEvent )
 		update();
 		return;
 	}
+	const bool bInside = m_MoveFrom.has_value();
 	m_MoveFrom.reset();
 	CMapDocument &document = GetDocument();
 	const QPoint moved = pEvent->position().toPoint() - m_PressAt;
@@ -1456,7 +1630,12 @@ void CMapView2D::mouseReleaseEvent( QMouseEvent *pEvent )
 	if ( std::abs( moved.x() ) < DRAG_THRESHOLD && std::abs( moved.y() ) < DRAG_THRESHOLD )
 	{
 		m_PendingBox.reset();
-		if ( const auto hit = HitAt( pEvent->position() ) )
+		if ( bInside && !bControl )
+		{
+			// A click inside the selection goes to the next of Hammer's edit modes.
+			m_Editor.RunAction( MapAction_t::MAP_ACTION_EDIT_MODE, this );
+		}
+		else if ( const auto hit = HitAt( pEvent->position() ) )
 		{
 			const std::vector<std::uint32_t> objects = document.Expand( *hit );
 			if ( bControl )
@@ -1634,7 +1813,7 @@ bool CMapView2D::Run( MapAction_t nAction )
 		case MapAction_t::MAP_ACTION_ESCAPE:
 			// The editor drops the box or marker; the drag mustn't bring it back.
 			m_nBoxDrag = BoxDrag_t::BOX_DRAG_NONE;
-			if ( m_pMoveScene )
+			if ( m_pMoveScene || m_HandleDrag )
 			{
 				CancelMove();
 				m_BoxFrom.reset();

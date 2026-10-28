@@ -103,6 +103,8 @@ struct MapPreferences_t
 	// Editing.
 	bool m_bArrowsNudge = true;      // arrow keys move the selection (Hammer++'s Nudge)
 	bool m_bTextureLock = true;      // what a map opens with (Hammer++'s LockTextures)
+	bool m_bScaleLock = false;       // and its ScaleLockTextures
+	double m_flRotationSnap = mapstyle::ROTATION_SNAP; // degrees a handle's turn snaps to
 
 	// The 2D views.
 	bool m_bHideSmallGrid = true;

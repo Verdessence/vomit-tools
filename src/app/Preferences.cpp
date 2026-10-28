@@ -52,6 +52,8 @@ void ForEachMapPreference( Preferences_t &map, Visit_t &&pfnVisit )
 	pfnVisit( "maps/selectedModels", map.m_nSelectedModels );
 	pfnVisit( "maps/arrowsNudge", map.m_bArrowsNudge );
 	pfnVisit( "maps/textureLock", map.m_bTextureLock );
+	pfnVisit( "maps/scaleLock", map.m_bScaleLock );
+	pfnVisit( "maps/rotationSnap", map.m_flRotationSnap );
 	pfnVisit( "maps/hideSmallGrid", map.m_bHideSmallGrid );
 	pfnVisit( "maps/hideGridBelow", map.m_flHideGridBelow );
 	pfnVisit( "maps/highlightEvery", map.m_nHighlightEvery );

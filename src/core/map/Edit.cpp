@@ -39,10 +39,12 @@ double Determinant( const Transform_t &transform )
 }
 
 //-----------------------------------------------------------------------------
-// Purpose: A texture axis after transform. Locked, the texel under every point stays under it as
-//          the point moves: the axis turns with the faces and the shift takes up the move.
+// Purpose: A texture axis after transform. Locked, the axis turns with the faces and the shift
+//          takes up the move, so the texel under every point stays under it. A stretch then
+//          stretches the texture too only with the scale lock (Hammer's Texture Scale Lock);
+//          without it the texture keeps its size, anchored at the pivot.
 //-----------------------------------------------------------------------------
-TextureAxis_t TransformAxis( const TextureAxis_t &axis, const Transform_t &transform, bool bLock )
+TextureAxis_t TransformAxis( const TextureAxis_t &axis, const Transform_t &transform, bool bLock, bool bScaleLock )
 {
 	if ( !bLock )
 	{
@@ -56,11 +58,17 @@ TextureAxis_t TransformAxis( const TextureAxis_t &axis, const Transform_t &trans
 	{
 		return axis;
 	}
-	// Kept as long as it was (a scale stretches the texture with the face, Hammer's scale lock).
 	out.m_Axis = Scale( turned, flAxisLength / flLength );
-	out.m_flScale = axis.m_flScale * flLength / flAxisLength;
-	out.m_flShift = axis.m_flShift - Dot( transform.m_Offset, out.m_Axis ) / out.m_flScale;
-	// Shifts wrap with the texture; keeping them small keeps the file tidy.
+	if ( bScaleLock )
+	{
+		out.m_flScale = axis.m_flScale * flLength / flAxisLength;
+		out.m_flShift = axis.m_flShift - Dot( transform.m_Offset, out.m_Axis ) / out.m_flScale;
+	}
+	else
+	{
+		const double flScale = axis.m_flScale != 0.0 ? axis.m_flScale : 1.0;
+		out.m_flShift = axis.m_flShift + ( Dot( transform.m_Pivot, axis.m_Axis ) - Dot( transform.Apply( transform.m_Pivot ), out.m_Axis ) ) / flScale;
+	}
 	return out;
 }
 
@@ -239,7 +247,7 @@ MapEdit_t InverseOf( const CScene &scene, const MapEdit_t &edit )
 //-----------------------------------------------------------------------------
 // Purpose:
 //-----------------------------------------------------------------------------
-Solid_t TransformSolid( const Solid_t &solid, const Transform_t &transform, bool bTextureLock )
+Solid_t TransformSolid( const Solid_t &solid, const Transform_t &transform, bool bTextureLock, bool bScaleLock )
 {
 	Solid_t out = solid;
 	const bool bMirror = Determinant( transform ) < 0.0;
@@ -258,8 +266,8 @@ Solid_t TransformSolid( const Solid_t &solid, const Transform_t &transform, bool
 			std::swap( side.m_Plane[ 0 ], side.m_Plane[ 2 ] );
 			std::ranges::reverse( side.m_PlusVertices );
 		}
-		side.m_UAxis = TransformAxis( side.m_UAxis, transform, bTextureLock );
-		side.m_VAxis = TransformAxis( side.m_VAxis, transform, bTextureLock );
+		side.m_UAxis = TransformAxis( side.m_UAxis, transform, bTextureLock, bScaleLock );
+		side.m_VAxis = TransformAxis( side.m_VAxis, transform, bTextureLock, bScaleLock );
 		if ( side.m_pDisp )
 		{
 			DispInfo_t &disp = *side.m_pDisp;
@@ -371,13 +379,13 @@ MapEdit_t DeleteObjects( const CScene &scene, const std::vector<std::uint32_t> &
 //-----------------------------------------------------------------------------
 // Purpose:
 //-----------------------------------------------------------------------------
-MapEdit_t TransformObjects( const CScene &scene, const std::vector<std::uint32_t> &objects, const Transform_t &transform, bool bTextureLock )
+MapEdit_t TransformObjects( const CScene &scene, const std::vector<std::uint32_t> &objects, const Transform_t &transform, bool bTextureLock, bool bScaleLock )
 {
 	const ObjectSet_t set = ObjectsOf( scene, objects );
 	MapEdit_t edit;
 	for ( const std::uint32_t nSolid : set.m_Solids )
 	{
-		edit.m_Solids.emplace_back( nSolid, TransformSolid( scene.m_Map.m_Solids[ nSolid ], transform, bTextureLock ) );
+		edit.m_Solids.emplace_back( nSolid, TransformSolid( scene.m_Map.m_Solids[ nSolid ], transform, bTextureLock, bScaleLock ) );
 	}
 	for ( const std::uint32_t nEntity : set.m_Entities )
 	{

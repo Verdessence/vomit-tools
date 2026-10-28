@@ -21,6 +21,7 @@
 
 #include "map/MapView.h"
 #include "map/Mesh.h"
+#include "map/Instance.h"
 #include "map/Scene.h"
 
 class QScrollBar;
@@ -132,6 +133,11 @@ private:
 	// The block tool: a press starts a new box, moves the one there or pulls one of its handles.
 	void PressBlock( QPointF at );
 	void DragBlock( QPointF at, Qt::KeyboardModifiers modifiers );
+	// The selection tool's handles: what pulling the one held to at does to the selection, in
+	// the edit mode it was taken in (resize, rotate or shear), snapped to the grid or to the
+	// rotation step (Alt: neither).
+	[[nodiscard]] xv::map::Transform_t HandleTransform( QPointF at, Qt::KeyboardModifiers modifiers ) const;
+	void PreviewHandle( QPointF at, Qt::KeyboardModifiers modifiers );
 	void PreviewMove( QPointF at, Qt::KeyboardModifiers modifiers );
 	void CancelMove();
 	void ReportCursor( QPointF at );
@@ -164,6 +170,12 @@ private:
 	// box's lowest corner then, and (once it moves) the scene and selection it moves from.
 	std::optional<QPointF> m_MoveFrom;
 	QPointF m_MoveCorner;
+	// Pulling one of the selection's handles: which (-1, 0 or 1 across and down the widget), in
+	// which mode, from where (map units), and the selection's box then.
+	std::optional<QPoint> m_HandleDrag;
+	MapEditMode_t m_nHandleMode = MapEditMode_t::MAP_EDIT_MODE_RESIZE;
+	QPointF m_HandleFrom;
+	xv::map::Box_t m_DragBounds;
 	std::shared_ptr<const xv::map::CScene> m_pMoveScene;
 	std::vector<std::uint32_t> m_MoveSelection;
 	// The block tool's drag: what it does, where it began (map units) and the box then.

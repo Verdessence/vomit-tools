@@ -27,14 +27,25 @@ namespace xv::map
 class CScene;
 struct SceneOptions_t;
 
-// A turn (with any scale) and then a move, in doubles.
+// A turn (with any scale or shear) and then a move, in doubles.
 struct Transform_t
 {
 	std::array<double, 9> m_Rotation{ 1, 0, 0, 0, 1, 0, 0, 0, 1 }; // three rows
 	Point_t m_Offset{};
+	// The point a turn, scale or shear is about (it stays where it is). Texture lock without
+	// scale lock keeps the texel under it; a move has none.
+	Point_t m_Pivot{};
 
 	// Source's angles: pitch (positive looks down), yaw (about up, 0 facing +X) and roll.
 	[[nodiscard]] static Transform_t FromAngles( Point_t origin, const std::array<double, 3> &angles, double flScale = 1.0 );
+	[[nodiscard]] static Transform_t Translation( Point_t offset );
+	// Each axis stretched by its factor about pivot (a negative one mirrors).
+	[[nodiscard]] static Transform_t Scaling( Point_t pivot, Point_t factors );
+	// Turned about the x, y or z axis (nAxis) through pivot, by the right-hand rule.
+	[[nodiscard]] static Transform_t Rotation( Point_t pivot, int nAxis, double flDegrees );
+	// Slid along axis nAlong by flRatio times how far a point is from pivot along nAxis.
+	[[nodiscard]] static Transform_t Shear( Point_t pivot, int nAxis, int nAlong, double flRatio );
+	[[nodiscard]] bool IsIdentity() const;
 	[[nodiscard]] Point_t Apply( Point_t p ) const;
 	[[nodiscard]] Point_t Rotate( Point_t v ) const;
 	// This after other: other is applied first.

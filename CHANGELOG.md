@@ -9,6 +9,10 @@
 - **Editing:** move the selection by dragging it in a 2D view or with the arrows (Shift clones),
   delete, cut, copy and paste (as VMF text, so between maps and to and from Hammer), select all,
   snap to the grid (Ctrl+B), with texture lock (Shift+L). Every edit can be undone.
+- **Resize, rotate and shear** the selection by its handles in the 2D views: a click inside the
+  selection (or X) goes round Hammer's three modes. Rotation snaps to 15° (Preferences → Maps;
+  Alt frees it); a Scale Lock button (Hammer++'s texture scale lock, off by default) makes
+  textures stretch with resized faces rather than keep their size.
 - **Block tool** (Shift+B): drag a box in a 2D view, pull its handles in the others, Enter (or the
   right button's Create Object) makes a block with the current texture. **Entity tool** (Shift+E):
   click in 2D and press Enter, or click a surface in 3D to stand the entity on it, with the class

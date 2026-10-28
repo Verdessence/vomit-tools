@@ -44,6 +44,15 @@ enum class MapTool_t
 	MAP_TOOL_BLOCK,
 };
 
+// What the selection's handles do in the 2D views: Hammer's cycle, a click inside the selection
+// (or X) going to the next.
+enum class MapEditMode_t
+{
+	MAP_EDIT_MODE_RESIZE,
+	MAP_EDIT_MODE_ROTATE,
+	MAP_EDIT_MODE_SHEAR,
+};
+
 // How the views draw, shared by all of a map's views (Hammer's View menu toggles).
 struct MapViewSettings_t
 {
@@ -51,6 +60,7 @@ struct MapViewSettings_t
 	bool m_bShowGrid = true;
 	bool m_bSnapToGrid = true;    // Shift+W
 	bool m_bTextureLock = true;   // textures move with the faces
+	bool m_bScaleLock = false;    // and stretch with them (Hammer's Texture Scale Lock)
 	bool m_bModels2D = true;      // Shift+M
 	bool m_bNames = true;         // Ctrl+Shift+N
 	bool m_bHelpers = true;       // Ctrl+Shift+H

@@ -204,6 +204,69 @@ Transform_t Transform_t::FromAngles( Point_t origin, const std::array<double, 3>
 //-----------------------------------------------------------------------------
 // Purpose:
 //-----------------------------------------------------------------------------
+Transform_t Transform_t::Translation( Point_t offset )
+{
+	Transform_t out;
+	out.m_Offset = offset;
+	return out;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: The offset puts the pivot back where it was: pivot - M pivot.
+//-----------------------------------------------------------------------------
+Transform_t Transform_t::Scaling( Point_t pivot, Point_t factors )
+{
+	Transform_t out;
+	out.m_Rotation = { factors[ 0 ], 0, 0, 0, factors[ 1 ], 0, 0, 0, factors[ 2 ] };
+	out.m_Offset = Subtract( pivot, out.Rotate( pivot ) );
+	out.m_Pivot = pivot;
+	return out;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+Transform_t Transform_t::Rotation( Point_t pivot, int nAxis, double flDegrees )
+{
+	const double c = std::cos( flDegrees * DEGREES ), s = std::sin( flDegrees * DEGREES );
+	Transform_t out;
+	switch ( nAxis )
+	{
+		case 0: out.m_Rotation = { 1, 0, 0, 0, c, -s, 0, s, c }; break;
+		case 1: out.m_Rotation = { c, 0, s, 0, 1, 0, -s, 0, c }; break;
+		default: out.m_Rotation = { c, -s, 0, s, c, 0, 0, 0, 1 }; break;
+	}
+	out.m_Offset = Subtract( pivot, out.Rotate( pivot ) );
+	out.m_Pivot = pivot;
+	return out;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+Transform_t Transform_t::Shear( Point_t pivot, int nAxis, int nAlong, double flRatio )
+{
+	Transform_t out;
+	if ( nAxis != nAlong && nAxis >= 0 && nAxis < 3 && nAlong >= 0 && nAlong < 3 )
+	{
+		out.m_Rotation[ static_cast<std::size_t>( nAlong * 3 + nAxis ) ] = flRatio;
+	}
+	out.m_Offset = Subtract( pivot, out.Rotate( pivot ) );
+	out.m_Pivot = pivot;
+	return out;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+bool Transform_t::IsIdentity() const
+{
+	return m_Rotation == std::array<double, 9>{ 1, 0, 0, 0, 1, 0, 0, 0, 1 } && m_Offset == Point_t{};
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
 Point_t Transform_t::Rotate( Point_t v ) const
 {
 	const auto &m = m_Rotation;
@@ -232,6 +295,7 @@ Transform_t Transform_t::operator*( const Transform_t &other ) const
 		}
 	}
 	out.m_Offset = Apply( other.m_Offset );
+	out.m_Pivot = other.m_Pivot;
 	return out;
 }
 
