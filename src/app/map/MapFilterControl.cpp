@@ -83,6 +83,9 @@ CMapFilterControl::CMapFilterControl( CMapDocument &document, QWidget *pParent )
 	connect( m_pUser, &QTreeWidget::itemChanged, this, &CMapFilterControl::ItemChanged );
 	connect( m_pAuto, &QTreeWidget::itemChanged, this, &CMapFilterControl::ItemChanged );
 	connect( &m_Document, &CMapDocument::Loaded, this, &CMapFilterControl::Rebuild );
+	// An edit makes a new scene with automatic visgroups of its own: the old ones the items
+	// pointed at go away with the old scene.
+	connect( &m_Document, &CMapDocument::SceneEdited, this, &CMapFilterControl::Rebuild );
 	connect( &m_Document, &CMapDocument::VisibilityChanged, this, &CMapFilterControl::UpdateStates );
 }
 

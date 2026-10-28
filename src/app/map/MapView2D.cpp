@@ -120,8 +120,13 @@ void PaintHandles( QPainter &painter, const QRectF &box, MapEditMode_t nMode = M
 		{
 			case MapEditMode_t::MAP_EDIT_MODE_RESIZE: painter.drawRect( handle ); break;
 			case MapEditMode_t::MAP_EDIT_MODE_ROTATE:
+				// A hollow ring (Verd), a little bigger than the squares.
 				painter.setRenderHint( QPainter::Antialiasing, true );
-				painter.drawEllipse( handle.adjusted( -1, -1, 1, 1 ) );
+				painter.setBrush( Qt::NoBrush );
+				painter.setPen( QPen{ Look().m_Colors.m_ToolHandle, 2.0 } );
+				painter.drawEllipse( handle.adjusted( -2, -2, 2, 2 ) );
+				painter.setPen( QPen{ Qt::black, 0 } );
+				painter.setBrush( Look().m_Colors.m_ToolHandle );
 				painter.setRenderHint( QPainter::Antialiasing, false );
 				break;
 			case MapEditMode_t::MAP_EDIT_MODE_SHEAR:
@@ -1236,7 +1241,7 @@ void CMapView2D::mousePressEvent( QMouseEvent *pEvent )
 		{
 			for ( const auto &[ where, handle ] : HandlesOf( RectOf( bounds ) ) )
 			{
-				if ( HandleInMode( where, m_Editor.GetEditMode() ) && handle.adjusted( -2.0, -2.0, 2.0, 2.0 ).contains( at ) )
+				if ( HandleInMode( where, m_Editor.GetEditMode() ) && handle.adjusted( -mapstyle::HANDLE_SLACK, -mapstyle::HANDLE_SLACK, mapstyle::HANDLE_SLACK, mapstyle::HANDLE_SLACK ).contains( at ) )
 				{
 					m_HandleDrag = where;
 					m_nHandleMode = m_Editor.GetEditMode();
@@ -1295,7 +1300,7 @@ void CMapView2D::PressBlock( QPointF at )
 		const QRectF rect = RectOf( *box );
 		for ( const auto &[ where, handle ] : HandlesOf( rect ) )
 		{
-			if ( handle.adjusted( -2.0, -2.0, 2.0, 2.0 ).contains( at ) )
+			if ( handle.adjusted( -mapstyle::HANDLE_SLACK, -mapstyle::HANDLE_SLACK, mapstyle::HANDLE_SLACK, mapstyle::HANDLE_SLACK ).contains( at ) )
 			{
 				m_nBoxDrag = BoxDrag_t::BOX_DRAG_HANDLE;
 				m_BoxHandle = where;

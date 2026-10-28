@@ -998,9 +998,9 @@ void CMapView3D::PaintTools( QPainter &painter ) const
 			const QColor color = nAxis == nLit ? CPreferences::Instance().GetMapPreferences().m_Colors.m_SelectionEdge3D : nAxis == 0 ? mapstyle::AXIS_X
 				: nAxis == 1                                                                                                          ? mapstyle::AXIS_Y
 																																	  : mapstyle::AXIS_Z;
-			painter.setPen( QPen{ QColor{ 0, 0, 0, 160 }, nAxis == nLit ? 5.0 : 4.0 } );
+			painter.setPen( QPen{ QColor{ 0, 0, 0, 160 }, nAxis == nLit ? 7.0 : 6.0, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin } );
 			painter.drawLines( lines.data(), static_cast<int>( lines.size() ) );
-			painter.setPen( QPen{ color, nAxis == nLit ? 3.0 : 2.0 } );
+			painter.setPen( QPen{ color, nAxis == nLit ? 4.5 : 3.5, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin } );
 			painter.drawLines( lines.data(), static_cast<int>( lines.size() ) );
 		}
 	}

@@ -91,15 +91,16 @@ std::vector<MapGizmoLine_t> CMapGizmo::GetLines( const xv::map::CViewCamera &cam
 			continue;
 		}
 		lines.push_back( { m_Pivot, tip, a } );
-		const double flHead = flLength * 0.18;
+		const double flHead = flLength * 0.22;
 		if ( m_nMode == MapGizmoMode_t::MAP_GIZMO_MODE_TRANSLATE )
 		{
 			// An arrowhead: four lines back from the tip.
 			const Point_t back = xv::map::Subtract( tip, xv::map::Scale( axis, flHead ) );
 			for ( const Point_t &side : { u, v } )
 			{
-				lines.push_back( { tip, xv::map::Add( back, xv::map::Scale( side, flHead * 0.4 ) ), a } );
-				lines.push_back( { tip, xv::map::Subtract( back, xv::map::Scale( side, flHead * 0.4 ) ), a } );
+				lines.push_back( { tip, xv::map::Add( back, xv::map::Scale( side, flHead * 0.45 ) ), a } );
+				lines.push_back( { tip, xv::map::Subtract( back, xv::map::Scale( side, flHead * 0.45 ) ), a } );
+				lines.push_back( { xv::map::Add( back, xv::map::Scale( side, flHead * 0.45 ) ), xv::map::Subtract( back, xv::map::Scale( side, flHead * 0.45 ) ), a } );
 			}
 		}
 		else

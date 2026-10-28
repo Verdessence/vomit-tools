@@ -13,6 +13,8 @@
   selection (or X) goes round Hammer's three modes. Rotation snaps to 15° (Preferences → Maps;
   Alt frees it); a Scale Lock button (Hammer++'s texture scale lock, off by default) makes
   textures stretch with resized faces rather than keep their size.
+- Fixed: Show All in the Filter Control crashed after the map had been edited (the automatic
+  visgroups' lists belonged to the scene before the edit).
 - **A gizmo in the 3D views** (Hammer++'s): arrows, rings or scale axes at the selection, dragged
   along an axis to move, turn or stretch it; G, R and E pick what it does, right-click goes round
   them, X hides it, J puts it on the entity's own axes, X/Y/Z during a drag pick the axis.

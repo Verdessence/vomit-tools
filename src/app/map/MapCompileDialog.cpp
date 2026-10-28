@@ -611,6 +611,11 @@ bool CMapCompileDialog::Run()
 		return false;
 	}
 	const xv::map::CompileVariables_t variables = GetVariables();
+	if ( !variables.m_szGameExe.empty() && !QString::fromStdString( variables.m_szGameExe ).startsWith( QString::fromStdString( variables.m_szExeDir ) ) )
+	{
+		// Two installs (two Steam libraries): the game would run from one with the other's folder.
+		m_pLog->appendPlainText( tr( "Note: the game launcher %1 isn't in the opened game's folder %2; the game runs from there with -game pointing here. Open that install's game, or set the launcher in Preferences > Source Tools." ).arg( QString::fromStdString( variables.m_szGameExe ), QString::fromStdString( variables.m_szExeDir ) ) );
+	}
 	m_Editor.GetDocument().SetPointfile( std::nullopt );
 	m_Clock.start();
 	m_pGo->setEnabled( false );
