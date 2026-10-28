@@ -66,6 +66,7 @@ struct MapColors_t
 	QColor m_ToolSelection = mapstyle::TOOL_SELECTION;
 	QColor m_ToolHandle = mapstyle::TOOL_HANDLE;
 	QColor m_ToolBlock = mapstyle::TOOL_BLOCK;
+	QColor m_Pointfile = mapstyle::POINTFILE;
 	QColor m_Camera = mapstyle::CAMERA;
 	QColor m_Instance2D = mapstyle::INSTANCE_TINT; // instances' contents in 2D, when chosen
 	QColor m_Background3D = mapstyle::BACKGROUND_3D;

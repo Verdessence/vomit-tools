@@ -967,6 +967,17 @@ void CMapView2D::PaintSelection( QPainter &painter ) const
 void CMapView2D::PaintTools( QPainter &painter ) const
 {
 	const QColor &color = Look().m_Colors.m_ToolBlock;
+	if ( const std::optional<std::vector<xv::map::Point_t>> &pointfile = GetDocument().GetPointfile(); pointfile && pointfile->size() >= 2 )
+	{
+		// The leak's line, from where vbsp started out to the entity, as Hammer draws it.
+		QPolygonF line;
+		for ( const xv::map::Point_t &p : *pointfile )
+		{
+			line << ToWidget( Flatten( p ) );
+		}
+		painter.setPen( QPen{ Look().m_Colors.m_Pointfile, 0 } );
+		painter.drawPolyline( line );
+	}
 	if ( const std::optional<xv::map::Box_t> &newBox = m_Editor.GetNewBox() )
 	{
 		const QRectF box = RectOf( *newBox );

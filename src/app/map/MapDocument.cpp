@@ -326,6 +326,16 @@ void CMapDocument::Run( Source_t source, int nGeneration )
 }
 
 //-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+void CMapDocument::SetPointfile( std::optional<std::vector<xv::map::Point_t>> points )
+{
+	m_Pointfile = std::move( points );
+	m_nStateGeneration++;
+	emit PointfileChanged();
+}
+
+//-----------------------------------------------------------------------------
 // Purpose: The map is built: what starts hidden follows the flags Hammer saved.
 //-----------------------------------------------------------------------------
 void CMapDocument::Finish( std::shared_ptr<xv::map::CScene> pScene, QString szFgdSource, xv::map::HammerDefaults_t defaults )

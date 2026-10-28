@@ -150,6 +150,8 @@ add_library(vomit_tools_ui STATIC
         map/MapFilterControl.h
         map/MapCompile.cpp
         map/MapCompile.h
+        map/MapCompileDialog.cpp
+        map/MapCompileDialog.h
         map/MapFaceEdit.cpp
         map/MapFaceEdit.h
         map/MapGizmo.cpp

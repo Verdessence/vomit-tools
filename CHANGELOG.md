@@ -35,6 +35,14 @@
 - **Saving** writes the map back as it was read, changing only what was edited: untouched parts
   stay byte for byte, so diffs against Hammer's saves stay small. The previous file is kept as a
   `.vmx`, as Hammer does.
+- **Run Map** (F9, Map → Run Map…): Hammer's compile window. Normal: how much of BSP, VIS and
+  RAD to run, HDR, the game's parameters; Expert: named command sequences with Hammer's
+  $variables, seeded from Hammer++'s `hammerplusplus_sequences.cfg` or Hammer's `CmdSeq.wc`
+  beside the game, edited and kept in the settings. The compilers' output streams into the
+  window, their problems are listed under it (a double click goes to the brush or point), a leak
+  stops the compile and its line is drawn red in every view (Map → Load Pointfile, Unload, Go to
+  Leak), and the game is started on the map. The compilers and the game's launcher are set in
+  Preferences → Source Tools (the native VBSP++, VVIS++ and VRAD++ can live anywhere).
 - **File → New → Map (VMF)** starts an empty map, as Hammer++ starts one; saving asks where it goes.
 - A selected prop shows its triangles; other entities drawn by a model (player starts, NPCs) show
   their box instead of a mass of triangles over everything. Preferences → Maps → 3D View can show

@@ -14,6 +14,8 @@
 #include <utility>
 #include <vector>
 
+#include <QDialog>
+#include <QPointer>
 #include <QWidget>
 
 #include "EditorTab.h"
@@ -109,6 +111,15 @@ public:
 	// What new blocks' faces get, and the class the entity tool places.
 	// Map > Map Properties: the world's keys (the sky) in a window of their own.
 	void ShowMapProperties();
+	// Map > Run Map (F9): Hammer's compile window, one per map.
+	void RunMap();
+	// Map > Load Pointfile / Unload / Go to Leak: a leak's line (the .lin beside the map).
+	void LoadPointfile();
+	void UnloadPointfile();
+	void GoToLeak();
+	// Selects the object with Hammer's id and centres the views on it; centres them on a point.
+	bool GoToObjectId( int nId );
+	void CenterViewsOn( const xv::map::Point_t &point );
 	[[nodiscard]] QString GetCurrentMaterial() const;
 	void SetCurrentMaterial( const QString &szMaterial );
 	// Picks the current texture from the game's materials (the texture browser).
@@ -196,6 +207,7 @@ private:
 	std::optional<xv::map::Point_t> m_EntityMarker;
 	QLineEdit *m_pMaterial = nullptr;
 	QComboBox *m_pEntityClass = nullptr;
+	QPointer<QDialog> m_pCompileDialog;
 
 	std::array<CMapPane *, 4> m_Panes{};
 	CMapQuadSplitter *m_pSplitter = nullptr;

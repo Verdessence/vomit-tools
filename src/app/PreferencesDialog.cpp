@@ -547,6 +547,7 @@ QWidget *CPreferencesDialog::BuildMapsPage()
 			{ "ToolSelection", tr( "Selection box and sizes" ), &MapColors_t::m_ToolSelection, false },
 			{ "ToolHandle", tr( "Selection box's handles" ), &MapColors_t::m_ToolHandle, false },
 			{ "ToolBlock", tr( "New block's box and new entity's marker" ), &MapColors_t::m_ToolBlock, false },
+			{ "Pointfile", tr( "A leak's line" ), &MapColors_t::m_Pointfile, false },
 			{ "Camera", tr( "The 3D camera in 2D" ), &MapColors_t::m_Camera, false },
 			{ "Instance2D", tr( "Instances' contents in 2D" ), &MapColors_t::m_Instance2D, false },
 			{ "Background3D", tr( "3D background" ), &MapColors_t::m_Background3D, false },

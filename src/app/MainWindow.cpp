@@ -703,6 +703,33 @@ void CMainWindow::BuildMenus( QAction *pSearchPathsToggle )
 			pMap->RunAction( MapAction_t::MAP_ACTION_GO_TO_BRUSH, pMap->GetActiveView() );
 		}
 	} );
+	m_pMapMenu->addSeparator();
+	QAction *pRunMap = m_pMapMenu->addAction( tr( "&Run Map…" ), this, [ this ] {
+		if ( CMapEditor *pMap = GetCurrentMap() )
+		{
+			pMap->RunMap();
+		}
+	} );
+	pRunMap->setObjectName( QStringLiteral( "mapRunMapAction" ) );
+	pRunMap->setToolTip( tr( "Compile the map with vbsp, vvis and vrad and run the game on it (F9 in a view)" ) );
+	m_pMapMenu->addAction( tr( "&Load Pointfile…" ), this, [ this ] {
+		if ( CMapEditor *pMap = GetCurrentMap() )
+		{
+			pMap->LoadPointfile();
+		}
+	} );
+	m_pMapMenu->addAction( tr( "&Unload Pointfile" ), this, [ this ] {
+		if ( CMapEditor *pMap = GetCurrentMap() )
+		{
+			pMap->UnloadPointfile();
+		}
+	} );
+	m_pMapMenu->addAction( tr( "Go to Lea&k" ), this, [ this ] {
+		if ( CMapEditor *pMap = GetCurrentMap() )
+		{
+			pMap->GoToLeak();
+		}
+	} );
 	m_pMapMenu->menuAction()->setVisible( false );
 
 	// Simple or regular names, everywhere and remembered.

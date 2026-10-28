@@ -878,7 +878,8 @@ void CMapView3D::PaintTools( QPainter &painter ) const
 	const std::optional<xv::map::Point_t> &marker = m_Editor.GetEntityMarker();
 	const std::optional<CMapGizmo> gizmo = m_DragGizmo ? m_DragGizmo : GetGizmo();
 	const std::vector<xv::map::FaceRef_t> &faces = m_Editor.GetSelectedFaces();
-	if ( !box && !marker && !gizmo && faces.empty() )
+	const std::optional<std::vector<xv::map::Point_t>> &pointfile = GetDocument().GetPointfile();
+	if ( !box && !marker && !gizmo && faces.empty() && !pointfile )
 	{
 		return;
 	}
@@ -968,6 +969,17 @@ void CMapView3D::PaintTools( QPainter &painter ) const
 	painter.drawLines( lines.data(), static_cast<int>( lines.size() ) );
 	painter.setPen( QPen{ CPreferences::Instance().GetMapPreferences().m_Colors.m_ToolBlock, 1.0 } );
 	painter.drawLines( lines.data(), static_cast<int>( lines.size() ) );
+	if ( pointfile && pointfile->size() >= 2 )
+	{
+		// The leak's line, over everything, like Hammer's.
+		lines.clear();
+		for ( std::size_t i = 0; i + 1 < pointfile->size(); i++ )
+		{
+			line( ( *pointfile )[ i ], ( *pointfile )[ i + 1 ] );
+		}
+		painter.setPen( QPen{ CPreferences::Instance().GetMapPreferences().m_Colors.m_Pointfile, 2.0 } );
+		painter.drawLines( lines.data(), static_cast<int>( lines.size() ) );
+	}
 	if ( gizmo )
 	{
 		// Each axis in its colour, the one under the mouse (or being dragged) in the selection's

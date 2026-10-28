@@ -58,6 +58,7 @@ const Binding_t BINDINGS[] = {
 	{ MapAction_t::MAP_ACTION_TOOL_ENTITY, Qt::Key_E, Qt::ShiftModifier, BOTH },
 	{ MapAction_t::MAP_ACTION_TOOL_BLOCK, Qt::Key_B, Qt::ShiftModifier, BOTH },
 	{ MapAction_t::MAP_ACTION_TOOL_TEXTURE, Qt::Key_A, Qt::ShiftModifier, BOTH },
+	{ MapAction_t::MAP_ACTION_RUN_MAP, Qt::Key_F9, Qt::NoModifier, BOTH },
 	{ MapAction_t::MAP_ACTION_APPLY_TEXTURE, Qt::Key_T, Qt::ShiftModifier, BOTH },
 	{ MapAction_t::MAP_ACTION_NEXT_HIT, Qt::Key_PageDown, Qt::NoModifier, BOTH },
 	{ MapAction_t::MAP_ACTION_PREVIOUS_HIT, Qt::Key_PageUp, Qt::NoModifier, BOTH },

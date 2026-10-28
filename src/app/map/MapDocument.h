@@ -85,6 +85,10 @@ public:
 	void EndPreview();
 	[[nodiscard]] bool IsPreviewing() const { return m_pPreviewBase != nullptr; }
 
+	// A leak's line (the .lin a compile left), drawn in every view until unloaded.
+	[[nodiscard]] const std::optional<std::vector<xv::map::Point_t>> &GetPointfile() const { return m_Pointfile; }
+	void SetPointfile( std::optional<std::vector<xv::map::Point_t>> points );
+
 	// Visibility, per object: hidden by its visgroups (or Hammer's own flags in the file), by
 	// an automatic group, or quick-hidden.
 	[[nodiscard]] bool IsShown( std::uint32_t nObject ) const;
@@ -128,6 +132,7 @@ signals:
 	// An edit changed these objects (and the scene is a new snapshot).
 	void SceneEdited( const std::vector<std::uint32_t> &changed );
 	void ModifiedChanged( bool bModified );
+	void PointfileChanged();
 
 private:
 	void Run( Source_t source, int nGeneration );
@@ -150,6 +155,7 @@ private:
 	std::vector<std::uint8_t> m_AutoShown;
 	std::vector<std::uint8_t> m_QuickHidden;
 	std::vector<std::uint32_t> m_Selection;
+	std::optional<std::vector<xv::map::Point_t>> m_Pointfile;
 	MapSelectMode_t m_nSelectMode = MapSelectMode_t::MAP_SELECT_MODE_GROUPS;
 	std::uint64_t m_nStateGeneration = 0;
 };

@@ -42,6 +42,8 @@
 #include "FileDialogs.h"
 #include "Preferences.h"
 #include "map/MapConstants.h"
+#include "map/Compile.h"
+#include "map/MapCompileDialog.h"
 #include "map/MapFaceEdit.h"
 #include "map/MapFilterControl.h"
 #include "map/MaterialBrowser.h"
@@ -314,6 +316,7 @@ CMapEditor::CMapEditor( const QString &szPath, bool bFromGame, QWidget *pParent 
 	connect( m_pDocument, &CMapDocument::VisibilityChanged, this, repaint );
 	connect( m_pDocument, &CMapDocument::SceneEdited, this, &CMapEditor::SceneEdited );
 	connect( m_pDocument, &CMapDocument::ModifiedChanged, this, &CMapEditor::TitleChanged );
+	connect( m_pDocument, &CMapDocument::PointfileChanged, this, &CMapEditor::RepaintTools );
 	UpdateStatus();
 }
 
@@ -495,6 +498,8 @@ void CMapEditor::BuildToolBars( QVBoxLayout *pLayout )
 	command( tr( "Center on Selection" ), MapAction_t::MAP_ACTION_CENTER_2D );
 	command( tr( "Go to Brush…" ), MapAction_t::MAP_ACTION_GO_TO_BRUSH );
 	command( tr( "Autosize Views" ), MapAction_t::MAP_ACTION_AUTOSIZE );
+	pBar->addSeparator();
+	command( tr( "Run Map…" ), MapAction_t::MAP_ACTION_RUN_MAP )->setObjectName( QStringLiteral( "mapRunMap" ) );
 	pLayout->addWidget( pBar );
 }
 
@@ -792,17 +797,110 @@ void CMapEditor::GoToBrush()
 	{
 		return;
 	}
-	for ( std::uint32_t n = 0; n < pScene->GetObjectCount(); n++ )
+	GoToObjectId( nId );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+bool CMapEditor::GoToObjectId( int nId )
+{
+	const xv::map::CScene *pScene = m_pDocument->GetScene();
+	for ( std::uint32_t n = 0; pScene && n < pScene->GetObjectCount(); n++ )
 	{
-		if ( pScene->GetObjectId( n ) == nId )
+		if ( pScene->GetObjectId( n ) == nId && !pScene->IsDeleted( n ) )
 		{
 			m_pDocument->SetSelection( m_pDocument->Expand( n ) );
 			RunAction( MapAction_t::MAP_ACTION_CENTER_2D, m_pActiveView );
 			RunAction( MapAction_t::MAP_ACTION_CENTER_3D, m_pActiveView );
-			return;
+			return true;
 		}
 	}
 	emit StatusMessage( tr( "No solid or entity has the id %1." ).arg( nId ) );
+	return false;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+void CMapEditor::CenterViewsOn( const xv::map::Point_t &point )
+{
+	xv::map::Box_t box;
+	box.Add( xv::map::Subtract( point, { 64, 64, 64 } ) );
+	box.Add( xv::map::Add( point, { 64, 64, 64 } ) );
+	for ( CMapView *pView : GetViews() )
+	{
+		pView->CenterOn( box );
+	}
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: One compile window per map, kept while the map is open.
+//-----------------------------------------------------------------------------
+void CMapEditor::RunMap()
+{
+	if ( !m_pDocument->IsLoaded() )
+	{
+		return;
+	}
+	if ( !m_pCompileDialog )
+	{
+		m_pCompileDialog = new CMapCompileDialog( *this );
+		m_pCompileDialog->setAttribute( Qt::WA_DeleteOnClose );
+	}
+	m_pCompileDialog->show();
+	m_pCompileDialog->raise();
+	m_pCompileDialog->activateWindow();
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: The .lin beside the map, or one chosen.
+//-----------------------------------------------------------------------------
+void CMapEditor::LoadPointfile()
+{
+	const QFileInfo map( m_szPath );
+	const QString szDefault = m_szPath.isEmpty() || m_bFromGame ? QString{} : map.absolutePath() + QLatin1Char( '/' ) + map.completeBaseName() + QStringLiteral( ".lin" );
+	const QString szFile = AskOpenFile( this, tr( "Load Pointfile" ), szDefault, tr( "Pointfiles (*.lin);;All files (*)" ) );
+	if ( szFile.isEmpty() )
+	{
+		return;
+	}
+	QFile file( szFile );
+	if ( !file.open( QIODevice::ReadOnly ) )
+	{
+		emit StatusMessage( tr( "Could not read %1" ).arg( QDir::toNativeSeparators( szFile ) ) );
+		return;
+	}
+	const std::vector<xv::map::Point_t> points = xv::map::ReadPointfile( file.readAll().toStdString() );
+	if ( points.size() < 2 )
+	{
+		emit StatusMessage( tr( "%1 holds no line" ).arg( QDir::toNativeSeparators( szFile ) ) );
+		return;
+	}
+	m_pDocument->SetPointfile( points );
+	GoToLeak();
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+void CMapEditor::UnloadPointfile()
+{
+	m_pDocument->SetPointfile( std::nullopt );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: The line's end is the entity vbsp named; the hole is somewhere along it.
+//-----------------------------------------------------------------------------
+void CMapEditor::GoToLeak()
+{
+	const std::optional<std::vector<xv::map::Point_t>> &points = m_pDocument->GetPointfile();
+	if ( !points || points->empty() )
+	{
+		emit StatusMessage( tr( "No pointfile is loaded: compile the map, or Map > Load Pointfile" ) );
+		return;
+	}
+	CenterViewsOn( points->back() );
 }
 
 //-----------------------------------------------------------------------------
@@ -994,6 +1092,9 @@ bool CMapEditor::RunAction( MapAction_t nAction, CMapView *pFrom )
 			return true;
 		case MapAction_t::MAP_ACTION_APPLY_TEXTURE:
 			ApplyCurrentTexture( false );
+			return true;
+		case MapAction_t::MAP_ACTION_RUN_MAP:
+			RunMap();
 			return true;
 		case MapAction_t::MAP_ACTION_ZOOM_IN_ALL:
 		case MapAction_t::MAP_ACTION_ZOOM_OUT_ALL:
