@@ -21,6 +21,10 @@
 namespace
 {
 
+// "Use the pivot" in each dialog, kept for the session; Hammer++ ticks both.
+bool s_bTransformUsesPivot = true;
+bool s_bPasteUsesPivot = true;
+
 //-----------------------------------------------------------------------------
 // Purpose: A row of three spin boxes labelled X, Y and Z.
 //-----------------------------------------------------------------------------
@@ -82,6 +86,11 @@ CMapTransformDialog::CMapTransformDialog( QWidget *pParent )
 	auto *pHint = new QLabel( tr( "Rotate: degrees about each axis, through the selection's centre. Scale: a factor for each axis (a negative one mirrors). Move: units." ) );
 	pHint->setWordWrap( true );
 	pValueLayout->addWidget( pHint );
+	m_pUsePivot = new QCheckBox( tr( "Use the pivot (turn and scale about it, not the centre)" ) );
+	m_pUsePivot->setObjectName( QStringLiteral( "mapTransformUsePivot" ) );
+	m_pUsePivot->setChecked( s_bTransformUsesPivot );
+	connect( m_pUsePivot, &QCheckBox::toggled, this, []( bool b ) { s_bTransformUsesPivot = b; } );
+	pValueLayout->addWidget( m_pUsePivot );
 	pLayout->addWidget( pValues );
 	auto *pButtons = new QDialogButtonBox( QDialogButtonBox::Ok | QDialogButtonBox::Cancel );
 	connect( pButtons, &QDialogButtonBox::accepted, this, &QDialog::accept );
@@ -114,7 +123,16 @@ TransformValues_t CMapTransformDialog::GetValues() const
 	{
 		values.m_Values[ a ] = m_Values[ a ]->value();
 	}
+	values.m_bUsePivot = m_pUsePivot->isEnabled() && m_pUsePivot->isChecked();
 	return values;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+void CMapTransformDialog::SetPivotAvailable( bool bAvailable )
+{
+	m_pUsePivot->setEnabled( bAvailable );
 }
 
 //-----------------------------------------------------------------------------
@@ -127,6 +145,7 @@ void CMapTransformDialog::SetValues( const TransformValues_t &values )
 	{
 		m_Values[ a ]->setValue( values.m_Values[ a ] );
 	}
+	m_pUsePivot->setChecked( values.m_bUsePivot );
 }
 
 //-----------------------------------------------------------------------------
@@ -165,8 +184,14 @@ CMapPasteSpecialDialog::CMapPasteSpecialDialog( QWidget *pParent )
 	m_pUniqueNames = new QCheckBox( tr( "Make entity names unique" ) );
 	m_pUniqueNames->setObjectName( QStringLiteral( "mapPasteUniqueNames" ) );
 	m_pUniqueNames->setToolTip( tr( "A copy's entities get names the map doesn't have yet (a number appended, or a trailing number raised), and its outputs follow" ) );
+	m_pUsePivot = new QCheckBox( tr( "Turn the copies about the pivot" ) );
+	m_pUsePivot->setObjectName( QStringLiteral( "mapPasteUsePivot" ) );
+	m_pUsePivot->setToolTip( tr( "Each copy turns about the pivot (Ctrl+P) rather than about its own centre" ) );
+	m_pUsePivot->setChecked( s_bPasteUsesPivot );
+	connect( m_pUsePivot, &QCheckBox::toggled, this, []( bool b ) { s_bPasteUsesPivot = b; } );
 	pForm->addRow( QString(), m_pGroup );
 	pForm->addRow( QString(), m_pUniqueNames );
+	pForm->addRow( QString(), m_pUsePivot );
 	pLayout->addLayout( pForm );
 	auto *pButtons = new QDialogButtonBox( QDialogButtonBox::Ok | QDialogButtonBox::Cancel );
 	connect( pButtons, &QDialogButtonBox::accepted, this, &QDialog::accept );
@@ -197,6 +222,22 @@ xv::map::PasteSpecial_t CMapPasteSpecialDialog::GetValues() const
 bool CMapPasteSpecialDialog::IsStartAtView() const
 {
 	return m_pStart->checkedId() == 1;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+bool CMapPasteSpecialDialog::IsUsingPivot() const
+{
+	return m_pUsePivot->isEnabled() && m_pUsePivot->isChecked();
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+void CMapPasteSpecialDialog::SetPivotAvailable( bool bAvailable )
+{
+	m_pUsePivot->setEnabled( bAvailable );
 }
 
 //-----------------------------------------------------------------------------

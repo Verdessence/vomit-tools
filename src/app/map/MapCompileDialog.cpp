@@ -555,8 +555,8 @@ xv::map::CompileVariables_t CMapCompileDialog::GetVariables() const
 {
 	xv::map::CompileVariables_t variables;
 	const QFileInfo map( m_Editor.GetPath() );
-	variables.m_szFile = map.completeBaseName().toStdString() + ( m_bCordoned ? "_cordon" : "" );
-	variables.m_szPath = map.absolutePath().toStdString();
+	variables.m_szFile = map.completeBaseName().toStdString();
+	variables.m_szPath = m_pCordonFolder ? m_pCordonFolder->path().toStdString() : map.absolutePath().toStdString();
 	if ( const std::optional<xv::vfs::CGameInfo> &game = m_Editor.GetDocument().GetGame() )
 	{
 		variables.m_szGameDir = game->m_GameDir.string();
@@ -606,26 +606,44 @@ bool CMapCompileDialog::Run()
 		m_pLog->appendPlainText( tr( "The map wasn't saved, so nothing was compiled." ) );
 		return false;
 	}
-	// With the cordon on, Hammer compiles a copy holding only what is inside it, sealed with
-	// walls; ours is written beside the map as <map>_cordon.vmf and compiled by that name.
-	m_bCordoned = m_Editor.IsCordonActive();
-	if ( m_bCordoned )
+	// With the cordon on, Hammer++ compiles the map with what lies outside the cordon left out,
+	// as if hidden, and the BSP is the map's own. The copy holding only what is inside, sealed
+	// with walls, is written as <map>.vmf in a folder of its own (the instances' files pointed at
+	// from there) and compiled from there; vrad's <map>.rad goes with it.
+	m_pCordonFolder.reset();
+	if ( m_Editor.IsCordonActive() )
 	{
 		const QFileInfo map( m_Editor.GetPath() );
-		const QString szCordoned = map.absoluteDir().filePath( map.completeBaseName() + QStringLiteral( "_cordon.vmf" ) );
-		QFile file( szCordoned );
-		const std::string szText = xv::map::CordonedMapText( *m_Editor.GetDocument().GetScene(), mapstyle::CORDON_MATERIAL );
-		if ( !file.open( QIODevice::WriteOnly | QIODevice::Truncate ) || file.write( szText.data(), static_cast<qint64>( szText.size() ) ) != static_cast<qint64>( szText.size() ) )
+		auto pFolder = std::make_unique<QTemporaryDir>( QDir::temp().filePath( QStringLiteral( "vomit-tools-cordon-XXXXXX" ) ) );
+		xv::map::MapCopy_t copy;
+		copy.m_Instances.m_MapFile = map.absoluteFilePath().toStdString();
+		if ( const std::optional<std::filesystem::path> path = GameInstancePath( *m_Editor.GetDocument().GetGame() ) )
 		{
-			m_pLog->appendPlainText( tr( "The cordoned copy %1 couldn't be written, so nothing was compiled." ).arg( szCordoned ) );
+			copy.m_Instances.m_SearchPaths.push_back( *path );
+		}
+		copy.m_CopyFolder = pFolder->path().toStdString();
+		const QString szCopy = QDir( pFolder->path() ).filePath( map.fileName() );
+		QFile file( szCopy );
+		const std::string szText = xv::map::CordonedMapText( *m_Editor.GetDocument().GetScene(), mapstyle::CORDON_MATERIAL, copy );
+		if ( !pFolder->isValid() || !file.open( QIODevice::WriteOnly | QIODevice::Truncate ) || file.write( szText.data(), static_cast<qint64>( szText.size() ) ) != static_cast<qint64>( szText.size() ) )
+		{
+			m_pLog->appendPlainText( tr( "The cordoned copy %1 couldn't be written, so nothing was compiled." ).arg( szCopy ) );
 			return false;
 		}
-		m_pLog->appendPlainText( tr( "Cordon on: compiling %1, what is inside the cordon sealed with %2." ).arg( szCordoned, QString::fromUtf8( mapstyle::CORDON_MATERIAL.data(), static_cast<qsizetype>( mapstyle::CORDON_MATERIAL.size() ) ) ) );
+		file.close();
+		const QString szRad = map.absoluteDir().filePath( map.completeBaseName() + QStringLiteral( ".rad" ) );
+		if ( QFile::exists( szRad ) )
+		{
+			QFile::copy( szRad, QDir( pFolder->path() ).filePath( map.completeBaseName() + QStringLiteral( ".rad" ) ) );
+		}
+		m_pCordonFolder = std::move( pFolder );
+		m_pLog->appendPlainText( tr( "Cordon on: compiling only what is inside the cordon, sealed with %1; the BSP is %2's own." ).arg( QString::fromUtf8( mapstyle::CORDON_MATERIAL.data(), static_cast<qsizetype>( mapstyle::CORDON_MATERIAL.size() ) ), map.completeBaseName() ) );
 	}
 	const std::vector<xv::map::ResolvedCommand_t> commands = GetCommands();
 	if ( commands.empty() )
 	{
 		m_pLog->appendPlainText( tr( "Nothing to run." ) );
+		m_pCordonFolder.reset();
 		return false;
 	}
 	const xv::map::CompileVariables_t variables = GetVariables();
@@ -650,6 +668,7 @@ void CMapCompileDialog::Finished( bool bSuccess, const xv::map::CompileReport_t 
 	m_Report = report;
 	m_pGo->setEnabled( true );
 	m_pCancel->setEnabled( false );
+	BringBackCompiled();
 	const double flSeconds = m_Clock.elapsed() / 1000.0;
 	for ( const xv::map::CompileProblem_t &problem : report.m_Problems )
 	{
@@ -673,6 +692,35 @@ void CMapCompileDialog::Finished( bool bSuccess, const xv::map::CompileReport_t 
 		return;
 	}
 	m_pStatus->setText( bSuccess ? tr( "Done in %1 s" ).arg( flSeconds, 0, 'f', 1 ) : tr( "Stopped after %1 s" ).arg( flSeconds, 0, 'f', 1 ) );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: A cordoned run's BSP, portal file, leak file and log, put beside the map where a run
+//          without the cordon leaves them; the copy's folder then goes.
+//-----------------------------------------------------------------------------
+void CMapCompileDialog::BringBackCompiled()
+{
+	if ( !m_pCordonFolder )
+	{
+		return;
+	}
+	const QFileInfo map( m_Editor.GetPath() );
+	for ( const char *pszExtension : { ".bsp", ".prt", ".lin", ".log" } )
+	{
+		const QString szName = map.completeBaseName() + QLatin1String( pszExtension );
+		const QString szFrom = QDir( m_pCordonFolder->path() ).filePath( szName );
+		if ( !QFile::exists( szFrom ) )
+		{
+			continue;
+		}
+		const QString szTo = map.absoluteDir().filePath( szName );
+		QFile::remove( szTo );
+		if ( !QFile::copy( szFrom, szTo ) )
+		{
+			m_pLog->appendPlainText( tr( "%1 couldn't be copied beside the map." ).arg( szName ) );
+		}
+	}
+	m_pCordonFolder.reset();
 }
 
 //-----------------------------------------------------------------------------

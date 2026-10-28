@@ -82,6 +82,7 @@ CMapView3D::CMapView3D( CMapEditor &editor, MapViewType_t nType, QWidget *pParen
 {
 	setAttribute( Qt::WA_OpaquePaintEvent );
 	setMouseTracking( true );
+	setCursor( Qt::ArrowCursor ); // not the splitter's bar's, on the way in
 	m_Camera.m_flNear = mapstyle::NEAR_PLANE;
 	// Not ApplyPreferences: that tells the editor, which is still making its panes.
 	m_Camera.m_flFov = CPreferences::Instance().GetMapPreferences().m_flFov;
@@ -561,7 +562,8 @@ void CMapView3D::mousePressEvent( QMouseEvent *pEvent )
 	{
 		if ( const std::optional<CMapGizmo> gizmo = GetGizmo() )
 		{
-			const int nAxis = gizmo->HitAt( GetSizedCamera(), mapstyle::GIZMO_PIXELS, pEvent->position(), mapstyle::GIZMO_SLACK );
+			const MapPreferences_t &look = CPreferences::Instance().GetMapPreferences();
+			const int nAxis = gizmo->HitAt( GetSizedCamera(), look.m_flGizmoPixels, pEvent->position(), mapstyle::GIZMO_SLACK * std::max( 1.0, look.m_flGizmoThickness ) );
 			if ( nAxis >= 0 )
 			{
 				m_nGizmoDrag = nAxis;
@@ -590,7 +592,8 @@ void CMapView3D::mousePressEvent( QMouseEvent *pEvent )
 }
 
 //-----------------------------------------------------------------------------
-// Purpose: At the selection's middle, on the world's axes or (J) a lone entity's own.
+// Purpose: At the selection's middle (or the pivot, which turns and scales are about), on the
+//          world's axes or (J) a lone entity's own.
 //-----------------------------------------------------------------------------
 std::optional<CMapGizmo> CMapView3D::GetGizmo() const
 {
@@ -616,7 +619,7 @@ std::optional<CMapGizmo> CMapView3D::GetGizmo() const
 		}
 	}
 	CMapGizmo gizmo;
-	gizmo.Place( bounds.GetCenter(), axes );
+	gizmo.Place( m_Editor.GetPivot().value_or( bounds.GetCenter() ), axes );
 	gizmo.SetMode( m_Editor.GetGizmoMode() );
 	return gizmo;
 }
@@ -709,7 +712,8 @@ void CMapView3D::mouseMoveEvent( QMouseEvent *pEvent )
 	{
 		// The axis under the mouse lights up.
 		const std::optional<CMapGizmo> gizmo = GetGizmo();
-		const int nHover = gizmo ? gizmo->HitAt( GetSizedCamera(), mapstyle::GIZMO_PIXELS, pEvent->position(), mapstyle::GIZMO_SLACK ) : -1;
+		const MapPreferences_t &look = CPreferences::Instance().GetMapPreferences();
+		const int nHover = gizmo ? gizmo->HitAt( GetSizedCamera(), look.m_flGizmoPixels, pEvent->position(), mapstyle::GIZMO_SLACK * std::max( 1.0, look.m_flGizmoThickness ) ) : -1;
 		if ( nHover != m_nGizmoHover )
 		{
 			m_nGizmoHover = nHover;
@@ -954,8 +958,17 @@ void CMapView3D::PaintTools( QPainter &painter ) const
 			}
 		}
 	}
+	painter.setRenderHint( QPainter::Antialiasing, true );
+	auto drawEdged = [ & ]( const QColor &color ) {
+		painter.setPen( QPen{ QColor{ 0, 0, 0, 160 }, 3.0 } );
+		painter.drawLines( lines.data(), static_cast<int>( lines.size() ) );
+		painter.setPen( QPen{ color, 1.0 } );
+		painter.drawLines( lines.data(), static_cast<int>( lines.size() ) );
+	};
+	drawEdged( CPreferences::Instance().GetMapPreferences().m_Colors.m_ToolBlock );
 	if ( marker )
 	{
+		lines.clear();
 		for ( std::size_t a = 0; a < 3; a++ )
 		{
 			xv::map::Point_t from = *marker;
@@ -964,12 +977,8 @@ void CMapView3D::PaintTools( QPainter &painter ) const
 			to[ a ] += 16.0;
 			line( from, to );
 		}
+		drawEdged( CPreferences::Instance().GetMapPreferences().m_Colors.m_EntityMarker );
 	}
-	painter.setRenderHint( QPainter::Antialiasing, true );
-	painter.setPen( QPen{ QColor{ 0, 0, 0, 160 }, 3.0 } );
-	painter.drawLines( lines.data(), static_cast<int>( lines.size() ) );
-	painter.setPen( QPen{ CPreferences::Instance().GetMapPreferences().m_Colors.m_ToolBlock, 1.0 } );
-	painter.drawLines( lines.data(), static_cast<int>( lines.size() ) );
 	if ( pointfile && pointfile->size() >= 2 )
 	{
 		// The leak's line, over everything, like Hammer's.
@@ -1008,22 +1017,26 @@ void CMapView3D::PaintTools( QPainter &painter ) const
 		// Each axis in its colour, the one under the mouse (or being dragged) in the selection's
 		// yellow and thicker; while a drag is on, the pivot stays where the drag began.
 		const int nLit = m_nGizmoDrag >= 0 ? m_nGizmoDrag : m_nGizmoHover;
+		const MapPreferences_t &look = CPreferences::Instance().GetMapPreferences();
+		const double flThick = look.m_flGizmoThickness;
+		const int nAlpha = std::clamp( look.m_nGizmoAlpha, 0, 255 );
 		for ( int nAxis = 0; nAxis < 3; nAxis++ )
 		{
 			lines.clear();
-			for ( const MapGizmoLine_t &axisLine : gizmo->GetLines( camera, mapstyle::GIZMO_PIXELS ) )
+			for ( const MapGizmoLine_t &axisLine : gizmo->GetLines( camera, look.m_flGizmoPixels ) )
 			{
 				if ( axisLine.m_nAxis == nAxis )
 				{
 					line( axisLine.m_From, axisLine.m_To );
 				}
 			}
-			const QColor color = nAxis == nLit ? CPreferences::Instance().GetMapPreferences().m_Colors.m_SelectionEdge3D : nAxis == 0 ? mapstyle::AXIS_X
-				: nAxis == 1                                                                                                          ? mapstyle::AXIS_Y
-																																	  : mapstyle::AXIS_Z;
-			painter.setPen( QPen{ QColor{ 0, 0, 0, 160 }, nAxis == nLit ? 7.0 : 6.0, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin } );
+			QColor color = nAxis == nLit ? look.m_Colors.m_SelectionEdge3D : nAxis == 0 ? mapstyle::AXIS_X
+				: nAxis == 1                                                            ? mapstyle::AXIS_Y
+																						: mapstyle::AXIS_Z;
+			color.setAlpha( nAlpha );
+			painter.setPen( QPen{ QColor{ 0, 0, 0, 160 * nAlpha / 255 }, ( nAxis == nLit ? 7.0 : 6.0 ) * flThick, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin } );
 			painter.drawLines( lines.data(), static_cast<int>( lines.size() ) );
-			painter.setPen( QPen{ color, nAxis == nLit ? 4.5 : 3.5, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin } );
+			painter.setPen( QPen{ color, ( nAxis == nLit ? 4.5 : 3.5 ) * flThick, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin } );
 			painter.drawLines( lines.data(), static_cast<int>( lines.size() ) );
 		}
 	}

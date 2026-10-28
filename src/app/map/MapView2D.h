@@ -61,6 +61,8 @@ public:
 	CMapView2D( CMapEditor &editor, MapViewType_t nType, QWidget *pParent = nullptr );
 
 	[[nodiscard]] MapViewType_t GetType() const override { return m_nType; }
+	// Hammer++'s pivot, where this view shows it: with the selection tool.
+	[[nodiscard]] std::optional<xv::map::Point_t> GetShownPivot() const;
 	void SetType( MapViewType_t nType ) override;
 	bool Run( MapAction_t nAction ) override;
 	void CenterOn( const xv::map::Box_t &box ) override;
@@ -150,6 +152,8 @@ private:
 	// rotation step (Alt: neither).
 	[[nodiscard]] xv::map::Transform_t HandleTransform( QPointF at, Qt::KeyboardModifiers modifiers ) const;
 	void PreviewHandle( QPointF at, Qt::KeyboardModifiers modifiers );
+	// The cursor for what a press at at would do.
+	void UpdateCursor( QPointF at );
 	void PreviewMove( QPointF at, Qt::KeyboardModifiers modifiers );
 	void CancelMove();
 	void ReportCursor( QPointF at );
@@ -188,6 +192,8 @@ private:
 	MapEditMode_t m_nHandleMode = MapEditMode_t::MAP_EDIT_MODE_RESIZE;
 	QPointF m_HandleFrom;
 	xv::map::Box_t m_DragBounds;
+	xv::map::Point_t m_DragPivot{}; // what a turn by the handles is about
+	bool m_bPivotDrag = false;      // the pivot itself being dragged
 	std::shared_ptr<const xv::map::CScene> m_pMoveScene;
 	std::vector<std::uint32_t> m_MoveSelection;
 	// The block tool's drag: what it does, where it began (map units) and the box then.

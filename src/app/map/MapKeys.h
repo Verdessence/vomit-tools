@@ -83,6 +83,7 @@ enum class MapAction_t
 	MAP_ACTION_SNAP_SELECTION,       // Ctrl+B
 	MAP_ACTION_TOGGLE_TEXTURE_LOCK,  // Shift+L
 	MAP_ACTION_TOGGLE_SCALE_LOCK,    // the tool bar's button
+	MAP_ACTION_TOGGLE_PIVOT,         // Ctrl+P: Hammer++'s pivot
 	MAP_ACTION_EDIT_MODE,            // X: the selection's handles resize, rotate or shear
 	// 2D views.
 	MAP_ACTION_NEXT_AXIS,            // Tab

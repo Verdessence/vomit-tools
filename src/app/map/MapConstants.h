@@ -29,7 +29,9 @@ inline const QColor VERTEX{ 255, 255, 255 };
 inline const QColor CENTER_HANDLE{ 255, 255, 0 }; // the × on every object
 inline const QColor TOOL_HANDLE{ 255, 255, 255 };
 inline const QColor TOOL_SELECTION{ 255, 255, 0 };
-inline const QColor TOOL_BLOCK{ 255, 255, 255 };  // the block tool's box, the entity tool's marker
+inline const QColor TOOL_BLOCK{ 255, 255, 255 };  // the block tool's box
+inline const QColor ENTITY_MARKER{ 0, 255, 0 };   // the entity tool's marker (Verd: green in Hammer++)
+inline const QColor PIVOT{ 255, 255, 255 };       // RotationPivot: the point turns are about
 inline const QColor POINTFILE{ 255, 0, 0 };       // a leak's line, as Hammer draws it
 inline const QColor CORDON{ 255, 0, 0 };          // the cordon's box, Hammer's thick red line
 inline constexpr std::string_view CORDON_MATERIAL = "TOOLS/TOOLSSKYBOX"; // the walls that seal a cordoned compile
@@ -50,7 +52,7 @@ inline constexpr float SELECTION_TINT = 0.5f;        // how far selected faces g
 inline constexpr int GRID_DEFAULT_SIZE = 64;
 inline constexpr int GRID_HIGHLIGHT_EVERY = 8; // GridHighSpec
 inline constexpr int HANDLE_SIZE = 8;          // [General] HandleSize is 5 in Hammer++; too small to hit on today's screens (Verd)
-inline constexpr double HANDLE_SLACK = 4.0;    // pixels round a handle that still take the mouse
+inline constexpr int HANDLE_REACH = 4;         // pixels round a handle that still take the mouse
 inline constexpr double HIDE_GRID_BELOW_PIXELS = 4.0; // HideSmallGrid
 inline constexpr int GRID_SMALLEST = 1;
 inline constexpr int GRID_LARGEST = 512;
@@ -77,6 +79,8 @@ inline const QColor AXIS_Y{ 64, 255, 64 };
 inline const QColor AXIS_Z{ 64, 128, 255 };
 inline constexpr int GIZMO_SIZE = 28;             // the axes' length in pixels
 inline constexpr double GIZMO_PIXELS = 140.0;     // the selection gizmo's axes, on screen (Verd: bigger)
+inline constexpr double GIZMO_THICKNESS = 1.0;    // [General] GizmoThiccness: times our lines' widths
+inline constexpr int GIZMO_ALPHA = 255;           // [General] GizmoAlpha
 inline constexpr double GIZMO_SLACK = 12.0;       // how near the mouse must be to an axis
 inline constexpr int GIZMO_MARGIN = 14;           // from the bottom left corner
 inline const QColor OVERLAY_BACKING{ 0, 0, 0, 150 };

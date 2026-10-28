@@ -475,6 +475,9 @@ QWidget *CPreferencesDialog::BuildMapsPage()
 		pForm->addRow( tr( "Instances' tint" ), spin( QStringLiteral( "preferencesMapInstanceTint" ), current.m_flInstanceTint, 0, 1, 0.05, 2, []( MapPreferences_t &p, double fl ) { p.m_flInstanceTint = fl; } ) );
 		pForm->addRow( tr( "Selected models show" ), choice( QStringLiteral( "preferencesMapSelectedModels" ), { { tr( "Their edges if props (prop_…), else their box" ), static_cast<int>( MapSelectedModels_t::MAP_SELECTED_MODELS_PROPS ) }, { tr( "Their edges" ), static_cast<int>( MapSelectedModels_t::MAP_SELECTED_MODELS_EDGES ) }, { tr( "Their box" ), static_cast<int>( MapSelectedModels_t::MAP_SELECTED_MODELS_BOX ) } }, static_cast<int>( current.m_nSelectedModels ), []( MapPreferences_t &p, int n ) { p.m_nSelectedModels = static_cast<MapSelectedModels_t>( n ); } ) );
 		pForm->addRow( tr( "Lightmap grid's darker squares" ), spin( QStringLiteral( "preferencesMapLightmapGridShade" ), current.m_flLightmapGridShade, 0, 1, 0.05, 2, []( MapPreferences_t &p, double fl ) { p.m_flLightmapGridShade = fl; } ) );
+		pForm->addRow( tr( "Gizmo's size (pixels)" ), spin( QStringLiteral( "preferencesMapGizmoPixels" ), current.m_flGizmoPixels, 40, 400, 10, 0, []( MapPreferences_t &p, double fl ) { p.m_flGizmoPixels = fl; } ) );
+		pForm->addRow( tr( "Gizmo's line thickness (times)" ), spin( QStringLiteral( "preferencesMapGizmoThickness" ), current.m_flGizmoThickness, 0.25, 4, 0.25, 2, []( MapPreferences_t &p, double fl ) { p.m_flGizmoThickness = fl; } ) );
+		pForm->addRow( tr( "Gizmo's opacity" ), whole( QStringLiteral( "preferencesMapGizmoAlpha" ), current.m_nGizmoAlpha, 32, 255, QString{}, []( MapPreferences_t &p, int n ) { p.m_nGizmoAlpha = n; } ) );
 		pLayout->addLayout( pForm );
 		pLayout->addWidget( check( QStringLiteral( "preferencesMapSkybox3D" ), tr( "Draw the 3D skybox" ), current.m_bSkybox3D, []( MapPreferences_t &p, bool b ) { p.m_bSkybox3D = b; } ) );
 		pLayout->addWidget( check( QStringLiteral( "preferencesMapSprites" ), tr( "Draw sprites (else entities' boxes)" ), current.m_bSprites, []( MapPreferences_t &p, bool b ) { p.m_bSprites = b; } ) );
@@ -485,7 +488,10 @@ QWidget *CPreferencesDialog::BuildMapsPage()
 		pLayout->addWidget( check( QStringLiteral( "preferencesMapScaleLock" ), tr( "Texture scale lock on when a map opens (textures stretch with resized faces)" ), current.m_bScaleLock, []( MapPreferences_t &p, bool b ) { p.m_bScaleLock = b; } ) );
 		auto *pEditing = new QFormLayout;
 		pEditing->addRow( tr( "Rotation snaps to" ), spin( QStringLiteral( "preferencesMapRotationSnap" ), current.m_flRotationSnap, 1, 90, 1, 0, []( MapPreferences_t &p, double fl ) { p.m_flRotationSnap = fl; } ) );
+		pEditing->addRow( tr( "Carve cuts" ), choice( QStringLiteral( "preferencesMapCarve" ), { { tr( "Blocks into slabs, other shapes into a fan round them" ), static_cast<int>( MapCarve_t::MAP_CARVE_AUTO ) }, { tr( "By the carver's faces in turn (Hammer)" ), static_cast<int>( MapCarve_t::MAP_CARVE_HAMMER ) }, { tr( "By the carver's box first (no cut runs past it)" ), static_cast<int>( MapCarve_t::MAP_CARVE_BOX_FIRST ) }, { tr( "Into a fan round the carver (arch segments round a cylinder)" ), static_cast<int>( MapCarve_t::MAP_CARVE_FAN ) } }, static_cast<int>( current.m_nCarve ), []( MapPreferences_t &p, int n ) { p.m_nCarve = static_cast<MapCarve_t>( n ); } ) );
 		pLayout->addLayout( pEditing );
+		pLayout->addWidget( check( QStringLiteral( "preferencesMapGroupCarve" ), tr( "Group the pieces Carve leaves of each brush" ), current.m_bGroupCarve, []( MapPreferences_t &p, bool b ) { p.m_bGroupCarve = b; } ) );
+		pLayout->addWidget( check( QStringLiteral( "preferencesMapPivot" ), tr( "Pivot on when a map opens (turns go about a point dragged in the 2D views; Ctrl+P)" ), current.m_bPivot, []( MapPreferences_t &p, bool b ) { p.m_bPivot = b; } ) );
 		pLayout->addStretch();
 	}
 
@@ -498,7 +504,9 @@ QWidget *CPreferencesDialog::BuildMapsPage()
 		pForm->addRow( tr( "Grid lines closer than this are hidden" ), spin( QStringLiteral( "preferencesMapHideGridBelow" ), current.m_flHideGridBelow, 1, 32, 1, 1, []( MapPreferences_t &p, double fl ) { p.m_flHideGridBelow = fl; } ) );
 		pForm->addRow( tr( "Corner dots' size" ), whole( QStringLiteral( "preferencesMapVertexSize" ), current.m_nVertexSize, 1, 8, szPixels, []( MapPreferences_t &p, int n ) { p.m_nVertexSize = n; } ) );
 		pForm->addRow( tr( "Corners on brushes from" ), whole( QStringLiteral( "preferencesMapVerticesFrom" ), current.m_nVerticesFromPixels, 0, 256, szPixels, []( MapPreferences_t &p, int n ) { p.m_nVerticesFromPixels = n; } ) );
-		pForm->addRow( tr( "Handles' size" ), whole( QStringLiteral( "preferencesMapHandleSize" ), current.m_nHandleSize, 3, 16, szPixels, []( MapPreferences_t &p, int n ) { p.m_nHandleSize = n; } ) );
+		pForm->addRow( tr( "Handles' size" ), whole( QStringLiteral( "preferencesMapHandleSize" ), current.m_nHandleSize, 3, 32, szPixels, []( MapPreferences_t &p, int n ) { p.m_nHandleSize = n; } ) );
+		pForm->addRow( tr( "Handles take the mouse within" ), whole( QStringLiteral( "preferencesMapHandleReach" ), current.m_nHandleReach, 0, 16, szPixels, []( MapPreferences_t &p, int n ) { p.m_nHandleReach = n; } ) );
+		pForm->addRow( tr( "Handles' colour" ), colour( QStringLiteral( "preferencesMapHandleColor" ), current.m_Colors.m_ToolHandle, false, []( MapPreferences_t &p, const QColor &color ) { p.m_Colors.m_ToolHandle = color; } ) );
 		pForm->addRow( tr( "Centre handles on objects from" ), whole( QStringLiteral( "preferencesMapCenterHandlesFrom" ), current.m_nCenterHandlesFromPixels, 0, 256, szPixels, []( MapPreferences_t &p, int n ) { p.m_nCenterHandlesFromPixels = n; } ) );
 		pForm->addRow( tr( "Models drawn from" ), whole( QStringLiteral( "preferencesMapModelsFrom" ), current.m_nModelsFromPixels, 0, 512, szPixels, []( MapPreferences_t &p, int n ) { p.m_nModelsFromPixels = n; } ) );
 		pForm->addRow( tr( "Names shown once 16 units are" ), whole( QStringLiteral( "preferencesMapNamesFrom" ), current.m_nNamesFromPixels, 1, 512, szPixels, []( MapPreferences_t &p, int n ) { p.m_nNamesFromPixels = n; } ) );
@@ -545,8 +553,9 @@ QWidget *CPreferencesDialog::BuildMapsPage()
 			{ "Selection", tr( "2D selection" ), &MapColors_t::m_Selection, false },
 			{ "SelectionFill", tr( "2D selection's fill" ), &MapColors_t::m_SelectionFill, true },
 			{ "ToolSelection", tr( "Selection box and sizes" ), &MapColors_t::m_ToolSelection, false },
-			{ "ToolHandle", tr( "Selection box's handles" ), &MapColors_t::m_ToolHandle, false },
-			{ "ToolBlock", tr( "New block's box and new entity's marker" ), &MapColors_t::m_ToolBlock, false },
+			{ "ToolBlock", tr( "New block's box" ), &MapColors_t::m_ToolBlock, false },
+			{ "EntityMarker", tr( "New entity's marker" ), &MapColors_t::m_EntityMarker, false },
+			{ "Pivot", tr( "The pivot" ), &MapColors_t::m_Pivot, false },
 			{ "Pointfile", tr( "A leak's line" ), &MapColors_t::m_Pointfile, false },
 			{ "Cordon", tr( "The cordon's box" ), &MapColors_t::m_Cordon, false },
 			{ "Camera", tr( "The 3D camera in 2D" ), &MapColors_t::m_Camera, false },

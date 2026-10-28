@@ -294,6 +294,14 @@ void CMapQuadSplitter::mouseReleaseEvent( QMouseEvent * )
 }
 
 //-----------------------------------------------------------------------------
+// Purpose: The bar's cursor goes when the mouse leaves for a pane.
+//-----------------------------------------------------------------------------
+void CMapQuadSplitter::leaveEvent( QEvent * )
+{
+	setCursor( Qt::ArrowCursor );
+}
+
+//-----------------------------------------------------------------------------
 // Purpose: The bars between the panes.
 //-----------------------------------------------------------------------------
 void CMapQuadSplitter::paintEvent( QPaintEvent * )

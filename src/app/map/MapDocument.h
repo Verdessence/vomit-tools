@@ -26,6 +26,10 @@
 
 class QUndoStack;
 
+// gameinfo.txt's InstancePath, under the game's folder, when it has one: where func_instances'
+// files are looked for after the map's own folder.
+[[nodiscard]] std::optional<std::filesystem::path> GameInstancePath( const xv::vfs::CGameInfo &game );
+
 // Selection picks whole groups, whole entities with their solids, or single solids (Hammer's
 // selection modes).
 enum class MapSelectMode_t

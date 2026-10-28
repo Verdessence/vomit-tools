@@ -50,10 +50,16 @@ void ForEachMapPreference( Preferences_t &map, Visit_t &&pfnVisit )
 	pfnVisit( "maps/sprites", map.m_bSprites );
 	pfnVisit( "maps/wireframeModels", map.m_bWireframeModels );
 	pfnVisit( "maps/selectedModels", map.m_nSelectedModels );
+	pfnVisit( "maps/gizmoPixels", map.m_flGizmoPixels );
+	pfnVisit( "maps/gizmoThickness", map.m_flGizmoThickness );
+	pfnVisit( "maps/gizmoAlpha", map.m_nGizmoAlpha );
 	pfnVisit( "maps/arrowsNudge", map.m_bArrowsNudge );
 	pfnVisit( "maps/textureLock", map.m_bTextureLock );
 	pfnVisit( "maps/scaleLock", map.m_bScaleLock );
 	pfnVisit( "maps/rotationSnap", map.m_flRotationSnap );
+	pfnVisit( "maps/pivot", map.m_bPivot );
+	pfnVisit( "maps/carve", map.m_nCarve );
+	pfnVisit( "maps/groupCarve", map.m_bGroupCarve );
 	pfnVisit( "maps/hideSmallGrid", map.m_bHideSmallGrid );
 	pfnVisit( "maps/hideGridBelow", map.m_flHideGridBelow );
 	pfnVisit( "maps/highlightEvery", map.m_nHighlightEvery );
@@ -62,6 +68,7 @@ void ForEachMapPreference( Preferences_t &map, Visit_t &&pfnVisit )
 	pfnVisit( "maps/verticesFrom", map.m_nVerticesFromPixels );
 	pfnVisit( "maps/centerHandles", map.m_bCenterHandles );
 	pfnVisit( "maps/handleSize", map.m_nHandleSize );
+	pfnVisit( "maps/handleReach", map.m_nHandleReach );
 	pfnVisit( "maps/centerHandlesFrom", map.m_nCenterHandlesFromPixels );
 	pfnVisit( "maps/namesFrom", map.m_nNamesFromPixels );
 	pfnVisit( "maps/models2D", map.m_bModels2D );
@@ -92,6 +99,8 @@ void ForEachMapPreference( Preferences_t &map, Visit_t &&pfnVisit )
 	pfnVisit( "maps/colors/toolSelection", colors.m_ToolSelection );
 	pfnVisit( "maps/colors/toolHandle", colors.m_ToolHandle );
 	pfnVisit( "maps/colors/toolBlock", colors.m_ToolBlock );
+	pfnVisit( "maps/colors/entityMarker", colors.m_EntityMarker );
+	pfnVisit( "maps/colors/pivot", colors.m_Pivot );
 	pfnVisit( "maps/colors/pointfile", colors.m_Pointfile );
 	pfnVisit( "maps/colors/cordon", colors.m_Cordon );
 	pfnVisit( "maps/colors/camera", colors.m_Camera );

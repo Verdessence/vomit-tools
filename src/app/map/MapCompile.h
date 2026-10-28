@@ -15,6 +15,7 @@
 #include <vector>
 
 #include <QObject>
+#include <QProcessEnvironment>
 #include <QString>
 
 #include "SourceTools.h"
@@ -48,6 +49,11 @@ private:
 	void CommandDone( bool bSuccess );
 	void Append( const QString &szText );
 	void End( bool bSuccess );
+	// The game started and left to itself, what it prints going into the log.
+	void StartGame( const QString &szProgram, const QStringList &arguments );
+	// The environment for the game: this process's without what an AppImage's AppRun put in it
+	// (its own libraries and Qt would be found before the game's).
+	[[nodiscard]] static QProcessEnvironment GameEnvironment();
 
 	std::vector<xv::map::ResolvedCommand_t> m_Commands;
 	std::size_t m_nCurrent = 0;

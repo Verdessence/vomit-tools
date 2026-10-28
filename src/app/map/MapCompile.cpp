@@ -132,15 +132,96 @@ void CCompileRunner::RunNext()
 			CommandDone( false );
 			return;
 		}
-		const bool bStarted = QProcess::startDetached( szProgram, arguments, QFileInfo( szProgram ).absolutePath() );
-		if ( !bStarted )
-		{
-			Append( tr( "%1 could not be started.\n" ).arg( szProgram ) );
-		}
-		CommandDone( bStarted );
+		StartGame( szProgram, arguments );
 		return;
 	}
 	m_pTool->Start( QString::fromStdString( command.m_szProgram ), arguments, m_szDirectory, m_szGameDirectory );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: The game is a process of its own that outlives the sequence; its lines go into the
+//          log as they come (prefixed), so a game that won't start says why there.
+//-----------------------------------------------------------------------------
+void CCompileRunner::StartGame( const QString &szProgram, const QStringList &arguments )
+{
+	auto *pGame = new QProcess( this );
+	pGame->setProgram( szProgram );
+	pGame->setArguments( arguments );
+	pGame->setWorkingDirectory( QFileInfo( szProgram ).absolutePath() );
+	pGame->setProcessEnvironment( GameEnvironment() );
+	pGame->setProcessChannelMode( QProcess::MergedChannels );
+	const QString szName = QFileInfo( szProgram ).fileName();
+	connect( pGame, &QProcess::readyReadStandardOutput, this, [ this, pGame, szName ] {
+		for ( const QByteArray &line : pGame->readAllStandardOutput().split( '\n' ) )
+		{
+			if ( !line.trimmed().isEmpty() )
+			{
+				Append( QStringLiteral( "%1: %2\n" ).arg( szName, QString::fromUtf8( line ) ) );
+			}
+		}
+	} );
+	connect( pGame, &QProcess::finished, this, [ this, pGame, szName ]( int nCode, QProcess::ExitStatus nStatus ) {
+		Append( nStatus == QProcess::NormalExit ? tr( "%1 ended with code %2.\n" ).arg( szName ).arg( nCode ) : tr( "%1 crashed.\n" ).arg( szName ) );
+		pGame->deleteLater();
+	} );
+	connect( pGame, &QProcess::errorOccurred, this, [ this, pGame, szProgram ]( QProcess::ProcessError nError ) {
+		if ( nError == QProcess::FailedToStart )
+		{
+			Append( tr( "%1 could not be started: %2\n" ).arg( szProgram, pGame->errorString() ) );
+			pGame->deleteLater();
+		}
+	} );
+	pGame->start();
+	const bool bStarted = pGame->waitForStarted( 5000 );
+	if ( bStarted )
+	{
+		Append( tr( "%1 started (process %2); what it prints follows.\n" ).arg( szName ).arg( pGame->processId() ) );
+	}
+	CommandDone( bStarted );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: AppRun sets APPDIR and puts the image's folders first in LD_LIBRARY_PATH, PATH and
+//          the Qt variables; the game's own script prepends its libraries, but what it lacks
+//          would still come from the image.
+//-----------------------------------------------------------------------------
+QProcessEnvironment CCompileRunner::GameEnvironment()
+{
+	QProcessEnvironment environment = QProcessEnvironment::systemEnvironment();
+	const QString szAppDir = environment.value( QStringLiteral( "APPDIR" ) );
+	if ( szAppDir.isEmpty() )
+	{
+		return environment;
+	}
+	for ( const QString &szKey : environment.keys() )
+	{
+		const QString szValue = environment.value( szKey );
+		if ( szKey == QStringLiteral( "APPDIR" ) || szKey == QStringLiteral( "APPIMAGE" ) || szKey == QStringLiteral( "ARGV0" ) || szKey == QStringLiteral( "OWD" ) )
+		{
+			environment.remove( szKey );
+		}
+		else if ( szKey == QStringLiteral( "PATH" ) || szKey == QStringLiteral( "LD_LIBRARY_PATH" ) || szKey.startsWith( QStringLiteral( "QT_" ) ) || szKey.startsWith( QStringLiteral( "QML" ) ) || szKey.startsWith( QStringLiteral( "GTK_" ) ) || szKey.startsWith( QStringLiteral( "GSETTINGS" ) ) || szKey.startsWith( QStringLiteral( "XDG_DATA_DIRS" ) ) || szKey.startsWith( QStringLiteral( "PERLLIB" ) ) || szKey.startsWith( QStringLiteral( "PYTHONPATH" ) ) )
+		{
+			// The image's entries out of a list; a variable that was only the image's goes.
+			QStringList kept;
+			for ( const QString &szEntry : szValue.split( QLatin1Char( ':' ) ) )
+			{
+				if ( !szEntry.startsWith( szAppDir ) )
+				{
+					kept << szEntry;
+				}
+			}
+			if ( kept.isEmpty() || ( kept.size() == 1 && kept.front().isEmpty() ) )
+			{
+				environment.remove( szKey );
+			}
+			else if ( kept.size() != szValue.split( QLatin1Char( ':' ) ).size() )
+			{
+				environment.insert( szKey, kept.join( QLatin1Char( ':' ) ) );
+			}
+		}
+	}
+	return environment;
 }
 
 //-----------------------------------------------------------------------------

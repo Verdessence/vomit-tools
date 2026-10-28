@@ -97,6 +97,12 @@ public:
 	// The selection transformed (turned, stretched, sheared), with the locks; one step to undo,
 	// named szName in Edit > Undo.
 	void TransformSelection( const xv::map::Transform_t &transform, const QString &szName );
+	// Hammer++'s pivot (Ctrl+P): the point the selection turns about, its centre until dragged
+	// somewhere in a 2D view; it stays where it was put as the selection moves (Verd: Hammer++'s
+	// is independent of the brushes), and goes back to the centre when something else is
+	// selected. None while it is off or nothing is selected.
+	[[nodiscard]] std::optional<xv::map::Point_t> GetPivot() const;
+	void SetPivot( const xv::map::Point_t &at );
 
 	// The block tool's box, dragged in a 2D view and shown in every view; Enter makes it a block.
 	[[nodiscard]] const std::optional<xv::map::Box_t> &GetNewBox() const { return m_NewBox; }
@@ -164,8 +170,6 @@ public:
 	// Find Entities (Ctrl+Shift+F): the entities named exactly so selected and centred on.
 	void ShowFindEntities();
 	bool FindEntitiesByName( const QString &szName );
-	// Hammer's cordon: the box the map has, whether it is on, the tool's box committed, and
-	// Toggle Cordon State.
 	// The vertex tool: which handles it shows, the handles picked (on the selected solids), and
 	// a move of them as one undo step.
 	[[nodiscard]] MapVertexMode_t GetVertexMode() const { return m_nVertexMode; }
@@ -176,6 +180,9 @@ public:
 	void MoveVertexHandles( const xv::map::Point_t &offset );
 	// The selected solids' corners and edges, by object.
 	[[nodiscard]] std::vector<std::pair<std::uint32_t, xv::map::SolidVertices_t>> GetSelectedVertices() const;
+	// Hammer++'s cordons: the box picked in the Filter Control's Cordons tab (the one Edit Cordon
+	// Bounds drags), whether the cordon is on, the tool's box committed into the picked cordon (a
+	// first cordon made when there is none), and Toggle Cordon State.
 	[[nodiscard]] std::optional<xv::map::Box_t> GetCordonBox() const;
 	[[nodiscard]] bool IsCordonActive() const;
 	void CommitCordon();
@@ -268,6 +275,8 @@ private:
 	bool m_bGizmo = true;
 	MapGizmoMode_t m_nGizmoMode = MapGizmoMode_t::MAP_GIZMO_MODE_TRANSLATE;
 	bool m_bGizmoLocal = false;
+	std::optional<xv::map::Point_t> m_Pivot;        // where it was dragged to
+	std::vector<std::uint32_t> m_PivotSelection;  // for this selection
 	std::optional<xv::map::CViewCamera> m_RememberedCamera;
 	CMapView *m_pActiveView = nullptr;
 	std::optional<xv::map::Box_t> m_NewBox;
@@ -285,6 +294,12 @@ private:
 	QComboBox *m_pPrimitive = nullptr; // the block tool's shape (Hammer's Objects box)
 	QSpinBox *m_pSides = nullptr;      // its Faces box
 	QPointer<QDialog> m_pCompileDialog;
+	// The cordon and box the cordon tool's box belongs to (the Cordons tab's pick when the tool
+	// took it up).
+	std::size_t m_nCordonPick = 0;
+	std::size_t m_nCordonBoxPick = 0;
+	// The map's cordons with the picked box set to box.
+	[[nodiscard]] std::vector<xv::map::Cordon_t> CordonsWithBox( const xv::map::Box_t &box ) const;
 
 	std::array<CMapPane *, 4> m_Panes{};
 	CMapQuadSplitter *m_pSplitter = nullptr;

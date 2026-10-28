@@ -11,11 +11,13 @@
 #pragma once
 
 #include <cstddef>
+#include <memory>
 #include <vector>
 
 #include <QDialog>
 #include <QElapsedTimer>
 #include <QString>
+#include <QTemporaryDir>
 
 #include "map/Compile.h"
 #include "map/MapCompile.h"
@@ -77,7 +79,10 @@ private:
 	std::vector<xv::map::CompileSequence_t> m_Sequences;
 	xv::map::CompileReport_t m_Report;
 	QElapsedTimer m_Clock;
-	bool m_bCordoned = false; // this run compiles the <map>_cordon.vmf copy
+	// With the cordon on, this run compiles a sealed copy of the map, under its own name, in a
+	// folder of its own; what the compilers leave there comes back beside the map.
+	std::unique_ptr<QTemporaryDir> m_pCordonFolder;
+	void BringBackCompiled();
 	bool m_bFilling = false;
 
 	QTabWidget *m_pTabs = nullptr;

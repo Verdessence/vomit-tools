@@ -42,23 +42,6 @@ void SortUnique( std::vector<std::uint32_t> &objects )
 	objects.erase( std::unique( objects.begin(), objects.end() ), objects.end() );
 }
 
-//-----------------------------------------------------------------------------
-// Purpose: gameinfo.txt's InstancePath, under the game's folder, when it has one.
-//-----------------------------------------------------------------------------
-std::optional<std::filesystem::path> InstancePath( const xv::vfs::CGameInfo &game )
-{
-	std::ifstream file( game.m_File, std::ios::binary );
-	const std::string szText( ( std::istreambuf_iterator<char>( file ) ), std::istreambuf_iterator<char>() );
-	const xv::kv1::CParseResult result = xv::kv1::Parse( szText );
-	const xv::kv1::CNode *pGameInfo = result.m_Document.Find( "GameInfo" );
-	const xv::kv1::CNode *pPath = pGameInfo ? pGameInfo->Find( "InstancePath" ) : nullptr;
-	if ( !pPath || pPath->GetValue().empty() )
-	{
-		return std::nullopt;
-	}
-	return game.m_GameDir / std::filesystem::path{ pPath->GetValue() };
-}
-
 // One edit on the undo stack: the objects as the edit makes them, and as they were.
 class CMapEditCommand : public QUndoCommand
 {
@@ -97,6 +80,23 @@ private:
 };
 
 } // namespace
+
+//-----------------------------------------------------------------------------
+// Purpose: gameinfo.txt's InstancePath, under the game's folder, when it has one.
+//-----------------------------------------------------------------------------
+std::optional<std::filesystem::path> GameInstancePath( const xv::vfs::CGameInfo &game )
+{
+	std::ifstream file( game.m_File, std::ios::binary );
+	const std::string szText( ( std::istreambuf_iterator<char>( file ) ), std::istreambuf_iterator<char>() );
+	const xv::kv1::CParseResult result = xv::kv1::Parse( szText );
+	const xv::kv1::CNode *pGameInfo = result.m_Document.Find( "GameInfo" );
+	const xv::kv1::CNode *pPath = pGameInfo ? pGameInfo->Find( "InstancePath" ) : nullptr;
+	if ( !pPath || pPath->GetValue().empty() )
+	{
+		return std::nullopt;
+	}
+	return game.m_GameDir / std::filesystem::path{ pPath->GetValue() };
+}
 
 //-----------------------------------------------------------------------------
 // Purpose:
@@ -316,7 +316,7 @@ void CMapDocument::Run( Source_t source, int nGeneration )
 	options.m_Instances.m_MapFile = source.m_DiskPath;
 	if ( source.m_Game )
 	{
-		if ( const std::optional<std::filesystem::path> path = InstancePath( *source.m_Game ) )
+		if ( const std::optional<std::filesystem::path> path = GameInstancePath( *source.m_Game ) )
 		{
 			options.m_Instances.m_SearchPaths.push_back( *path );
 		}

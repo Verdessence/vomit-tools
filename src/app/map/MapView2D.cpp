@@ -96,6 +96,15 @@ std::array<std::pair<QPoint, QRectF>, 8> HandlesOf( const QRectF &box )
 }
 
 //-----------------------------------------------------------------------------
+// Purpose: A handle with the margin round it that still takes the mouse (Preferences).
+//-----------------------------------------------------------------------------
+QRectF Reached( const QRectF &handle )
+{
+	const double fl = Look().m_nHandleReach;
+	return handle.adjusted( -fl, -fl, fl, fl );
+}
+
+//-----------------------------------------------------------------------------
 // Purpose: Which of the eight handles an edit mode uses: resizing all of them, turning the
 //          corners, shearing the sides.
 //-----------------------------------------------------------------------------
@@ -191,6 +200,8 @@ CMapView2D::CMapView2D( CMapEditor &editor, MapViewType_t nType, QWidget *pParen
 {
 	setMouseTracking( true );
 	setAttribute( Qt::WA_OpaquePaintEvent );
+	// A cursor of its own, or the one the splitter's bar set would stay on the way in.
+	setCursor( Qt::ArrowCursor );
 	m_pHorizontal = new QScrollBar( Qt::Horizontal, this );
 	m_pVertical = new QScrollBar( Qt::Vertical, this );
 	for ( QScrollBar *pBar : { m_pHorizontal, m_pVertical } )
@@ -950,6 +961,22 @@ void CMapView2D::PaintSelection( QPainter &painter ) const
 			painter.fillRect( box, Look().m_Colors.m_SelectionFill );
 			dotted( box );
 			PaintHandles( painter, box, m_Editor.GetEditMode() );
+			if ( const std::optional<xv::map::Point_t> pivot = GetShownPivot() )
+			{
+				// A ring with a dot in it, a little bigger than the handles.
+				const QPointF at = ToWidget( Flatten( *pivot ) );
+				const double flRadius = Look().m_nHandleSize / 2.0 + 3.0;
+				painter.setRenderHint( QPainter::Antialiasing, true );
+				painter.setBrush( Qt::NoBrush );
+				painter.setPen( QPen{ QColor{ 0, 0, 0, 160 }, 4.0 } );
+				painter.drawEllipse( at, flRadius, flRadius );
+				painter.setPen( QPen{ Look().m_Colors.m_Pivot, 2.0 } );
+				painter.drawEllipse( at, flRadius, flRadius );
+				painter.setBrush( Look().m_Colors.m_Pivot );
+				painter.drawEllipse( at, 1.5, 1.5 );
+				painter.setBrush( Qt::NoBrush );
+				painter.setRenderHint( QPainter::Antialiasing, false );
+			}
 			// Its size on two sides, as Hammer shows it while selecting.
 			PaintSizes( painter, box, Flatten( bounds.m_Maxs ) - Flatten( bounds.m_Mins ), Look().m_Colors.m_ToolSelection );
 		}
@@ -1048,10 +1075,11 @@ void CMapView2D::PaintTools( QPainter &painter ) const
 	if ( const std::optional<xv::map::Point_t> &marker = m_Editor.GetEntityMarker() )
 	{
 		const QPointF at = ToWidget( Flatten( *marker ) );
-		painter.setPen( QPen{ color, 0, Qt::DotLine } );
+		const QColor &markerColor = Look().m_Colors.m_EntityMarker;
+		painter.setPen( QPen{ markerColor, 0, Qt::DotLine } );
 		painter.drawLine( QPointF{ 0.0, at.y() }, QPointF{ static_cast<double>( width() ), at.y() } );
 		painter.drawLine( QPointF{ at.x(), 0.0 }, QPointF{ at.x(), static_cast<double>( height() ) } );
-		painter.setPen( QPen{ color, 0 } );
+		painter.setPen( QPen{ markerColor, 0 } );
 		painter.setBrush( Qt::NoBrush );
 		painter.drawRect( QRectF{ at.x() - 4.0, at.y() - 4.0, 8.0, 8.0 } );
 	}
@@ -1181,7 +1209,7 @@ std::optional<std::uint32_t> CMapView2D::HitAt( QPointF at ) const
 	{
 		return std::nullopt;
 	}
-	const double flReach = Look().m_nHandleSize / 2.0 + 2.0;
+	const double flReach = Look().m_nHandleSize / 2.0 + Look().m_nHandleReach;
 	const QRectF near = QRectF{ ToMap( at - QPointF{ flReach, -flReach } ), ToMap( at + QPointF{ flReach, -flReach } ) }.normalized();
 	std::optional<std::uint32_t> best;
 	double flBestArea = 0.0;
@@ -1308,14 +1336,28 @@ void CMapView2D::mousePressEvent( QMouseEvent *pEvent )
 		const xv::map::Box_t bounds = GetDocument().GetSelectionBounds();
 		if ( !bounds.IsEmpty() && nTool == MapTool_t::MAP_TOOL_SELECT )
 		{
+			// In rotate mode the pivot comes first: it sits inside the selection, where a click
+			// would change modes (in the other modes it only shows).
+			if ( const std::optional<xv::map::Point_t> pivot = m_Editor.GetEditMode() == MapEditMode_t::MAP_EDIT_MODE_ROTATE ? GetShownPivot() : std::nullopt )
+			{
+				const QPointF p = ToWidget( Flatten( *pivot ) );
+				const double flReach = Look().m_nHandleSize / 2.0 + 3.0 + Look().m_nHandleReach;
+				if ( std::abs( p.x() - at.x() ) <= flReach && std::abs( p.y() - at.y() ) <= flReach )
+				{
+					m_bPivotDrag = true;
+					m_BoxFrom.reset();
+					return;
+				}
+			}
 			for ( const auto &[ where, handle ] : HandlesOf( RectOf( bounds ) ) )
 			{
-				if ( HandleInMode( where, m_Editor.GetEditMode() ) && handle.adjusted( -mapstyle::HANDLE_SLACK, -mapstyle::HANDLE_SLACK, mapstyle::HANDLE_SLACK, mapstyle::HANDLE_SLACK ).contains( at ) )
+				if ( HandleInMode( where, m_Editor.GetEditMode() ) && Reached( handle ).contains( at ) )
 				{
 					m_HandleDrag = where;
 					m_nHandleMode = m_Editor.GetEditMode();
 					m_HandleFrom = ToMap( at );
 					m_DragBounds = bounds;
+					m_DragPivot = m_Editor.GetPivot().value_or( bounds.GetCenter() );
 					m_BoxFrom.reset();
 					return;
 				}
@@ -1367,7 +1409,7 @@ void CMapView2D::PressClip( QPointF at, Qt::KeyboardModifiers modifiers )
 		const QPointF ends[ 2 ] = { ToWidget( Flatten( line->m_From ) ), ToWidget( Flatten( line->m_To ) ) };
 		for ( int i = 0; i < 2; i++ )
 		{
-			if ( ( ends[ i ] - at ).manhattanLength() <= mapstyle::HANDLE_SIZE + mapstyle::HANDLE_SLACK )
+			if ( Reached( QRectF{ ends[ i ].x() - Look().m_nHandleSize / 2.0, ends[ i ].y() - Look().m_nHandleSize / 2.0, static_cast<double>( Look().m_nHandleSize ), static_cast<double>( Look().m_nHandleSize ) } ).contains( at ) )
 			{
 				m_nClipDrag = modifiers.testFlag( Qt::ControlModifier ) ? 2 : i;
 				return;
@@ -1433,7 +1475,7 @@ void CMapView2D::PressBlock( QPointF at )
 		const QRectF rect = RectOf( *box );
 		for ( const auto &[ where, handle ] : HandlesOf( rect ) )
 		{
-			if ( handle.adjusted( -mapstyle::HANDLE_SLACK, -mapstyle::HANDLE_SLACK, mapstyle::HANDLE_SLACK, mapstyle::HANDLE_SLACK ).contains( at ) )
+			if ( Reached( handle ).contains( at ) )
 			{
 				m_nBoxDrag = BoxDrag_t::BOX_DRAG_HANDLE;
 				m_BoxHandle = where;
@@ -1494,7 +1536,7 @@ void CMapView2D::PaintVertexHandles( QPainter &painter ) const
 std::optional<xv::map::VertexRef_t> CMapView2D::VertexHandleAt( QPointF at ) const
 {
 	const MapVertexMode_t nMode = m_Editor.GetVertexMode();
-	const double flReach = Look().m_nHandleSize / 2.0 + mapstyle::HANDLE_SLACK;
+	const double flReach = Look().m_nHandleSize / 2.0 + Look().m_nHandleReach;
 	auto near = [ & ]( const xv::map::Point_t &p ) {
 		const QPointF d = ToWidget( Flatten( p ) ) - at;
 		return std::abs( d.x() ) <= flReach && std::abs( d.y() ) <= flReach;
@@ -1784,7 +1826,7 @@ xv::map::Transform_t CMapView2D::HandleTransform( QPointF at, Qt::KeyboardModifi
 		}
 		case MapEditMode_t::MAP_EDIT_MODE_ROTATE:
 		{
-			const Point_t pivot = bounds.GetCenter();
+			const Point_t pivot = m_DragPivot;
 			const QPointF centre = Flatten( pivot );
 			const QPointF was = m_HandleFrom - centre;
 			const QPointF now = map - centre;
@@ -1904,6 +1946,63 @@ void CMapView2D::CancelMove()
 	m_MoveSelection.clear();
 	m_MoveFrom.reset();
 	m_HandleDrag.reset();
+	m_bPivotDrag = false;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+std::optional<xv::map::Point_t> CMapView2D::GetShownPivot() const
+{
+	return m_Editor.GetTool() == MapTool_t::MAP_TOOL_SELECT ? m_Editor.GetPivot() : std::nullopt;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: The cursor says what a press would do: pull a handle (an arrow across it, a cross
+//          for a turn), move the pivot or the selection, or pick.
+//-----------------------------------------------------------------------------
+void CMapView2D::UpdateCursor( QPointF at )
+{
+	if ( m_bSpaceHeld || m_PanFrom )
+	{
+		return;
+	}
+	Qt::CursorShape nShape = Qt::ArrowCursor;
+	const xv::map::Box_t bounds = GetDocument().GetSelectionBounds();
+	if ( m_Editor.GetTool() == MapTool_t::MAP_TOOL_SELECT && !bounds.IsEmpty() )
+	{
+		const MapEditMode_t nMode = m_Editor.GetEditMode();
+		if ( const std::optional<xv::map::Point_t> pivot = nMode == MapEditMode_t::MAP_EDIT_MODE_ROTATE ? GetShownPivot() : std::nullopt )
+		{
+			const QPointF p = ToWidget( Flatten( *pivot ) );
+			const double flReach = Look().m_nHandleSize / 2.0 + 3.0 + Look().m_nHandleReach;
+			if ( std::abs( p.x() - at.x() ) <= flReach && std::abs( p.y() - at.y() ) <= flReach )
+			{
+				setCursor( Qt::SizeAllCursor );
+				return;
+			}
+		}
+		for ( const auto &[ where, handle ] : HandlesOf( RectOf( bounds ) ) )
+		{
+			if ( HandleInMode( where, nMode ) && Reached( handle ).contains( at ) )
+			{
+				const bool bCorner = where.x() != 0 && where.y() != 0;
+				nShape = nMode == MapEditMode_t::MAP_EDIT_MODE_ROTATE ? Qt::CrossCursor
+					: nMode == MapEditMode_t::MAP_EDIT_MODE_SHEAR     ? ( where.x() == 0 ? Qt::SizeHorCursor : Qt::SizeVerCursor )
+					: bCorner                                         ? ( where.x() == where.y() ? Qt::SizeFDiagCursor : Qt::SizeBDiagCursor )
+					: where.x() == 0                                  ? Qt::SizeVerCursor
+																	  : Qt::SizeHorCursor;
+				setCursor( nShape );
+				return;
+			}
+		}
+		const double flSlack = 2.0 / m_flZoom;
+		if ( QRectF{ Flatten( bounds.m_Mins ), Flatten( bounds.m_Maxs ) }.normalized().adjusted( -flSlack, -flSlack, flSlack, flSlack ).contains( ToMap( at ) ) )
+		{
+			nShape = Qt::SizeAllCursor;
+		}
+	}
+	setCursor( nShape );
 }
 
 //-----------------------------------------------------------------------------
@@ -1939,6 +2038,18 @@ void CMapView2D::mouseMoveEvent( QMouseEvent *pEvent )
 		PreviewHandle( pEvent->position(), pEvent->modifiers() );
 		return;
 	}
+	if ( m_bPivotDrag && ( pEvent->buttons() & Qt::LeftButton ) )
+	{
+		// On the grid (Alt: free); the axis this view doesn't show keeps its place.
+		if ( std::optional<xv::map::Point_t> pivot = m_Editor.GetPivot() )
+		{
+			const QPointF map = ToMap( pEvent->position() );
+			( *pivot )[ static_cast<std::size_t>( GetAxis( 0 ) ) ] = Snap( map.x(), pEvent->modifiers() );
+			( *pivot )[ static_cast<std::size_t>( GetAxis( 1 ) ) ] = Snap( map.y(), pEvent->modifiers() );
+			m_Editor.SetPivot( *pivot );
+		}
+		return;
+	}
 	if ( m_MoveFrom && ( pEvent->buttons() & Qt::LeftButton ) && ( m_pMoveScene || ( pEvent->position().toPoint() - m_PressAt ).manhattanLength() >= DRAG_THRESHOLD ) )
 	{
 		PreviewMove( pEvent->position(), pEvent->modifiers() );
@@ -1947,6 +2058,10 @@ void CMapView2D::mouseMoveEvent( QMouseEvent *pEvent )
 	if ( m_BoxFrom )
 	{
 		update();
+	}
+	if ( pEvent->buttons() == Qt::NoButton )
+	{
+		UpdateCursor( pEvent->position() );
 	}
 }
 
@@ -1970,6 +2085,12 @@ void CMapView2D::mouseReleaseEvent( QMouseEvent *pEvent )
 	if ( m_nClipDrag >= 0 && pEvent->button() == Qt::LeftButton )
 	{
 		m_nClipDrag = -1;
+		m_PressAt = {};
+		return;
+	}
+	if ( m_bPivotDrag && pEvent->button() == Qt::LeftButton )
+	{
+		m_bPivotDrag = false;
 		m_PressAt = {};
 		return;
 	}

@@ -45,6 +45,15 @@ enum class MapSelectedModels_t
 	MAP_SELECTED_MODELS_BOX,
 };
 
+// How Carve cuts the brushes it meets (map/Clip.h's CarveStyle_t, kept as a number).
+enum class MapCarve_t
+{
+	MAP_CARVE_AUTO,      // slabs for a block, a fan for anything else
+	MAP_CARVE_HAMMER,    // by the carver's faces in turn, as Hammer does
+	MAP_CARVE_BOX_FIRST, // by the carver's box first: no cut runs past it
+	MAP_CARVE_FAN,       // pieces fanning out from the carver's centre (arch segments round a cylinder)
+};
+
 // How many samples an anisotropic filter takes at most; 1 for the others.
 [[nodiscard]] int MapAnisotropy( MapTextureFilter_t nFilter );
 
@@ -66,6 +75,8 @@ struct MapColors_t
 	QColor m_ToolSelection = mapstyle::TOOL_SELECTION;
 	QColor m_ToolHandle = mapstyle::TOOL_HANDLE;
 	QColor m_ToolBlock = mapstyle::TOOL_BLOCK;
+	QColor m_EntityMarker = mapstyle::ENTITY_MARKER;
+	QColor m_Pivot = mapstyle::PIVOT;
 	QColor m_Pointfile = mapstyle::POINTFILE;
 	QColor m_Cordon = mapstyle::CORDON;
 	QColor m_Camera = mapstyle::CAMERA;
@@ -101,12 +112,18 @@ struct MapPreferences_t
 	bool m_bSprites = true;          // iconsprites and env_sprites drawn as such (else as boxes)
 	bool m_bWireframeModels = true;  // props' edges in the wireframe view
 	MapSelectedModels_t m_nSelectedModels = MapSelectedModels_t::MAP_SELECTED_MODELS_PROPS;
+	double m_flGizmoPixels = mapstyle::GIZMO_PIXELS; // the gizmo's axes, on screen
+	double m_flGizmoThickness = mapstyle::GIZMO_THICKNESS;
+	int m_nGizmoAlpha = mapstyle::GIZMO_ALPHA;
 
 	// Editing.
 	bool m_bArrowsNudge = true;      // arrow keys move the selection (Hammer++'s Nudge)
 	bool m_bTextureLock = true;      // what a map opens with (Hammer++'s LockTextures)
 	bool m_bScaleLock = false;       // and its ScaleLockTextures
 	double m_flRotationSnap = mapstyle::ROTATION_SNAP; // degrees a handle's turn snaps to
+	bool m_bPivot = true;            // what a map opens with (Hammer++'s Pivot): turns go about a point that can be moved
+	MapCarve_t m_nCarve = MapCarve_t::MAP_CARVE_AUTO;
+	bool m_bGroupCarve = true;       // a carved brush's pieces grouped (Hammer++'s GroupCarve)
 
 	// The 2D views.
 	bool m_bHideSmallGrid = true;
@@ -117,6 +134,7 @@ struct MapPreferences_t
 	int m_nVerticesFromPixels = mapstyle::VERTICES_FROM_PIXELS;
 	bool m_bCenterHandles = true;
 	int m_nHandleSize = mapstyle::HANDLE_SIZE;
+	int m_nHandleReach = mapstyle::HANDLE_REACH;
 	int m_nCenterHandlesFromPixels = mapstyle::CENTER_HANDLES_FROM_PIXELS;
 	int m_nNamesFromPixels = mapstyle::NAMES_FROM_PIXELS;
 	bool m_bModels2D = true;

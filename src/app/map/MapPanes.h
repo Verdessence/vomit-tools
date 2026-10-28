@@ -64,6 +64,7 @@ protected:
 	void mousePressEvent( QMouseEvent *pEvent ) override;
 	void mouseMoveEvent( QMouseEvent *pEvent ) override;
 	void mouseReleaseEvent( QMouseEvent *pEvent ) override;
+	void leaveEvent( QEvent *pEvent ) override;
 	void paintEvent( QPaintEvent *pEvent ) override;
 
 private:

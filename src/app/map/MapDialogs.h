@@ -33,6 +33,7 @@ struct TransformValues_t
 {
 	TransformMode_t m_nMode = TransformMode_t::TRANSFORM_MODE_ROTATE;
 	std::array<double, 3> m_Values{};
+	bool m_bUsePivot = true; // turns and scales about the pivot, when there is one (Hammer++'s UsePivot)
 };
 
 class CMapTransformDialog : public QDialog
@@ -44,12 +45,15 @@ public:
 
 	[[nodiscard]] TransformValues_t GetValues() const;
 	void SetValues( const TransformValues_t &values );
+	// Whether "Use the pivot" can be ticked (the pivot is on).
+	void SetPivotAvailable( bool bAvailable );
 
 private:
 	void FillDefaults();
 
 	QButtonGroup *m_pModes = nullptr;
 	std::array<QDoubleSpinBox *, 3> m_Values{};
+	QCheckBox *m_pUsePivot = nullptr;
 };
 
 // Hammer's Paste Special dialog; the start is a choice here (where the original was, or the
@@ -65,6 +69,9 @@ public:
 	[[nodiscard]] xv::map::PasteSpecial_t GetValues() const;
 	[[nodiscard]] bool IsStartAtView() const;
 	void SetValues( const xv::map::PasteSpecial_t &how, bool bStartAtView );
+	// Hammer++'s Pivot box: the copies turn about the pivot rather than their own centre.
+	[[nodiscard]] bool IsUsingPivot() const;
+	void SetPivotAvailable( bool bAvailable );
 
 private:
 	QSpinBox *m_pCopies = nullptr;
@@ -73,4 +80,5 @@ private:
 	std::array<QDoubleSpinBox *, 3> m_Angles{};
 	QCheckBox *m_pGroup = nullptr;
 	QCheckBox *m_pUniqueNames = nullptr;
+	QCheckBox *m_pUsePivot = nullptr;
 };

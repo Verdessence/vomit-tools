@@ -18,6 +18,7 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QListView>
+#include <QPainter>
 #include <QPixmap>
 #include <QSortFilterProxyModel>
 #include <QStandardPaths>
@@ -31,8 +32,9 @@
 namespace
 {
 
-constexpr int PICTURE_VERSION = 1;
-constexpr int PICTURE_SIZE = 128; // what is kept; smaller sizes are scaled from it
+constexpr int PICTURE_VERSION = 2;
+constexpr int SMALL_PICTURE = 128; // what is kept for every material; smaller sizes are scaled from it
+constexpr int LARGE_PICTURE = 512; // made only for those shown at 256 or 512
 
 //-----------------------------------------------------------------------------
 // Purpose: Hammer's name for a material file: "materials/brick/wall.vmt" is BRICK/WALL.
@@ -54,10 +56,49 @@ QString HammerName( const std::string &szPath )
 //-----------------------------------------------------------------------------
 // Purpose:
 //-----------------------------------------------------------------------------
-QString PicturePath( const QString &szName )
+QString PicturePath( const QString &szName, int nPictureSize )
 {
 	const QByteArray hash = QCryptographicHash::hash( szName.toUtf8(), QCryptographicHash::Md5 ).toHex();
-	return QStringLiteral( "%1/%2.png" ).arg( CMaterialBrowser::CacheFolder(), QString::fromLatin1( hash ) );
+	return QStringLiteral( "%1/%2/%3.png" ).arg( CMaterialBrowser::CacheFolder() ).arg( nPictureSize ).arg( QString::fromLatin1( hash ) );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: A see-through material over a grey checkerboard (eight squares across), its alpha
+//          showing; any other without its alpha, which is something else there (a mask). A
+//          texture smaller than the picture is blown up in whole pixels.
+//-----------------------------------------------------------------------------
+QImage Composed( QImage picture, bool bSeeThrough, int nPictureSize )
+{
+	if ( !bSeeThrough )
+	{
+		// The colour as it is, the alpha ignored: before scaling, which premultiplies (and so
+		// blacks out what the alpha hides).
+		picture = picture.convertToFormat( QImage::Format_RGBA8888 );
+		picture.reinterpretAsFormat( QImage::Format_RGBX8888 );
+	}
+	const int nLargest = std::max( picture.width(), picture.height() );
+	if ( nLargest > 0 && nLargest < nPictureSize )
+	{
+		const int nTimes = nPictureSize / nLargest;
+		picture = picture.scaled( picture.width() * nTimes, picture.height() * nTimes, Qt::IgnoreAspectRatio, Qt::FastTransformation );
+	}
+	QImage composed( picture.size(), QImage::Format_RGB32 );
+	composed.fill( Qt::black );
+	if ( bSeeThrough )
+	{
+		const int nSquare = std::max( 1, std::max( picture.width(), picture.height() ) / 8 );
+		QPainter checker( &composed );
+		for ( int y = 0; y < composed.height(); y += nSquare )
+		{
+			for ( int x = 0; x < composed.width(); x += nSquare )
+			{
+				checker.fillRect( x, y, nSquare, nSquare, ( ( x / nSquare + y / nSquare ) % 2 ) ? QColor( 102, 102, 102 ) : QColor( 153, 153, 153 ) );
+			}
+		}
+	}
+	QPainter painter( &composed );
+	painter.drawImage( 0, 0, picture );
+	return composed;
 }
 
 // Every word typed must be in the name; "Only used" keeps the map's materials.
@@ -149,9 +190,9 @@ void CMaterialList::SetNames( QStringList names )
 //-----------------------------------------------------------------------------
 // Purpose:
 //-----------------------------------------------------------------------------
-void CMaterialList::SetPicture( int nRow, const QIcon &icon )
+void CMaterialList::SetPicture( int nRow, const QIcon &icon, int nPictureSize )
 {
-	if ( nRow < 0 || nRow >= m_Names.size() )
+	if ( nRow < 0 || nRow >= m_Names.size() || nPictureSize != m_nPictureSize )
 	{
 		return;
 	}
@@ -165,6 +206,13 @@ void CMaterialList::SetPicture( int nRow, const QIcon &icon )
 void CMaterialList::SetSize( int nSize )
 {
 	m_nSize = nSize;
+	if ( const int nPictureSize = nSize > SMALL_PICTURE ? LARGE_PICTURE : SMALL_PICTURE; nPictureSize != m_nPictureSize )
+	{
+		m_nPictureSize = nPictureSize;
+		m_Pictures.assign( m_Pictures.size(), QIcon{} );
+		const std::lock_guard lock( m_Mutex );
+		m_Wanted.clear();
+	}
 	if ( !m_Names.isEmpty() )
 	{
 		emit dataChanged( index( 0 ), index( m_Names.size() - 1 ), { Qt::SizeHintRole, Qt::DecorationRole } );
@@ -210,7 +258,7 @@ CMaterialBrowser::CMaterialBrowser( const xv::vfs::CGameInfo &game, QStringList 
 	pTop->addWidget( m_pWords, 1 );
 	m_pSize = new QComboBox;
 	m_pSize->setObjectName( QStringLiteral( "materialBrowserSize" ) );
-	for ( const int nSize : { 32, 64, 128 } )
+	for ( const int nSize : { 32, 64, 128, 256, 512 } )
 	{
 		m_pSize->addItem( tr( "%1×%1" ).arg( nSize ), nSize );
 	}
@@ -295,7 +343,8 @@ std::optional<QString> CMaterialBrowser::Pick( QWidget *pParent, const xv::vfs::
 //-----------------------------------------------------------------------------
 // Purpose: Lists the materials (every VMT under materials/ but the models'), then makes
 //          pictures: the rows the view asks for first, then the rest in order. A picture is a
-//          material's base texture, 128 px across, kept on disk by the material's name.
+//          material's base texture, 128 px across, kept on disk by the material's name; at the
+//          two biggest sizes they are 512 px, and only the rows shown are made.
 //-----------------------------------------------------------------------------
 void CMaterialBrowser::Run()
 {
@@ -320,12 +369,27 @@ void CMaterialBrowser::Run()
 		m_pList->SetNames( names );
 		m_bListed = true;
 		ApplyFilter(); }, Qt::QueuedConnection );
-	QDir().mkpath( CacheFolder() );
+	// Pictures made the older ways aren't read any more.
+	for ( int nVersion = 1; nVersion < PICTURE_VERSION; nVersion++ )
+	{
+		QDir( QStandardPaths::writableLocation( QStandardPaths::CacheLocation ) + QStringLiteral( "/material-pictures/v%1" ).arg( nVersion ) ).removeRecursively();
+	}
+	QDir().mkpath( CacheFolder() + QStringLiteral( "/%1" ).arg( SMALL_PICTURE ) );
+	QDir().mkpath( CacheFolder() + QStringLiteral( "/%1" ).arg( LARGE_PICTURE ) );
 	const xv::material::Reader_t read = [ &fileSystem ]( std::string_view szPath ) { return fileSystem.Read( szPath ); };
 	std::vector<bool> done( paths.size(), false );
 	std::size_t nNext = 0;
+	int nDoneSize = SMALL_PICTURE;
 	while ( !m_bStop )
 	{
+		// Another size: every row is made again, but only the big ones the view shows.
+		const int nPictureSize = m_pList->GetPictureSize();
+		if ( nPictureSize != nDoneSize )
+		{
+			done.assign( paths.size(), false );
+			nNext = 0;
+			nDoneSize = nPictureSize;
+		}
 		std::vector<int> wanted = m_pList->TakeWanted();
 		int nRow = -1;
 		for ( const int n : wanted )
@@ -335,6 +399,11 @@ void CMaterialBrowser::Run()
 				nRow = n;
 				break;
 			}
+		}
+		if ( nRow < 0 && nPictureSize == LARGE_PICTURE )
+		{
+			std::this_thread::sleep_for( std::chrono::milliseconds( 50 ) );
+			continue;
 		}
 		if ( nRow < 0 )
 		{
@@ -351,7 +420,7 @@ void CMaterialBrowser::Run()
 		}
 		done[ static_cast<std::size_t>( nRow ) ] = true;
 		const QString szName = names[ nRow ];
-		const QString szFile = PicturePath( szName );
+		const QString szFile = PicturePath( szName, nPictureSize );
 		QImage picture( szFile );
 		if ( picture.isNull() )
 		{
@@ -360,9 +429,9 @@ void CMaterialBrowser::Run()
 			const xv::map::MaterialInfo_t info = xv::map::ReadMaterialInfo( szPath.substr( 10, szPath.size() - 14 ), read );
 			if ( const auto vtf = info.m_szTexture.empty() ? std::nullopt : fileSystem.Read( "materials/" + info.m_szTexture + ".vtf" ) )
 			{
-				if ( const auto pTexture = ReadMapTexture( *vtf, PICTURE_SIZE, true ); pTexture && !pTexture->m_Mips.empty() )
+				if ( const auto pTexture = ReadMapTexture( *vtf, nPictureSize, true ); pTexture && !pTexture->m_Mips.empty() )
 				{
-					picture = ToQImage( pTexture->m_Mips.front() ).copy();
+					picture = Composed( ToQImage( pTexture->m_Mips.front() ).copy(), info.IsSeeThrough() || info.m_bAlphaTest, nPictureSize );
 					picture.save( szFile );
 				}
 			}
@@ -374,7 +443,7 @@ void CMaterialBrowser::Run()
 			picture.fill( QColor( 96, 96, 96 ) );
 		}
 		const QIcon icon( QPixmap::fromImage( picture ) );
-		QMetaObject::invokeMethod( this, [ this, nRow, icon ] { m_pList->SetPicture( nRow, icon ); }, Qt::QueuedConnection );
+		QMetaObject::invokeMethod( this, [ this, nRow, icon, nPictureSize ] { m_pList->SetPicture( nRow, icon, nPictureSize ); }, Qt::QueuedConnection );
 	}
 }
 

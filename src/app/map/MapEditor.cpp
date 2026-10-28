@@ -243,6 +243,26 @@ CMapEditor::CMapEditor( const QString &szPath, bool bFromGame, QWidget *pParent 
 		return pTitle;
 	};
 	m_pFilter = new CMapFilterControl( *m_pDocument );
+	// A new cordon starts round the selection, else where the last block was.
+	m_pFilter->SetNewBoxSource( [ this ]() -> std::optional<xv::map::Box_t> {
+		const xv::map::Box_t bounds = m_pDocument->GetSelectionBounds();
+		return bounds.IsEmpty() ? m_LastBox : bounds;
+	} );
+	connect( m_pFilter, &CMapFilterControl::CordonEditing, this, [ this ] {
+		if ( m_nTool == MapTool_t::MAP_TOOL_CORDON )
+		{
+			CommitCordon();
+		}
+	} );
+	connect( m_pFilter, &CMapFilterControl::CordonPicked, this, [ this ] {
+		m_nCordonPick = m_pFilter->GetPickedCordon();
+		m_nCordonBoxPick = m_pFilter->GetPickedBox();
+		if ( m_nTool == MapTool_t::MAP_TOOL_CORDON )
+		{
+			SetNewBox( GetCordonBox() );
+		}
+	} );
+	connect( m_pFilter, &CMapFilterControl::CordonEditWanted, this, [ this ] { SetTool( MapTool_t::MAP_TOOL_CORDON ); } );
 	m_pProperties = new CMapProperties( *m_pDocument );
 	m_pFaceEdit = new CMapFaceEdit( *this );
 	// Hammer opens Face Edit as a window of its own; here it takes Object Properties' place
@@ -351,7 +371,15 @@ CMapEditor::CMapEditor( const QString &szPath, bool bFromGame, QWidget *pParent 
 		RepaintViews();
 		UpdateStatus();
 	};
-	connect( m_pDocument, &CMapDocument::SelectionChanged, this, repaint );
+	connect( m_pDocument, &CMapDocument::SelectionChanged, this, [ this, repaint ] {
+		// Something else selected: the pivot goes back to the centre.
+		if ( m_Pivot && m_PivotSelection != m_pDocument->GetSelection() )
+		{
+			m_Pivot.reset();
+			m_PivotSelection.clear();
+		}
+		repaint();
+	} );
 	connect( m_pDocument, &CMapDocument::VisibilityChanged, this, repaint );
 	connect( m_pDocument, &CMapDocument::SceneEdited, this, &CMapEditor::SceneEdited );
 	connect( m_pDocument, &CMapDocument::ModifiedChanged, this, &CMapEditor::TitleChanged );
@@ -549,6 +577,7 @@ void CMapEditor::BuildToolBars( QVBoxLayout *pLayout )
 	toggle( tr( "Snap to Grid" ), MapAction_t::MAP_ACTION_TOGGLE_SNAP, m_Settings.m_bSnapToGrid )->setObjectName( QStringLiteral( "mapToggleSnap" ) );
 	toggle( tr( "Texture Lock" ), MapAction_t::MAP_ACTION_TOGGLE_TEXTURE_LOCK, m_Settings.m_bTextureLock )->setObjectName( QStringLiteral( "mapToggleTextureLock" ) );
 	toggle( tr( "Scale Lock" ), MapAction_t::MAP_ACTION_TOGGLE_SCALE_LOCK, m_Settings.m_bScaleLock )->setObjectName( QStringLiteral( "mapToggleScaleLock" ) );
+	toggle( tr( "Pivot" ), MapAction_t::MAP_ACTION_TOGGLE_PIVOT, m_Settings.m_bPivot )->setObjectName( QStringLiteral( "mapTogglePivot" ) );
 	pBar->addSeparator();
 	toggle( tr( "Models in 2D" ), MapAction_t::MAP_ACTION_TOGGLE_MODELS_2D, m_Settings.m_bModels2D )->setObjectName( QStringLiteral( "mapToggleModels2D" ) );
 	toggle( tr( "Entity Names" ), MapAction_t::MAP_ACTION_TOGGLE_NAMES, m_Settings.m_bNames );
@@ -831,6 +860,7 @@ void CMapEditor::TakePreferences()
 	m_Settings.m_bCenterHandles = preferences.m_bCenterHandles;
 	m_Settings.m_bTextureLock = preferences.m_bTextureLock;
 	m_Settings.m_bScaleLock = preferences.m_bScaleLock;
+	m_Settings.m_bPivot = preferences.m_bPivot;
 	m_Settings.m_bModels2D = preferences.m_bModels2D;
 	m_Settings.m_bUseGroupColors = preferences.m_bGroupColors;
 	m_Settings.m_bSkybox3D = preferences.m_bSkybox3D;
@@ -967,8 +997,14 @@ void CMapEditor::Carve()
 	{
 		return;
 	}
+	const MapPreferences_t &preferences = CPreferences::Instance().GetMapPreferences();
+	xv::map::CarveOptions_t options;
+	options.m_nStyle = preferences.m_nCarve == MapCarve_t::MAP_CARVE_BOX_FIRST ? xv::map::CarveStyle_t::CARVE_STYLE_BOX_FIRST : preferences.m_nCarve == MapCarve_t::MAP_CARVE_HAMMER ? xv::map::CarveStyle_t::CARVE_STYLE_HAMMER
+		: preferences.m_nCarve == MapCarve_t::MAP_CARVE_FAN                                                                                                                          ? xv::map::CarveStyle_t::CARVE_STYLE_FAN
+																																													 : xv::map::CarveStyle_t::CARVE_STYLE_AUTO;
+	options.m_bGroup = preferences.m_bGroupCarve;
 	std::vector<std::uint32_t> added;
-	xv::map::MapEdit_t edit = xv::map::CarveObjects( *pScene, m_pDocument->GetSelection(), &added );
+	xv::map::MapEdit_t edit = xv::map::CarveObjects( *pScene, m_pDocument->GetSelection(), &added, options );
 	if ( edit.IsEmpty() )
 	{
 		emit StatusMessage( tr( "The selection overlaps nothing to carve" ) );
@@ -1287,8 +1323,9 @@ bool CMapEditor::RunAction( MapAction_t nAction, CMapView *pFrom )
 			return true;
 		}
 		case MapAction_t::MAP_ACTION_ESCAPE:
-			// A box or marker being made goes first, then the selection; the cordon tool's box
-			// goes back to the cordon as saved.
+			// A box or marker being made goes first, then the tool (back to selecting, the
+			// selection kept: Verd), then the selection; the cordon tool's box goes back to the
+			// cordon as saved.
 			if ( m_nTool == MapTool_t::MAP_TOOL_CORDON )
 			{
 				SetNewBox( GetCordonBox() );
@@ -1299,6 +1336,11 @@ bool CMapEditor::RunAction( MapAction_t nAction, CMapView *pFrom )
 				SetNewBox( std::nullopt );
 				SetEntityMarker( std::nullopt );
 				SetClipLine( std::nullopt );
+				return true;
+			}
+			if ( m_nTool != MapTool_t::MAP_TOOL_SELECT )
+			{
+				SetTool( MapTool_t::MAP_TOOL_SELECT );
 				return true;
 			}
 			m_pDocument->ClearSelection();
@@ -1340,6 +1382,7 @@ bool CMapEditor::RunAction( MapAction_t nAction, CMapView *pFrom )
 		case MapAction_t::MAP_ACTION_TOGGLE_SNAP: return toggle( m_Settings.m_bSnapToGrid );
 		case MapAction_t::MAP_ACTION_TOGGLE_TEXTURE_LOCK: return toggle( m_Settings.m_bTextureLock );
 		case MapAction_t::MAP_ACTION_TOGGLE_SCALE_LOCK: return toggle( m_Settings.m_bScaleLock );
+		case MapAction_t::MAP_ACTION_TOGGLE_PIVOT: return toggle( m_Settings.m_bPivot );
 		case MapAction_t::MAP_ACTION_EDIT_MODE:
 			SetEditMode( m_nEditMode == MapEditMode_t::MAP_EDIT_MODE_RESIZE ? MapEditMode_t::MAP_EDIT_MODE_ROTATE : m_nEditMode == MapEditMode_t::MAP_EDIT_MODE_ROTATE ? MapEditMode_t::MAP_EDIT_MODE_SHEAR
 																																									   : MapEditMode_t::MAP_EDIT_MODE_RESIZE );
@@ -1556,6 +1599,34 @@ void CMapEditor::TransformSelection( const xv::map::Transform_t &transform, cons
 //-----------------------------------------------------------------------------
 // Purpose:
 //-----------------------------------------------------------------------------
+std::optional<xv::map::Point_t> CMapEditor::GetPivot() const
+{
+	const std::vector<std::uint32_t> &selection = m_pDocument->GetSelection();
+	if ( !m_Settings.m_bPivot || selection.empty() )
+	{
+		return std::nullopt;
+	}
+	if ( m_Pivot && m_PivotSelection == selection )
+	{
+		return m_Pivot;
+	}
+	const xv::map::Box_t bounds = m_pDocument->GetSelectionBounds();
+	return bounds.IsEmpty() ? std::nullopt : std::optional{ bounds.GetCenter() };
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+void CMapEditor::SetPivot( const xv::map::Point_t &at )
+{
+	m_Pivot = at;
+	m_PivotSelection = m_pDocument->GetSelection();
+	RepaintTools();
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
 void CMapEditor::SetGizmoShown( bool bShown )
 {
 	m_bGizmo = bShown;
@@ -1678,25 +1749,49 @@ std::vector<std::pair<std::uint32_t, xv::map::SolidVertices_t>> CMapEditor::GetS
 }
 
 //-----------------------------------------------------------------------------
-// Purpose: The cordon's box as the map has it (Hammer++'s first cordon's first box).
+// Purpose: The picked cordon's picked box (its first when the pick is past its last).
 //-----------------------------------------------------------------------------
 std::optional<xv::map::Box_t> CMapEditor::GetCordonBox() const
 {
 	const xv::map::CScene *pScene = m_pDocument->GetScene();
-	if ( pScene )
+	if ( !pScene || m_nCordonPick >= pScene->m_Map.m_Cordons.size() )
 	{
-		for ( const xv::map::Cordon_t &cordon : pScene->m_Map.m_Cordons )
-		{
-			for ( const xv::map::Box_t &box : cordon.m_Boxes )
-			{
-				if ( !box.IsEmpty() )
-				{
-					return box;
-				}
-			}
-		}
+		return std::nullopt;
 	}
-	return std::nullopt;
+	const std::vector<xv::map::Box_t> &boxes = pScene->m_Map.m_Cordons[ m_nCordonPick ].m_Boxes;
+	const std::size_t nBox = m_nCordonBoxPick < boxes.size() ? m_nCordonBoxPick : 0;
+	return nBox < boxes.size() && !boxes[ nBox ].IsEmpty() ? std::optional{ boxes[ nBox ] } : std::nullopt;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: With no cordon yet, the box makes Hammer's one, "cordon", switched on.
+//-----------------------------------------------------------------------------
+std::vector<xv::map::Cordon_t> CMapEditor::CordonsWithBox( const xv::map::Box_t &box ) const
+{
+	std::vector<xv::map::Cordon_t> cordons = m_pDocument->GetScene()->m_Map.m_Cordons;
+	if ( m_nCordonPick >= cordons.size() )
+	{
+		xv::map::Cordon_t cordon;
+		cordon.m_szName = "cordon";
+		cordon.m_bActive = true;
+		cordon.m_Boxes.push_back( box );
+		cordons.push_back( cordon );
+		return cordons;
+	}
+	std::vector<xv::map::Box_t> &boxes = cordons[ m_nCordonPick ].m_Boxes;
+	if ( m_nCordonBoxPick < boxes.size() )
+	{
+		boxes[ m_nCordonBoxPick ] = box;
+	}
+	else if ( boxes.empty() )
+	{
+		boxes.push_back( box );
+	}
+	else
+	{
+		boxes.front() = box;
+	}
+	return cordons;
 }
 
 //-----------------------------------------------------------------------------
@@ -1714,11 +1809,11 @@ bool CMapEditor::IsCordonActive() const
 void CMapEditor::CommitCordon()
 {
 	const xv::map::CScene *pScene = m_pDocument->GetScene();
-	if ( !pScene || m_NewBox == GetCordonBox() )
+	if ( !pScene || !m_NewBox || m_NewBox == GetCordonBox() )
 	{
 		return;
 	}
-	m_pDocument->Edit( xv::map::SetCordon( *pScene, m_NewBox, pScene->m_Map.m_bCordonsActive ), tr( "Edit Cordon" ) );
+	m_pDocument->Edit( xv::map::SetCordons( *pScene, CordonsWithBox( *m_NewBox ), pScene->m_Map.m_bCordonsActive ), tr( "Edit Cordon" ) );
 }
 
 //-----------------------------------------------------------------------------
@@ -1738,7 +1833,7 @@ void CMapEditor::ToggleCordon()
 		return;
 	}
 	const bool bOn = !pScene->m_Map.m_bCordonsActive;
-	m_pDocument->Edit( xv::map::SetCordon( *pScene, box, bOn ), bOn ? tr( "Cordon On" ) : tr( "Cordon Off" ) );
+	m_pDocument->Edit( xv::map::SetCordons( *pScene, CordonsWithBox( *box ), bOn ), bOn ? tr( "Cordon On" ) : tr( "Cordon Off" ) );
 	emit StatusMessage( bOn ? tr( "Cordon on: only what is inside it is shown and compiled" ) : tr( "Cordon off" ) );
 }
 
@@ -2125,6 +2220,7 @@ void CMapEditor::ShowTransformDialog()
 		return;
 	}
 	CMapTransformDialog dialog( this );
+	dialog.SetPivotAvailable( GetPivot().has_value() );
 	if ( dialog.exec() == QDialog::Accepted )
 	{
 		ApplyTransformValues( dialog.GetValues() );
@@ -2141,7 +2237,9 @@ void CMapEditor::ApplyTransformValues( const TransformValues_t &values )
 	{
 		return;
 	}
-	const xv::map::Point_t centre = bounds.GetCenter();
+	// Hammer++'s "Use pivot": turns and scales about the pivot rather than the centre.
+	const std::optional<xv::map::Point_t> pivot = values.m_bUsePivot ? GetPivot() : std::nullopt;
+	const xv::map::Point_t centre = pivot.value_or( bounds.GetCenter() );
 	const std::array<double, 3> &v = values.m_Values;
 	switch ( values.m_nMode )
 	{
@@ -2197,11 +2295,17 @@ void CMapEditor::ShowPasteSpecialDialog()
 	static bool s_bLastAtView = false;
 	CMapPasteSpecialDialog dialog( this );
 	dialog.SetValues( s_Last, s_bLastAtView );
+	// Only a pivot dragged somewhere: one at the selection's centre isn't the pasted copies'.
+	const std::optional<xv::map::Point_t> pivot = m_Settings.m_bPivot && m_Pivot && m_PivotSelection == m_pDocument->GetSelection() ? m_Pivot : std::nullopt;
+	dialog.SetPivotAvailable( pivot.has_value() );
 	if ( dialog.exec() == QDialog::Accepted )
 	{
 		s_Last = dialog.GetValues();
 		s_bLastAtView = dialog.IsStartAtView();
-		PasteSpecial( s_Last, s_bLastAtView );
+		// The pivot is where it is now, so it isn't kept with the other answers.
+		xv::map::PasteSpecial_t how = s_Last;
+		how.m_Pivot = dialog.IsUsingPivot() ? pivot : std::nullopt;
+		PasteSpecial( how, s_bLastAtView );
 	}
 }
 

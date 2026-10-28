@@ -2,9 +2,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
 // Purpose: Hammer's Texture Browser: the game's materials as pictures, filtered by words in
-//          their names (every word must match) or to those the map uses, at 32, 64 or 128
-//          pixels; a double click picks one. Pictures are made on a thread of its own and
-//          kept on disk between runs.
+//          their names (every word must match) or to those the map uses, at 32 to 512 pixels
+//          (Hammer++'s sizes); a double click picks one. See-through materials show over a
+//          checkerboard, as Hammer++ shows their alpha. Pictures are made on a thread of its
+//          own and kept on disk between runs.
 //
 //===========================================================================//
 #pragma once
@@ -42,8 +43,11 @@ public:
 	[[nodiscard]] QVariant data( const QModelIndex &index, int nRole ) const override;
 
 	void SetNames( QStringList names );
-	void SetPicture( int nRow, const QIcon &icon );
+	// A picture made at nPictureSize; one made for the size before a change is dropped.
+	void SetPicture( int nRow, const QIcon &icon, int nPictureSize );
+	// The size rows are shown at; past 128 the pictures are made again, bigger.
 	void SetSize( int nSize );
+	[[nodiscard]] int GetPictureSize() const { return m_nPictureSize; }
 	[[nodiscard]] const QStringList &GetNames() const { return m_Names; }
 	// Rows whose pictures are wanted (shown, or asked for and not yet made), oldest first.
 	[[nodiscard]] std::vector<int> TakeWanted();
@@ -56,6 +60,7 @@ private:
 	mutable std::mutex m_Mutex;
 	mutable std::vector<int> m_Wanted;
 	int m_nSize = 64;
+	std::atomic<int> m_nPictureSize{ 128 };
 };
 
 class CMaterialBrowser : public QDialog

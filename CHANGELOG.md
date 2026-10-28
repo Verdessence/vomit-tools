@@ -17,7 +17,9 @@
   visgroups' lists belonged to the scene before the edit).
 - **A gizmo in the 3D views** (Hammer++'s): arrows, rings or scale axes at the selection, dragged
   along an axis to move, turn or stretch it; G, R and E pick what it does, right-click goes round
-  them, X hides it, J puts it on the entity's own axes, X/Y/Z during a drag pick the axis.
+  them, X hides it, J puts it on the entity's own axes, X/Y/Z during a drag pick the axis. Its
+  size, line thickness and opacity are in Preferences → Maps, as the 2D handles' size, colour
+  and reach are.
 - **Object Properties edits:** a key's value typed or picked (choices as their names, with
   SmartEdit), the class retyped, flags ticked, outputs added, changed and deleted (the class's
   outputs and the target's inputs offered; a target nothing answers to in red), comments, and
@@ -28,19 +30,27 @@
   the Face Edit sheet in the side panel sets their scale, shift, rotation and lightmap scale,
   justifies (L, R, Fit, T, B, C; Treat as one), aligns to the world or the face, and applies the
   current texture (Apply, the right button, or Shift+T on the selection). The **texture browser**
-  (Browse…) lists the game's materials with pictures, filtered by words or to the map's own.
+  (Browse…) lists the game's materials with pictures from 32 to 512 pixels, see-through ones over
+  a checkerboard, filtered by words or to the map's own.
 - **Tie to Entity** (Ctrl+T), **Move to World** (Ctrl+Shift+W), **Group** and **Ungroup**
   (Ctrl+G, Ctrl+U), group ignore (Ctrl+W).
 - **Clipping tool** (Shift+X): a line dragged in a 2D view cuts the selection on Enter, keeping
   the front, the back or both (Shift+X again goes round them); the kept part is outlined in
   white first. **Carve** (Ctrl+Shift+C) takes the selection's shape out of the brushes it
-  overlaps, in convex pieces; **Make Hollow** (Map menu) turns brushes into grouped walls of a
-  given width, inside or (negative) outside.
-- **Transform** (Ctrl+M): turn, scale or move the selection by typed amounts about its centre.
+  overlaps, in convex pieces, each brush's pieces grouped (Hammer++'s GroupCarve): a block
+  carves Hammer's slabs, any other shape a fan of pieces round itself, so a cylinder through a
+  wall leaves arch segments rather than cuts across the wall (Preferences → Maps picks the way). **Make Hollow** (Map menu) turns brushes into
+  grouped walls of a given width, inside or (negative) outside.
+- **Pivot** (Ctrl+P, Hammer++'s): the point the selection turns about, a ring dragged in the 2D
+  views (on the grid), where the 3D gizmo stands too; it stays where it was put as the selection
+  moves. The cursor over the selection's handles says what a drag would do, and Esc in a tool
+  with nothing drawn goes back to selecting without losing the selection.
+- **Transform** (Ctrl+M): turn, scale or move the selection by typed amounts about its centre
+  (or the pivot).
   **Flip Horizontal** and **Flip Vertical** (Ctrl+L, Ctrl+I) mirror it across the active 2D
   view's axes. **Paste Special** (Ctrl+Shift+V): several copies, each stepped and turned once
-  more than the last, starting where the original was or at the 2D view's centre, each copy
-  grouped, with entity names made unique (their outputs follow).
+  more than the last, starting where the original was or at the 2D view's centre, turned about
+  the pivot if asked, each copy grouped, with entity names made unique (their outputs follow).
 - **Replace Textures** (Ctrl+Shift+R): exact, partial or substituted names, in everything or the
   selection (hidden too), rescaled for the new texture's size, or just marking the faces found
   for the texture tool. **Find Entities** (Ctrl+Shift+F) selects and centres on a name. The
@@ -50,9 +60,11 @@
   with brushes, outputs to names nothing has and a missing player start, with Go to, Fix and Fix
   all, over the visible parts only when asked.
 - **Cordon** (Map > Edit Cordon Bounds, Toggle Cordon State): a box dragged like a block's;
-  while it is on, what lies outside is hidden and Run Map compiles a copy (`<map>_cordon.vmf`)
-  holding only what is inside, sealed with walls of `TOOLS/TOOLSSKYBOX`. Saved in Hammer++'s
-  `cordons` block, read from Hammer's old `cordon` block too.
+  while it is on, what lies outside is hidden and left out of Run Map's compile, whose BSP is
+  still the map's own (a copy holding only what is inside, sealed with walls of
+  `TOOLS/TOOLSSKYBOX`, is compiled from a folder of its own). Hammer++'s several cordons, each
+  with its boxes, are listed in the Filter Control's **Cordons** tab: switched, renamed, added and
+  deleted there. Saved in Hammer++'s `cordons` block, read from Hammer's old `cordon` block too.
 - **Vertex tool** (Shift+V): the selected brushes' corners (white) and edges (yellow) as handles
   in the 2D views; click or box them (Ctrl adds), drag them on the grid, each move one undo step;
   Shift+V again shows vertices only, edges only, or both. A face bent out of flat makes Hammer's
@@ -61,8 +73,9 @@
 - **Block tool** (Shift+B): drag a box in a 2D view, pull its handles in the others, Enter (or the
   right button's Create Object) makes a block with the current texture; the New Objects panel's
   Objects box picks a wedge, cylinder, spike or sphere instead, with its Faces count. **Entity tool** (Shift+E):
-  click in 2D and press Enter, or click a surface in 3D to stand the entity on it, with the class
-  picked under New Objects. New objects get the keys and colours Hammer gives them, and the game's
+  click in 2D (its marker in green, as Hammer++'s) and press Enter, or click a surface in 3D to
+  stand the entity on it, with the class picked under New Objects. New objects get the keys and
+  colours Hammer gives them (an entity's defaults but those that are 0 or empty), and the game's
   Hammer configuration's default entity, texture scale and lightmap scale.
 - **Saving** writes the map back as it was read, changing only what was edited: untouched parts
   stay byte for byte, so diffs against Hammer's saves stay small. The previous file is kept as a
@@ -71,7 +84,7 @@
   RAD to run, HDR, the game's parameters; Expert: named command sequences with Hammer's
   $variables, seeded from Hammer++'s `hammerplusplus_sequences.cfg` or Hammer's `CmdSeq.wc`
   beside the game, edited and kept in the settings. The compilers' output streams into the
-  window, their problems are listed under it (a double click goes to the brush or point), a leak
+  window (the game's too, once it is started, with its exit), their problems are listed under it (a double click goes to the brush or point), a leak
   stops the compile and its line is drawn red in every view (Map → Load Pointfile, Unload, Go to
   Leak), and the game is started on the map. The compilers and the game's launcher are set in
   Preferences → Source Tools (the native VBSP++, VVIS++ and VRAD++ can live anywhere).
