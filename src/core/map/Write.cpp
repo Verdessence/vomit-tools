@@ -520,6 +520,7 @@ void CWriter::PatchSide( const Side_t &side, const Node_t &node )
 {
 	const Node_t *pPlane = nullptr;
 	const Node_t *pPlus = nullptr;
+	const Node_t *pDisp = nullptr;
 	for ( const Node_t &child : node.m_Children )
 	{
 		if ( child.m_bBlock )
@@ -528,9 +529,9 @@ void CWriter::PatchSide( const Side_t &side, const Node_t &node )
 			{
 				pPlus = &child;
 			}
-			else if ( Is( child.m_szName, "dispinfo" ) && side.m_pDisp )
+			else if ( Is( child.m_szName, "dispinfo" ) )
 			{
-				PatchDisp( *side.m_pDisp, child );
+				pDisp = &child;
 			}
 			continue;
 		}
@@ -608,6 +609,21 @@ void CWriter::PatchSide( const Side_t &side, const Node_t &node )
 	{
 		const std::string szIndent = LineIndent( pPlane->m_nAt );
 		InsertLines( LineEnd( pPlane->m_nEnd ), szIndent, PlusVertices( side.m_PlusVertices, szIndent ) );
+	}
+	// The displacement: patched where it was, taken out when the face lost it, put in at the
+	// end of the side (where Hammer writes it) when the face gained one.
+	if ( pDisp && side.m_pDisp )
+	{
+		PatchDisp( *side.m_pDisp, *pDisp );
+	}
+	else if ( pDisp )
+	{
+		Remove( pDisp->GetSpan() );
+	}
+	else if ( side.m_pDisp )
+	{
+		const std::string szIndent = LineIndent( node.m_nAt ) + '\t';
+		InsertLines( node.m_nEnd - 1, szIndent, Disp( *side.m_pDisp, szIndent ) );
 	}
 	// Keys Hammer always writes but a file made by hand may leave out: put in after the last
 	// key when they no longer mean their defaults.
@@ -717,6 +733,7 @@ void CWriter::PatchDisp( const DispInfo_t &disp, const Node_t &node )
 		};
 	};
 	auto scalar = []( const std::vector<float> &values ) { return [ &values ]( std::size_t i ) { return i < values.size() ? values[ i ] : 0.0f; }; };
+	auto tags = []( const std::vector<int> &values ) { return [ &values ]( std::size_t i ) { return i < values.size() ? static_cast<float>( values[ i ] ) : 0.0f; }; };
 	bool bRows = false;
 	for ( const Node_t &child : node.m_Children )
 	{
@@ -724,9 +741,19 @@ void CWriter::PatchDisp( const DispInfo_t &disp, const Node_t &node )
 		{
 			continue;
 		}
+		// Another power: the rows are another number, so the block is written afresh.
+		std::size_t nRows = 0;
+		for ( const Node_t &row : child.m_Children )
+		{
+			nRows += row.m_bBlock ? 0 : 1;
+		}
 		if ( Is( child.m_szName, "normals" ) )
 		{
-			bRows = bRows || rowsDiffer( child, nSize * 3, component( disp.m_Normals ) );
+			bRows = bRows || nRows != nSize || rowsDiffer( child, nSize * 3, component( disp.m_Normals ) );
+		}
+		else if ( Is( child.m_szName, "triangle_tags" ) )
+		{
+			bRows = bRows || nRows != nSize - 1 || rowsDiffer( child, ( nSize - 1 ) * 2, tags( disp.m_TriangleTags ) );
 		}
 		else if ( Is( child.m_szName, "distances" ) )
 		{

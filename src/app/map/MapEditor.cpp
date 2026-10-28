@@ -9,6 +9,7 @@
 #include "kv1/Kv1.h"
 #include "map/Check.h"
 #include "map/Cordon.h"
+#include "map/DispEdit.h"
 #include "map/MapReports.h"
 #include "map/Materials.h"
 #include "texture/Vtf.h"
@@ -584,6 +585,7 @@ void CMapEditor::BuildToolBars( QVBoxLayout *pLayout )
 	toggle( tr( "Helpers" ), MapAction_t::MAP_ACTION_TOGGLE_HELPERS, m_Settings.m_bHelpers );
 	toggle( tr( "Tool Textures" ), MapAction_t::MAP_ACTION_TOGGLE_TOOL_TEXTURES, m_Settings.m_bToolTextures );
 	toggle( tr( "3D Skybox" ), MapAction_t::MAP_ACTION_TOGGLE_SKYBOX_3D, m_Settings.m_bSkybox3D )->setObjectName( QStringLiteral( "mapToggleSkybox3D" ) );
+	toggle( tr( "Walkable" ), MapAction_t::MAP_ACTION_TOGGLE_WALKABLE, m_Settings.m_bWalkable )->setObjectName( QStringLiteral( "mapToggleWalkable" ) );
 	pBar->addSeparator();
 	command( tr( "Center on Selection" ), MapAction_t::MAP_ACTION_CENTER_2D );
 	command( tr( "Go to Brush…" ), MapAction_t::MAP_ACTION_GO_TO_BRUSH );
@@ -1455,6 +1457,7 @@ bool CMapEditor::RunAction( MapAction_t nAction, CMapView *pFrom )
 		case MapAction_t::MAP_ACTION_TOGGLE_NAMES: return toggle( m_Settings.m_bNames );
 		case MapAction_t::MAP_ACTION_TOGGLE_TOOL_TEXTURES: return toggle( m_Settings.m_bToolTextures );
 		case MapAction_t::MAP_ACTION_TOGGLE_SKYBOX_3D: return toggle( m_Settings.m_bSkybox3D );
+		case MapAction_t::MAP_ACTION_TOGGLE_WALKABLE: return toggle( m_Settings.m_bWalkable );
 		case MapAction_t::MAP_ACTION_GO_TO_BRUSH:
 			GoToBrush();
 			return true;
@@ -2076,6 +2079,201 @@ void CMapEditor::EditSelectedFaces( const QString &szName, const std::function<v
 	xv::map::MapEdit_t edit = xv::map::EditFaces( *pScene, m_SelectedFaces, [ & ]( xv::map::Side_t &side, const std::vector<xv::map::Point_t> &points ) {
 		const std::optional<xv::map::Plane_t> plane = xv::map::PlaneFromPoints( side.m_Plane );
 		pfnEdit( side, plane ? plane->m_Normal : xv::map::Point_t{ 0, 0, 1 }, points );
+	} );
+	if ( !edit.IsEmpty() )
+	{
+		m_pDocument->Edit( std::move( edit ), szName );
+	}
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+std::vector<xv::map::FaceRef_t> CMapEditor::GetFaceTargets() const
+{
+	const xv::map::CScene *pScene = m_pDocument->GetScene();
+	if ( !pScene )
+	{
+		return {};
+	}
+	return !m_SelectedFaces.empty() ? m_SelectedFaces : xv::map::FacesOf( *pScene, m_pDocument->GetSelection() );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+void CMapEditor::EditDisplacementFaces( const QString &szName, const std::function<bool( std::vector<xv::map::DispFace_t> & )> &pfnEdit, const QString &szNothing )
+{
+	const xv::map::CScene *pScene = m_pDocument->GetScene();
+	const std::vector<xv::map::FaceRef_t> faces = GetFaceTargets();
+	if ( !pScene || faces.empty() )
+	{
+		emit StatusMessage( tr( "Select faces (or objects) first" ) );
+		return;
+	}
+	xv::map::MapEdit_t edit = xv::map::EditDisplacements( *pScene, faces, pfnEdit );
+	if ( edit.IsEmpty() )
+	{
+		emit StatusMessage( szNothing );
+		return;
+	}
+	m_pDocument->Edit( std::move( edit ), szName );
+	m_pFaceEdit->Refresh();
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Hammer's Create: faces that already have one, or aren't four-sided, are left.
+//-----------------------------------------------------------------------------
+void CMapEditor::CreateDisplacements( int nPower )
+{
+	EditDisplacementFaces( tr( "Create Displacement" ), [ nPower ]( std::vector<xv::map::DispFace_t> &refs ) {
+		bool bMade = false;
+		for ( xv::map::DispFace_t &ref : refs )
+		{
+			if ( ref.m_pDisp || !ref.m_pFace )
+			{
+				continue;
+			}
+			if ( std::optional<xv::map::DispInfo_t> disp = xv::map::MakeDisplacement( *ref.m_pFace, nPower ) )
+			{
+				ref.m_pSide->m_pDisp = std::make_unique<xv::map::DispInfo_t>( std::move( *disp ) );
+				bMade = true;
+			}
+		}
+		return bMade; }, tr( "No four-sided face without a displacement is selected" ) );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+void CMapEditor::DestroyDisplacements()
+{
+	EditDisplacementFaces( tr( "Destroy Displacement" ), []( std::vector<xv::map::DispFace_t> &refs ) {
+		bool bGone = false;
+		for ( xv::map::DispFace_t &ref : refs )
+		{
+			if ( ref.m_pDisp )
+			{
+				ref.m_pSide->m_pDisp.reset();
+				bGone = true;
+			}
+		}
+		return bGone; }, tr( "No selected face has a displacement" ) );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+void CMapEditor::SewDisplacements()
+{
+	EditDisplacementFaces( tr( "Sew" ), []( std::vector<xv::map::DispFace_t> &refs ) { return xv::map::SewDisplacements( refs ); }, tr( "Nothing to sew: no selected displacement's edge meets another selected face's" ) );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+void CMapEditor::SubdivideDisplacements()
+{
+	EditDisplacementFaces( tr( "Subdivide" ), []( std::vector<xv::map::DispFace_t> &refs ) { return xv::map::SubdivideDisplacements( refs ); }, tr( "Nothing to subdivide among the selected faces" ) );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+void CMapEditor::NoiseDisplacements( double flMin, double flMax )
+{
+	const std::uint32_t nSeed = QRandomGenerator::global()->generate();
+	EditDisplacementFaces( tr( "Noise" ), [ = ]( std::vector<xv::map::DispFace_t> &refs ) {
+		bool bAny = false;
+		std::uint32_t n = 0;
+		for ( xv::map::DispFace_t &ref : refs )
+		{
+			if ( ref.m_pDisp && ref.m_pFace )
+			{
+				xv::map::AddNoise( *ref.m_pDisp, flMin, flMax, ref.m_pFace->m_Plane.m_Normal, nSeed + n++ );
+				bAny = true;
+			}
+		}
+		return bAny; }, tr( "No selected face has a displacement" ) );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+void CMapEditor::InvertDisplacementAlpha()
+{
+	EditDisplacementFaces( tr( "Invert Alpha" ), []( std::vector<xv::map::DispFace_t> &refs ) {
+		bool bAny = false;
+		for ( xv::map::DispFace_t &ref : refs )
+		{
+			if ( ref.m_pDisp )
+			{
+				xv::map::InvertAlpha( *ref.m_pDisp );
+				bAny = true;
+			}
+		}
+		return bAny; }, tr( "No selected face has a displacement" ) );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+void CMapEditor::SetDisplacementAttributes( int nPower, double flElevation )
+{
+	EditDisplacementFaces( tr( "Displacement Attributes" ), [ = ]( std::vector<xv::map::DispFace_t> &refs ) {
+		bool bAny = false;
+		for ( xv::map::DispFace_t &ref : refs )
+		{
+			if ( ref.m_pDisp && ( ref.m_pDisp->m_nPower != nPower || ref.m_pDisp->m_flElevation != flElevation ) )
+			{
+				xv::map::SetDisplacementPower( *ref.m_pDisp, nPower );
+				ref.m_pDisp->m_flElevation = flElevation;
+				bAny = true;
+			}
+		}
+		return bAny; }, tr( "The selected displacements have those already" ) );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+std::vector<xv::map::FaceRef_t> CMapEditor::GetPaintFaces( const std::optional<xv::map::FaceRef_t> &under ) const
+{
+	const xv::map::CScene *pScene = m_pDocument->GetScene();
+	if ( !pScene )
+	{
+		return {};
+	}
+	std::vector<xv::map::FaceRef_t> faces = xv::map::DisplacementFaces( *pScene, m_SelectedFaces );
+	if ( faces.empty() && under )
+	{
+		faces = xv::map::DisplacementFaces( *pScene, { *under } );
+	}
+	return faces;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+void CMapEditor::CommitDisplacements( const xv::map::CScene &scene, const std::vector<std::pair<xv::map::FaceRef_t, xv::map::DispInfo_t>> &painted, const QString &szName )
+{
+	std::vector<xv::map::FaceRef_t> faces;
+	for ( const auto &[ face, disp ] : painted )
+	{
+		faces.push_back( face );
+	}
+	xv::map::MapEdit_t edit = xv::map::EditDisplacements( scene, faces, [ & ]( std::vector<xv::map::DispFace_t> &refs ) {
+		for ( xv::map::DispFace_t &ref : refs )
+		{
+			for ( const auto &[ face, disp ] : painted )
+			{
+				if ( face == ref.m_Ref && ref.m_pDisp )
+				{
+					*ref.m_pDisp = disp;
+				}
+			}
+		}
+		return true;
 	} );
 	if ( !edit.IsEmpty() )
 	{

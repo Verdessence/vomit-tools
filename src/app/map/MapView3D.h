@@ -126,6 +126,11 @@ private:
 	void PaintTools( QPainter &painter ) const;
 	void PreviewGizmo( QPointF at, Qt::KeyboardModifiers modifiers );
 	void EndGizmo( bool bCommit, QPointF at, Qt::KeyboardModifiers modifiers );
+	// The Displacement tab's brush: whether a press paints, a stroke's sample at a point
+	// (previewed), and the stroke made one undo step (or dropped).
+	[[nodiscard]] bool IsPaintingDisplacements() const;
+	void PaintStroke( QPointF at );
+	void EndPaint( bool bCommit );
 	[[nodiscard]] xv::map::RasterMode_t GetMode() const;
 
 	MapViewType_t m_nType;
@@ -171,5 +176,13 @@ private:
 	std::optional<CMapGizmo> m_DragGizmo;
 	std::shared_ptr<const xv::map::CScene> m_pGizmoScene;
 	std::vector<std::uint32_t> m_GizmoSelection;
+	// A paint stroke: the scene it started from, the displacements as the stroke leaves them,
+	// whether the right button (lowering) began it, where it last painted, and the brush's
+	// place under the mouse (its ring).
+	std::shared_ptr<const xv::map::CScene> m_pPaintScene;
+	std::vector<std::pair<xv::map::FaceRef_t, xv::map::DispInfo_t>> m_Painted;
+	bool m_bPaintLower = false;
+	QPoint m_PaintLast;
+	std::optional<std::pair<xv::map::Point_t, xv::map::Point_t>> m_BrushAt;
 	QElapsedTimer m_LogClock; // the statistics go to the debug log once a second
 };

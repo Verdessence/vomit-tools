@@ -20,6 +20,7 @@
 
 #include "EditorTab.h"
 #include "map/Clip.h"
+#include "map/DispEdit.h"
 #include "map/Faces.h"
 #include "map/Vertex.h"
 #include "map/MapDocument.h"
@@ -214,6 +215,21 @@ public:
 	void ClickFace( const xv::map::FaceRef_t &face, Qt::KeyboardModifiers modifiers );
 	void ApplyToFace( const xv::map::FaceRef_t &face, bool bValues );
 	[[nodiscard]] CMapFaceEdit &GetFaceEdit() { return *m_pFaceEdit; }
+	// The Displacement tab's edits, each one undo step, on the selected faces (else every face
+	// of the selected objects): displacements made at a power on four-sided faces, taken off,
+	// sewn to each other and to plain faces among them, subdivided together, given noise along
+	// their faces' normals, their alpha inverted, their power and elevation set.
+	void CreateDisplacements( int nPower );
+	void DestroyDisplacements();
+	void SewDisplacements();
+	void SubdivideDisplacements();
+	void NoiseDisplacements( double flMin, double flMax );
+	void InvertDisplacementAlpha();
+	void SetDisplacementAttributes( int nPower, double flElevation );
+	// The displacements a brush paints: the selected faces', else the one under the mouse.
+	[[nodiscard]] std::vector<xv::map::FaceRef_t> GetPaintFaces( const std::optional<xv::map::FaceRef_t> &under ) const;
+	// A stroke's result (the painted copies, from pScene) made one undo step.
+	void CommitDisplacements( const xv::map::CScene &scene, const std::vector<std::pair<xv::map::FaceRef_t, xv::map::DispInfo_t>> &painted, const QString &szName );
 	// A material's texture size in texels (128 by 128 until it is read, as for a missing one).
 	[[nodiscard]] std::array<int, 2> GetMaterialSize( std::uint32_t nMaterial ) const;
 	// A 3D view changed how it draws (the card's drawing failed): software needs the textures decoded.
@@ -254,6 +270,9 @@ private:
 	void SnapSelection();
 	void ShowProperties();
 	void TakePreferences();
+	// The faces the Displacement tab works on, and one of its edits applied under a name.
+	[[nodiscard]] std::vector<xv::map::FaceRef_t> GetFaceTargets() const;
+	void EditDisplacementFaces( const QString &szName, const std::function<bool( std::vector<xv::map::DispFace_t> & )> &pfnEdit, const QString &szNothing );
 	[[nodiscard]] bool NeedsDecodedTextures() const;
 	void StartResources();
 	// The camera kept between runs, per map file.

@@ -4,13 +4,16 @@
 // Purpose: Hammer's Face Edit sheet, shown in the side panel while the Texture Application
 //          tool is on: the selected faces' texture scale, shift, rotation and lightmap scale
 //          (typed, and applied as typed), Justify, Align, the current texture with Browse and
-//          Apply, and the Mode a click in 3D works in.
+//          Apply, and the Mode a click in 3D works in. Its Displacement tab, as Hammer's:
+//          Create, Destroy, Sew, Subdivide, Noise, Invert Alpha, the power and elevation, and
+//          the paint brush the 3D views paint geometry or alpha with.
 //
 //===========================================================================//
 #pragma once
 
 #include <QWidget>
 
+#include "map/DispEdit.h"
 #include "map/Faces.h"
 
 class CMapEditor;
@@ -20,6 +23,15 @@ class QDoubleSpinBox;
 class QLineEdit;
 class QRadioButton;
 class QSpinBox;
+class QTabWidget;
+
+// What a left click (or drag) on a displacement does while the Displacement tab paints.
+enum class DispPaintMode_t
+{
+	DISP_PAINT_NONE, // the texture tool's own click
+	DISP_PAINT_GEOMETRY,
+	DISP_PAINT_ALPHA,
+};
 
 // What a left click on a face does (Hammer's Mode).
 enum class FaceEditMode_t
@@ -46,7 +58,20 @@ public:
 	void ApplyValuesTo( xv::map::Side_t &side ) const;
 	void Justify( xv::map::Justify_t nHow );
 
+	// The Displacement tab's brush: what painting does, the brush without its centre (the view
+	// puts it where the mouse is), whether its axis is the face's normal (else the brush's axis
+	// is a world axis), and its radius ([ and ] in the 3D views).
+	[[nodiscard]] DispPaintMode_t GetDispPaintMode() const;
+	void SetDispPaintMode( DispPaintMode_t nMode );
+	[[nodiscard]] xv::map::DispBrush_t GetBrush() const;
+	[[nodiscard]] bool IsBrushAlongFaceNormal() const;
+	[[nodiscard]] double GetBrushRadius() const;
+	void SetBrushRadius( double flRadius );
+	[[nodiscard]] int GetDispPower() const;
+	void ShowTab( int nTab );
+
 private:
+	void BuildDisplacementTab( QWidget *pPage );
 	// A field typed: the selected faces take it.
 	void FieldChanged( const QString &szName, const std::function<void( xv::map::Side_t & )> &pfnSet );
 	void Align( bool bWorld );
@@ -64,4 +89,14 @@ private:
 	QRadioButton *m_pAlignFace = nullptr;
 	QLineEdit *m_pTexture = nullptr;
 	QComboBox *m_pMode = nullptr;
+	QTabWidget *m_pTabs = nullptr;
+	QSpinBox *m_pPower = nullptr;
+	QDoubleSpinBox *m_pElevation = nullptr;
+	QComboBox *m_pPaintMode = nullptr;
+	QComboBox *m_pEffect = nullptr;
+	QComboBox *m_pAxis = nullptr;
+	QDoubleSpinBox *m_pRadius = nullptr;
+	QDoubleSpinBox *m_pAmount = nullptr;
+	QDoubleSpinBox *m_pNoiseMin = nullptr;
+	QDoubleSpinBox *m_pNoiseMax = nullptr;
 };

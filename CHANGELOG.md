@@ -70,6 +70,15 @@
   Shift+V again shows vertices only, edges only, or both. A face bent out of flat makes Hammer's
   "invalid solid structure", which Check for Problems reports. No face splitting (Ctrl+F) or
   vertex scaling yet.
+- **Displacements** (the Displacement tab of Face Edit, with the texture tool): Create (power
+  2 to 4) on four-sided faces and Destroy; Paint Geometry and Paint Alpha in the 3D views with a
+  round brush (Raise/Lower, Raise To, Smooth, along the face's normal or an axis; the left
+  button raises, the right lowers; [ and ] size the brush; a drag keeps painting, one undo step
+  a stroke); Sew (edges meeting end to end, T-junctions, and onto plain faces); Subdivide (the
+  selected displacements smoothed together); Noise; Invert Alpha; the power (resampled) and
+  elevation. Triangle tags are written as Hammer's (9, 1, 0 by slope), and the Walkable button
+  tints the selected displacements' steep triangles. New and destroyed displacements, and
+  changed powers, are saved in place.
 - **Block tool** (Shift+B): drag a box in a 2D view, pull its handles in the others, Enter (or the
   right button's Create Object) makes a block with the current texture; the New Objects panel's
   Objects box picks a wedge, cylinder, spike or sphere instead, with its Faces count. **Entity tool** (Shift+E):
