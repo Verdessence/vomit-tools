@@ -147,6 +147,8 @@ struct CompileReport_t
 };
 // Reads the whole log; each tool's lines are told apart by the banners the tools print.
 [[nodiscard]] CompileReport_t ParseCompileOutput( std::string_view szLog );
+// The text without the terminal colour codes the ++ compilers print.
+[[nodiscard]] std::string StripAnsi( std::string_view szText );
 
 // A leak's pointfile (<map>.lin): one point a line, from where vbsp started to the entity.
 [[nodiscard]] std::vector<Point_t> ReadPointfile( std::string_view szText );

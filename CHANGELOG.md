@@ -43,6 +43,9 @@
   stops the compile and its line is drawn red in every view (Map → Load Pointfile, Unload, Go to
   Leak), and the game is started on the map. The compilers and the game's launcher are set in
   Preferences → Source Tools (the native VBSP++, VVIS++ and VRAD++ can live anywhere).
+  `vomit-tools-cli map compile <map.vmf> --game <folder>` does the same from a script (the
+  compilers found beside the game or named, Hammer's choices as switches, or `--sequence` from a
+  sequence file; exit code 2 on a leak), and `map sequences` lists what a file holds.
 - **File → New → Map (VMF)** starts an empty map, as Hammer++ starts one; saving asks where it goes.
 - A selected prop shows its triangles; other entities drawn by a model (player starts, NPCs) show
   their box instead of a mass of triangles over everything. Preferences → Maps → 3D View can show

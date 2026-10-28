@@ -159,20 +159,20 @@ void CCompileRunner::CommandDone( bool bSuccess )
 		Append( tr( "%1 wasn't made.\n" ).arg( QString::fromStdString( command.m_szEnsure ) ) );
 		bSuccess = false;
 	}
-	if ( !bSuccess || m_bCancelled )
+	// VBSP++ exits with an error on a leak, stock vbsp doesn't: the log says either way.
+	if ( command.m_nSpecial == xv::map::COMPILE_SPECIAL_RUN && QFileInfo( QString::fromStdString( command.m_szProgram ) ).fileName().contains( QStringLiteral( "vbsp" ), Qt::CaseInsensitive ) && xv::map::ParseCompileOutput( m_szLog.toStdString() ).m_bLeaked )
 	{
-		End( false );
-		return;
-	}
-	if ( m_bStopOnLeak && command.m_nSpecial == xv::map::COMPILE_SPECIAL_RUN && QFileInfo( QString::fromStdString( command.m_szProgram ) ).fileName().contains( QStringLiteral( "vbsp" ), Qt::CaseInsensitive ) )
-	{
-		const xv::map::CompileReport_t report = xv::map::ParseCompileOutput( m_szLog.toStdString() );
-		if ( report.m_bLeaked )
+		if ( m_bStopOnLeak || !bSuccess )
 		{
 			Append( tr( "The map leaked: the rest of the sequence isn't run.\n" ) );
 			End( false );
 			return;
 		}
+	}
+	if ( !bSuccess || m_bCancelled )
+	{
+		End( false );
+		return;
 	}
 	m_nCurrent++;
 	RunNext();
@@ -181,8 +181,10 @@ void CCompileRunner::CommandDone( bool bSuccess )
 //-----------------------------------------------------------------------------
 // Purpose:
 //-----------------------------------------------------------------------------
-void CCompileRunner::Append( const QString &szText )
+void CCompileRunner::Append( const QString &szGiven )
 {
+	// The ++ compilers colour their output for a terminal.
+	const QString szText = QString::fromStdString( xv::map::StripAnsi( szGiven.toStdString() ) );
 	if ( szText.isEmpty() )
 	{
 		return;

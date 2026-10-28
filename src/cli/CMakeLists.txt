@@ -1,5 +1,5 @@
 # vomit-tools-cli: the texture tools from the command line (core only, no Qt).
-add_executable(vomit-tools-cli main.cpp ModelCommands.cpp)
+add_executable(vomit-tools-cli main.cpp MapCommands.cpp ModelCommands.cpp Process.cpp)
 target_link_libraries(vomit-tools-cli PRIVATE vomit_tools::core)
 vomit_tools_set_warnings(vomit-tools-cli)
 install(TARGETS vomit-tools-cli RUNTIME DESTINATION bin)

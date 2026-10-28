@@ -500,11 +500,37 @@ std::vector<ResolvedCommand_t> ResolveSequence( const CompileSequence_t &sequenc
 }
 
 //-----------------------------------------------------------------------------
+// Purpose: ESC [ ... <letter> sequences taken out.
+//-----------------------------------------------------------------------------
+std::string StripAnsi( std::string_view szText )
+{
+	std::string szOut;
+	szOut.reserve( szText.size() );
+	for ( std::size_t i = 0; i < szText.size(); i++ )
+	{
+		if ( szText[ i ] == '\x1b' && i + 1 < szText.size() && szText[ i + 1 ] == '[' )
+		{
+			std::size_t nEnd = i + 2;
+			while ( nEnd < szText.size() && !std::isalpha( static_cast<unsigned char>( szText[ nEnd ] ) ) )
+			{
+				nEnd++;
+			}
+			i = nEnd;
+			continue;
+		}
+		szOut += szText[ i ];
+	}
+	return szOut;
+}
+
+//-----------------------------------------------------------------------------
 // Purpose: The tools' banners say which is talking; the lines the Compile Errors article lists
 //          are picked out, with a brush number or a point where they give one.
 //-----------------------------------------------------------------------------
-CompileReport_t ParseCompileOutput( std::string_view szLog )
+CompileReport_t ParseCompileOutput( std::string_view szGivenLog )
 {
+	const std::string szClean = StripAnsi( szGivenLog );
+	const std::string_view szLog = szClean;
 	CompileReport_t report;
 	std::string szTool;
 	static const std::regex brushPattern( R"([Bb]rush (\d+))" );
