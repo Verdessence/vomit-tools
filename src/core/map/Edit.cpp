@@ -155,7 +155,8 @@ std::shared_ptr<CScene> ApplyEdit( const CScene &scene, const MapEdit_t &edit )
 			out.m_Solids.push_back( BuildSolid( solid ) );
 			out.m_SolidObjects.push_back( static_cast<std::uint32_t>( out.m_Objects.size() ) );
 			out.m_Objects.push_back( { true, nSolid } );
-			// Its owner lists it (a new entity may already).
+			// Its owner lists it (a new entity may already); where it is written is where it is.
+			solid.m_nReadEntity = solid.m_nEntity;
 			Entity_t &owner = solid.m_nEntity < 0 ? map.m_World : map.m_Entities[ static_cast<std::size_t>( solid.m_nEntity ) ];
 			if ( std::ranges::find( owner.m_Solids, nSolid ) == owner.m_Solids.end() )
 			{
@@ -165,6 +166,18 @@ std::shared_ptr<CScene> ApplyEdit( const CScene &scene, const MapEdit_t &edit )
 		}
 		else
 		{
+			// Another owner: off the old one's list, onto the new one's.
+			const int nWas = std::as_const( map.m_Solids )[ nSolid ].m_nEntity;
+			if ( nWas != solid.m_nEntity )
+			{
+				Entity_t &was = nWas < 0 ? map.m_World : map.m_Entities[ static_cast<std::size_t>( nWas ) ];
+				std::erase( was.m_Solids, nSolid );
+				Entity_t &now = solid.m_nEntity < 0 ? map.m_World : map.m_Entities[ static_cast<std::size_t>( solid.m_nEntity ) ];
+				if ( std::ranges::find( now.m_Solids, nSolid ) == now.m_Solids.end() )
+				{
+					now.m_Solids.push_back( nSolid );
+				}
+			}
 			out.m_Solids[ nSolid ] = BuildSolid( solid );
 			map.m_Solids[ nSolid ] = std::move( solid );
 		}
@@ -174,6 +187,13 @@ std::shared_ptr<CScene> ApplyEdit( const CScene &scene, const MapEdit_t &edit )
 			out.m_EditedSolids.insert( it, nSolid );
 		}
 		out.m_Changed.push_back( out.SolidObject( nSolid ) );
+	}
+
+	for ( const Group_t &group : edit.m_Groups )
+	{
+		map.m_Groups.push_back( group );
+		map.m_Groups.back().m_Span = {};
+		out.m_nNextObjectId = std::max( out.m_nNextObjectId, group.m_nId + 1 );
 	}
 
 	// The edit mesh: every solid edits have touched, as it is now.
@@ -428,6 +448,7 @@ struct Incoming_t
 void Adopt( const CMap &map, Solid_t &solid, bool bForeign )
 {
 	solid.m_Span = {};
+	solid.m_nReadEntity = -2; // set when the edit is made: a new solid has no old place
 	solid.m_bChanged = false;
 	solid.m_bDeleted = false;
 	solid.m_bInHidden = false;
@@ -666,6 +687,167 @@ void SetKeyValue( const CMap &map, Entity_t &entity, std::string_view szKey, std
 		}
 	}
 	entity.m_Keys.push_back( { map.Store( std::string{ szKey } ), map.Store( std::string{ szValue } ), {} } );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: The world solids picked, and selected entities' solids with their entities emptied
+//          (deleted): all of them in one new entity, which the edit adds last.
+//-----------------------------------------------------------------------------
+MapEdit_t TieToEntity( const CScene &scene, const std::vector<std::uint32_t> &objects, std::string_view szClass, std::vector<std::uint32_t> *pAdded )
+{
+	MapEdit_t edit;
+	const CMap &map = scene.m_Map;
+	const ObjectSet_t set = ObjectsOf( scene, objects );
+	if ( set.m_Solids.empty() )
+	{
+		return edit;
+	}
+	const auto nNewEntity = static_cast<std::uint32_t>( map.m_Entities.size() );
+	Entity_t entity;
+	entity.m_nId = scene.m_nNextObjectId;
+	entity.m_Editor.m_Color = ENTITY_COLOR;
+	entity.m_Editor.m_bHasColor = true;
+	const FgdClass_t *pClass = scene.m_pFgd ? scene.m_pFgd->Find( szClass ) : nullptr;
+	entity.m_Keys.push_back( { "classname", map.Store( std::string{ pClass ? std::string_view{ pClass->m_szName } : szClass } ), {} } );
+	for ( const FgdKey_t &key : pClass ? pClass->m_Keys : std::vector<FgdKey_t>{} )
+	{
+		if ( !key.m_szDefault.empty() && key.m_szType != "flags" && !kv1::EqualsIgnoreCase( key.m_szName, "classname" ) )
+		{
+			entity.m_Keys.push_back( { map.Store( key.m_szName ), map.Store( key.m_szDefault ), {} } );
+		}
+	}
+	if ( const FgdHelper_t *pColor = pClass ? pClass->FindHelper( "color" ) : nullptr; pColor && !pColor->m_Arguments.empty() )
+	{
+		entity.m_Editor.m_Color = ParseColor( pColor->m_Arguments[ 0 ] ).value_or( ENTITY_COLOR );
+	}
+	for ( const std::uint32_t nSolid : set.m_Solids )
+	{
+		Solid_t solid = map.m_Solids[ nSolid ];
+		solid.m_nEntity = static_cast<int>( nNewEntity );
+		solid.m_bChanged = true;
+		entity.m_Solids.push_back( nSolid );
+		edit.m_Solids.emplace_back( nSolid, std::move( solid ) );
+	}
+	for ( const std::uint32_t nEntity : set.m_Entities )
+	{
+		Entity_t emptied = map.m_Entities[ nEntity ];
+		if ( !emptied.m_Solids.empty() )
+		{
+			emptied.m_bDeleted = true;
+			edit.m_Entities.emplace_back( nEntity, std::move( emptied ) );
+		}
+	}
+	edit.m_Entities.emplace_back( nNewEntity, std::move( entity ) );
+	if ( pAdded )
+	{
+		pAdded->push_back( scene.GetObjectCount() );
+	}
+	return edit;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+MapEdit_t MoveToWorld( const CScene &scene, const std::vector<std::uint32_t> &objects )
+{
+	MapEdit_t edit;
+	const CMap &map = scene.m_Map;
+	const ObjectSet_t set = ObjectsOf( scene, objects );
+	for ( const std::uint32_t nSolid : set.m_Solids )
+	{
+		if ( map.m_Solids[ nSolid ].m_nEntity < 0 )
+		{
+			continue;
+		}
+		Solid_t solid = map.m_Solids[ nSolid ];
+		solid.m_nEntity = -1;
+		solid.m_bChanged = true;
+		edit.m_Solids.emplace_back( nSolid, std::move( solid ) );
+	}
+	for ( const std::uint32_t nEntity : set.m_Entities )
+	{
+		Entity_t gone = map.m_Entities[ nEntity ];
+		if ( !gone.m_Solids.empty() )
+		{
+			gone.m_bDeleted = true;
+			edit.m_Entities.emplace_back( nEntity, std::move( gone ) );
+		}
+	}
+	return edit;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: A new group with Hammer's next id; each object's editor block names it (a brush
+//          entity's solids follow their entity).
+//-----------------------------------------------------------------------------
+MapEdit_t GroupObjects( const CScene &scene, const std::vector<std::uint32_t> &objects, int *pGroupId )
+{
+	MapEdit_t edit;
+	const CMap &map = scene.m_Map;
+	const ObjectSet_t set = ObjectsOf( scene, objects );
+	if ( set.m_Solids.size() + set.m_Entities.size() < 2 && !( set.m_Entities.size() == 1 && !set.m_Solids.empty() ) )
+	{
+		return edit;
+	}
+	Group_t group;
+	group.m_nId = scene.m_nNextObjectId;
+	group.m_Editor.m_Color = { 220, 220, 220 };
+	group.m_Editor.m_bHasColor = true;
+	edit.m_Groups.push_back( group );
+	if ( pGroupId )
+	{
+		*pGroupId = group.m_nId;
+	}
+	for ( const std::uint32_t nSolid : set.m_Solids )
+	{
+		Solid_t solid = map.m_Solids[ nSolid ];
+		solid.m_Editor.m_nGroup = group.m_nId;
+		solid.m_Editor.m_bChanged = true;
+		solid.m_bChanged = true;
+		edit.m_Solids.emplace_back( nSolid, std::move( solid ) );
+	}
+	for ( const std::uint32_t nEntity : set.m_Entities )
+	{
+		Entity_t entity = map.m_Entities[ nEntity ];
+		entity.m_Editor.m_nGroup = group.m_nId;
+		entity.m_Editor.m_bChanged = true;
+		edit.m_Entities.emplace_back( nEntity, std::move( entity ) );
+	}
+	return edit;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+MapEdit_t UngroupObjects( const CScene &scene, const std::vector<std::uint32_t> &objects )
+{
+	MapEdit_t edit;
+	const CMap &map = scene.m_Map;
+	const ObjectSet_t set = ObjectsOf( scene, objects );
+	for ( const std::uint32_t nSolid : set.m_Solids )
+	{
+		if ( map.m_Solids[ nSolid ].m_Editor.m_nGroup == 0 )
+		{
+			continue;
+		}
+		Solid_t solid = map.m_Solids[ nSolid ];
+		solid.m_Editor.m_nGroup = 0;
+		solid.m_Editor.m_bChanged = true;
+		solid.m_bChanged = true;
+		edit.m_Solids.emplace_back( nSolid, std::move( solid ) );
+	}
+	for ( const std::uint32_t nEntity : set.m_Entities )
+	{
+		if ( map.m_Entities[ nEntity ].m_Editor.m_nGroup == 0 )
+		{
+			continue;
+		}
+		Entity_t entity = map.m_Entities[ nEntity ];
+		entity.m_Editor.m_nGroup = 0;
+		entity.m_Editor.m_bChanged = true;
+		edit.m_Entities.emplace_back( nEntity, std::move( entity ) );
+	}
+	return edit;
 }
 
 //-----------------------------------------------------------------------------

@@ -801,6 +801,97 @@ void CMapEditor::GoToBrush()
 }
 
 //-----------------------------------------------------------------------------
+// Purpose: Hammer asks which class with Object Properties; a list of the game data's brush
+//          classes does here, the configuration's default (func_detail) first.
+//-----------------------------------------------------------------------------
+void CMapEditor::TieToEntity()
+{
+	const xv::map::CScene *pScene = m_pDocument->GetScene();
+	const std::vector<std::uint32_t> &selection = m_pDocument->GetSelection();
+	if ( !pScene || selection.empty() )
+	{
+		return;
+	}
+	QStringList classes;
+	for ( const auto &[ szLower, fgdClass ] : pScene->m_pFgd ? pScene->m_pFgd->GetClasses() : std::map<std::string, xv::map::FgdClass_t>{} )
+	{
+		if ( fgdClass.m_nKind == xv::map::FgdClassKind_t::FGD_CLASS_KIND_SOLID )
+		{
+			classes << QString::fromStdString( fgdClass.m_szName );
+		}
+	}
+	const QString szDefault = QString::fromStdString( m_pDocument->GetDefaults().m_szSolidEntity );
+	classes.removeAll( szDefault );
+	classes.prepend( szDefault );
+	bool bOk = false;
+	const QString szClass = QInputDialog::getItem( this, tr( "Tie to Entity" ), tr( "Class:" ), classes, 0, true, &bOk ).trimmed();
+	if ( bOk && !szClass.isEmpty() )
+	{
+		TieToEntity( szClass );
+	}
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+void CMapEditor::TieToEntity( const QString &szClass )
+{
+	const xv::map::CScene *pScene = m_pDocument->GetScene();
+	const std::vector<std::uint32_t> &selection = m_pDocument->GetSelection();
+	if ( !pScene || selection.empty() )
+	{
+		return;
+	}
+	std::vector<std::uint32_t> added;
+	xv::map::MapEdit_t edit = xv::map::TieToEntity( *pScene, selection, szClass.toStdString(), &added );
+	if ( edit.IsEmpty() )
+	{
+		emit StatusMessage( tr( "Select brushes to tie to an entity" ) );
+		return;
+	}
+	m_pDocument->Edit( std::move( edit ), tr( "Tie to Entity" ), std::move( added ) );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+void CMapEditor::MoveToWorld()
+{
+	const xv::map::CScene *pScene = m_pDocument->GetScene();
+	if ( !pScene || m_pDocument->GetSelection().empty() )
+	{
+		return;
+	}
+	xv::map::MapEdit_t edit = xv::map::MoveToWorld( *pScene, m_pDocument->GetSelection() );
+	std::vector<std::uint32_t> keep;
+	for ( const auto &[ nSolid, solid ] : edit.m_Solids )
+	{
+		keep.push_back( pScene->SolidObject( nSolid ) );
+	}
+	if ( !edit.IsEmpty() )
+	{
+		m_pDocument->Edit( std::move( edit ), tr( "Move to World" ), std::move( keep ) );
+	}
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+void CMapEditor::GroupSelection( bool bGroup )
+{
+	const xv::map::CScene *pScene = m_pDocument->GetScene();
+	if ( !pScene || m_pDocument->GetSelection().empty() )
+	{
+		return;
+	}
+	xv::map::MapEdit_t edit = bGroup ? xv::map::GroupObjects( *pScene, m_pDocument->GetSelection(), nullptr ) : xv::map::UngroupObjects( *pScene, m_pDocument->GetSelection() );
+	if ( !edit.IsEmpty() )
+	{
+		m_pDocument->Edit( std::move( edit ), bGroup ? tr( "Group" ) : tr( "Ungroup" ), m_pDocument->GetSelection() );
+	}
+}
+
+//-----------------------------------------------------------------------------
 // Purpose:
 //-----------------------------------------------------------------------------
 bool CMapEditor::GoToObjectId( int nId )
@@ -1095,6 +1186,26 @@ bool CMapEditor::RunAction( MapAction_t nAction, CMapView *pFrom )
 			return true;
 		case MapAction_t::MAP_ACTION_RUN_MAP:
 			RunMap();
+			return true;
+		case MapAction_t::MAP_ACTION_TIE_TO_ENTITY:
+			TieToEntity();
+			return true;
+		case MapAction_t::MAP_ACTION_MOVE_TO_WORLD:
+			MoveToWorld();
+			return true;
+		case MapAction_t::MAP_ACTION_GROUP:
+			GroupSelection( true );
+			return true;
+		case MapAction_t::MAP_ACTION_UNGROUP:
+			GroupSelection( false );
+			return true;
+		case MapAction_t::MAP_ACTION_TOGGLE_GROUP_IGNORE:
+			// Hammer's "ignore groups": Objects mode, and back to Groups.
+			m_pDocument->SetSelectMode( m_pDocument->GetSelectMode() == MapSelectMode_t::MAP_SELECT_MODE_GROUPS ? MapSelectMode_t::MAP_SELECT_MODE_OBJECTS : MapSelectMode_t::MAP_SELECT_MODE_GROUPS );
+			for ( QAction *pAction : m_pModes->actions() )
+			{
+				pAction->setChecked( pAction->data().toInt() == static_cast<int>( m_pDocument->GetSelectMode() ) );
+			}
 			return true;
 		case MapAction_t::MAP_ACTION_ZOOM_IN_ALL:
 		case MapAction_t::MAP_ACTION_ZOOM_OUT_ALL:

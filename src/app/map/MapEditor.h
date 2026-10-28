@@ -117,6 +117,11 @@ public:
 	void LoadPointfile();
 	void UnloadPointfile();
 	void GoToLeak();
+	// Edit > Tie to Entity (Ctrl+T), Move to World (Ctrl+Shift+W), Group (Ctrl+G), Ungroup (Ctrl+U).
+	void TieToEntity();
+	void TieToEntity( const QString &szClass );
+	void MoveToWorld();
+	void GroupSelection( bool bGroup );
 	// Selects the object with Hammer's id and centres the views on it; centres them on a point.
 	bool GoToObjectId( int nId );
 	void CenterViewsOn( const xv::map::Point_t &point );

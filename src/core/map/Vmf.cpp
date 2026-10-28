@@ -551,6 +551,7 @@ std::size_t CReader::ReadSolid( const Token_t &key, int nDepth, int nEntity, boo
 {
 	Solid_t solid;
 	solid.m_nEntity = nEntity;
+	solid.m_nReadEntity = nEntity;
 	solid.m_bInHidden = bInHidden;
 	bool bTooMany = false;
 	const std::size_t nEnd = ReadBody(

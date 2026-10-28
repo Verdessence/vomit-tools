@@ -50,6 +50,11 @@ enum class MapAction_t
 	MAP_ACTION_TOOL_BLOCK,           // Shift+B
 	MAP_ACTION_TOOL_TEXTURE,         // Shift+A
 	MAP_ACTION_RUN_MAP,              // F9
+	MAP_ACTION_TIE_TO_ENTITY,        // Ctrl+T
+	MAP_ACTION_MOVE_TO_WORLD,        // Ctrl+Shift+W
+	MAP_ACTION_GROUP,                // Ctrl+G
+	MAP_ACTION_UNGROUP,              // Ctrl+U
+	MAP_ACTION_TOGGLE_GROUP_IGNORE,  // Ctrl+W: Groups and Objects selection modes
 	MAP_ACTION_APPLY_TEXTURE,        // Shift+T: the current texture onto the selected faces or objects
 	MAP_ACTION_NEXT_HIT,             // Page Down
 	MAP_ACTION_PREVIOUS_HIT,         // Page Up

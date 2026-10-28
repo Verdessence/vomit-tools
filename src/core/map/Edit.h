@@ -38,8 +38,10 @@ struct MapEdit_t
 	std::vector<std::pair<std::uint32_t, Entity_t>> m_Entities;
 	// The world's keys, outputs and editor notes as they are to be (its solids stay as they are).
 	std::optional<Entity_t> m_World;
+	// Groups to add (Hammer's group blocks in the world); an empty group left behind is harmless.
+	std::vector<Group_t> m_Groups;
 
-	[[nodiscard]] bool IsEmpty() const { return m_Solids.empty() && m_Entities.empty() && !m_World; }
+	[[nodiscard]] bool IsEmpty() const { return m_Solids.empty() && m_Entities.empty() && !m_World && m_Groups.empty(); }
 };
 
 inline constexpr std::uint32_t NEW_MATERIAL = ~0u;
@@ -91,6 +93,17 @@ struct ObjectSet_t
 // What ObjectsToText wrote (or any VMF's objects), added to the scene moved by transform, with ids
 // of their own; pAdded as for CopyObjects. Empty when the text holds nothing.
 [[nodiscard]] MapEdit_t ObjectsFromText( const CScene &scene, std::string_view szText, const Transform_t &transform, std::vector<std::uint32_t> *pAdded );
+
+// Tie to Entity: the objects' solids (world solids, and those of selected entities, which are
+// emptied) made one new brush entity of szClass, with the keys the game data gives it; pAdded
+// gets the new entity's object number.
+[[nodiscard]] MapEdit_t TieToEntity( const CScene &scene, const std::vector<std::uint32_t> &objects, std::string_view szClass, std::vector<std::uint32_t> *pAdded );
+// Move to World: the selected entities' solids back to the world, the entities deleted.
+[[nodiscard]] MapEdit_t MoveToWorld( const CScene &scene, const std::vector<std::uint32_t> &objects );
+// Group: a new group round the objects (an entity's solids follow it); Ungroup: the objects'
+// outermost groups taken off them.
+[[nodiscard]] MapEdit_t GroupObjects( const CScene &scene, const std::vector<std::uint32_t> &objects, int *pGroupId );
+[[nodiscard]] MapEdit_t UngroupObjects( const CScene &scene, const std::vector<std::uint32_t> &objects );
 
 // Sets an entity's key (adding it if it has none), keeping the value in map's store.
 void SetKeyValue( const CMap &map, Entity_t &entity, std::string_view szKey, std::string_view szValue );

@@ -100,7 +100,8 @@ struct Side_t
 struct Solid_t
 {
 	int m_nId = 0;
-	int m_nEntity = -1;                // index into CMap::m_Entities; -1 for the world
+	int m_nEntity = -1;
+	int m_nReadEntity = -1;            // its owner when the map was read (or when it was added): saving moves it when they differ                // index into CMap::m_Entities; -1 for the world
 	std::vector<Side_t> m_Sides;
 	EditorInfo_t m_Editor;
 	bool m_bInHidden = false;          // stored in a "hidden" block

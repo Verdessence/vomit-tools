@@ -862,14 +862,20 @@ std::string CWriter::Run()
 		}
 		PatchEntity( entity );
 	}
-	// New solids go before their owner's closing brace (the world's, or an entity's).
+	// New solids go before their owner's closing brace (the world's, or an entity's); a solid
+	// tied to another owner since it was read is cut from its old place and written there anew.
 	for ( const Solid_t &solid : m_Map.m_Solids )
 	{
+		const bool bMoved = !solid.IsNew() && solid.m_nReadEntity != solid.m_nEntity;
+		if ( bMoved )
+		{
+			Remove( solid.m_Span );
+		}
 		if ( deadEntity( solid.m_nEntity ) || newEntity( solid.m_nEntity ) )
 		{
 			continue;
 		}
-		if ( solid.IsNew() )
+		if ( solid.IsNew() || bMoved )
 		{
 			if ( !solid.m_bDeleted )
 			{
@@ -886,6 +892,17 @@ std::string CWriter::Run()
 		else if ( solid.m_bChanged )
 		{
 			PatchSolid( solid );
+		}
+	}
+	// New groups go before the world's closing brace too.
+	for ( const Group_t &group : m_Map.m_Groups )
+	{
+		if ( group.m_Span.m_nLength == 0 )
+		{
+			const std::string szIndent = LineIndent( m_Map.m_World.m_Span.m_nOffset ) + '\t';
+			const std::string szInner = szIndent + '\t';
+			const std::string szBlock = "group" + std::string{ m_szNewline } + szIndent + '{' + std::string{ m_szNewline } + szInner + Pair( "id", std::to_string( group.m_nId ) ) + std::string{ m_szNewline } + szInner + Editor( group.m_Editor, szInner, nullptr ) + std::string{ m_szNewline } + szIndent + '}';
+			InsertLines( m_Map.m_World.m_Span.m_nOffset + m_Map.m_World.m_Span.m_nLength - 1, szIndent, szBlock );
 		}
 	}
 	// New entities after the last one there was (or the world).
