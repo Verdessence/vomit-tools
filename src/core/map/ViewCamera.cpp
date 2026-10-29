@@ -170,6 +170,62 @@ std::optional<std::array<double, 3>> CViewCamera::Project( Point_t p ) const
 }
 
 //-----------------------------------------------------------------------------
+// Purpose: Share the small projection margin between tool edges and filled polygons.
+//-----------------------------------------------------------------------------
+double CViewCamera::ToolNearDistance( Point_t p ) const
+{
+	return Dot( Subtract( p, m_Eye ), GetForward() ) - m_flNear * 1.01;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Clip a tool edge before projection, including edges crossing behind the eye.
+//-----------------------------------------------------------------------------
+std::optional<std::pair<std::array<double, 3>, std::array<double, 3>>> CViewCamera::ProjectLine( Point_t a, Point_t b ) const
+{
+	const double flA = ToolNearDistance( a );
+	const double flB = ToolNearDistance( b );
+	if ( flA < 0 && flB < 0 )
+		return std::nullopt;
+	if ( ( flA < 0 ) != ( flB < 0 ) )
+		( flA < 0 ? a : b ) = Add( a, Scale( Subtract( b, a ), flA / ( flA - flB ) ) );
+	const auto pa = Project( a );
+	const auto pb = Project( b );
+	if ( !pa || !pb )
+		return std::nullopt;
+	return std::pair{ *pa, *pb };
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Preserve the visible part of a polygon even when some corners are behind the eye.
+//-----------------------------------------------------------------------------
+std::vector<std::array<double, 3>> CViewCamera::ProjectPolygon( std::span<const Point_t> points ) const
+{
+	std::vector<std::array<double, 3>> projected;
+	if ( points.empty() )
+		return projected;
+	Point_t previous = points.back();
+	double flPrevious = ToolNearDistance( previous );
+	for ( const Point_t &p : points )
+	{
+		const double flDistance = ToolNearDistance( p );
+		if ( ( flDistance < 0 ) != ( flPrevious < 0 ) )
+		{
+			const Point_t cut = Add( previous, Scale( Subtract( p, previous ), flPrevious / ( flPrevious - flDistance ) ) );
+			if ( const auto at = Project( cut ) )
+				projected.push_back( *at );
+		}
+		if ( flDistance >= 0 )
+		{
+			if ( const auto at = Project( p ) )
+				projected.push_back( *at );
+		}
+		previous = p;
+		flPrevious = flDistance;
+	}
+	return projected;
+}
+
+//-----------------------------------------------------------------------------
 // Purpose:
 //-----------------------------------------------------------------------------
 std::pair<Point_t, Point_t> CViewCamera::Ray( double x, double y ) const

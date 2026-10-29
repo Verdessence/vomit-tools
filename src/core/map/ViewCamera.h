@@ -11,6 +11,8 @@
 #include <array>
 #include <optional>
 #include <utility>
+#include <span>
+#include <vector>
 
 #include "map/Geometry.h"
 
@@ -48,12 +50,17 @@ public:
 	// A map point's place in the image: x and y in pixels (y down), and depth from 0 at the near
 	// plane to 1 at the far one. nullopt behind the near plane.
 	[[nodiscard]] std::optional<std::array<double, 3>> Project( Point_t p ) const;
+	// Tool geometry is cut just in front of the near plane before projection. Edge-on polygons
+	// remain valid; an empty result means all vertices were behind the cut.
+	[[nodiscard]] std::vector<std::array<double, 3>> ProjectPolygon( std::span<const Point_t> points ) const;
+	[[nodiscard]] std::optional<std::pair<std::array<double, 3>, std::array<double, 3>>> ProjectLine( Point_t a, Point_t b ) const;
 	// The ray from the eye through a pixel (centre at x + 0.5, y + 0.5): start and unit direction.
 	[[nodiscard]] std::pair<Point_t, Point_t> Ray( double x, double y ) const;
 	// Whether any of box can be in view (between the near and far planes, inside the sides).
 	[[nodiscard]] bool CanSee( const Box_t &box ) const;
 
 private:
+	[[nodiscard]] double ToolNearDistance( Point_t p ) const;
 	[[nodiscard]] std::array<double, 2> GetFocal() const; // the projection's x and y scale
 };
 

@@ -1341,6 +1341,12 @@ void CMapView3D::PaintTools( QPainter &painter )
 		return;
 	}
 	const xv::map::CViewCamera camera = GetSizedCamera();
+	auto project = [ & ]( const std::vector<xv::map::Point_t> &points ) {
+		QPolygonF polygon;
+		for ( const auto &at : camera.ProjectPolygon( points ) )
+			polygon << QPointF{ at[ 0 ], at[ 1 ] };
+		return polygon;
+	};
 	if ( bWalkable )
 	{
 		// Hammer's Display walkable area, on the selected displacements: steep triangles red,
@@ -1368,18 +1374,8 @@ void CMapView3D::PaintTools( QPainter &painter )
 				{
 					continue;
 				}
-				QPolygonF polygon;
-				for ( std::size_t k = 0; k < 3; k++ )
-				{
-					const auto at = camera.Project( mesh->m_Points[ mesh->m_Indices[ t * 3 + k ] ] );
-					if ( !at )
-					{
-						polygon.clear();
-						break;
-					}
-					polygon << QPointF{ ( *at )[ 0 ], ( *at )[ 1 ] };
-				}
-				if ( polygon.size() == 3 )
+				const QPolygonF polygon = project( { mesh->m_Points[ mesh->m_Indices[ t * 3 ] ], mesh->m_Points[ mesh->m_Indices[ t * 3 + 1 ] ], mesh->m_Points[ mesh->m_Indices[ t * 3 + 2 ] ] } );
+				if ( polygon.size() >= 3 )
 				{
 					painter.setBrush( disp.m_TriangleTags[ t ] == xv::map::DISP_TAG_WALKABLE ? QColor{ 255, 220, 0, 90 } : QColor{ 255, 0, 0, 110 } );
 					painter.drawPolygon( polygon );
@@ -1404,21 +1400,7 @@ void CMapView3D::PaintTools( QPainter &painter )
 		const bool bShade = !m_Editor.GetFaceEdit().IsSelectMasked();
 		const bool bGrid = !m_Editor.GetFaceEdit().IsGridMasked();
 		painter.setRenderHint( QPainter::Antialiasing, true );
-		auto project = [ & ]( const std::vector<xv::map::Point_t> &points, QPolygonF &polygon ) {
-			polygon.clear();
-			for ( const xv::map::Point_t &p : points )
-			{
-				const auto at = camera.Project( p );
-				if ( !at )
-				{
-					polygon.clear();
-					return false;
-				}
-				polygon << QPointF{ ( *at )[ 0 ], ( *at )[ 1 ] };
-			}
-			return polygon.size() >= 3;
-		};
-		QPolygonF polygon;
+
 		for ( const xv::map::FaceRef_t &face : faces )
 		{
 			const xv::map::FaceGeometry_t *pFace = face.m_nSolid < pScene->m_Solids.size() ? pScene->m_Solids[ face.m_nSolid ].FindFace( face.m_nSide ) : nullptr;
@@ -1435,10 +1417,7 @@ void CMapView3D::PaintTools( QPainter &painter )
 				{
 					for ( std::size_t t = 0; t + 2 < mesh->m_Indices.size(); t += 3 )
 					{
-						if ( project( { mesh->m_Points[ mesh->m_Indices[ t ] ], mesh->m_Points[ mesh->m_Indices[ t + 1 ] ], mesh->m_Points[ mesh->m_Indices[ t + 2 ] ] }, polygon ) )
-						{
-							painter.drawPolygon( polygon );
-						}
+						painter.drawPolygon( project( { mesh->m_Points[ mesh->m_Indices[ t ] ], mesh->m_Points[ mesh->m_Indices[ t + 1 ] ], mesh->m_Points[ mesh->m_Indices[ t + 2 ] ] } ) );
 					}
 				}
 				if ( m_Editor.GetFaceEdit().IsCollapsibleShown() )
@@ -1460,33 +1439,17 @@ void CMapView3D::PaintTools( QPainter &painter )
 			}
 			painter.setPen( edge );
 			painter.setBrush( fill );
-			if ( project( pFace->m_Points, polygon ) )
-			{
-				painter.drawPolygon( polygon );
-			}
+			painter.drawPolygon( project( pFace->m_Points ) );
 		}
 		painter.setBrush( Qt::NoBrush );
 		painter.setRenderHint( QPainter::Antialiasing, false );
 	}
-	const xv::map::Point_t forward = camera.GetForward();
 	std::vector<QLineF> lines;
 	auto line = [ & ]( xv::map::Point_t a, xv::map::Point_t b ) {
-		const double flA = xv::map::Dot( xv::map::Subtract( a, camera.m_Eye ), forward ) - camera.m_flNear * 1.01;
-		const double flB = xv::map::Dot( xv::map::Subtract( b, camera.m_Eye ), forward ) - camera.m_flNear * 1.01;
-		if ( flA < 0.0 && flB < 0.0 )
+		if ( const auto projected = camera.ProjectLine( a, b ) )
 		{
-			return;
-		}
-		if ( flA < 0.0 || flB < 0.0 )
-		{
-			const xv::map::Point_t cut = xv::map::Add( a, xv::map::Scale( xv::map::Subtract( b, a ), flA / ( flA - flB ) ) );
-			( flA < 0.0 ? a : b ) = cut;
-		}
-		const auto pa = camera.Project( a );
-		const auto pb = camera.Project( b );
-		if ( pa && pb )
-		{
-			lines.emplace_back( QPointF{ ( *pa )[ 0 ], ( *pa )[ 1 ] }, QPointF{ ( *pb )[ 0 ], ( *pb )[ 1 ] } );
+			const auto &[ pa, pb ] = *projected;
+			lines.emplace_back( QPointF{ pa[ 0 ], pa[ 1 ] }, QPointF{ pb[ 0 ], pb[ 1 ] } );
 		}
 	};
 	if ( box )
