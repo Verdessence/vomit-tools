@@ -65,6 +65,7 @@ public:
 	void SetSmartEdit( bool bSmartEdit );
 	// Puts the keyboard in the keys list (Alt+Enter).
 	void FocusKeys();
+	void SetFacePickKey( const QString &szKey );
 	[[nodiscard]] const xv::map::PropertySheet_t &GetSheet() const { return m_Sheet; }
 	[[nodiscard]] QTreeWidget *GetKeys() const { return m_pKeys; }
 	[[nodiscard]] QTreeWidget *GetOutputs() const { return m_pOutputs; }
@@ -84,6 +85,9 @@ public:
 	// is a choice; the first is empty for a free field.
 	[[nodiscard]] std::vector<std::pair<std::string, std::string>> GetKeyChoices( std::size_t nRow ) const;
 	[[nodiscard]] std::vector<std::pair<std::string, std::string>> GetOutputChoices( std::size_t nRow, int nColumn ) const;
+
+signals:
+	void FacePickRequested( const QString &szKey );
 
 protected:
 	bool eventFilter( QObject *pWatched, QEvent *pEvent ) override;
@@ -108,6 +112,8 @@ private:
 	QToolButton *m_pSmartEdit = nullptr;
 	QTabWidget *m_pTabs = nullptr;
 	QTreeWidget *m_pKeys = nullptr;
+	QPushButton *m_pPickFaces = nullptr;
+	QString m_szFacePickKey;
 	QPushButton *m_pAddKey = nullptr;
 	QPushButton *m_pRemoveKey = nullptr;
 	QLabel *m_pHelp = nullptr;

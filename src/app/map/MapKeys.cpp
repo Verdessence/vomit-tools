@@ -57,6 +57,7 @@ const Binding_t BINDINGS[] = {
 	{ MapAction_t::MAP_ACTION_TOOL_CAMERA, Qt::Key_C, Qt::ShiftModifier, BOTH },
 	{ MapAction_t::MAP_ACTION_TOOL_ENTITY, Qt::Key_E, Qt::ShiftModifier, BOTH },
 	{ MapAction_t::MAP_ACTION_TOOL_BLOCK, Qt::Key_B, Qt::ShiftModifier, BOTH },
+	{ MapAction_t::MAP_ACTION_TOOL_OVERLAY, Qt::Key_O, Qt::ShiftModifier, BOTH },
 	{ MapAction_t::MAP_ACTION_TOOL_DECAL, Qt::Key_D, Qt::ShiftModifier, BOTH },
 	{ MapAction_t::MAP_ACTION_TOOL_TEXTURE, Qt::Key_A, Qt::ShiftModifier, BOTH },
 	{ MapAction_t::MAP_ACTION_RUN_MAP, Qt::Key_F9, Qt::NoModifier, BOTH },

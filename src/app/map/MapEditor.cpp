@@ -66,6 +66,7 @@
 #include "map/MapView3D.h"
 #include "map/Entities.h"
 #include "map/Primitives.h"
+#include "map/Overlay.h"
 #include "util/Memory.h"
 
 namespace
@@ -80,6 +81,7 @@ enum class MapIcon_t
 	MAP_ICON_BLOCK,
 	MAP_ICON_TEXTURE,
 	MAP_ICON_DECAL,
+	MAP_ICON_OVERLAY,
 	MAP_ICON_CLIP,
 	MAP_ICON_CORDON,
 	MAP_ICON_VERTEX,
@@ -161,6 +163,12 @@ QIcon MakeIcon( MapIcon_t nIcon, const QColor &color )
 			painter.drawRect( QRectF{ 6, 8, 20, 16 } );
 			painter.setPen( QPen{ color, 2.5, Qt::DashLine, Qt::RoundCap } );
 			painter.drawLine( QPointF{ 3, 28 }, QPointF{ 29, 4 } );
+			break;
+		case MapIcon_t::MAP_ICON_OVERLAY:
+			painter.drawPolygon( QPolygonF{ { 5, 9 }, { 23, 4 }, { 28, 24 }, { 8, 28 } } );
+			painter.setBrush( color );
+			for ( const QPointF &at : { QPointF{ 5, 9 }, QPointF{ 23, 4 }, QPointF{ 28, 24 }, QPointF{ 8, 28 } } )
+				painter.drawRect( QRectF{ at.x() - 2, at.y() - 2, 4, 4 } );
 			break;
 		case MapIcon_t::MAP_ICON_DECAL:
 			// A stamp above a marked surface.
@@ -275,6 +283,8 @@ CMapEditor::CMapEditor( const QString &szPath, bool bFromGame, QWidget *pParent 
 	} );
 	connect( m_pFilter, &CMapFilterControl::CordonEditWanted, this, [ this ] { SetTool( MapTool_t::MAP_TOOL_CORDON ); } );
 	m_pProperties = new CMapProperties( *m_pDocument );
+	connect( m_pProperties, &CMapProperties::FacePickRequested, this, &CMapEditor::SetFacePickKey );
+	connect( this, &CMapEditor::FacePickChanged, m_pProperties, &CMapProperties::SetFacePickKey );
 	m_pFaceEdit = new CMapFaceEdit( *this );
 	// Hammer opens Face Edit as a window of its own; here it takes Object Properties' place
 	// while the texture tool is on.
@@ -341,6 +351,7 @@ CMapEditor::CMapEditor( const QString &szPath, bool bFromGame, QWidget *pParent 
 		{ MapTool_t::MAP_TOOL_ENTITY, MapIcon_t::MAP_ICON_ENTITY, tr( "Entity Tool" ), MapAction_t::MAP_ACTION_TOOL_ENTITY },
 		{ MapTool_t::MAP_TOOL_BLOCK, MapIcon_t::MAP_ICON_BLOCK, tr( "Block Tool" ), MapAction_t::MAP_ACTION_TOOL_BLOCK },
 		{ MapTool_t::MAP_TOOL_TEXTURE, MapIcon_t::MAP_ICON_TEXTURE, tr( "Texture Application" ), MapAction_t::MAP_ACTION_TOOL_TEXTURE },
+		{ MapTool_t::MAP_TOOL_OVERLAY, MapIcon_t::MAP_ICON_OVERLAY, tr( "Overlay Tool" ), MapAction_t::MAP_ACTION_TOOL_OVERLAY },
 		{ MapTool_t::MAP_TOOL_DECAL, MapIcon_t::MAP_ICON_DECAL, tr( "Apply Decals" ), MapAction_t::MAP_ACTION_TOOL_DECAL },
 		{ MapTool_t::MAP_TOOL_CLIP, MapIcon_t::MAP_ICON_CLIP, tr( "Clipping Tool" ), MapAction_t::MAP_ACTION_TOOL_CLIP },
 		{ MapTool_t::MAP_TOOL_VERTEX, MapIcon_t::MAP_ICON_VERTEX, tr( "Vertex Tool" ), MapAction_t::MAP_ACTION_TOOL_VERTEX },
@@ -419,6 +430,14 @@ CMapEditor::CMapEditor( const QString &szPath, bool bFromGame, QWidget *pParent 
 	connect( m_pDocument, &CMapDocument::VisibilityChanged, this, repaint );
 	connect( m_pDocument, &CMapDocument::SceneEdited, this, [ this ]( const std::vector<std::uint32_t> &changed ) { m_pDocument->MeasureEditListener( tr( "Editor and views" ), [ & ] { SceneEdited( changed ); } ); } );
 	connect( m_pDocument, &CMapDocument::ScenePreviewed, this, [ this ]( const std::vector<std::uint32_t> &changed ) {
+		const auto *pScene = m_pDocument->GetScene();
+		if ( pScene && std::ranges::any_of( changed, [ & ]( std::uint32_t nObject ) {
+				 if ( pScene->IsSolidObject( nObject ) )
+					 return false;
+				 const auto &entity = pScene->m_Map.m_Entities[ pScene->GetIndex( nObject ) ];
+				 return entity.GetClassname() == "info_overlay" || entity.GetClassname() == "info_overlay_transition";
+			 } ) )
+			m_pResources->Refresh( m_pDocument->GetSharedScene() );
 		for ( CMapView *pView : GetViews() )
 		{
 			if ( auto *p2D = qobject_cast<CMapView2D *>( pView ) )
@@ -527,6 +546,11 @@ QWidget *CMapEditor::BuildNewObjects()
 	pForm->addRow( tr( "Entity" ), m_pEntityClass );
 	pForm->addRow( tr( "Objects" ), m_pPrimitive );
 	pForm->addRow( tr( "Faces" ), m_pSides );
+	m_pOverlayKind = new QComboBox;
+	m_pOverlayKind->setObjectName( QStringLiteral( "mapNewOverlayKind" ) );
+	m_pOverlayKind->addItem( tr( "Overlay" ), false );
+	m_pOverlayKind->addItem( tr( "Water transition" ), true );
+	pForm->addRow( tr( "Overlay" ), m_pOverlayKind );
 	pForm->addRow( tr( "Texture" ), m_pMaterial );
 	return pBox;
 }
@@ -705,6 +729,7 @@ void CMapEditor::SetTool( MapTool_t nTool )
 	{
 		CommitCordon();
 	}
+	SetFacePickKey( {} );
 	const bool bEnteringTexture = nTool == MapTool_t::MAP_TOOL_TEXTURE && m_nTool != MapTool_t::MAP_TOOL_TEXTURE;
 	m_nTool = nTool;
 	if ( nTool == MapTool_t::MAP_TOOL_CORDON )
@@ -1441,6 +1466,11 @@ bool CMapEditor::RunAction( MapAction_t nAction, CMapView *pFrom )
 			return true;
 		}
 		case MapAction_t::MAP_ACTION_ESCAPE:
+			if ( !m_szFacePickKey.isEmpty() )
+			{
+				SetFacePickKey( {} );
+				return true;
+			}
 			// A box or marker being made goes first, then the tool (back to selecting, the
 			// selection kept: Verd), then the selection; the cordon tool's box goes back to the
 			// cordon as saved.
@@ -1598,6 +1628,9 @@ bool CMapEditor::RunAction( MapAction_t nAction, CMapView *pFrom )
 			return true;
 		case MapAction_t::MAP_ACTION_TOOL_BLOCK:
 			SetTool( MapTool_t::MAP_TOOL_BLOCK );
+			return true;
+		case MapAction_t::MAP_ACTION_TOOL_OVERLAY:
+			SetTool( MapTool_t::MAP_TOOL_OVERLAY );
 			return true;
 		case MapAction_t::MAP_ACTION_TOOL_DECAL:
 			SetTool( MapTool_t::MAP_TOOL_DECAL );
@@ -2041,6 +2074,54 @@ void CMapEditor::SetEntityMarker( std::optional<xv::map::Point_t> at )
 	}
 	m_EntityMarker = at;
 	RepaintTools();
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Place one overlay on its first face; the handles and Properties add the rest.
+//-----------------------------------------------------------------------------
+void CMapEditor::PlaceOverlay( const xv::map::Point_t &origin, const xv::map::Point_t &normal, xv::map::FaceRef_t face )
+{
+	const auto *pScene = m_pDocument->GetScene();
+	if ( !pScene || face.m_nSolid >= pScene->m_Map.m_Solids.size() )
+		return;
+	const auto &solid = pScene->m_Map.m_Solids[ face.m_nSolid ];
+	if ( face.m_nSide >= solid.m_Sides.size() )
+		return;
+	std::vector<std::uint32_t> added;
+	auto overlay = xv::map::MakeOverlay( pScene->m_Map, origin, normal, solid.m_Sides[ face.m_nSide ].m_nId, GetCurrentMaterial().toStdString(), { 64, 64 }, m_pOverlayKind->currentData().toBool() );
+	auto edit = xv::map::AddObjects( *pScene, {}, { std::move( overlay ) }, &added );
+	m_pDocument->Edit( std::move( edit ), tr( "Create Overlay" ), std::move( added ) );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: The face picker changes assignments while keeping the overlay itself selected.
+//-----------------------------------------------------------------------------
+void CMapEditor::AssignOverlayFace( xv::map::FaceRef_t face, const QString &szKey, bool bToggle, bool bReplace )
+{
+	const auto *pScene = m_pDocument->GetScene();
+	if ( !pScene || face.m_nSolid >= pScene->m_Map.m_Solids.size() || face.m_nSide >= pScene->m_Map.m_Solids[ face.m_nSolid ].m_Sides.size() )
+		return;
+	const int nSide = pScene->m_Map.m_Solids[ face.m_nSolid ].m_Sides[ face.m_nSide ].m_nId;
+	const std::string szSides = szKey.toStdString();
+	auto edit = xv::map::EditEntities( *pScene, m_pDocument->GetSelection(), [ & ]( xv::map::Entity_t &entity ) {
+		if ( entity.GetClassname() == "info_overlay" || entity.GetClassname() == "info_overlay_transition" )
+			xv::map::AssignOverlayFace( pScene->m_Map, entity, szSides, nSide, bToggle, bReplace );
+	} );
+	m_pDocument->Edit( std::move( edit ), tr( "Assign Overlay Face" ) );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Enter or leave Properties' face assignment mode without changing the selected tool.
+//-----------------------------------------------------------------------------
+void CMapEditor::SetFacePickKey( const QString &szKey )
+{
+	if ( m_szFacePickKey == szKey )
+		return;
+	m_szFacePickKey = szKey;
+	emit FacePickChanged( szKey );
+	for ( auto *pView : GetViews() )
+		if ( auto *p3D = qobject_cast<CMapView3D *>( pView ) )
+			p3D->UpdateCursor();
 }
 
 //-----------------------------------------------------------------------------

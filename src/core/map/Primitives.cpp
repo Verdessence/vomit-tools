@@ -285,4 +285,42 @@ Entity_t MakeDecal( const CMap &map, Point_t origin, std::string_view szMaterial
 	return entity;
 }
 
+//-----------------------------------------------------------------------------
+// Purpose: Place a projection with readable wall/floor orientation and explicit face IDs.
+//-----------------------------------------------------------------------------
+Entity_t MakeOverlay( const CMap &map, Point_t origin, Point_t normal, int nSide, std::string_view szMaterial, std::array<double, 2> halfSize, bool bTransition )
+{
+	Entity_t entity = MakePointEntity( map, nullptr, bTransition ? "info_overlay_transition" : "info_overlay", origin );
+	normal = Normalized( normal );
+	const bool bFloor = std::abs( normal[ 2 ] ) > 0.999;
+	const Point_t u = bFloor ? Point_t{ 1, 0, 0 } : Normalized( Cross( normal, { 0, 0, 1 } ) );
+	const Point_t v = Normalized( Cross( normal, u ) );
+	SetKeyValue( map, entity, "angles", "0 0 0" );
+	SetKeyValue( map, entity, "BasisOrigin", FormatPoint( origin ) );
+	SetKeyValue( map, entity, "BasisNormal", FormatPoint( normal ) );
+	SetKeyValue( map, entity, "BasisU", FormatPoint( u ) );
+	SetKeyValue( map, entity, "BasisV", FormatPoint( v ) );
+	SetKeyValue( map, entity, "material", szMaterial );
+	SetKeyValue( map, entity, "sides", std::to_string( nSide ) );
+	SetKeyValue( map, entity, "StartU", bFloor ? "0" : "1" );
+	SetKeyValue( map, entity, "EndU", bFloor ? "1" : "0" );
+	SetKeyValue( map, entity, "StartV", bFloor ? "1" : "0" );
+	SetKeyValue( map, entity, "EndV", bFloor ? "0" : "1" );
+	SetKeyValue( map, entity, "fademindist", "-1" );
+	const std::array<Point_t, 4> corners{ Point_t{ -halfSize[ 0 ], -halfSize[ 1 ], 0 }, { -halfSize[ 0 ], halfSize[ 1 ], 0 }, { halfSize[ 0 ], halfSize[ 1 ], 0 }, { halfSize[ 0 ], -halfSize[ 1 ], 0 } };
+	for ( int n = 0; n < 4; ++n )
+		SetKeyValue( map, entity, "uv" + std::to_string( n ), FormatPoint( corners[ n ] ) );
+	if ( bTransition )
+	{
+		SetKeyValue( map, entity, "sides2", "" );
+		for ( const auto szKey : { "LengthTexcoordStart", "WidthTexcoordStart" } )
+			SetKeyValue( map, entity, szKey, "0" );
+		for ( const auto szKey : { "LengthTexcoordEnd", "WidthTexcoordEnd" } )
+			SetKeyValue( map, entity, szKey, "1" );
+		SetKeyValue( map, entity, "Width1", std::to_string( halfSize[ 1 ] ) );
+		SetKeyValue( map, entity, "Width2", std::to_string( halfSize[ 1 ] ) );
+	}
+	return entity;
+}
+
 } // namespace xv::map

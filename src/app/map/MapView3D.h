@@ -98,7 +98,7 @@ public:
 	[[nodiscard]] bool HasPaintBrushRing() const;
 	[[nodiscard]] QString GetPaintCosts() const;
 	// The brush face under a widget point (the nearest hit's triangle, when it is a brush's).
-	[[nodiscard]] std::optional<xv::map::FaceRef_t> FaceAt( QPointF at );
+	[[nodiscard]] std::optional<xv::map::FaceRef_t> FaceAt( QPointF at, bool bThroughOverlays = false );
 	[[nodiscard]] xv::map::CViewCamera GetSizedCamera() const;
 
 protected:
@@ -129,6 +129,14 @@ private:
 	// The block tool's box, the entity tool's marker and the gizmo, over the picture.
 	void PaintTools( QPainter &painter );
 	void UpdateCollapsibleVertices();
+	bool BeginOverlayDrag( QPointF at );
+	void PreviewOverlayDrag( QPointF at );
+	void EndOverlayDrag( bool bCommit );
+	std::shared_ptr<const xv::map::CScene> m_pOverlayScene;
+	xv::map::MapEdit_t m_OverlayEdit;
+	xv::map::Point_t m_OverlayFrom{};
+	std::uint32_t m_nOverlayEntity = 0;
+	int m_nOverlayCorner = -1;
 	void PreviewGizmo( QPointF at, Qt::KeyboardModifiers modifiers );
 	void EndGizmo( bool bCommit, QPointF at, Qt::KeyboardModifiers modifiers );
 	// The Displacement tab's brush: whether a press paints, a stroke's sample at a point

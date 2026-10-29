@@ -57,4 +57,8 @@ enum class Primitive_t
 // A surface decal at the picked point, using the texture toolbar's current material.
 [[nodiscard]] Entity_t MakeDecal( const CMap &map, Point_t origin, std::string_view szMaterial );
 
+// An overlay's frame and U/V ranges match Hammer's wall and floor orientation. Half extents
+// are world units in its projection plane. A transition also gets its water-side list/defaults.
+[[nodiscard]] Entity_t MakeOverlay( const CMap &map, Point_t origin, Point_t normal, int nSide, std::string_view szMaterial, std::array<double, 2> halfSize = { 64, 64 }, bool bTransition = false );
+
 } // namespace xv::map

@@ -18,6 +18,7 @@
 #include <QLineEdit>
 #include <QPlainTextEdit>
 #include <QPushButton>
+#include <QSignalBlocker>
 #include <QTabWidget>
 #include <QTimer>
 #include <QToolButton>
@@ -216,6 +217,16 @@ CMapProperties::CMapProperties( CMapDocument &document, QWidget *pParent )
 	m_pKeys->setItemDelegate( new CPropertyDelegate( *this, *m_pKeys ) );
 	pInfoLayout->addWidget( m_pKeys, 1 );
 	auto *pKeyButtons = new QHBoxLayout;
+	m_pPickFaces = new QPushButton( tr( "Pick..." ) );
+	m_pPickFaces->setObjectName( QStringLiteral( "mapPropertiesPickFaces" ) );
+	m_pPickFaces->setCheckable( true );
+	m_pPickFaces->hide();
+	pKeyButtons->addWidget( m_pPickFaces );
+	connect( m_pPickFaces, &QPushButton::toggled, this, [ this ]( bool bOn ) {
+		const auto *pItem = m_pKeys->currentItem();
+		const std::size_t nRow = pItem ? pItem->data( 0, ROLE_ROW ).toULongLong() : m_Sheet.m_Rows.size();
+		emit FacePickRequested( bOn && nRow < m_Sheet.m_Rows.size() ? FromStd( m_Sheet.m_Rows[ nRow ].m_szKey ) : QString{} );
+	} );
 	pKeyButtons->addStretch( 1 );
 	m_pAddKey = new QPushButton( tr( "Add Key" ) );
 	m_pAddKey->setObjectName( QStringLiteral( "mapPropertiesAddKey" ) );
@@ -308,6 +319,13 @@ void CMapProperties::SetWorld( bool bWorld )
 //-----------------------------------------------------------------------------
 void CMapProperties::Refresh()
 {
+	QString szCurrent;
+	if ( const auto *pItem = m_pKeys->currentItem() )
+	{
+		const auto nRow = pItem->data( 0, ROLE_ROW ).toULongLong();
+		if ( nRow < m_Sheet.m_Rows.size() )
+			szCurrent = FromStd( m_Sheet.m_Rows[ nRow ].m_szKey );
+	}
 	const xv::map::CScene *pScene = m_Document.GetScene();
 	m_Sheet = !pScene ? xv::map::PropertySheet_t{} : m_bWorld ? xv::map::DescribeWorld( *pScene, IsSmartEdit() )
 															  : xv::map::DescribeSelection( *pScene, m_Document.GetSelection(), IsSmartEdit() );
@@ -362,6 +380,8 @@ void CMapProperties::Refresh()
 			pItem->setToolTip( 1, tr( "The selected entities differ; a value typed here goes to all of them" ) );
 		}
 		m_pKeys->addTopLevelItem( pItem );
+		if ( FromStd( row.m_szKey ) == szCurrent )
+			m_pKeys->setCurrentItem( pItem );
 	}
 	m_pKeys->resizeColumnToContents( 0 );
 	m_pAddKey->setVisible( !IsSmartEdit() );
@@ -443,15 +463,34 @@ void CMapProperties::Refresh()
 //-----------------------------------------------------------------------------
 void CMapProperties::ShowHelp()
 {
+	if ( m_bFilling )
+		return;
 	const QTreeWidgetItem *pItem = m_pKeys->currentItem();
 	const std::size_t i = pItem ? pItem->data( 0, ROLE_ROW ).toULongLong() : m_Sheet.m_Rows.size();
 	if ( i < m_Sheet.m_Rows.size() )
 	{
 		const xv::map::PropertyRow_t &row = m_Sheet.m_Rows[ i ];
+		const bool bSides = ( row.m_szKey == "sides" || row.m_szKey == "sides2" ) && ( m_Sheet.m_szClass == "info_overlay" || m_Sheet.m_szClass == "info_overlay_transition" );
+		m_pPickFaces->setVisible( bSides );
+		if ( !m_szFacePickKey.isEmpty() && ( !bSides || m_szFacePickKey != FromStd( row.m_szKey ) ) )
+			emit FacePickRequested( {} );
 		m_pHelp->setText( row.m_szHelp.empty() ? FromStd( row.m_szKey ) : QStringLiteral( "%1: %2" ).arg( FromStd( row.m_szKey ), FromStd( row.m_szHelp ) ) );
 		return;
 	}
+	m_pPickFaces->hide();
+	if ( !m_szFacePickKey.isEmpty() )
+		emit FacePickRequested( {} );
 	m_pHelp->setText( FromStd( m_Sheet.m_szClassHelp ) );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Keep the Pick button synchronized with Escape and the map's active face picker.
+//-----------------------------------------------------------------------------
+void CMapProperties::SetFacePickKey( const QString &szKey )
+{
+	m_szFacePickKey = szKey;
+	const QSignalBlocker blocker( m_pPickFaces );
+	m_pPickFaces->setChecked( !szKey.isEmpty() );
 }
 
 //-----------------------------------------------------------------------------

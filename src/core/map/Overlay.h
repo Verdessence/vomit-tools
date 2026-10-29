@@ -11,6 +11,7 @@
 #include <array>
 #include <cstdint>
 #include <span>
+#include <optional>
 #include <string>
 #include <vector>
 #include <utility>
@@ -32,6 +33,15 @@ void TransformOverlay( const CMap &map, Entity_t &entity, const Transform_t &tra
 // Overlay entity changes implied by solid edits: transformed projections and surviving face IDs.
 // Explicit overlay edits are respected, so selecting a face and its overlay never moves it twice.
 [[nodiscard]] std::vector<std::pair<std::uint32_t, Entity_t>> FollowOverlayFaces( const CScene &scene, const MapEdit_t &edit );
+
+// Four editing handles in world space, independent of how the projection is tessellated.
+[[nodiscard]] std::optional<std::array<Point_t, 4>> OverlayCorners( const Entity_t &entity );
+// Nearest point on the overlay's assigned faces (including their displacement triangles).
+[[nodiscard]] std::optional<Point_t> OverlaySurfacePoint( const CScene &scene, const Entity_t &entity, Point_t p );
+// A corner dragged to its surface; the projection frame stays put and its local uv key changes.
+[[nodiscard]] Entity_t MoveOverlayCorner( const CScene &scene, const Entity_t &entity, int nCorner, Point_t p );
+// Replace, add or toggle a face assignment, preserving the other side list of a transition.
+void AssignOverlayFace( const CMap &map, Entity_t &entity, std::string_view szKey, int nSide, bool bToggle, bool bReplace );
 
 // How far pieces sit off their faces, so they show over them without fighting for depth.
 inline constexpr double OVERLAY_LIFT = 0.25;

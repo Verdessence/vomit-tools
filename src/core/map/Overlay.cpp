@@ -15,6 +15,8 @@
 #include <map>
 #include <optional>
 #include <set>
+#include <limits>
+#include "map/Displacement.h"
 #include "map/Edit.h"
 #include <unordered_map>
 
@@ -564,6 +566,149 @@ std::vector<std::pair<std::uint32_t, Entity_t>> FollowOverlayFaces( const CScene
 			entities.emplace_back( e, std::move( out ) );
 	}
 	return entities;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Projection corners also serve as editing handles, without the drawing lift.
+//-----------------------------------------------------------------------------
+std::optional<std::array<Point_t, 4>> OverlayCorners( const Entity_t &entity )
+{
+	const auto origin = VectorOf( entity.GetValue( "BasisOrigin" ) );
+	const auto u = VectorOf( entity.GetValue( "BasisU" ) );
+	const auto v = VectorOf( entity.GetValue( "BasisV" ) );
+	if ( !origin || !u || !v )
+		return std::nullopt;
+	std::array<Point_t, 4> corners;
+	for ( int n = 0; n < 4; ++n )
+	{
+		const auto local = VectorOf( entity.GetValue( "uv" + std::to_string( n ) ) );
+		if ( !local )
+			return std::nullopt;
+		corners[ n ] = Add( *origin, Add( Scale( Normalized( *u ), ( *local )[ 0 ] ), Scale( Normalized( *v ), ( *local )[ 1 ] ) ) );
+	}
+	return corners;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Closest point on a triangle: the perpendicular projection when inside, else one
+//          of its three finite edges. Degenerate triangles still contribute their edges.
+//-----------------------------------------------------------------------------
+static Point_t ClosestTrianglePoint( Point_t p, Point_t a, Point_t b, Point_t c )
+{
+	const Point_t normal = Cross( Subtract( b, a ), Subtract( c, a ) );
+	const double flArea = Dot( normal, normal );
+	if ( flArea > 1e-16 )
+	{
+		const Point_t projected = Subtract( p, Scale( normal, Dot( Subtract( p, a ), normal ) / flArea ) );
+		if ( Dot( Cross( Subtract( b, a ), Subtract( projected, a ) ), normal ) >= -1e-8 &&
+			Dot( Cross( Subtract( c, b ), Subtract( projected, b ) ), normal ) >= -1e-8 &&
+			Dot( Cross( Subtract( a, c ), Subtract( projected, c ) ), normal ) >= -1e-8 )
+			return projected;
+	}
+	Point_t best = a;
+	double flBest = Dot( Subtract( best, p ), Subtract( best, p ) );
+	for ( const auto &edge : { std::pair{ a, b }, std::pair{ b, c }, std::pair{ c, a } } )
+	{
+		const Point_t dir = Subtract( edge.second, edge.first );
+		const double flLength = Dot( dir, dir );
+		const Point_t at = Add( edge.first, Scale( dir, flLength > 1e-16 ? std::clamp( Dot( Subtract( p, edge.first ), dir ) / flLength, 0.0, 1.0 ) : 0.0 ) );
+		const double flDistance = Dot( Subtract( at, p ), Subtract( at, p ) );
+		if ( flDistance < flBest )
+		{
+			best = at;
+			flBest = flDistance;
+		}
+	}
+	return best;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Handles may snap to face edges, but cannot escape the assigned surface.
+//-----------------------------------------------------------------------------
+std::optional<Point_t> OverlaySurfacePoint( const CScene &scene, const Entity_t &entity, Point_t p )
+{
+	std::set<int> sides;
+	for ( const auto szKey : { "sides", "sides2" } )
+	{
+		CScanner scanner( entity.GetValue( szKey ) );
+		while ( const auto nSide = scanner.Int() )
+			sides.insert( *nSide );
+	}
+	std::optional<Point_t> best;
+	double flBest = std::numeric_limits<double>::max();
+	auto consider = [ & ]( Point_t a, Point_t b, Point_t c ) {
+		const Point_t at = ClosestTrianglePoint( p, a, b, c );
+		const double flDistance = Dot( Subtract( at, p ), Subtract( at, p ) );
+		if ( flDistance < flBest )
+		{
+			best = at;
+			flBest = flDistance;
+		}
+	};
+	for ( std::size_t s = 0; s < scene.m_Map.m_Solids.size(); ++s )
+	{
+		if ( scene.m_Map.m_Solids[ s ].m_bDeleted )
+			continue;
+		for ( const FaceGeometry_t &face : scene.m_Solids[ s ].m_Faces )
+		{
+			const Side_t &side = scene.m_Map.m_Solids[ s ].m_Sides[ face.m_nSide ];
+			if ( !sides.contains( side.m_nId ) )
+				continue;
+			if ( const auto mesh = side.m_pDisp ? BuildDisplacement( *side.m_pDisp, face ) : std::nullopt )
+			{
+				for ( std::size_t n = 0; n + 2 < mesh->m_Indices.size(); n += 3 )
+					consider( mesh->m_Points[ mesh->m_Indices[ n ] ], mesh->m_Points[ mesh->m_Indices[ n + 1 ] ], mesh->m_Points[ mesh->m_Indices[ n + 2 ] ] );
+			}
+			else
+				for ( std::size_t n = 1; n + 1 < face.m_Points.size(); ++n )
+					consider( face.m_Points[ 0 ], face.m_Points[ n ], face.m_Points[ n + 1 ] );
+		}
+	}
+	return best;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Change only the dragged corner, retaining tiling, other corners and assignments.
+//-----------------------------------------------------------------------------
+Entity_t MoveOverlayCorner( const CScene &scene, const Entity_t &entity, int nCorner, Point_t p )
+{
+	Entity_t out = entity;
+	const auto at = OverlaySurfacePoint( scene, entity, p );
+	const auto origin = VectorOf( entity.GetValue( "BasisOrigin" ) );
+	const auto u = VectorOf( entity.GetValue( "BasisU" ) );
+	const auto v = VectorOf( entity.GetValue( "BasisV" ) );
+	if ( at && origin && u && v && nCorner >= 0 && nCorner < 4 )
+	{
+		const Point_t delta = Subtract( *at, *origin );
+		SetKeyValue( scene.m_Map, out, "uv" + std::to_string( nCorner ), FormatPoint( { Dot( delta, Normalized( *u ) ), Dot( delta, Normalized( *v ) ), 0 } ) );
+	}
+	return out;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Properties' Pick replaces a list, Ctrl toggles a face, Shift-placement adds one.
+//-----------------------------------------------------------------------------
+void AssignOverlayFace( const CMap &map, Entity_t &entity, std::string_view szKey, int nSide, bool bToggle, bool bReplace )
+{
+	std::vector<int> sides;
+	CScanner scanner( entity.GetValue( szKey ) );
+	if ( !bReplace )
+		while ( const auto n = scanner.Int() )
+			if ( std::ranges::find( sides, *n ) == sides.end() )
+				sides.push_back( *n );
+	const auto found = std::ranges::find( sides, nSide );
+	if ( found != sides.end() && bToggle )
+		sides.erase( found );
+	else if ( found == sides.end() )
+		sides.push_back( nSide );
+	std::string szSides;
+	for ( const int n : sides )
+	{
+		if ( !szSides.empty() )
+			szSides += ' ';
+		szSides += std::to_string( n );
+	}
+	SetKeyValue( map, entity, szKey, szSides );
 }
 
 } // namespace xv::map

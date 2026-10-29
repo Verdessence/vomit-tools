@@ -26,6 +26,8 @@
 #include "DebugLog.h"
 #include "map/Cordon.h"
 #include "map/DispEdit.h"
+#include "map/Overlay.h"
+#include "map/VmfValues.h"
 #include "map/MapFaceEdit.h"
 #include "map/MapPanes.h"
 #include "map/MapView2D.h"
@@ -633,6 +635,8 @@ void CMapView3D::mousePressEvent( QMouseEvent *pEvent )
 	m_LastMouse = pEvent->position().toPoint();
 	m_PressAt = m_LastMouse;
 	m_bMoved = false;
+	if ( pEvent->button() == Qt::LeftButton && !m_bSpaceHeld && !m_bMouselook && m_Editor.GetTool() == MapTool_t::MAP_TOOL_OVERLAY && m_Editor.GetFacePickKey().isEmpty() && !pEvent->modifiers().testFlag( Qt::ShiftModifier ) && BeginOverlayDrag( pEvent->position() ) )
+		return;
 	// On one of the gizmo's axes, the selection tool drags the selection along it.
 	if ( pEvent->button() == Qt::LeftButton && !m_bSpaceHeld && !m_bMouselook && m_Editor.GetTool() == MapTool_t::MAP_TOOL_SELECT )
 	{
@@ -731,6 +735,87 @@ void CMapView3D::mousePressEvent( QMouseEvent *pEvent )
 		m_Editor.SetGizmoMode( nMode == MapGizmoMode_t::MAP_GIZMO_MODE_TRANSLATE ? MapGizmoMode_t::MAP_GIZMO_MODE_ROTATE : nMode == MapGizmoMode_t::MAP_GIZMO_MODE_ROTATE ? MapGizmoMode_t::MAP_GIZMO_MODE_SCALE
 																																										  : MapGizmoMode_t::MAP_GIZMO_MODE_TRANSLATE );
 	}
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Selected overlays expose four corners and a centre in the Overlay tool only.
+//-----------------------------------------------------------------------------
+bool CMapView3D::BeginOverlayDrag( QPointF at )
+{
+	const auto *pScene = GetDocument().GetScene();
+	if ( !pScene )
+		return false;
+	const auto camera = GetSizedCamera();
+	for ( const auto nObject : GetDocument().GetSelection() )
+	{
+		if ( pScene->IsSolidObject( nObject ) )
+			continue;
+		const auto &entity = pScene->m_Map.m_Entities[ pScene->GetIndex( nObject ) ];
+		const auto corners = xv::map::OverlayCorners( entity );
+		const auto origin = xv::map::ParsePoint( entity.GetValue( "BasisOrigin" ) );
+		if ( !corners || !origin )
+			continue;
+		for ( int n = 0; n < 5; ++n )
+		{
+			const auto handle = n < 4 ? ( *corners )[ n ] : *origin;
+			if ( const auto projected = camera.Project( handle ) )
+			{
+				if ( QLineF( at, QPointF{ ( *projected )[ 0 ], ( *projected )[ 1 ] } ).length() <= 8 )
+				{
+					m_pOverlayScene = GetDocument().GetSharedScene();
+					m_nOverlayEntity = pScene->GetIndex( nObject );
+					m_nOverlayCorner = n;
+					m_OverlayFrom = handle;
+					m_OverlayEdit = {};
+					return true;
+				}
+			}
+		}
+	}
+	return false;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Drag in the projection plane, constrained to the assigned brush/displacement faces.
+//-----------------------------------------------------------------------------
+void CMapView3D::PreviewOverlayDrag( QPointF at )
+{
+	if ( !m_pOverlayScene )
+		return;
+	const auto &entity = m_pOverlayScene->m_Map.m_Entities[ m_nOverlayEntity ];
+	const auto normal = xv::map::ParsePoint( entity.GetValue( "BasisNormal" ) );
+	if ( !normal )
+		return;
+	const auto [ from, direction ] = GetSizedCamera().Ray( at.x(), at.y() );
+	const double flDenominator = xv::map::Dot( direction, *normal );
+	if ( std::abs( flDenominator ) < 1e-9 )
+		return;
+	const double flDistance = xv::map::Dot( xv::map::Subtract( m_OverlayFrom, from ), *normal ) / flDenominator;
+	if ( flDistance < 0 )
+		return;
+	const auto p = xv::map::Add( from, xv::map::Scale( direction, flDistance ) );
+	xv::map::Entity_t changed = entity;
+	if ( m_nOverlayCorner < 4 )
+		changed = xv::map::MoveOverlayCorner( *m_pOverlayScene, entity, m_nOverlayCorner, p );
+	else if ( const auto surface = xv::map::OverlaySurfacePoint( *m_pOverlayScene, entity, p ) )
+		changed = xv::map::TransformEntity( m_pOverlayScene->m_Map, entity, xv::map::Transform_t::Translation( xv::map::Subtract( *surface, m_OverlayFrom ) ) );
+	m_OverlayEdit.m_Entities = { { m_nOverlayEntity, std::move( changed ) } };
+	GetDocument().Preview( m_OverlayEdit );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: A handle drag is one undoable edit; Escape restores the untouched snapshot.
+//-----------------------------------------------------------------------------
+void CMapView3D::EndOverlayDrag( bool bCommit )
+{
+	if ( !m_pOverlayScene )
+		return;
+	m_pOverlayScene.reset();
+	GetDocument().EndPreview();
+	if ( bCommit && !m_OverlayEdit.IsEmpty() )
+		GetDocument().Edit( std::move( m_OverlayEdit ), tr( "Edit Overlay" ) );
+	m_OverlayEdit = {};
+	RedrawLabels();
 }
 
 //-----------------------------------------------------------------------------
@@ -833,6 +918,11 @@ void CMapView3D::EndGizmo( bool bCommit, QPointF at, Qt::KeyboardModifiers modif
 //-----------------------------------------------------------------------------
 void CMapView3D::mouseMoveEvent( QMouseEvent *pEvent )
 {
+	if ( m_pOverlayScene )
+	{
+		PreviewOverlayDrag( pEvent->position() );
+		return;
+	}
 	const QPoint at = pEvent->position().toPoint();
 	const QPoint delta = at - m_LastMouse;
 	m_LastMouse = at;
@@ -938,6 +1028,12 @@ void CMapView3D::mouseReleaseEvent( QMouseEvent *pEvent )
 {
 	const bool bWasLeft = ( m_Dragging & Qt::LeftButton ) != 0;
 	m_Dragging = pEvent->buttons();
+	if ( m_pOverlayScene && pEvent->button() == Qt::LeftButton )
+	{
+		PreviewOverlayDrag( pEvent->position() );
+		EndOverlayDrag( true );
+		return;
+	}
 	if ( m_nGizmoDrag >= 0 && pEvent->button() == Qt::LeftButton )
 	{
 		EndGizmo( true, pEvent->position(), pEvent->modifiers() );
@@ -955,6 +1051,38 @@ void CMapView3D::mouseReleaseEvent( QMouseEvent *pEvent )
 	}
 	if ( !bWasLeft || m_bMoved || m_bSpaceHeld || m_bMouselook || pEvent->button() != Qt::LeftButton )
 	{
+		return;
+	}
+	if ( !m_Editor.GetFacePickKey().isEmpty() )
+	{
+		if ( const auto face = FaceAt( pEvent->position(), true ) )
+			m_Editor.AssignOverlayFace( *face, m_Editor.GetFacePickKey(), pEvent->modifiers().testFlag( Qt::ControlModifier ), !pEvent->modifiers().testFlag( Qt::ControlModifier ) );
+		return;
+	}
+	if ( m_Editor.GetTool() == MapTool_t::MAP_TOOL_OVERLAY )
+	{
+		if ( pEvent->modifiers().testFlag( Qt::ShiftModifier ) )
+		{
+			if ( const auto face = FaceAt( pEvent->position(), true ) )
+				m_Editor.AssignOverlayFace( *face, QStringLiteral( "sides" ), false, false );
+			return;
+		}
+		for ( const auto &hit : HitsAt( pEvent->position() ) )
+		{
+			const auto *pScene = GetDocument().GetScene();
+			if ( pScene && !pScene->IsSolidObject( hit.m_nObject ) )
+			{
+				const auto szClass = pScene->m_Map.m_Entities[ pScene->GetIndex( hit.m_nObject ) ].GetClassname();
+				if ( szClass == "info_overlay" || szClass == "info_overlay_transition" )
+				{
+					GetDocument().SetSelection( { hit.m_nObject } );
+					return;
+				}
+			}
+		}
+		if ( const auto face = FaceAt( pEvent->position() ) )
+			if ( const auto surface = SurfaceAt( pEvent->position() ) )
+				m_Editor.PlaceOverlay( surface->first, surface->second, *face );
 		return;
 	}
 	if ( m_Editor.GetTool() == MapTool_t::MAP_TOOL_SELECT )
@@ -1019,7 +1147,7 @@ std::vector<xv::map::TraceHit_t> CMapView3D::HitsAt( QPointF at )
 //-----------------------------------------------------------------------------
 // Purpose: Only the map's own meshes (as read, and the edit mesh) map triangles back to sides.
 //-----------------------------------------------------------------------------
-std::optional<xv::map::FaceRef_t> CMapView3D::FaceAt( QPointF at )
+std::optional<xv::map::FaceRef_t> CMapView3D::FaceAt( QPointF at, bool bThroughOverlays )
 {
 	const MapFrame_t frame = MakeFrame( size() );
 	if ( !frame.m_pScene )
@@ -1033,14 +1161,23 @@ std::optional<xv::map::FaceRef_t> CMapView3D::FaceAt( QPointF at )
 	{
 		return std::nullopt;
 	}
-	const xv::map::TraceHit_t &hit = hits.front();
-	const xv::map::CMapMesh &mesh = *scene.m_Meshes[ hit.m_nMesh ];
-	if ( ( &mesh != &frame.m_pScene->GetMesh() && &mesh != &frame.m_pScene->GetEditMesh() && std::ranges::none_of( frame.m_pScene->m_SolidMeshes, [ &mesh ]( const auto &entry ) { return entry.second.get() == &mesh; } ) ) || hit.m_nTriangle >= mesh.m_TriangleFaces.size() )
+	for ( const auto &hit : hits )
 	{
+		const xv::map::CMapMesh &mesh = *scene.m_Meshes[ hit.m_nMesh ];
+		if ( ( &mesh == &frame.m_pScene->GetMesh() || &mesh == &frame.m_pScene->GetEditMesh() || std::ranges::any_of( frame.m_pScene->m_SolidMeshes, [ &mesh ]( const auto &entry ) { return entry.second.get() == &mesh; } ) ) && hit.m_nTriangle < mesh.m_TriangleFaces.size() )
+		{
+			const auto &face = mesh.m_Faces[ mesh.m_TriangleFaces[ hit.m_nTriangle ] ];
+			return xv::map::FaceRef_t{ face.m_nSolid, face.m_nSide };
+		}
+		if ( bThroughOverlays && !frame.m_pScene->IsSolidObject( hit.m_nObject ) )
+		{
+			const auto szClass = frame.m_pScene->m_Map.m_Entities[ frame.m_pScene->GetIndex( hit.m_nObject ) ].GetClassname();
+			if ( szClass == "info_overlay" || szClass == "infodecal" || szClass == "info_overlay_transition" )
+				continue;
+		}
 		return std::nullopt;
 	}
-	const xv::map::MeshFace_t &face = mesh.m_Faces[ mesh.m_TriangleFaces[ hit.m_nTriangle ] ];
-	return xv::map::FaceRef_t{ face.m_nSolid, face.m_nSide };
+	return std::nullopt;
 }
 
 //-----------------------------------------------------------------------------
@@ -1089,13 +1226,15 @@ QString CMapView3D::GetPaintCosts() const
 //-----------------------------------------------------------------------------
 void CMapView3D::UpdateCursor()
 {
+	if ( m_pOverlayScene && m_Editor.GetTool() != MapTool_t::MAP_TOOL_OVERLAY )
+		EndOverlayDrag( false );
 	if ( m_pPaintScene && !IsPaintingDisplacements() )
 		EndPaint( false );
 	if ( m_bMouselook )
 	{
 		return;
 	}
-	const Qt::CursorShape nShape = IsPaintingDisplacements() ? Qt::CrossCursor : Qt::ArrowCursor;
+	const Qt::CursorShape nShape = ( IsPaintingDisplacements() || !m_Editor.GetFacePickKey().isEmpty() ) ? Qt::CrossCursor : Qt::ArrowCursor;
 	if ( cursor().shape() != nShape )
 	{
 		setCursor( nShape );
@@ -1355,8 +1494,9 @@ void CMapView3D::PaintTools( QPainter &painter )
 	const std::vector<xv::map::FaceRef_t> &faces = m_Editor.GetSelectedFaces();
 	const std::optional<std::vector<xv::map::Point_t>> &pointfile = GetDocument().GetPointfile();
 	const bool bBrush = HasPaintBrushRing();
+	const bool bOverlay = m_Editor.GetTool() == MapTool_t::MAP_TOOL_OVERLAY && !GetDocument().GetSelection().empty();
 	const bool bWalkable = m_Editor.GetSettings().m_bWalkable && GetDocument().GetScene();
-	if ( !box && !marker && !gizmo && faces.empty() && !pointfile && !bBrush && !bWalkable )
+	if ( !box && !marker && !gizmo && faces.empty() && !pointfile && !bBrush && !bWalkable && !bOverlay )
 	{
 		return;
 	}
@@ -1367,6 +1507,35 @@ void CMapView3D::PaintTools( QPainter &painter )
 			polygon << QPointF{ at[ 0 ], at[ 1 ] };
 		return polygon;
 	};
+	if ( bOverlay )
+	{
+		const auto *pScene = GetDocument().GetScene();
+		for ( const auto nObject : GetDocument().GetSelection() )
+		{
+			if ( !pScene || pScene->IsSolidObject( nObject ) )
+				continue;
+			const auto &entity = pScene->m_Map.m_Entities[ pScene->GetIndex( nObject ) ];
+			const auto corners = xv::map::OverlayCorners( entity );
+			if ( !corners )
+				continue;
+			painter.setPen( QPen{ Qt::white, 1.5 } );
+			painter.setBrush( Qt::NoBrush );
+			for ( int n = 0; n < 4; ++n )
+			{
+				if ( const auto edge = camera.ProjectLine( ( *corners )[ n ], ( *corners )[ ( n + 1 ) % 4 ] ) )
+					painter.drawLine( QPointF{ edge->first[ 0 ], edge->first[ 1 ] }, QPointF{ edge->second[ 0 ], edge->second[ 1 ] } );
+				if ( const auto at = camera.Project( ( *corners )[ n ] ) )
+				{
+					painter.setBrush( Qt::white );
+					painter.drawRect( QRectF{ ( *at )[ 0 ] - 3, ( *at )[ 1 ] - 3, 6, 6 } );
+					painter.setBrush( Qt::NoBrush );
+				}
+			}
+			if ( const auto origin = xv::map::ParsePoint( entity.GetValue( "BasisOrigin" ) ) )
+				if ( const auto at = camera.Project( *origin ) )
+					painter.drawEllipse( QPointF{ ( *at )[ 0 ], ( *at )[ 1 ] }, 5, 5 );
+		}
+	}
 	if ( bWalkable )
 	{
 		// Hammer's Display walkable area, on the selected displacements: steep triangles red,
@@ -1648,6 +1817,11 @@ void CMapView3D::wheelEvent( QWheelEvent *pEvent )
 //-----------------------------------------------------------------------------
 void CMapView3D::keyPressEvent( QKeyEvent *pEvent )
 {
+	if ( pEvent->key() == Qt::Key_Escape && m_pOverlayScene )
+	{
+		EndOverlayDrag( false );
+		return;
+	}
 	if ( pEvent->key() == Qt::Key_Escape && m_pPaintScene )
 	{
 		EndPaint( false );
