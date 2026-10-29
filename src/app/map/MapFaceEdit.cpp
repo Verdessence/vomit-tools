@@ -11,6 +11,10 @@
 
 #include <QButtonGroup>
 #include <QCheckBox>
+#include <QSettings>
+#include <QPainter>
+#include <QMouseEvent>
+#include <QScrollArea>
 #include <QComboBox>
 #include <QDoubleSpinBox>
 #include <QFormLayout>
@@ -48,6 +52,89 @@ QDoubleSpinBox *MakeSpin( const QString &szName, double flMin, double flMax, dou
 } // namespace
 
 //-----------------------------------------------------------------------------
+// Purpose: Restore the Carve profile and expose the graph's signed coordinate system.
+//-----------------------------------------------------------------------------
+CMapSculptProfile::CMapSculptProfile( QWidget *pParent )
+	: QWidget( pParent )
+{
+	setObjectName( QStringLiteral( "mapDispSculptProfile" ) );
+	setMinimumSize( 240, 100 );
+	setToolTip( tr( "Drag the graph to shape Carve's cross-section; the centre line is zero, above raises and below lowers" ) );
+	const QVariantList values = QSettings{}.value( QStringLiteral( "maps/displacement/sculptProfile" ) ).toList();
+	for ( int i = 0; i < values.size() && i < 9; ++i )
+	{
+		m_Profile[ i ] = std::clamp( values[ i ].toDouble(), -1.0, 1.0 );
+	}
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Draw the cross-section against its zero line and brush limits.
+//-----------------------------------------------------------------------------
+void CMapSculptProfile::paintEvent( QPaintEvent * )
+{
+	QPainter painter( this );
+	painter.fillRect( rect(), palette().base() );
+	const QRectF area = QRectF( rect() ).adjusted( 8, 8, -8, -8 );
+	painter.setPen( palette().mid().color() );
+	painter.drawRect( area );
+	painter.drawLine( QPointF( area.left(), area.center().y() ), QPointF( area.right(), area.center().y() ) );
+	painter.drawLine( QPointF( area.center().x(), area.top() ), QPointF( area.center().x(), area.bottom() ) );
+	QPolygonF line;
+	for ( std::size_t i = 0; i < m_Profile.size(); ++i )
+	{
+		line << QPointF( area.left() + area.width() * i / 8.0, area.center().y() - area.height() * 0.5 * m_Profile[ i ] );
+	}
+	painter.setRenderHint( QPainter::Antialiasing );
+	painter.setPen( QPen( palette().highlight().color(), 2 ) );
+	painter.drawPolyline( line );
+	painter.setBrush( palette().highlight() );
+	for ( const QPointF &at : line )
+	{
+		painter.drawEllipse( at, 3, 3 );
+	}
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Move the nearest profile handle and keep it for the next sculpt session.
+//-----------------------------------------------------------------------------
+void CMapSculptProfile::Drag( QPointF at )
+{
+	const QRectF area = QRectF( rect() ).adjusted( 8, 8, -8, -8 );
+	const int n = std::clamp( static_cast<int>( std::lround( ( at.x() - area.left() ) / area.width() * 8 ) ), 0, 8 );
+	m_Profile[ n ] = std::clamp( ( area.center().y() - at.y() ) / ( area.height() * 0.5 ), -1.0, 1.0 );
+	QVariantList values;
+	for ( const double fl : m_Profile )
+	{
+		values.push_back( fl );
+	}
+	QSettings{}.setValue( QStringLiteral( "maps/displacement/sculptProfile" ), values );
+	update();
+	emit Changed();
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Start shaping a cross-section with the left button.
+//-----------------------------------------------------------------------------
+void CMapSculptProfile::mousePressEvent( QMouseEvent *pEvent )
+{
+	if ( pEvent->button() == Qt::LeftButton )
+	{
+		Drag( pEvent->position() );
+	}
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Continue shaping while the left button is held.
+//-----------------------------------------------------------------------------
+void CMapSculptProfile::mouseMoveEvent( QMouseEvent *pEvent )
+{
+	if ( pEvent->buttons() & Qt::LeftButton )
+	{
+		Drag( pEvent->position() );
+	}
+}
+
+//-----------------------------------------------------------------------------
 // Purpose:
 //-----------------------------------------------------------------------------
 CMapFaceEdit::CMapFaceEdit( CMapEditor &editor, QWidget *pParent )
@@ -63,7 +150,12 @@ CMapFaceEdit::CMapFaceEdit( CMapEditor &editor, QWidget *pParent )
 	auto *pTexturePage = new QWidget;
 	auto *pDispPage = new QWidget;
 	m_pTabs->addTab( pTexturePage, tr( "Materials" ) );
-	m_pTabs->addTab( pDispPage, tr( "Displacement" ) );
+	auto *pDispScroll = new QScrollArea;
+	pDispScroll->setWidgetResizable( true );
+	pDispScroll->setFrameShape( QFrame::NoFrame );
+	pDispScroll->setMinimumSize( 320, 400 );
+	pDispScroll->setWidget( pDispPage );
+	m_pTabs->addTab( pDispScroll, tr( "Displacement" ) );
 	pOuter->addWidget( m_pTabs );
 	BuildDisplacementTab( pDispPage );
 	auto *pLayout = new QVBoxLayout( pTexturePage );
@@ -224,11 +316,17 @@ void CMapFaceEdit::BuildDisplacementTab( QWidget *pPage )
 	} modes[] = {
 		{ DispPaintMode_t::DISP_PAINT_NONE, tr( "Select" ), QStringLiteral( "mapDispSelect" ), tr( "A click picks faces (Ctrl adds, Shift takes the brush)" ), 0 },
 		{ DispPaintMode_t::DISP_PAINT_GEOMETRY, tr( "Paint Geometry" ), QStringLiteral( "mapDispPaintGeometry" ), tr( "The left button raises the selected displacements under the brush, the right lowers; Alt+drag sizes the brush, Alt+right-click takes a face's normal as the axis" ), 1 },
+		{ DispPaintMode_t::DISP_PAINT_SCULPT, tr( "Sculpt" ), QStringLiteral( "mapDispSculpt" ), tr( "Push or Carve the selected surfaces; right-drag sizes the brush, Ctrl reverses, Shift smooths" ), 3 },
 		{ DispPaintMode_t::DISP_PAINT_ALPHA, tr( "Paint Alpha" ), QStringLiteral( "mapDispPaintAlpha" ), tr( "The left button paints in the second texture of a blended material, the right paints it out" ), 1 },
 	};
 	for ( const auto &mode : modes )
 	{
 		QPushButton *pButton = button( pButtons, mode.m_nRow, mode.m_nMode == DispPaintMode_t::DISP_PAINT_ALPHA ? 1 : 0, mode.m_szText, mode.m_szName, mode.m_szTip );
+		if ( mode.m_nMode == DispPaintMode_t::DISP_PAINT_SCULPT )
+		{
+			pButtons->removeWidget( pButton );
+			pButtons->addWidget( pButton, mode.m_nRow, 0, 1, 3 );
+		}
 		pButton->setCheckable( true );
 		m_pPaintModes->addButton( pButton, static_cast<int>( mode.m_nMode ) );
 	}
@@ -236,7 +334,7 @@ void CMapFaceEdit::BuildDisplacementTab( QWidget *pPage )
 	connect( button( pButtons, 0, 1, tr( "Create" ), QStringLiteral( "mapDispCreate" ), tr( "A displacement at the power below on each selected four-sided face" ) ), &QPushButton::clicked, this, [ this ] { m_Editor.CreateDisplacements( GetDispPower() ); } );
 	connect( button( pButtons, 0, 2, tr( "Destroy" ), QStringLiteral( "mapDispDestroy" ), tr( "The selected faces' displacements taken off: plain faces again" ) ), &QPushButton::clicked, this, [ this ] { m_Editor.DestroyDisplacements(); } );
 	connect( button( pButtons, 1, 2, tr( "Invert Alpha" ), QStringLiteral( "mapDispInvertAlpha" ), tr( "The two textures of a blended material swapped over the selected displacements" ) ), &QPushButton::clicked, this, [ this ] { m_Editor.InvertDisplacementAlpha(); } );
-	connect( button( pButtons, 2, 0, tr( "Subdivide" ), QStringLiteral( "mapDispSubdivide" ), tr( "The selected displacements smoothed together as one surface" ) ), &QPushButton::clicked, this, [ this ] { m_Editor.SubdivideDisplacements(); } );
+	connect( button( pButtons, 2, 0, tr( "Subdivide" ), QStringLiteral( "mapDispSubdivide" ), tr( "Round the selected base surfaces together, preserving painted heights and alpha" ) ), &QPushButton::clicked, this, [ this ] { m_Editor.SubdivideDisplacements(); } );
 	connect( button( pButtons, 2, 1, tr( "Noise" ), QStringLiteral( "mapDispNoise" ), tr( "Every point moved along its face's normal by a random amount between Min and Max" ) ), &QPushButton::clicked, this, [ this ] { m_Editor.NoiseDisplacements( m_pNoiseMin->value(), m_pNoiseMax->value() ); } );
 	connect( button( pButtons, 2, 2, tr( "Sew" ), QStringLiteral( "mapDispSew" ), tr( "The selected displacements' edges put together where their faces meet (and onto plain faces among them)" ) ), &QPushButton::clicked, this, [ this ] { m_Editor.SewDisplacements(); } );
 	pLayout->addLayout( pButtons );
@@ -252,6 +350,7 @@ void CMapFaceEdit::BuildDisplacementTab( QWidget *pPage )
 	m_pAxis = new QComboBox;
 	m_pAxis->setObjectName( QStringLiteral( "mapDispAxis" ) );
 	m_pAxis->addItem( tr( "Face Normal" ), -1 );
+	m_pAxis->addItem( tr( "Subdiv Normal" ), -2 );
 	m_pAxis->addItem( QStringLiteral( "X" ), 0 );
 	m_pAxis->addItem( QStringLiteral( "Y" ), 1 );
 	m_pAxis->addItem( QStringLiteral( "Z" ), 2 );
@@ -296,12 +395,128 @@ void CMapFaceEdit::BuildDisplacementTab( QWidget *pPage )
 	pPaint->addWidget( m_pAlphaValue, 1, 3 );
 	pPaint->addWidget( m_pSoftEdge, 2, 0, 1, 2 );
 	pPaint->addWidget( m_pAutosew, 2, 2, 1, 2 );
+	m_pSelectedOnly = new QCheckBox( tr( "Selected only" ) );
+	m_pSelectedOnly->setObjectName( QStringLiteral( "mapDispSelectedOnly" ) );
+	m_pSelectedOnly->setToolTip( tr( "Paint only selected displacements; off, paint every shown displacement inside the brush sphere" ) );
+	m_pSelectedOnly->setChecked( QSettings{}.value( QStringLiteral( "maps/displacement/selectedOnly" ), true ).toBool() );
+	connect( m_pSelectedOnly, &QCheckBox::toggled, this, []( bool bOn ) { QSettings{}.setValue( QStringLiteral( "maps/displacement/selectedOnly" ), bOn ); } );
+	pPaint->addWidget( m_pSelectedOnly, 3, 0, 1, 4 );
+	m_pSpatial = new QCheckBox( tr( "Spatial" ) );
+	m_pSpatial->setObjectName( QStringLiteral( "mapDispSpatial" ) );
+	m_pSpatial->setChecked( true );
+	m_pVertexRadius = new QSpinBox;
+	m_pVertexRadius->setObjectName( QStringLiteral( "mapDispVertexRadius" ) );
+	m_pVertexRadius->setRange( 0, 8 );
+	m_pVertexRadius->setValue( 1 );
+	m_pVertexRadius->setToolTip( tr( "Fixed brush radius in grid steps; 0 affects the nearest vertex alone" ) );
+	pPaint->addWidget( m_pSpatial, 4, 0 );
+	pPaint->addWidget( new QLabel( tr( "Vertex radius" ) ), 4, 2 );
+	pPaint->addWidget( m_pVertexRadius, 4, 3 );
+	auto spatialChanged = [ this ] {
+		m_pRadius->setEnabled( m_pSpatial->isChecked() );
+		m_pSoftEdge->setEnabled( m_pSpatial->isChecked() );
+		m_pVertexRadius->setEnabled( !m_pSpatial->isChecked() );
+	};
+	connect( m_pSpatial, &QCheckBox::toggled, this, spatialChanged );
+	spatialChanged();
+	m_pVertexRadius->setValue( QSettings{}.value( QStringLiteral( "maps/displacement/vertexRadius" ), 1 ).toInt() );
+	connect( m_pVertexRadius, &QSpinBox::valueChanged, this, []( int n ) { QSettings{}.setValue( QStringLiteral( "maps/displacement/vertexRadius" ), n ); } );
+	for ( QDoubleSpinBox *pBox : { m_pRadius, m_pAmount, m_pAlphaValue } )
+	{
+		const QString szKey = QStringLiteral( "maps/displacement/" ) + pBox->objectName();
+		pBox->setValue( QSettings{}.value( szKey, pBox->value() ).toDouble() );
+		connect( pBox, &QDoubleSpinBox::valueChanged, this, [ szKey ]( double flValue ) { QSettings{}.setValue( szKey, flValue ); } );
+	}
+	for ( QComboBox *pBox : { m_pEffect, m_pAxis } )
+	{
+		const QString szKey = QStringLiteral( "maps/displacement/" ) + pBox->objectName();
+		pBox->setCurrentIndex( std::clamp( QSettings{}.value( szKey, pBox->currentIndex() ).toInt(), 0, pBox->count() - 1 ) );
+		connect( pBox, &QComboBox::currentIndexChanged, this, [ szKey ]( int nValue ) { QSettings{}.setValue( szKey, nValue ); } );
+	}
+	for ( QCheckBox *pBox : { m_pSoftEdge, m_pAutosew, m_pSpatial } )
+	{
+		const QString szKey = QStringLiteral( "maps/displacement/" ) + pBox->objectName();
+		pBox->setChecked( QSettings{}.value( szKey, pBox->isChecked() ).toBool() );
+		connect( pBox, &QCheckBox::toggled, this, [ szKey ]( bool bOn ) { QSettings{}.setValue( szKey, bOn ); } );
+	}
 	pLayout->addWidget( pPaintBox );
-	auto showPaint = [ this, pPaintBox ] {
+	auto *pSculptBox = new QGroupBox( tr( "Sculpt" ) );
+	pSculptBox->setObjectName( QStringLiteral( "mapDispSculptPanel" ) );
+	auto *pSculpt = new QFormLayout( pSculptBox );
+	auto choice = [ this, pSculpt ]( const QString &szLabel, const QString &szName, const QStringList &items ) {
+		auto *pBox = new QComboBox;
+		pBox->setObjectName( szName );
+		pBox->addItems( items );
+		const QString szKey = QStringLiteral( "maps/displacement/" ) + szName;
+		pBox->setCurrentIndex( std::clamp( QSettings{}.value( szKey, 0 ).toInt(), 0, pBox->count() - 1 ) );
+		connect( pBox, &QComboBox::currentIndexChanged, this, [ szKey ]( int n ) { QSettings{}.setValue( szKey, n ); } );
+		pSculpt->addRow( szLabel, pBox );
+		return pBox;
+	};
+	auto number = [ this, pSculpt ]( const QString &szLabel, const QString &szName, double flMin, double flMax, double flDefault ) {
+		auto *pBox = new QDoubleSpinBox;
+		pBox->setObjectName( szName );
+		pBox->setRange( flMin, flMax );
+		pBox->setDecimals( 2 );
+		const QString szKey = QStringLiteral( "maps/displacement/" ) + szName;
+		pBox->setValue( QSettings{}.value( szKey, flDefault ).toDouble() );
+		connect( pBox, &QDoubleSpinBox::valueChanged, this, [ szKey ]( double fl ) { QSettings{}.setValue( szKey, fl ); } );
+		pSculpt->addRow( szLabel, pBox );
+		return pBox;
+	};
+	m_pSculptKind = choice( tr( "Tool" ), QStringLiteral( "mapDispSculptKind" ), { tr( "Push" ), tr( "Carve" ) } );
+	m_pSculptOffset = choice( tr( "Offset mode" ), QStringLiteral( "mapDispSculptOffset" ), { tr( "Absolute" ), tr( "Adaptive" ) } );
+	m_pSculptDistance = number( tr( "Offset distance" ), QStringLiteral( "mapDispSculptDistance" ), 0, 10000, 8 );
+	m_pSculptPercent = number( tr( "Offset percent" ), QStringLiteral( "mapDispSculptPercent" ), 0, 100, 10 );
+	m_pSculptSmoothing = number( tr( "Smoothing" ), QStringLiteral( "mapDispSculptSmoothing" ), 0, 100, 0 );
+	m_pSculptBounds = choice( tr( "Bounds limit" ), QStringLiteral( "mapDispSculptBounds" ), { tr( "Attenuated" ), tr( "Additive" ) } );
+	m_pSculptDirection = choice( tr( "Normal direction" ), QStringLiteral( "mapDispSculptDirection" ), { QStringLiteral( "X" ), QStringLiteral( "Y" ), QStringLiteral( "Z" ), tr( "Brush Center" ), tr( "Screen" ), tr( "Selected" ) } );
+	if ( !QSettings{}.contains( QStringLiteral( "maps/displacement/mapDispSculptDirection" ) ) )
+	{
+		m_pSculptDirection->setCurrentIndex( 2 );
+	}
+	m_pFalloffPosition = number( tr( "Full offset to (%)" ), QStringLiteral( "mapDispSculptFalloffPosition" ), 0, 100, 50 );
+	m_pFalloffFinal = number( tr( "Offset at edge (%)" ), QStringLiteral( "mapDispSculptFalloffFinal" ), 0, 100, 0 );
+	m_pProfile = new CMapSculptProfile;
+	pSculpt->addRow( m_pProfile );
+	pLayout->addWidget( pSculptBox );
+	auto sculptChanged = [ this ] {
+		m_pProfile->setVisible( m_pSculptKind->currentIndex() == 1 );
+		m_pSculptDistance->setEnabled( m_pSculptOffset->currentIndex() == 0 );
+		m_pSculptPercent->setEnabled( m_pSculptOffset->currentIndex() == 1 );
+	};
+	connect( m_pSculptKind, &QComboBox::currentIndexChanged, this, sculptChanged );
+	connect( m_pSculptOffset, &QComboBox::currentIndexChanged, this, sculptChanged );
+	sculptChanged();
+	auto showPaint = [ this, pPaintBox, pPaint, pSculptBox, spatialChanged ] {
 		const DispPaintMode_t nMode = GetDispPaintMode();
 		pPaintBox->setEnabled( nMode != DispPaintMode_t::DISP_PAINT_NONE );
+		const bool bSculpt = nMode == DispPaintMode_t::DISP_PAINT_SCULPT;
+		pSculptBox->setVisible( bSculpt );
+		for ( const auto &[ r, c ] : std::array<std::pair<int, int>, 7>{ { { 0, 0 }, { 0, 1 }, { 0, 2 }, { 0, 3 }, { 4, 0 }, { 4, 2 }, { 4, 3 } } } )
+		{
+			if ( QLayoutItem *pItem = pPaint->itemAtPosition( r, c ); pItem && pItem->widget() )
+			{
+				pItem->widget()->setVisible( !bSculpt );
+			}
+		}
+		m_pSoftEdge->setVisible( !bSculpt );
+		m_pAmountLabel->setVisible( !bSculpt );
+		m_pEffect->setEnabled( !bSculpt );
+		m_pAmount->setEnabled( !bSculpt );
+		m_pSpatial->setEnabled( !bSculpt );
+		if ( bSculpt )
+		{
+			m_pRadius->setEnabled( true );
+			m_pSoftEdge->setEnabled( false );
+			m_pVertexRadius->setEnabled( false );
+		}
+		else
+		{
+			spatialChanged();
+		}
 		const bool bAlpha = nMode == DispPaintMode_t::DISP_PAINT_ALPHA;
-		m_pAmount->setVisible( !bAlpha );
+		m_pAmount->setVisible( !bAlpha && !bSculpt );
 		m_pAlphaValue->setVisible( bAlpha );
 		m_pAmountLabel->setText( bAlpha ? tr( "Value" ) : tr( "Distance" ) );
 		m_pAxis->setEnabled( !bAlpha );
@@ -389,6 +604,11 @@ void CMapFaceEdit::BuildDisplacementTab( QWidget *pPage )
 	pMasks->addWidget( m_pSelectMask );
 	pMasks->addStretch( 1 );
 	pLayout->addLayout( pMasks );
+	m_pCollapsible = new QCheckBox( tr( "Show collapsible vertices" ) );
+	m_pCollapsible->setObjectName( QStringLiteral( "mapDispCollapsible" ) );
+	m_pCollapsible->setToolTip( tr( "Pink markers show disabled vertices and fine seam vertices the compiler interpolates to meet a coarser neighbour" ) );
+	pLayout->addWidget( m_pCollapsible );
+	connect( m_pCollapsible, &QCheckBox::toggled, this, &CMapFaceEdit::PaintModeChanged );
 	for ( QCheckBox *pBox : { m_pGridMask, m_pSelectMask } )
 	{
 		connect( pBox, &QCheckBox::toggled, this, &CMapFaceEdit::PaintModeChanged );
@@ -422,6 +642,14 @@ xv::map::DispBrush_t CMapFaceEdit::GetBrush() const
 	brush.m_flAmount = GetDispPaintMode() == DispPaintMode_t::DISP_PAINT_ALPHA ? m_pAlphaValue->value() : m_pAmount->value();
 	brush.m_nEffect = static_cast<xv::map::PaintEffect_t>( m_pEffect->currentData().toInt() );
 	brush.m_bSoftEdge = m_pSoftEdge->isChecked();
+	brush.m_bSpatial = m_pSpatial->isChecked();
+	brush.m_nVertexRadius = m_pVertexRadius->value();
+	brush.m_bSubdivNormal = m_pAxis->currentData().toInt() == -2;
+	if ( GetDispPaintMode() == DispPaintMode_t::DISP_PAINT_SCULPT )
+	{
+		brush.m_flAmount = 1;
+		brush.m_bSpatial = true;
+	}
 	brush.m_Axis = {};
 	if ( const int nAxis = m_pAxis->currentData().toInt(); nAxis >= 0 )
 	{
@@ -431,7 +659,54 @@ xv::map::DispBrush_t CMapFaceEdit::GetBrush() const
 	{
 		brush.m_Axis = *m_PaintNormal;
 	}
+	if ( GetDispPaintMode() == DispPaintMode_t::DISP_PAINT_SCULPT )
+	{
+		brush.m_Axis = m_PaintNormal.value_or( xv::map::Point_t{} );
+	}
 	return brush;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: The Sculpt panel's documented offsets, bounds and cross-section.
+//-----------------------------------------------------------------------------
+xv::map::SculptBrush_t CMapFaceEdit::GetSculptBrush() const
+{
+	xv::map::SculptBrush_t sculpt;
+	sculpt.m_bCarve = m_pSculptKind->currentIndex() == 1;
+	sculpt.m_bAttenuated = m_pSculptBounds->currentIndex() == 0;
+	sculpt.m_bAdaptive = m_pSculptOffset->currentIndex() == 1;
+	sculpt.m_bTowardsCentre = GetSculptDirection() == 3;
+	sculpt.m_flDistance = m_pSculptDistance->value();
+	sculpt.m_flPercent = m_pSculptPercent->value() / 100.0;
+	sculpt.m_flSmoothing = m_pSculptSmoothing->value() / 100.0;
+	sculpt.m_flFalloffPosition = m_pFalloffPosition->value() / 100.0;
+	sculpt.m_flFalloffFinal = m_pFalloffFinal->value() / 100.0;
+	sculpt.m_Profile = m_pProfile->GetProfile();
+	return sculpt;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: X, Y, Z, Brush Center, Screen, or the picked face normal.
+//-----------------------------------------------------------------------------
+int CMapFaceEdit::GetSculptDirection() const
+{
+	return m_pSculptDirection->currentIndex();
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Whether the stored disabled vertices should be marked in the selected grids.
+//-----------------------------------------------------------------------------
+bool CMapFaceEdit::IsCollapsibleShown() const
+{
+	return m_pCollapsible->isChecked();
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Whether painting is restricted to the selected displacement faces.
+//-----------------------------------------------------------------------------
+bool CMapFaceEdit::IsSelectedOnly() const
+{
+	return m_pSelectedOnly->isChecked();
 }
 
 //-----------------------------------------------------------------------------
@@ -439,7 +714,7 @@ xv::map::DispBrush_t CMapFaceEdit::GetBrush() const
 //-----------------------------------------------------------------------------
 bool CMapFaceEdit::IsBrushAlongFaceNormal() const
 {
-	return m_pAxis->currentData().toInt() < 0 && !m_PaintNormal;
+	return m_pAxis->currentData().toInt() == -1 && !m_PaintNormal;
 }
 
 //-----------------------------------------------------------------------------

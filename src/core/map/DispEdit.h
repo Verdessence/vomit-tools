@@ -14,6 +14,7 @@
 #include <cstdint>
 #include <functional>
 #include <optional>
+#include <span>
 #include <vector>
 
 #include "map/Displacement.h"
@@ -55,12 +56,37 @@ struct DispBrush_t
 	double m_flAmount = 8.0;
 	Point_t m_Axis{ 0, 0, 1 }; // a unit vector; the face's normal is the usual choice
 	PaintEffect_t m_nEffect = PaintEffect_t::PAINT_EFFECT_RAISE_LOWER;
+	bool m_bSpatial = true;
+	int m_nVertexRadius = 1; // fixed brush radius in grid steps; zero paints one vertex
+	bool m_bSubdivNormal = false;
 	bool m_bSoftEdge = true;   // Hammer's Soft-Edge; Hard-Edge gives every point inside all of it
 };
 // The displacement on face painted; true when a point changed. Alpha painting takes the amount
 // as alpha (0 to 255) added (Raise/Lower), set (Raise To) or averaged in (Smooth).
 bool PaintGeometry( DispInfo_t &disp, const FaceGeometry_t &face, const DispBrush_t &brush );
 bool PaintAlpha( DispInfo_t &disp, const FaceGeometry_t &face, const DispBrush_t &brush );
+// Disabled mask bits and fine seam vertices without a matching vertex on a coarser neighbour.
+[[nodiscard]] std::vector<std::size_t> CollapsibleVertices( const DispInfo_t &disp, const DispMesh_t &mesh, std::span<const DispMesh_t> neighbours );
+
+// Sculpt's offsets and falloff, as documented in Hammer Face Edit Disps. The profile runs
+// across the brush from -radius to +radius; adaptive offsets are fractions of its radius.
+struct SculptBrush_t
+{
+	bool m_bCarve = false;
+	bool m_bAttenuated = true;
+	bool m_bAdaptive = false;
+	bool m_bTowardsCentre = false;
+	double m_flDistance = 8.0;
+	double m_flPercent = 0.1;
+	double m_flSmoothing = 0.0;
+	double m_flFalloffPosition = 0.5;
+	double m_flFalloffFinal = 0.0;
+	Point_t m_Right{ 1, 0, 0 };
+	std::array<double, 9> m_Profile{ 0, 0.25, 0.5, 0.75, 1, 0.75, 0.5, 0.25, 0 };
+};
+// pApplied belongs to one stroke and one displacement. In attenuated mode it remembers the
+// strongest offset at each vertex, so repeatedly passing it does not add that offset again.
+bool SculptGeometry( DispInfo_t &disp, const FaceGeometry_t &face, const DispBrush_t &brush, const SculptBrush_t &sculpt, std::vector<double> *pApplied );
 
 // Hammer's Scale attribute: every point's height off its face (its distance) times flScale.
 void ScaleDisplacement( DispInfo_t &disp, double flScale );
@@ -97,9 +123,10 @@ struct DispFace_t
 // alike, the finer grid onto the coarser one otherwise, and onto the flat edge of a plain face.
 // True when something moved.
 bool SewDisplacements( const std::vector<DispFace_t> &faces );
-// Subdivide: the displacements smoothed together as one surface, points shared across sewn
-// edges moving as one, the outer boundary staying; nPasses rounds of it.
-bool SubdivideDisplacements( const std::vector<DispFace_t> &faces, int nPasses = 3 );
+// Subdivide the selected base quadrilaterals as one Catmull-Clark surface. The outer rim
+// stays attached to unselected geometry. Store its curvature in offsets and offset_normals,
+// preserving painted normal/distance fields and alpha; resample to each face's power.
+bool SubdivideDisplacements( const std::vector<DispFace_t> &faces );
 
 // An edit of the faces' displacements: pfnEdit gets each face (its displacement a copy to
 // change, or none) and says whether it changed anything; the solids that did are the edit.

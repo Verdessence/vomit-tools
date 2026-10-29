@@ -283,7 +283,7 @@ CMapEntityReport::CMapEntityReport( CMapEditor &editor )
 		connect( pField, &QLineEdit::textChanged, this, &CMapEntityReport::Refresh );
 	}
 	connect( m_pList, &QListWidget::itemSelectionChanged, this, &CMapEntityReport::FollowList );
-	connect( &m_Editor.GetDocument(), &CMapDocument::SceneEdited, this, [ this ] { Refresh(); } );
+	connect( &m_Editor.GetDocument(), &CMapDocument::SceneEdited, this, [ this ] { m_Editor.GetDocument().MeasureEditListener( tr( "Entity Report" ), [ this ] { Refresh(); } ); } );
 	Refresh();
 }
 
@@ -398,7 +398,7 @@ CMapCheckDialog::CMapCheckDialog( CMapEditor &editor )
 	pSide->addWidget( pClose );
 	pLayout->addLayout( pSide );
 	connect( m_pList, &QListWidget::currentRowChanged, this, &CMapCheckDialog::Pick );
-	connect( &m_Editor.GetDocument(), &CMapDocument::SceneEdited, this, [ this ] { Run(); } );
+	connect( &m_Editor.GetDocument(), &CMapDocument::SceneEdited, this, [ this ] { m_Editor.GetDocument().MeasureEditListener( tr( "Check for Problems" ), [ this ] { Run(); } ); } );
 	Run();
 }
 

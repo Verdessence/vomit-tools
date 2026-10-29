@@ -408,7 +408,20 @@ CMapEditor::CMapEditor( const QString &szPath, bool bFromGame, QWidget *pParent 
 		repaint();
 	} );
 	connect( m_pDocument, &CMapDocument::VisibilityChanged, this, repaint );
-	connect( m_pDocument, &CMapDocument::SceneEdited, this, &CMapEditor::SceneEdited );
+	connect( m_pDocument, &CMapDocument::SceneEdited, this, [ this ]( const std::vector<std::uint32_t> &changed ) { m_pDocument->MeasureEditListener( tr( "Editor and views" ), [ & ] { SceneEdited( changed ); } ); } );
+	connect( m_pDocument, &CMapDocument::ScenePreviewed, this, [ this ]( const std::vector<std::uint32_t> &changed ) {
+		for ( CMapView *pView : GetViews() )
+		{
+			if ( auto *p2D = qobject_cast<CMapView2D *>( pView ) )
+			{
+				p2D->ObjectsChanged( changed );
+			}
+			else if ( auto *p3D = qobject_cast<CMapView3D *>( pView ) )
+			{
+				p3D->Redraw();
+			}
+		}
+	} );
 	connect( m_pDocument, &CMapDocument::ModifiedChanged, this, &CMapEditor::TitleChanged );
 	connect( m_pDocument, &CMapDocument::PointfileChanged, this, &CMapEditor::RepaintTools );
 	UpdateStatus();
@@ -682,6 +695,7 @@ void CMapEditor::SetTool( MapTool_t nTool )
 	{
 		CommitCordon();
 	}
+	const bool bEnteringTexture = nTool == MapTool_t::MAP_TOOL_TEXTURE && m_nTool != MapTool_t::MAP_TOOL_TEXTURE;
 	m_nTool = nTool;
 	if ( nTool == MapTool_t::MAP_TOOL_CORDON )
 	{
@@ -692,6 +706,12 @@ void CMapEditor::SetTool( MapTool_t nTool )
 	if ( !bTexture && !m_SelectedFaces.empty() )
 	{
 		SetSelectedFaces( {} );
+	}
+	if ( bEnteringTexture && m_SelectedFaces.empty() && m_pDocument->GetScene() )
+	{
+		// A brush picked before opening Face Edit supplies its faces, as in Hammer. Otherwise
+		// its selection tint would promise painting permission the face selection didn't hold.
+		SetSelectedFaces( xv::map::FacesOf( *m_pDocument->GetScene(), m_pDocument->GetSelection() ) );
 	}
 	if ( bTexture )
 	{
@@ -2332,17 +2352,32 @@ void CMapEditor::SetDisplacementAttributes( int nPower, double flElevation, doub
 //-----------------------------------------------------------------------------
 // Purpose:
 //-----------------------------------------------------------------------------
-std::vector<xv::map::FaceRef_t> CMapEditor::GetPaintFaces( const std::optional<xv::map::FaceRef_t> &under ) const
+std::vector<xv::map::FaceRef_t> CMapEditor::GetPaintFaces( const std::optional<xv::map::FaceRef_t> & ) const
 {
 	const xv::map::CScene *pScene = m_pDocument->GetScene();
 	if ( !pScene )
 	{
 		return {};
 	}
-	std::vector<xv::map::FaceRef_t> faces = xv::map::DisplacementFaces( *pScene, m_SelectedFaces );
-	if ( faces.empty() && under )
+	if ( m_pFaceEdit->IsSelectedOnly() )
 	{
-		faces = xv::map::DisplacementFaces( *pScene, { *under } );
+		return xv::map::DisplacementFaces( *pScene, m_SelectedFaces );
+	}
+	std::vector<xv::map::FaceRef_t> faces;
+	for ( std::uint32_t nSolid = 0; nSolid < pScene->m_Map.m_Solids.size(); ++nSolid )
+	{
+		if ( !m_pDocument->IsShown( pScene->SolidObject( nSolid ) ) || pScene->m_Map.m_Solids[ nSolid ].m_bDeleted )
+		{
+			continue;
+		}
+		const auto &sides = pScene->m_Map.m_Solids[ nSolid ].m_Sides;
+		for ( std::uint32_t nSide = 0; nSide < sides.size(); ++nSide )
+		{
+			if ( sides[ nSide ].m_pDisp )
+			{
+				faces.push_back( { nSolid, nSide } );
+			}
+		}
 	}
 	return faces;
 }
@@ -2369,7 +2404,7 @@ void CMapEditor::CommitDisplacements( const xv::map::CScene &scene, const std::v
 			}
 		}
 		// Hammer's Autosew: the painted displacements sewn after the stroke.
-		if ( m_pFaceEdit->IsAutosew() && szName == tr( "Paint Geometry" ) )
+		if ( m_pFaceEdit->IsAutosew() && ( szName == tr( "Paint Geometry" ) || szName == tr( "Sculpt" ) ) )
 		{
 			xv::map::SewDisplacements( refs );
 		}
@@ -2998,8 +3033,8 @@ void CMapEditor::SceneEdited( const std::vector<std::uint32_t> &changed )
 		}
 		pView->update();
 	}
-	m_pProperties->Refresh();
-	m_pFaceEdit->Refresh();
+	m_pDocument->MeasureEditListener( tr( "Object Properties" ), [ this ] { m_pProperties->Refresh(); } );
+	m_pDocument->MeasureEditListener( tr( "Face Edit" ), [ this ] { m_pFaceEdit->Refresh(); } );
 	UpdateStatus();
 }
 
@@ -3025,7 +3060,7 @@ void CMapEditor::ShowMapProperties()
 	auto *pButtons = new QDialogButtonBox( QDialogButtonBox::Close );
 	connect( pButtons, &QDialogButtonBox::rejected, pDialog, &QDialog::close );
 	pLayout->addWidget( pButtons );
-	connect( m_pDocument, &CMapDocument::SceneEdited, pPanel, &CMapProperties::Refresh );
+	connect( m_pDocument, &CMapDocument::SceneEdited, pPanel, [ this, pPanel ] { m_pDocument->MeasureEditListener( tr( "Properties window" ), [ pPanel ] { pPanel->Refresh(); } ); } );
 	pDialog->show();
 }
 

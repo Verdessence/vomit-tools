@@ -16,6 +16,7 @@
 #include <QFile>
 #include <QSaveFile>
 #include <QUndoStack>
+#include <QElapsedTimer>
 
 #include "kv1/Kv1.h"
 #include "map/GameConfig.h"
@@ -152,14 +153,26 @@ void CMapDocument::ApplyEditNow( const xv::map::MapEdit_t &edit )
 	UpdateCordonHidden();
 	std::erase_if( m_Selection, [ this ]( std::uint32_t n ) { return m_pScene->IsDeleted( n ); } );
 	m_nStateGeneration++;
+	m_EditListenerCosts.clear();
 	emit SceneEdited( m_pScene->m_Changed );
 	emit SelectionChanged();
 }
 
 //-----------------------------------------------------------------------------
+// Purpose: Keep each committed edit listener's main-thread cost for the O overlay and log.
+//-----------------------------------------------------------------------------
+void CMapDocument::MeasureEditListener( const QString &szName, const std::function<void()> &pfnListen )
+{
+	QElapsedTimer timer;
+	timer.start();
+	pfnListen();
+	m_EditListenerCosts << QStringLiteral( "%1: %2 ms" ).arg( szName ).arg( timer.nsecsElapsed() / 1e6, 0, 'f', 2 );
+}
+
+//-----------------------------------------------------------------------------
 // Purpose:
 //-----------------------------------------------------------------------------
-void CMapDocument::Preview( const xv::map::MapEdit_t &edit )
+void CMapDocument::Preview( const xv::map::MapEdit_t &edit, bool bDisplacements )
 {
 	if ( !m_pScene )
 	{
@@ -169,8 +182,33 @@ void CMapDocument::Preview( const xv::map::MapEdit_t &edit )
 	{
 		m_pPreviewBase = m_pScene;
 	}
-	m_pScene = m_pPreviewBase;
-	ApplyEditNow( edit );
+	QElapsedTimer timer;
+	timer.start();
+	if ( bDisplacements )
+	{
+		std::vector<std::uint32_t> solids;
+		for ( const auto &[ nSolid, solid ] : edit.m_Solids )
+		{
+			solids.push_back( nSolid );
+		}
+		if ( !m_pDisplacementBase || solids != m_PreviewSolids )
+		{
+			m_pDisplacementBase = xv::map::PrepareDisplacementPreview( *m_pPreviewBase, edit );
+			m_PreviewSolids = std::move( solids );
+			m_nStateGeneration++;
+		}
+		m_pScene = xv::map::ApplyEdit( *m_pDisplacementBase, edit, true );
+		m_flPreviewMs = timer.nsecsElapsed() / 1e6;
+		timer.restart();
+		emit ScenePreviewed( m_pScene->m_Changed );
+		m_flPreviewNotifyMs = timer.nsecsElapsed() / 1e6;
+	}
+	else
+	{
+		m_pScene = m_pPreviewBase;
+		ApplyEditNow( edit );
+		m_flPreviewMs = timer.nsecsElapsed() / 1e6;
+	}
 }
 
 //-----------------------------------------------------------------------------
@@ -183,7 +221,15 @@ void CMapDocument::EndPreview()
 		return;
 	}
 	const std::vector<std::uint32_t> changed = m_pScene->m_Changed;
+	const bool bDisplacements = m_pDisplacementBase != nullptr;
+	m_pDisplacementBase.reset();
 	m_pScene = std::move( m_pPreviewBase );
+	if ( bDisplacements )
+	{
+		m_nStateGeneration++;
+		emit ScenePreviewed( changed );
+		return;
+	}
 	UpdateCordonHidden();
 	m_nStateGeneration++;
 	emit SceneEdited( changed );

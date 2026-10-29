@@ -95,6 +95,7 @@ public:
 	[[nodiscard]] std::optional<CMapGizmo> GetGizmo() const;
 	// A cross while the Displacement tab's brush is on, else the arrow (not during mouselook).
 	void UpdateCursor();
+	[[nodiscard]] QString GetPaintCosts() const;
 	// The brush face under a widget point (the nearest hit's triangle, when it is a brush's).
 	[[nodiscard]] std::optional<xv::map::FaceRef_t> FaceAt( QPointF at );
 	[[nodiscard]] xv::map::CViewCamera GetSizedCamera() const;
@@ -125,13 +126,15 @@ private:
 	void Look( QPointF delta );
 	void Select( QPointF at, bool bToggle );
 	// The block tool's box, the entity tool's marker and the gizmo, over the picture.
-	void PaintTools( QPainter &painter ) const;
+	void PaintTools( QPainter &painter );
+	void UpdateCollapsibleVertices();
 	void PreviewGizmo( QPointF at, Qt::KeyboardModifiers modifiers );
 	void EndGizmo( bool bCommit, QPointF at, Qt::KeyboardModifiers modifiers );
 	// The Displacement tab's brush: whether a press paints, a stroke's sample at a point
 	// (previewed), and the stroke made one undo step (or dropped).
 	[[nodiscard]] bool IsPaintingDisplacements() const;
 	void PaintStroke( QPointF at );
+	void PreviewPaint();
 	void EndPaint( bool bCommit );
 	[[nodiscard]] xv::map::RasterMode_t GetMode() const;
 
@@ -181,6 +184,17 @@ private:
 	// A paint stroke: the scene it started from, the displacements as the stroke leaves them,
 	// whether the right button (lowering) began it, where it last painted, and the brush's
 	// place under the mouse (its ring).
+	std::shared_ptr<const xv::map::CScene> m_pCollapsibleScene;
+	std::vector<xv::map::FaceRef_t> m_CollapsibleFaces;
+	std::vector<std::vector<std::size_t>> m_CollapsibleVertices;
+	std::vector<std::vector<double>> m_SculptApplied;
+	Qt::KeyboardModifiers m_PaintModifiers;
+	bool m_bPaintAlpha = false;
+	bool m_bPaintSculpt = false;
+	std::vector<xv::map::FaceRef_t> m_PaintChanged;
+	QTimer *m_pPaintPreview = nullptr;
+	double m_flGridPaintMs = 0.0;
+	double m_flDispEditMs = 0.0;
 	std::shared_ptr<const xv::map::CScene> m_pPaintScene;
 	std::vector<std::pair<xv::map::FaceRef_t, xv::map::DispInfo_t>> m_Painted;
 	bool m_bPaintLower = false;

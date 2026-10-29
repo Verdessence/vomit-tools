@@ -35,6 +35,7 @@ enum class DispPaintMode_t
 	DISP_PAINT_NONE, // the texture tool's own click
 	DISP_PAINT_GEOMETRY,
 	DISP_PAINT_ALPHA,
+	DISP_PAINT_SCULPT,
 };
 
 // What a left click on a face does (Hammer's Mode).
@@ -45,6 +46,27 @@ enum class FaceEditMode_t
 	FACE_EDIT_MODE_SELECT,
 	FACE_EDIT_MODE_APPLY,        // the current texture onto the face
 	FACE_EDIT_MODE_APPLY_VALUES, // and the sheet's values with it
+};
+
+// An editable cross-section for Sculpt's Carve brush. Horizontal position spans the brush;
+// vertical position is a signed fraction of the sculpt offset.
+class CMapSculptProfile : public QWidget
+{
+	Q_OBJECT
+public:
+	explicit CMapSculptProfile( QWidget *pParent = nullptr );
+	[[nodiscard]] const std::array<double, 9> &GetProfile() const { return m_Profile; }
+signals:
+	void Changed();
+
+protected:
+	void paintEvent( QPaintEvent *pEvent ) override;
+	void mousePressEvent( QMouseEvent *pEvent ) override;
+	void mouseMoveEvent( QMouseEvent *pEvent ) override;
+
+private:
+	void Drag( QPointF at );
+	std::array<double, 9> m_Profile{ 0, 0.25, 0.5, 0.75, 1, 0.75, 0.5, 0.25, 0 };
 };
 
 class CMapFaceEdit : public QWidget
@@ -68,6 +90,10 @@ public:
 	[[nodiscard]] DispPaintMode_t GetDispPaintMode() const;
 	void SetDispPaintMode( DispPaintMode_t nMode );
 	[[nodiscard]] xv::map::DispBrush_t GetBrush() const;
+	[[nodiscard]] bool IsSelectedOnly() const;
+	[[nodiscard]] bool IsCollapsibleShown() const;
+	[[nodiscard]] xv::map::SculptBrush_t GetSculptBrush() const;
+	[[nodiscard]] int GetSculptDirection() const;
 	[[nodiscard]] bool IsBrushAlongFaceNormal() const;
 	[[nodiscard]] double GetBrushRadius() const;
 	void SetBrushRadius( double flRadius );
@@ -113,7 +139,21 @@ private:
 	QDoubleSpinBox *m_pAmount = nullptr;     // Paint Geometry's Distance
 	QDoubleSpinBox *m_pAlphaValue = nullptr; // Paint Alpha's Value
 	QLabel *m_pAmountLabel = nullptr;
+	QCheckBox *m_pSpatial = nullptr;
+	QSpinBox *m_pVertexRadius = nullptr;
+	QCheckBox *m_pCollapsible = nullptr;
+	QComboBox *m_pSculptKind = nullptr;
+	QComboBox *m_pSculptOffset = nullptr;
+	QComboBox *m_pSculptBounds = nullptr;
+	QComboBox *m_pSculptDirection = nullptr;
+	QDoubleSpinBox *m_pSculptDistance = nullptr;
+	QDoubleSpinBox *m_pSculptPercent = nullptr;
+	QDoubleSpinBox *m_pSculptSmoothing = nullptr;
+	QDoubleSpinBox *m_pFalloffPosition = nullptr;
+	QDoubleSpinBox *m_pFalloffFinal = nullptr;
+	CMapSculptProfile *m_pProfile = nullptr;
 	QCheckBox *m_pSoftEdge = nullptr;
+	QCheckBox *m_pSelectedOnly = nullptr;
 	QCheckBox *m_pAutosew = nullptr;
 	std::optional<xv::map::Point_t> m_PaintNormal;
 	QDoubleSpinBox *m_pNoiseMin = nullptr;

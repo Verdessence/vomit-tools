@@ -75,13 +75,19 @@
   round brush (Raise/Lower, Raise To, Smooth, along the face's normal or an axis; the left
   button raises, the right lowers; [ and ] size the brush; a drag keeps painting, one undo step
   a stroke); Sew (edges meeting end to end, T-junctions, and onto plain faces); Subdivide (the
-  selected displacements smoothed together); Noise; Invert Alpha; the power (resampled) and
+  selected base surfaces rounded together, with painted heights preserved); Noise; Invert Alpha; the power (resampled) and
   elevation. Triangle tags are written as Hammer's (9, 1, 0 by slope), and the Walkable button
   tints the selected displacements' steep triangles. New and destroyed displacements, and
   changed powers, are saved in place. As Hammer: a brush carrying a displacement is drawn as
   the displacement alone; a selected displacement shows its triangles and grid (the Grid and
   Select masks hide either); Soft or hard edge, Autosew, Alt+drag to size the brush and
   Alt+right-click to take a face's normal; Scale and the no-collision flags under Attributes.
+  Painting defaults to **Selected only**, with an option to paint across all shown displacements.
+  Stroke previews keep the panels and 2D backgrounds cached until commit; Escape cancels a
+  stroke. Brush settings are remembered, and saved grid fields retain their full float precision. Fixed-vertex brushes, Subdiv Normal, collapsible
+  vertex markers, collision flags in Object Properties, and Sculpt's Push/Carve tools (editable
+  cross-section, absolute/adaptive offsets, falloff, smoothing and additive/attenuated bounds)
+  are available in the Displacement tab.
 - **Face Edit** opens as a window of its own, as Hammer's (Preferences → Maps puts it back in
   the side panel); closing it goes back to the selection tool.
 - **Block tool** (Shift+B): drag a box in a 2D view, pull its handles in the others, Enter (or the

@@ -18,6 +18,7 @@
 
 #include <QObject>
 #include <QString>
+#include <QStringList>
 
 #include "map/Edit.h"
 #include "map/GameConfig.h"
@@ -85,7 +86,12 @@ public:
 	// While a drag goes on: edit shown on the scene as it was when the drag began, outside the undo
 	// stack. EndPreview puts that scene back (before the drag's edit goes through Edit, or when
 	// it is cancelled).
-	void Preview( const xv::map::MapEdit_t &edit );
+	void Preview( const xv::map::MapEdit_t &edit, bool bDisplacements = false );
+	[[nodiscard]] const xv::map::CScene *GetDisplacementPreviewBase() const { return m_pDisplacementBase ? m_pPreviewBase.get() : nullptr; }
+	[[nodiscard]] double GetPreviewTime() const { return m_flPreviewMs; }
+	[[nodiscard]] double GetPreviewNotifyTime() const { return m_flPreviewNotifyMs; }
+	void MeasureEditListener( const QString &szName, const std::function<void()> &pfnListen );
+	[[nodiscard]] const QStringList &GetEditListenerCosts() const { return m_EditListenerCosts; }
 	void EndPreview();
 	[[nodiscard]] bool IsPreviewing() const { return m_pPreviewBase != nullptr; }
 
@@ -135,6 +141,7 @@ signals:
 	void SelectModeChanged();
 	// An edit changed these objects (and the scene is a new snapshot).
 	void SceneEdited( const std::vector<std::uint32_t> &changed );
+	void ScenePreviewed( const std::vector<std::uint32_t> &changed );
 	void ModifiedChanged( bool bModified );
 	void PointfileChanged();
 
@@ -147,6 +154,11 @@ private:
 
 	std::shared_ptr<const xv::map::CScene> m_pScene;
 	QUndoStack *m_pUndo = nullptr;
+	QStringList m_EditListenerCosts;
+	double m_flPreviewMs = 0.0;
+	double m_flPreviewNotifyMs = 0.0;
+	std::vector<std::uint32_t> m_PreviewSolids;
+	std::shared_ptr<const xv::map::CScene> m_pDisplacementBase;
 	std::shared_ptr<const xv::map::CScene> m_pPreviewBase; // the scene before the drag
 	std::optional<xv::vfs::CGameInfo> m_Game;
 	QString m_szFgdSource;

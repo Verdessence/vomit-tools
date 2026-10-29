@@ -25,6 +25,7 @@
 #include <QVBoxLayout>
 
 #include "kv1/Kv1.h"
+#include "map/DispEdit.h"
 #include "util/Numbers.h"
 
 namespace
@@ -32,6 +33,7 @@ namespace
 
 constexpr int ROLE_ROW = Qt::UserRole;        // the sheet's row (or output) the item shows
 constexpr int ROLE_VALUE = Qt::UserRole + 1;  // a key's value as stored, behind a choice's name
+constexpr int ROLE_DISPLACEMENT = Qt::UserRole + 3;
 constexpr int ROLE_OBJECT = Qt::UserRole + 2; // an output's entity
 
 //-----------------------------------------------------------------------------
@@ -378,7 +380,26 @@ void CMapProperties::Refresh()
 		pItem->setToolTip( 0, QString::number( flag.m_nBit ) );
 		m_pFlags->addTopLevelItem( pItem );
 	}
-	m_pTabs->setTabEnabled( 1, !m_Sheet.m_Flags.empty() );
+	const std::vector<xv::map::FaceRef_t> displacements = pScene && !m_bWorld ? xv::map::DisplacementFaces( *pScene, xv::map::FacesOf( *pScene, m_Document.GetSelection() ) ) : std::vector<xv::map::FaceRef_t>{};
+	if ( !displacements.empty() )
+	{
+		for ( const auto &[ nBit, szName ] : std::vector<std::pair<int, QString>>{ { xv::map::DISP_FLAG_NO_PHYSICS, tr( "Displacement: No Physics Collision" ) }, { xv::map::DISP_FLAG_NO_HULL, tr( "Displacement: No Hull Collision" ) }, { xv::map::DISP_FLAG_NO_RAY, tr( "Displacement: No Ray Collision" ) } } )
+		{
+			std::size_t nOn = 0;
+			for ( const xv::map::FaceRef_t &face : displacements )
+			{
+				nOn += ( pScene->m_Map.m_Solids[ face.m_nSolid ].m_Sides[ face.m_nSide ].m_pDisp->m_nFlags & nBit ) != 0;
+			}
+			auto *pItem = new QTreeWidgetItem( QStringList{ szName } );
+			pItem->setFlags( Qt::ItemIsEnabled | Qt::ItemIsUserCheckable | Qt::ItemIsSelectable );
+			pItem->setData( 0, ROLE_ROW, nBit );
+			pItem->setData( 0, ROLE_DISPLACEMENT, true );
+			pItem->setCheckState( 0, nOn == 0 ? Qt::Unchecked : nOn == displacements.size() ? Qt::Checked
+																							: Qt::PartiallyChecked );
+			m_pFlags->addTopLevelItem( pItem );
+		}
+	}
+	m_pTabs->setTabEnabled( 1, m_pFlags->topLevelItemCount() > 0 );
 
 	auto fill = [ this ]( QTreeWidget *pList, const std::vector<xv::map::PropertyConnection_t> &rows, bool bInputs ) {
 		pList->clear();
@@ -644,6 +665,22 @@ void CMapProperties::FlagChanged( QTreeWidgetItem *pItem )
 	}
 	const auto nBit = pItem->data( 0, ROLE_ROW ).toUInt();
 	const bool bOn = pItem->checkState( 0 ) == Qt::Checked;
+	if ( pItem->data( 0, ROLE_DISPLACEMENT ).toBool() )
+	{
+		Apply( tr( "Displacement Flags" ), [ nBit, bOn, selection = m_Document.GetSelection() ]( const xv::map::CScene &scene ) {
+			return xv::map::EditDisplacements( scene, xv::map::DisplacementFaces( scene, xv::map::FacesOf( scene, selection ) ), [ nBit, bOn ]( std::vector<xv::map::DispFace_t> &faces ) {
+				bool bChanged = false;
+				for ( xv::map::DispFace_t &face : faces )
+				{
+					const int nWas = face.m_pDisp->m_nFlags;
+					face.m_pDisp->m_nFlags = bOn ? nWas | static_cast<int>( nBit ) : nWas & ~static_cast<int>( nBit );
+					bChanged = bChanged || nWas != face.m_pDisp->m_nFlags;
+				}
+				return bChanged;
+			} );
+		} );
+		return;
+	}
 	Apply( tr( "Change Flags" ), [ this, nBit, bOn, nDefault = m_Sheet.m_nFlagsDefault, selection = m_Document.GetSelection() ]( const xv::map::CScene &scene ) {
 		return EditShown( scene, selection, [ & ]( xv::map::Entity_t &entity ) { xv::map::SetSpawnFlag( scene.m_Map, entity, nBit, bOn, nDefault ); } );
 	} );

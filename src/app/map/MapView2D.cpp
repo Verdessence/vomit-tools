@@ -270,7 +270,7 @@ void CMapView2D::Rebuild()
 	}
 	// The same map edited: only what the edits changed is projected again, while what is left
 	// behind stays under a third of the segments.
-	if ( pScene && m_pBuiltFor && pProps == m_pProps && pScene->m_pMesh.get() == m_pBuiltMesh && m_nStaleSegments * 3 < m_Segments.size() )
+	if ( pScene && m_pBuiltFor && pProps == m_pProps && pScene->m_pMesh.get() == m_pBuiltMesh && ( GetDocument().GetDisplacementPreviewBase() || m_nStaleSegments * 3 < m_Segments.size() ) )
 	{
 		Patch( *pScene );
 		return;
@@ -402,7 +402,13 @@ void CMapView2D::PlaceSolid( const xv::map::CScene &scene, std::uint32_t nSolid,
 //-----------------------------------------------------------------------------
 void CMapView2D::PlaceSolid( const xv::map::CScene &scene, std::uint32_t nSolid )
 {
-	const xv::map::CMapMesh &edits = scene.GetEditMesh();
+	if ( !scene.IsEditedSolid( nSolid ) )
+	{
+		const xv::map::CMapMesh &mesh = scene.GetMesh();
+		PlaceSolid( scene, nSolid, mesh, nSolid < mesh.m_SolidLines.size() ? mesh.m_SolidLines[ nSolid ] : xv::map::MeshRange_t{} );
+		return;
+	}
+	const xv::map::CMapMesh &edits = scene.m_pPreviewBaseMesh && !std::ranges::binary_search( scene.m_Changed, scene.SolidObject( nSolid ) ) ? *scene.m_pPreviewBaseMesh : scene.GetEditMesh();
 	const auto it = std::ranges::lower_bound( edits.m_SolidIndices, nSolid );
 	const xv::map::MeshRange_t range = it != edits.m_SolidIndices.end() && *it == nSolid ? edits.m_SolidLines[ static_cast<std::size_t>( it - edits.m_SolidIndices.begin() ) ] : xv::map::MeshRange_t{};
 	PlaceSolid( scene, nSolid, edits, range );
@@ -746,7 +752,7 @@ void CMapView2D::PaintModels( QPainter &painter, const QRectF &visible ) const
 // Purpose: Every shown object in view, in batches of one colour; broken solids over the rest
 //          (Hammer++ draws them over everything), and selected ones last, on top.
 //-----------------------------------------------------------------------------
-void CMapView2D::PaintObjects( QPainter &painter, const QRectF &visible ) const
+void CMapView2D::PaintObjects( QPainter &painter, const QRectF &visible, bool bPreviewOnly ) const
 {
 	const CMapDocument &document = GetDocument();
 	const xv::map::CScene *pScene = document.GetScene();
@@ -843,6 +849,10 @@ void CMapView2D::PaintObjects( QPainter &painter, const QRectF &visible ) const
 	};
 	for ( const MapFlatObject_t &object : m_Objects )
 	{
+		if ( document.GetDisplacementPreviewBase() && std::ranges::binary_search( pScene->m_Changed, object.m_nObject ) != bPreviewOnly )
+		{
+			continue;
+		}
 		if ( !Overlaps( object.m_Bounds, visible ) || !document.IsShown( object.m_nObject ) )
 		{
 			continue;
@@ -1131,7 +1141,8 @@ void CMapView2D::PaintCamera( QPainter &painter ) const
 void CMapView2D::PaintLayer()
 {
 	LayerKey_t key;
-	key.m_pScene = m_pBuiltFor;
+	key.m_bPreview = GetDocument().GetDisplacementPreviewBase() != nullptr;
+	key.m_pScene = key.m_bPreview ? GetDocument().GetDisplacementPreviewBase() : m_pBuiltFor;
 	key.m_pProps = m_pProps.get();
 	key.m_pMaterials = m_Editor.GetRenderData().GetShared().m_pMaterials.get();
 	key.m_nState = GetDocument().GetStateGeneration();
@@ -1168,10 +1179,17 @@ void CMapView2D::paintEvent( QPaintEvent * )
 	QElapsedTimer timer;
 	timer.start();
 	Rebuild();
+	m_flPatchMs = timer.nsecsElapsed() / 1e6;
 	m_pLineColors = m_Editor.GetRenderData().GetLineColors( m_Editor.GetSettings() );
+	const qint64 nLayerStart = timer.nsecsElapsed();
 	PaintLayer();
+	m_flLayerMs = ( timer.nsecsElapsed() - nLayerStart ) / 1e6;
 	QPainter painter( this );
 	painter.drawPixmap( 0, 0, m_Layer );
+	if ( GetDocument().GetDisplacementPreviewBase() )
+	{
+		PaintObjects( painter, GetVisible(), true );
+	}
 	PaintCamera( painter );
 	PaintSelection( painter );
 	PaintTools( painter );

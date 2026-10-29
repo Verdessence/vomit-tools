@@ -8,6 +8,7 @@
 
 #include <algorithm>
 #include <charconv>
+#include <cmath>
 #include <optional>
 #include <system_error>
 #include <vector>
@@ -29,6 +30,21 @@ using kv1::TokenKind_t;
 bool Is( std::string_view szText, std::string_view szLowerName )
 {
 	return szText.size() == szLowerName.size() && std::ranges::equal( szText, szLowerName, []( char a, char b ) { return ( a >= 'A' && a <= 'Z' ? static_cast<char>( a - 'A' + 'a' ) : a ) == b; } );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Displacement fields must survive saving exactly as floats. Rounding to world
+//          coordinate millionths loses small normal components and subdivision offsets.
+//-----------------------------------------------------------------------------
+std::string DispNumber( float flValue )
+{
+	if ( !std::isfinite( flValue ) || flValue == 0 )
+	{
+		return "0";
+	}
+	char buffer[ 64 ];
+	const auto result = std::to_chars( buffer, buffer + sizeof buffer, flValue );
+	return result.ec == std::errc{} ? std::string( buffer, result.ptr ) : "0";
 }
 
 //-----------------------------------------------------------------------------
@@ -335,11 +351,11 @@ std::string CWriter::Disp( const DispInfo_t &disp, std::string_view szIndent ) c
 	auto vector = [ & ]( const std::vector<CVec3> &values ) {
 		return [ &values ]( std::size_t i ) {
 			const CVec3 &v = values[ i / 3 ];
-			return FormatNumber( i % 3 == 0 ? v.m_flX : i % 3 == 1 ? v.m_flY
-																   : v.m_flZ );
+			return DispNumber( i % 3 == 0 ? v.m_flX : i % 3 == 1 ? v.m_flY
+																 : v.m_flZ );
 		};
 	};
-	auto scalar = []( const auto &values ) { return [ &values ]( std::size_t i ) { return FormatNumber( values[ i ] ); }; };
+	auto scalar = []( const auto &values ) { return [ &values ]( std::size_t i ) { return DispNumber( static_cast<float>( values[ i ] ) ); }; };
 	rows( "normals", nSize, nSize * 3, vector( disp.m_Normals ) );
 	rows( "distances", nSize, nSize, scalar( disp.m_Distances ) );
 	rows( "offsets", nSize, nSize * 3, vector( disp.m_Offsets ) );
@@ -347,7 +363,7 @@ std::string CWriter::Disp( const DispInfo_t &disp, std::string_view szIndent ) c
 	rows( "alphas", nSize, nSize, scalar( disp.m_Alphas ) );
 	if ( disp.m_TriangleTags.size() == ( nSize - 1 ) * ( nSize - 1 ) * 2 )
 	{
-		rows( "triangle_tags", nSize - 1, ( nSize - 1 ) * 2, scalar( disp.m_TriangleTags ) );
+		rows( "triangle_tags", nSize - 1, ( nSize - 1 ) * 2, [ &disp ]( std::size_t i ) { return std::to_string( disp.m_TriangleTags[ i ] ); } );
 	}
 	if ( disp.m_AllowedVerts.size() == 10 )
 	{

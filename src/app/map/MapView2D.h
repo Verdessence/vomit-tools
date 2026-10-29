@@ -92,6 +92,8 @@ public:
 	[[nodiscard]] std::vector<std::uint32_t> ObjectsIn( const QRectF &box ) const;
 	[[nodiscard]] std::optional<QRectF> GetPendingBox() const { return m_PendingBox; }
 	// Milliseconds the last full repaint took.
+	[[nodiscard]] double GetLastPatchTime() const { return m_flPatchMs; }
+	[[nodiscard]] double GetLastLayerTime() const { return m_flLayerMs; }
 	[[nodiscard]] double GetLastPaintTime() const { return m_flPaintMs; }
 	[[nodiscard]] int GetPaintCount() const { return m_nPaints; }
 	[[nodiscard]] int GetLayerPaintCount() const { return m_nLayerPaints; }
@@ -116,7 +118,7 @@ private:
 	void PaintModels( QPainter &painter, const QRectF &visible ) const;
 	// Whether a prop is drawn textured rather than as its edges or box.
 	[[nodiscard]] bool IsTexturedModel( const MapFlatObject_t &object, const QRectF &box ) const;
-	void PaintObjects( QPainter &painter, const QRectF &visible ) const;
+	void PaintObjects( QPainter &painter, const QRectF &visible, bool bPreviewOnly = false ) const;
 	void PaintSelection( QPainter &painter ) const;
 	// The block tool's box and the entity tool's marker.
 	void PaintTools( QPainter &painter ) const;
@@ -219,6 +221,8 @@ private:
 	std::optional<QPointF> m_VertexBoxFrom;
 	QPointF m_ClipDragFrom;
 	QPoint m_PressAt;
+	double m_flPatchMs = 0.0;
+	double m_flLayerMs = 0.0;
 	double m_flPaintMs = 0.0;
 	int m_nPaints = 0;
 	int m_nLayerPaints = 0;      // how many of those drew the layer again
@@ -227,6 +231,7 @@ private:
 	struct LayerKey_t
 	{
 		const void *m_pScene = nullptr;
+		bool m_bPreview = false;
 		const void *m_pProps = nullptr;
 		const void *m_pMaterials = nullptr; // textures arriving draw the models again
 		std::uint64_t m_nState = ~0ull;

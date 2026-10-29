@@ -99,9 +99,27 @@ std::uint32_t ResolveMaterial( CScene &scene, std::string_view szSpelling )
 } // namespace
 
 //-----------------------------------------------------------------------------
+// Purpose: Keep earlier edits outside the stroke in a mesh that survives every sample.
+//-----------------------------------------------------------------------------
+std::shared_ptr<CScene> PrepareDisplacementPreview( const CScene &scene, const MapEdit_t &edit )
+{
+	auto pScene = std::make_shared<CScene>( scene );
+	std::vector<MeshSolid_t> solids;
+	for ( const std::uint32_t nSolid : scene.m_EditedSolids )
+	{
+		if ( !scene.m_Map.m_Solids[ nSolid ].m_bDeleted && std::ranges::none_of( edit.m_Solids, [ nSolid ]( const auto &entry ) { return entry.first == nSolid; } ) )
+		{
+			solids.push_back( { nSolid, scene.SolidObject( nSolid ), &scene.m_Solids[ nSolid ] } );
+		}
+	}
+	pScene->m_pPreviewBaseMesh = std::make_shared<const CMapMesh>( BuildMesh( scene.m_Map, std::span<const MeshSolid_t>{ solids } ) );
+	return pScene;
+}
+
+//-----------------------------------------------------------------------------
 // Purpose:
 //-----------------------------------------------------------------------------
-std::shared_ptr<CScene> ApplyEdit( const CScene &scene, const MapEdit_t &edit )
+std::shared_ptr<CScene> ApplyEdit( const CScene &scene, const MapEdit_t &edit, bool bDisplacementPreview )
 {
 	auto pScene = std::make_shared<CScene>( scene );
 	CScene &out = *pScene;
@@ -213,34 +231,47 @@ std::shared_ptr<CScene> ApplyEdit( const CScene &scene, const MapEdit_t &edit )
 	std::vector<MeshSolid_t> edited;
 	for ( const std::uint32_t nSolid : out.m_EditedSolids )
 	{
-		if ( !std::as_const( map.m_Solids )[ nSolid ].m_bDeleted )
+		if ( !std::as_const( map.m_Solids )[ nSolid ].m_bDeleted && ( !bDisplacementPreview || std::ranges::any_of( edit.m_Solids, [ nSolid ]( const auto &entry ) { return entry.first == nSolid; } ) ) )
 		{
 			edited.push_back( { nSolid, out.SolidObject( nSolid ), &std::as_const( out.m_Solids )[ nSolid ] } );
 		}
 	}
 	out.m_pEditMesh = std::make_shared<const CMapMesh>( BuildMesh( std::as_const( map ), std::span<const MeshSolid_t>{ edited } ) );
 
-	// What spans the whole map.
-	out.m_Bounds = {};
-	for ( std::uint32_t s = 0; s < map.m_Solids.size(); s++ )
+	if ( bDisplacementPreview )
 	{
-		if ( !std::as_const( map.m_Solids )[ s ].m_bDeleted )
+		// A preview may overestimate the bounds until commit; culling must never lose a raised
+		// vertex. Collision flags and the automatic groups cannot change during painting.
+		for ( const auto &[ nSolid, solid ] : edit.m_Solids )
 		{
-			out.m_Bounds.Add( std::as_const( out.m_Solids )[ s ].m_Bounds );
+			out.m_Bounds.Add( std::as_const( out.m_Solids )[ nSolid ].m_Bounds );
 		}
 	}
-	for ( std::size_t e = 0; e < out.m_Entities.size(); e++ )
+	else
 	{
-		if ( std::as_const( out.m_Entities )[ e ].m_bPoint && !std::as_const( map.m_Entities )[ e ].m_bDeleted )
+		// What spans the whole map.
+		out.m_Bounds = {};
+		for ( std::uint32_t s = 0; s < map.m_Solids.size(); s++ )
 		{
-			out.m_Bounds.Add( out.GetEntityBox( e ) );
+			if ( !std::as_const( map.m_Solids )[ s ].m_bDeleted )
+			{
+				out.m_Bounds.Add( std::as_const( out.m_Solids )[ s ].m_Bounds );
+			}
 		}
+		for ( std::size_t e = 0; e < out.m_Entities.size(); e++ )
+		{
+			if ( std::as_const( out.m_Entities )[ e ].m_bPoint && !std::as_const( map.m_Entities )[ e ].m_bDeleted )
+			{
+				out.m_Bounds.Add( out.GetEntityBox( e ) );
+			}
+		}
+		for ( const MeshChunk_t &chunk : out.GetInstanceMesh().m_Chunks )
+		{
+			out.m_Bounds.Add( chunk.m_Bounds );
+		}
+		out.m_AutoVisgroups = BuildAutoVisgroups( out );
+		out.m_pPreviewBaseMesh.reset();
 	}
-	for ( const MeshChunk_t &chunk : out.GetInstanceMesh().m_Chunks )
-	{
-		out.m_Bounds.Add( chunk.m_Bounds );
-	}
-	out.m_AutoVisgroups = BuildAutoVisgroups( out );
 	if ( bSkybox )
 	{
 		out.m_Skybox3D = FindSkybox3D( out );

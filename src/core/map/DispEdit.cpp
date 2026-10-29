@@ -71,6 +71,41 @@ std::vector<std::size_t> Neighbours( std::size_t nSize, std::size_t i )
 }
 
 //-----------------------------------------------------------------------------
+// Purpose: Spatial brushes use world distances; fixed brushes use steps about the closest
+//          grid vertex, independent of the displacement's world size or power.
+//-----------------------------------------------------------------------------
+std::vector<double> BrushWeights( const DispMesh_t &mesh, const DispBrush_t &brush )
+{
+	std::vector<double> weights( mesh.m_Points.size(), 0.0 );
+	if ( mesh.m_Points.empty() )
+	{
+		return weights;
+	}
+	const auto closest = std::ranges::min_element( mesh.m_Points, [ & ]( const Point_t &a, const Point_t &b ) { return Length( Subtract( a, brush.m_Centre ) ) < Length( Subtract( b, brush.m_Centre ) ); } );
+	const std::size_t nClosest = static_cast<std::size_t>( closest - mesh.m_Points.begin() );
+	const auto nSize = static_cast<std::size_t>( mesh.m_nSize );
+	const double flStep = std::max( Length( Subtract( mesh.m_Corners[ 1 ], mesh.m_Corners[ 0 ] ) ), Length( Subtract( mesh.m_Corners[ 3 ], mesh.m_Corners[ 0 ] ) ) ) / ( nSize - 1 );
+	if ( !brush.m_bSpatial && Length( Subtract( *closest, brush.m_Centre ) ) > flStep * ( brush.m_nVertexRadius + 0.75 ) )
+	{
+		return weights;
+	}
+	for ( std::size_t i = 0; i < weights.size(); ++i )
+	{
+		if ( brush.m_bSpatial )
+		{
+			weights[ i ] = Weight( Length( Subtract( mesh.m_Points[ i ], brush.m_Centre ) ), brush.m_flRadius, brush.m_bSoftEdge );
+		}
+		else
+		{
+			const double r = static_cast<double>( i / nSize ) - static_cast<double>( nClosest / nSize );
+			const double c = static_cast<double>( i % nSize ) - static_cast<double>( nClosest % nSize );
+			weights[ i ] = r * r + c * c <= brush.m_nVertexRadius * brush.m_nVertexRadius ? 1.0 : 0.0;
+		}
+	}
+	return weights;
+}
+
+//-----------------------------------------------------------------------------
 // Purpose: The point's position set, the elevation and offset taken out of what is stored.
 //-----------------------------------------------------------------------------
 void SetPosition( DispInfo_t &disp, const DispMesh_t &mesh, const FaceGeometry_t &face, std::size_t i, const Point_t &target )
@@ -307,17 +342,19 @@ void SetDisplacementPower( DispInfo_t &disp, int nPower )
 bool PaintGeometry( DispInfo_t &disp, const FaceGeometry_t &face, const DispBrush_t &brush )
 {
 	const std::optional<DispMesh_t> mesh = BuildDisplacement( disp, face );
-	if ( !mesh || brush.m_flRadius <= 0.0 )
+	if ( !mesh || ( brush.m_bSpatial && brush.m_flRadius <= 0.0 ) )
 	{
 		return false;
 	}
 	const auto nSize = static_cast<std::size_t>( mesh->m_nSize );
 	const Point_t axis = Length( brush.m_Axis ) > 1e-9 ? Normalized( brush.m_Axis ) : face.m_Plane.m_Normal;
+	const std::vector<double> weights = BrushWeights( *mesh, brush );
 	bool bChanged = false;
 	for ( std::size_t i = 0; i < mesh->m_Points.size(); i++ )
 	{
 		const Point_t &p = mesh->m_Points[ i ];
-		const double w = Weight( Length( Subtract( p, brush.m_Centre ) ), brush.m_flRadius, brush.m_bSoftEdge );
+		const Point_t direction = brush.m_bSubdivNormal && i < disp.m_OffsetNormals.size() && Length( ToPoint( disp.m_OffsetNormals[ i ] ) ) > 1e-9 ? Normalized( ToPoint( disp.m_OffsetNormals[ i ] ) ) : axis;
+		const double w = weights[ i ];
 		if ( w <= 0.0 )
 		{
 			continue;
@@ -326,10 +363,10 @@ bool PaintGeometry( DispInfo_t &disp, const FaceGeometry_t &face, const DispBrus
 		switch ( brush.m_nEffect )
 		{
 			case PaintEffect_t::PAINT_EFFECT_RAISE_LOWER:
-				move = Scale( axis, brush.m_flAmount * w );
+				move = Scale( direction, brush.m_flAmount * w );
 				break;
 			case PaintEffect_t::PAINT_EFFECT_RAISE_TO:
-				move = Scale( axis, ( brush.m_flAmount - Dot( p, axis ) ) * w );
+				move = Scale( direction, ( brush.m_flAmount - Dot( Subtract( p, mesh->m_Flat[ i ] ), direction ) ) * w );
 				break;
 			case PaintEffect_t::PAINT_EFFECT_SMOOTH:
 			{
@@ -360,16 +397,17 @@ bool PaintGeometry( DispInfo_t &disp, const FaceGeometry_t &face, const DispBrus
 bool PaintAlpha( DispInfo_t &disp, const FaceGeometry_t &face, const DispBrush_t &brush )
 {
 	const std::optional<DispMesh_t> mesh = BuildDisplacement( disp, face );
-	if ( !mesh || brush.m_flRadius <= 0.0 )
+	if ( !mesh || ( brush.m_bSpatial && brush.m_flRadius <= 0.0 ) )
 	{
 		return false;
 	}
 	const auto nSize = static_cast<std::size_t>( mesh->m_nSize );
 	const std::vector<float> before = disp.m_Alphas;
+	const std::vector<double> weights = BrushWeights( *mesh, brush );
 	bool bChanged = false;
 	for ( std::size_t i = 0; i < mesh->m_Points.size() && i < disp.m_Alphas.size(); i++ )
 	{
-		const double w = Weight( Length( Subtract( mesh->m_Points[ i ], brush.m_Centre ) ), brush.m_flRadius, brush.m_bSoftEdge );
+		const double w = weights[ i ];
 		if ( w <= 0.0 )
 		{
 			continue;
@@ -399,6 +437,132 @@ bool PaintAlpha( DispInfo_t &disp, const FaceGeometry_t &face, const DispBrush_t
 		const auto flNew = static_cast<float>( std::clamp( flAlpha, 0.0, 255.0 ) );
 		bChanged = bChanged || flNew != before[ i ];
 		disp.m_Alphas[ i ] = flNew;
+	}
+	return bChanged;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Show what a displacement's stored mask disables, and where unequal seam grids
+//          force interpolation. Match full edges and half-edge T-junctions in either direction.
+//-----------------------------------------------------------------------------
+std::vector<std::size_t> CollapsibleVertices( const DispInfo_t &disp, const DispMesh_t &mesh, std::span<const DispMesh_t> neighbours )
+{
+	std::vector<bool> collapsed( mesh.m_Points.size(), false );
+	for ( std::size_t i = 0; i < collapsed.size(); ++i )
+	{
+		collapsed[ i ] = i / 32 < disp.m_AllowedVerts.size() && !( static_cast<std::uint32_t>( disp.m_AllowedVerts[ i / 32 ] ) & ( 1u << ( i % 32 ) ) );
+	}
+	for ( const DispMesh_t &other : neighbours )
+	{
+		if ( other.m_nSize < 2 )
+		{
+			continue;
+		}
+		for ( std::size_t a = 0; a < 4; ++a )
+		{
+			for ( std::size_t b = 0; b < 4; ++b )
+			{
+				auto match = EdgeMatch( mesh.m_Corners[ a ], mesh.m_Corners[ ( a + 1 ) % 4 ], other.m_Corners[ b ], other.m_Corners[ ( b + 1 ) % 4 ] );
+				if ( !match )
+				{
+					const auto reverse = EdgeMatch( other.m_Corners[ b ], other.m_Corners[ ( b + 1 ) % 4 ], mesh.m_Corners[ a ], mesh.m_Corners[ ( a + 1 ) % 4 ] );
+					if ( reverse )
+						match = std::pair{ -reverse->first / reverse->second, 1.0 / reverse->second };
+				}
+				if ( !match )
+					continue;
+				for ( const auto &[ i, t ] : EdgePoints( mesh.m_nSize, a ) )
+				{
+					const double u = match->first + match->second * t;
+					if ( u < -1e-6 || u > 1.0 + 1e-6 )
+						continue;
+					const double flVertex = u * ( other.m_nSize - 1 );
+					collapsed[ i ] = collapsed[ i ] || std::abs( flVertex - std::round( flVertex ) ) > 1e-6;
+				}
+			}
+		}
+	}
+	std::vector<std::size_t> indices;
+	for ( std::size_t i = 0; i < collapsed.size(); ++i )
+	{
+		if ( collapsed[ i ] )
+			indices.push_back( i );
+	}
+	return indices;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Push adds a radial offset; Carve samples an editable cross-section. Attenuation
+//          caps a vertex's contribution over the stroke instead of adding on every sample.
+//-----------------------------------------------------------------------------
+bool SculptGeometry( DispInfo_t &disp, const FaceGeometry_t &face, const DispBrush_t &brush, const SculptBrush_t &sculpt, std::vector<double> *pApplied )
+{
+	const auto mesh = BuildDisplacement( disp, face );
+	if ( !mesh || brush.m_flRadius <= 0 )
+	{
+		return false;
+	}
+	if ( pApplied )
+	{
+		pApplied->resize( mesh->m_Points.size(), 0.0 );
+	}
+	const double flAmount = ( sculpt.m_bAdaptive ? sculpt.m_flPercent * brush.m_flRadius : sculpt.m_flDistance ) * ( brush.m_flAmount < 0 ? -1.0 : 1.0 );
+	const Point_t axis = Length( brush.m_Axis ) > 1e-9 ? Normalized( brush.m_Axis ) : face.m_Plane.m_Normal;
+	const Point_t across = Normalized( sculpt.m_Right );
+	bool bChanged = false;
+	for ( std::size_t i = 0; i < mesh->m_Points.size(); ++i )
+	{
+		const Point_t &p = mesh->m_Points[ i ];
+		const double d = Length( Subtract( p, brush.m_Centre ) ) / brush.m_flRadius;
+		if ( d >= 1.0 )
+		{
+			continue;
+		}
+		const double flPlateau = std::clamp( sculpt.m_flFalloffPosition, 0.0, 1.0 );
+		const double w = d <= flPlateau ? 1.0 : sculpt.m_flFalloffFinal + ( 1.0 - sculpt.m_flFalloffFinal ) * Weight( d - flPlateau, 1.0 - flPlateau );
+		double flProfile = 1.0;
+		if ( sculpt.m_bCarve )
+		{
+			const double t = std::clamp( ( Dot( Subtract( p, brush.m_Centre ), across ) / brush.m_flRadius + 1.0 ) * 4.0, 0.0, 8.0 );
+			const std::size_t n = std::min<std::size_t>( static_cast<std::size_t>( t ), 7 );
+			flProfile = sculpt.m_Profile[ n ] + ( sculpt.m_Profile[ n + 1 ] - sculpt.m_Profile[ n ] ) * ( t - n );
+		}
+		double flOffset = flAmount * w * flProfile;
+		if ( sculpt.m_bAttenuated && pApplied )
+		{
+			double &flWas = ( *pApplied )[ i ];
+			const double flTarget = flOffset >= 0 ? std::max( flWas, flOffset ) : std::min( flWas, flOffset );
+			flOffset = flTarget - flWas;
+			flWas = flTarget;
+		}
+		Point_t direction = axis;
+		if ( sculpt.m_bTowardsCentre )
+		{
+			const Point_t towards = Subtract( brush.m_Centre, p );
+			if ( Length( towards ) > 1e-9 )
+			{
+				direction = Normalized( towards );
+			}
+		}
+		Point_t move = Scale( direction, flOffset );
+		if ( sculpt.m_flSmoothing > 0 && ( !sculpt.m_bAttenuated || std::abs( flOffset ) > 1e-9 ) )
+		{
+			const auto round = Neighbours( mesh->m_nSize, i );
+			Point_t average{};
+			for ( const std::size_t j : round )
+			{
+				average = Add( average, mesh->m_Points[ j ] );
+			}
+			if ( !round.empty() )
+			{
+				move = Add( move, Scale( Subtract( Scale( average, 1.0 / round.size() ), p ), std::clamp( sculpt.m_flSmoothing, 0.0, 1.0 ) * w ) );
+			}
+		}
+		if ( Length( move ) > 1e-9 )
+		{
+			SetPosition( disp, *mesh, face, i, Add( p, move ) );
+			bChanged = true;
+		}
 	}
 	return bChanged;
 }
@@ -586,105 +750,199 @@ bool SewDisplacements( const std::vector<DispFace_t> &faces )
 }
 
 //-----------------------------------------------------------------------------
-// Purpose: The displacements as one mesh (points at one place are one point), smoothed
-//          toward their neighbours; a point on an edge no other triangle shares is the
-//          surface's rim and stays, so the terrain still meets what is round it.
+// Purpose: Round the base quadrilaterals rather than smoothing the painted vertex field.
+//          Shared control edges refine together; the open rim stays where adjacent unselected
+//          geometry expects it. Painted distances and alpha survive another subdivision.
 //-----------------------------------------------------------------------------
-bool SubdivideDisplacements( const std::vector<DispFace_t> &faces, int nPasses )
+bool SubdivideDisplacements( const std::vector<DispFace_t> &faces )
 {
-	std::vector<std::optional<DispMesh_t>> meshes( faces.size() );
-	std::map<std::tuple<long long, long long, long long>, std::size_t> ids;
-	std::vector<Point_t> positions;
-	std::vector<std::vector<std::size_t>> pointIds( faces.size() );
-	std::map<std::pair<std::size_t, std::size_t>, int> edgeUses;
-	std::vector<std::set<std::size_t>> neighbours;
-	for ( std::size_t f = 0; f < faces.size(); f++ )
+	struct Quad_t
 	{
-		if ( !faces[ f ].m_pDisp || !faces[ f ].m_pFace )
+		std::array<std::size_t, 4> m_Vertices;
+		std::size_t m_nFace;
+		int m_nRow, m_nColumn, m_nWidth;
+	};
+	struct Edge_t
+	{
+		Point_t m_FaceSum{};
+		int m_nFaces = 0;
+		std::size_t m_nVertex = 0;
+	};
+	std::vector<std::optional<DispMesh_t>> meshes( faces.size() );
+	int nPower = 0;
+	for ( std::size_t f = 0; f < faces.size(); ++f )
+	{
+		if ( faces[ f ].m_pDisp && faces[ f ].m_pFace )
 		{
-			continue;
-		}
-		meshes[ f ] = BuildDisplacement( *faces[ f ].m_pDisp, *faces[ f ].m_pFace );
-		if ( !meshes[ f ] )
-		{
-			continue;
-		}
-		for ( const Point_t &p : meshes[ f ]->m_Points )
-		{
-			const auto [ it, bNew ] = ids.try_emplace( Key( p ), positions.size() );
-			if ( bNew )
+			meshes[ f ] = BuildDisplacement( *faces[ f ].m_pDisp, *faces[ f ].m_pFace );
+			if ( meshes[ f ] )
 			{
-				positions.push_back( p );
-				neighbours.emplace_back();
-			}
-			pointIds[ f ].push_back( it->second );
-		}
-		const std::vector<std::uint32_t> &indices = meshes[ f ]->m_Indices;
-		for ( std::size_t t = 0; t + 2 < indices.size(); t += 3 )
-		{
-			for ( std::size_t k = 0; k < 3; k++ )
-			{
-				const std::size_t u = pointIds[ f ][ indices[ t + k ] ];
-				const std::size_t v = pointIds[ f ][ indices[ t + ( k + 1 ) % 3 ] ];
-				if ( u == v )
-				{
-					continue;
-				}
-				edgeUses[ { std::min( u, v ), std::max( u, v ) } ]++;
-				neighbours[ u ].insert( v );
-				neighbours[ v ].insert( u );
+				nPower = std::max( nPower, faces[ f ].m_pDisp->m_nPower );
 			}
 		}
 	}
-	if ( positions.empty() )
+	if ( nPower == 0 )
 	{
 		return false;
 	}
-	std::vector<bool> fixed( positions.size(), false );
-	for ( const auto &[ edge, nUses ] : edgeUses )
-	{
-		if ( nUses == 1 )
-		{
-			fixed[ edge.first ] = fixed[ edge.second ] = true;
-		}
-	}
-	const std::vector<Point_t> before = positions;
-	for ( int nPass = 0; nPass < nPasses; nPass++ )
-	{
-		std::vector<Point_t> next = positions;
-		for ( std::size_t i = 0; i < positions.size(); i++ )
-		{
-			if ( fixed[ i ] || neighbours[ i ].empty() )
-			{
-				continue;
-			}
-			Point_t average{};
-			for ( const std::size_t n : neighbours[ i ] )
-			{
-				average = Add( average, positions[ n ] );
-			}
-			average = Scale( average, 1.0 / static_cast<double>( neighbours[ i ].size() ) );
-			next[ i ] = Lerp( positions[ i ], average, 0.5 );
-		}
-		positions = std::move( next );
-	}
-	bool bChanged = false;
-	for ( std::size_t f = 0; f < faces.size(); f++ )
+	const int nWidth = 1 << nPower;
+	std::map<std::tuple<long long, long long, long long>, std::size_t> ids;
+	std::vector<Point_t> points;
+	std::vector<Quad_t> quads;
+	for ( std::size_t f = 0; f < faces.size(); ++f )
 	{
 		if ( !meshes[ f ] )
 		{
 			continue;
 		}
-		for ( std::size_t i = 0; i < pointIds[ f ].size(); i++ )
+		Quad_t quad{ {}, f, 0, 0, nWidth };
+		for ( std::size_t k = 0; k < 4; ++k )
 		{
-			const Point_t &target = positions[ pointIds[ f ][ i ] ];
-			if ( Length( Subtract( target, before[ pointIds[ f ][ i ] ] ) ) > 1e-6 )
+			const Point_t &p = meshes[ f ]->m_Corners[ k ];
+			const auto [ it, bNew ] = ids.try_emplace( Key( p ), points.size() );
+			if ( bNew )
 			{
-				SetPosition( *faces[ f ].m_pDisp, *meshes[ f ], *faces[ f ].m_pFace, i, target );
-				bChanged = true;
+				points.push_back( p );
+			}
+			quad.m_Vertices[ k ] = it->second;
+		}
+		quads.push_back( quad );
+	}
+	for ( int nLevel = 0; nLevel < nPower; ++nLevel )
+	{
+		std::map<std::pair<std::size_t, std::size_t>, Edge_t> edges;
+		std::vector<Point_t> centres, faceSums( points.size() ), edgeSums( points.size() );
+		std::vector<int> counts( points.size(), 0 ), edgeCounts( points.size(), 0 );
+		std::vector<bool> boundary( points.size(), false );
+		for ( const Quad_t &quad : quads )
+		{
+			Point_t centre{};
+			for ( const std::size_t n : quad.m_Vertices )
+			{
+				centre = Add( centre, Scale( points[ n ], 0.25 ) );
+			}
+			centres.push_back( centre );
+			for ( std::size_t k = 0; k < 4; ++k )
+			{
+				const std::size_t u = quad.m_Vertices[ k ], v = quad.m_Vertices[ ( k + 1 ) % 4 ];
+				faceSums[ u ] = Add( faceSums[ u ], centre );
+				counts[ u ]++;
+				Edge_t &edge = edges[ std::minmax( u, v ) ];
+				edge.m_FaceSum = Add( edge.m_FaceSum, centre );
+				edge.m_nFaces++;
 			}
 		}
-		faces[ f ].m_pDisp->m_bSubdivided = true;
+		for ( const auto &[ ends, edge ] : edges )
+		{
+			const Point_t midpoint = Lerp( points[ ends.first ], points[ ends.second ], 0.5 );
+			for ( const std::size_t n : { ends.first, ends.second } )
+			{
+				edgeSums[ n ] = Add( edgeSums[ n ], midpoint );
+				edgeCounts[ n ]++;
+				boundary[ n ] = boundary[ n ] || edge.m_nFaces != 2;
+			}
+		}
+		std::vector<Point_t> next = points;
+		for ( std::size_t n = 0; n < points.size(); ++n )
+		{
+			if ( !boundary[ n ] && counts[ n ] > 0 && edgeCounts[ n ] > 0 )
+			{
+				const double flValence = counts[ n ];
+				next[ n ] = Scale( Add( Add( Scale( faceSums[ n ], 1.0 / flValence ), Scale( edgeSums[ n ], 2.0 / edgeCounts[ n ] ) ), Scale( points[ n ], flValence - 3.0 ) ), 1.0 / flValence );
+			}
+		}
+		for ( auto &[ ends, edge ] : edges )
+		{
+			edge.m_nVertex = next.size();
+			next.push_back( edge.m_nFaces == 2 ? Scale( Add( Add( points[ ends.first ], points[ ends.second ] ), edge.m_FaceSum ), 0.25 ) : Lerp( points[ ends.first ], points[ ends.second ], 0.5 ) );
+		}
+		std::vector<Quad_t> refined;
+		refined.reserve( quads.size() * 4 );
+		for ( std::size_t q = 0; q < quads.size(); ++q )
+		{
+			const Quad_t &quad = quads[ q ];
+			const auto &v = quad.m_Vertices;
+			std::array<std::size_t, 4> e;
+			for ( std::size_t k = 0; k < 4; ++k )
+			{
+				e[ k ] = edges.at( std::minmax( v[ k ], v[ ( k + 1 ) % 4 ] ) ).m_nVertex;
+			}
+			const std::size_t nCentre = next.size();
+			next.push_back( centres[ q ] );
+			const int h = quad.m_nWidth / 2, r = quad.m_nRow, c = quad.m_nColumn;
+			refined.push_back( { { v[ 0 ], e[ 0 ], nCentre, e[ 3 ] }, quad.m_nFace, r, c, h } );
+			refined.push_back( { { e[ 0 ], v[ 1 ], e[ 1 ], nCentre }, quad.m_nFace, r + h, c, h } );
+			refined.push_back( { { nCentre, e[ 1 ], v[ 2 ], e[ 2 ] }, quad.m_nFace, r + h, c + h, h } );
+			refined.push_back( { { e[ 3 ], nCentre, e[ 2 ], v[ 3 ] }, quad.m_nFace, r, c + h, h } );
+		}
+		points = std::move( next );
+		quads = std::move( refined );
+	}
+	std::vector<std::vector<Point_t>> surfaces( faces.size() );
+	for ( std::size_t f = 0; f < faces.size(); ++f )
+	{
+		if ( meshes[ f ] )
+		{
+			surfaces[ f ] = meshes[ f ]->m_Flat;
+		}
+	}
+	for ( const Quad_t &quad : quads )
+	{
+		const int nSize = meshes[ quad.m_nFace ]->m_nSize;
+		const int nStride = nWidth / ( nSize - 1 );
+		const std::array<std::pair<int, int>, 4> places{ { { quad.m_nRow, quad.m_nColumn }, { quad.m_nRow + 1, quad.m_nColumn }, { quad.m_nRow + 1, quad.m_nColumn + 1 }, { quad.m_nRow, quad.m_nColumn + 1 } } };
+		for ( std::size_t k = 0; k < 4; ++k )
+		{
+			const auto [ r, c ] = places[ k ];
+			if ( r % nStride == 0 && c % nStride == 0 )
+			{
+				surfaces[ quad.m_nFace ][ ( r / nStride ) * nSize + c / nStride ] = points[ quad.m_Vertices[ k ] ];
+			}
+		}
+	}
+	std::vector<std::optional<DispMesh_t>> roundedBases( faces.size() );
+	std::map<std::tuple<long long, long long, long long>, Point_t> normalSums;
+	bool bChanged = false;
+	for ( std::size_t f = 0; f < faces.size(); ++f )
+	{
+		if ( !meshes[ f ] )
+		{
+			continue;
+		}
+		DispInfo_t &disp = *faces[ f ].m_pDisp;
+		bChanged = bChanged || !disp.m_bSubdivided;
+		for ( std::size_t i = 0; i < surfaces[ f ].size(); ++i )
+		{
+			const Point_t offset = Subtract( surfaces[ f ][ i ], meshes[ f ]->m_Flat[ i ] );
+			const CVec3 stored = ToVec3( offset );
+			bChanged = bChanged || Length( Subtract( ToPoint( stored ), ToPoint( disp.m_Offsets[ i ] ) ) ) > 1e-6;
+			disp.m_Offsets[ i ] = stored;
+		}
+		DispInfo_t base = disp;
+		std::ranges::fill( base.m_Distances, 0.0f );
+		base.m_flElevation = 0;
+		roundedBases[ f ] = BuildDisplacement( base, *faces[ f ].m_pFace );
+		if ( roundedBases[ f ] )
+		{
+			for ( std::size_t i = 0; i < roundedBases[ f ]->m_Points.size(); ++i )
+			{
+				Point_t &sum = normalSums[ Key( roundedBases[ f ]->m_Points[ i ] ) ];
+				sum = Add( sum, roundedBases[ f ]->m_Normals[ i ] );
+			}
+		}
+		disp.m_bSubdivided = true;
+	}
+	for ( std::size_t f = 0; f < faces.size(); ++f )
+	{
+		if ( !roundedBases[ f ] )
+			continue;
+		DispInfo_t &disp = *faces[ f ].m_pDisp;
+		for ( std::size_t i = 0; i < roundedBases[ f ]->m_Points.size(); ++i )
+		{
+			const CVec3 normal = ToVec3( Normalized( normalSums.at( Key( roundedBases[ f ]->m_Points[ i ] ) ) ) );
+			bChanged = bChanged || Length( Subtract( ToPoint( normal ), ToPoint( disp.m_OffsetNormals[ i ] ) ) ) > 1e-6;
+			disp.m_OffsetNormals[ i ] = normal;
+		}
 	}
 	return bChanged;
 }

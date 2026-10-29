@@ -70,6 +70,10 @@ xv::map::RasterScene_t MapFrame_t::MakeScene() const
 		{
 			scene.m_Meshes.push_back( &m_pScene->GetInstanceMesh() );
 		}
+		if ( m_pScene->m_pPreviewBaseMesh && !m_pScene->m_pPreviewBaseMesh->m_Vertices.empty() )
+		{
+			scene.m_Meshes.push_back( m_pScene->m_pPreviewBaseMesh.get() );
+		}
 		if ( !m_pScene->GetEditMesh().m_Vertices.empty() )
 		{
 			scene.m_Meshes.push_back( &m_pScene->GetEditMesh() );
@@ -293,6 +297,11 @@ void CMapRenderData::Refresh()
 {
 	m_pBuiltFor = m_Document.GetScene();
 	m_Frame.m_pScene = m_Document.GetSharedScene();
+	if ( m_Document.GetDisplacementPreviewBase() )
+	{
+		m_nGeneration++;
+		return;
+	}
 	m_nStateFor = ~0ull;
 	m_LineColorsFor = {};
 	BuildEntityBoxes();

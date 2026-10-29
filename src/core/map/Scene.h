@@ -65,6 +65,7 @@ public:
 	// Edits (map/Edit.h): the solids drawn from the edit mesh rather than the mesh as read (sorted
 	// solid indices), how many edits made this snapshot, and the objects the last one changed.
 	std::shared_ptr<const CMapMesh> m_pEditMesh = std::make_shared<const CMapMesh>();
+	std::shared_ptr<const CMapMesh> m_pPreviewBaseMesh; // edited solids outside a displacement stroke
 	std::vector<std::uint32_t> m_EditedSolids;
 	std::uint64_t m_nRevision = 0;
 	std::vector<std::uint32_t> m_Changed;

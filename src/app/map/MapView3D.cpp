@@ -90,6 +90,9 @@ CMapView3D::CMapView3D( CMapEditor &editor, MapViewType_t nType, QWidget *pParen
 	// Not ApplyPreferences: that tells the editor, which is still making its panes.
 	m_Camera.m_flFov = CPreferences::Instance().GetMapPreferences().m_flFov;
 	m_Camera.m_flFar = CPreferences::Instance().GetMapPreferences().m_flRenderDistance;
+	m_pPaintPreview = new QTimer( this );
+	m_pPaintPreview->setSingleShot( true );
+	connect( m_pPaintPreview, &QTimer::timeout, this, &CMapView3D::PreviewPaint );
 	m_pTick = new QTimer( this );
 	m_pTick->setInterval( TICK_MS );
 	m_pTick->setTimerType( Qt::PreciseTimer );
@@ -432,13 +435,18 @@ void CMapView3D::PaintLabels( QPainter &painter )
 		{
 			lines << tr( "software: %1 ms a frame%2" ).arg( m_flRenderMs, 0, 'f', 1 ).arg( m_bReduced ? tr( " (half size while moving)" ) : QString{} );
 		}
+		if ( m_pPaintScene )
+		{
+			lines << GetPaintCosts();
+		}
 		for ( CMapView *pView : m_Editor.GetViews() )
 		{
 			if ( auto *p2D = qobject_cast<CMapView2D *>( pView ) )
 			{
-				lines << tr( "%1: %2 ms a repaint, %3 repaints" ).arg( CMapPane::TypeName( p2D->GetType() ) ).arg( p2D->GetLastPaintTime(), 0, 'f', 1 ).arg( p2D->GetPaintCount() );
+				lines << tr( "%1: %2 ms a repaint (%3 patch, %4 layer), %5 repaints" ).arg( CMapPane::TypeName( p2D->GetType() ) ).arg( p2D->GetLastPaintTime(), 0, 'f', 1 ).arg( p2D->GetLastPatchTime(), 0, 'f', 2 ).arg( p2D->GetLastLayerTime(), 0, 'f', 2 ).arg( p2D->GetPaintCount() );
 			}
 		}
+		lines << GetDocument().GetEditListenerCosts();
 		const QString szText = lines.join( QLatin1Char( '\n' ) );
 		const QRect text = painter.fontMetrics().boundingRect( rect().adjusted( 0, 4, -8, 0 ), Qt::AlignRight | Qt::AlignTop, szText );
 		painter.fillRect( text.adjusted( -6, -3, 6, 3 ), mapstyle::OVERLAY_BACKING );
@@ -608,6 +616,12 @@ void CMapView3D::mousePressEvent( QMouseEvent *pEvent )
 			return;
 		}
 	}
+	if ( IsPaintingDisplacements() && m_Editor.GetFaceEdit().GetDispPaintMode() == DispPaintMode_t::DISP_PAINT_SCULPT && pEvent->button() == Qt::RightButton && !m_bSpaceHeld && !m_bMouselook )
+	{
+		m_RadiusFrom = pEvent->position().toPoint();
+		m_flRadiusFrom = m_Editor.GetFaceEdit().GetBrushRadius();
+		return;
+	}
 	if ( IsPaintingDisplacements() && ( pEvent->button() == Qt::LeftButton || pEvent->button() == Qt::RightButton ) && !m_bSpaceHeld && !m_bMouselook )
 	{
 		const std::vector<xv::map::FaceRef_t> faces = m_Editor.GetPaintFaces( FaceAt( pEvent->position() ) );
@@ -615,15 +629,24 @@ void CMapView3D::mousePressEvent( QMouseEvent *pEvent )
 		{
 			m_pPaintScene = GetDocument().GetSharedScene();
 			m_Painted.clear();
+			m_PaintChanged.clear();
 			for ( const xv::map::FaceRef_t &face : faces )
 			{
 				m_Painted.emplace_back( face, *m_pPaintScene->m_Map.m_Solids[ face.m_nSolid ].m_Sides[ face.m_nSide ].m_pDisp );
 			}
+			m_SculptApplied.assign( m_Painted.size(), {} );
+			m_PaintModifiers = pEvent->modifiers();
+			m_bPaintAlpha = m_Editor.GetFaceEdit().GetDispPaintMode() == DispPaintMode_t::DISP_PAINT_ALPHA;
+			m_bPaintSculpt = m_Editor.GetFaceEdit().GetDispPaintMode() == DispPaintMode_t::DISP_PAINT_SCULPT;
 			m_bPaintLower = pEvent->button() == Qt::RightButton;
 			m_PaintLast = pEvent->position().toPoint();
 			PaintStroke( pEvent->position() );
-			return;
 		}
+		else
+		{
+			emit m_Editor.StatusMessage( tr( "Select a displacement face before painting, or turn off Selected only" ) );
+		}
+		return;
 	}
 	// The texture tool's right click puts the current texture on the face (Alt: its values too).
 	if ( pEvent->button() == Qt::RightButton && m_Editor.GetTool() == MapTool_t::MAP_TOOL_TEXTURE )
@@ -759,7 +782,7 @@ void CMapView3D::mouseMoveEvent( QMouseEvent *pEvent )
 		PreviewGizmo( pEvent->position(), pEvent->modifiers() );
 		return;
 	}
-	if ( m_RadiusFrom && ( pEvent->buttons() & Qt::LeftButton ) )
+	if ( m_RadiusFrom && ( pEvent->buttons() & ( Qt::LeftButton | Qt::RightButton ) ) )
 	{
 		// A hundred pixels right makes the brush about 2.7 times as big.
 		m_Editor.GetFaceEdit().SetBrushRadius( std::clamp( m_flRadiusFrom * std::exp( ( at.x() - m_RadiusFrom->x() ) / 100.0 ), 1.0, 8192.0 ) );
@@ -772,6 +795,7 @@ void CMapView3D::mouseMoveEvent( QMouseEvent *pEvent )
 		if ( ( at - m_PaintLast ).manhattanLength() >= 8 )
 		{
 			m_PaintLast = at;
+			m_PaintModifiers = pEvent->modifiers();
 			PaintStroke( pEvent->position() );
 		}
 		return;
@@ -851,7 +875,7 @@ void CMapView3D::mouseReleaseEvent( QMouseEvent *pEvent )
 		EndGizmo( true, pEvent->position(), pEvent->modifiers() );
 		return;
 	}
-	if ( m_RadiusFrom && pEvent->button() == Qt::LeftButton )
+	if ( m_RadiusFrom && ( pEvent->button() == Qt::LeftButton || pEvent->button() == Qt::RightButton ) )
 	{
 		m_RadiusFrom.reset();
 		return;
@@ -923,7 +947,7 @@ std::optional<xv::map::FaceRef_t> CMapView3D::FaceAt( QPointF at )
 	}
 	const xv::map::TraceHit_t &hit = hits.front();
 	const xv::map::CMapMesh &mesh = *scene.m_Meshes[ hit.m_nMesh ];
-	if ( ( &mesh != &frame.m_pScene->GetMesh() && &mesh != &frame.m_pScene->GetEditMesh() ) || hit.m_nTriangle >= mesh.m_TriangleFaces.size() )
+	if ( ( &mesh != &frame.m_pScene->GetMesh() && &mesh != &frame.m_pScene->GetEditMesh() && &mesh != frame.m_pScene->m_pPreviewBaseMesh.get() ) || hit.m_nTriangle >= mesh.m_TriangleFaces.size() )
 	{
 		return std::nullopt;
 	}
@@ -962,6 +986,14 @@ std::optional<std::pair<xv::map::Point_t, xv::map::Point_t>> CMapView3D::Surface
 		normal = xv::map::Scale( normal, -1.0 );
 	}
 	return std::pair{ xv::map::Add( from, xv::map::Scale( dir, hit.m_flDistance ) ), normal };
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: The stroke's main-thread stages, for the overlay and the corpus benchmark.
+//-----------------------------------------------------------------------------
+QString CMapView3D::GetPaintCosts() const
+{
+	return tr( "paint: %1 grid, %2 edit, %3 scene, %4 notify (ms)" ).arg( m_flGridPaintMs, 0, 'f', 2 ).arg( m_flDispEditMs, 0, 'f', 2 ).arg( GetDocument().GetPreviewTime(), 0, 'f', 2 ).arg( GetDocument().GetPreviewNotifyTime(), 0, 'f', 2 );
 }
 
 //-----------------------------------------------------------------------------
@@ -1007,16 +1039,20 @@ void CMapView3D::PaintStroke( QPointF at )
 	}
 	m_BrushAt = surface;
 	const CMapFaceEdit &sheet = m_Editor.GetFaceEdit();
-	const bool bAlpha = sheet.GetDispPaintMode() == DispPaintMode_t::DISP_PAINT_ALPHA;
+	const bool bAlpha = m_bPaintAlpha;
 	xv::map::DispBrush_t brush = sheet.GetBrush();
 	brush.m_Centre = surface->first;
-	if ( m_bPaintLower && brush.m_nEffect == xv::map::PaintEffect_t::PAINT_EFFECT_RAISE_LOWER )
+	if ( ( m_bPaintLower && brush.m_nEffect == xv::map::PaintEffect_t::PAINT_EFFECT_RAISE_LOWER ) || ( m_bPaintSculpt && m_PaintModifiers.testFlag( Qt::ControlModifier ) ) )
 	{
 		brush.m_flAmount = -brush.m_flAmount;
 	}
+	QElapsedTimer timer;
+	timer.start();
 	bool bChanged = false;
+	std::size_t nStrokeFace = 0;
 	for ( auto &[ face, disp ] : m_Painted )
 	{
+		const std::size_t nFace = nStrokeFace++;
 		const xv::map::FaceGeometry_t *pFace = m_pPaintScene->m_Solids[ face.m_nSolid ].FindFace( face.m_nSide );
 		if ( !pFace )
 		{
@@ -1027,18 +1063,65 @@ void CMapView3D::PaintStroke( QPointF at )
 		{
 			own.m_Axis = pFace->m_Plane.m_Normal;
 		}
-		bChanged = ( bAlpha ? xv::map::PaintAlpha( disp, *pFace, own ) : xv::map::PaintGeometry( disp, *pFace, own ) ) || bChanged;
+		bool bPainted = false;
+		if ( m_bPaintSculpt && m_PaintModifiers.testFlag( Qt::ShiftModifier ) )
+		{
+			own.m_nEffect = xv::map::PaintEffect_t::PAINT_EFFECT_SMOOTH;
+			own.m_flAmount = 0.5;
+			bPainted = xv::map::PaintGeometry( disp, *pFace, own );
+		}
+		else if ( m_bPaintSculpt )
+		{
+			xv::map::SculptBrush_t sculpt = sheet.GetSculptBrush();
+			sculpt.m_Right = m_Camera.GetRight();
+			const int nDirection = sheet.GetSculptDirection();
+			if ( nDirection >= 0 && nDirection <= 2 )
+			{
+				own.m_Axis = {};
+				own.m_Axis[ nDirection ] = 1;
+			}
+			else if ( nDirection == 4 )
+			{
+				own.m_Axis = xv::map::Scale( m_Camera.GetForward(), -1 );
+			}
+			bPainted = xv::map::SculptGeometry( disp, *pFace, own, sculpt, &m_SculptApplied[ nFace ] );
+		}
+		else
+		{
+			bPainted = bAlpha ? xv::map::PaintAlpha( disp, *pFace, own ) : xv::map::PaintGeometry( disp, *pFace, own );
+		}
+		if ( bPainted )
+		{
+			bChanged = true;
+			if ( std::ranges::find( m_PaintChanged, face ) == m_PaintChanged.end() )
+			{
+				m_PaintChanged.push_back( face );
+			}
+		}
 	}
+	m_flGridPaintMs = timer.nsecsElapsed() / 1e6;
 	if ( !bChanged )
 	{
 		return;
 	}
-	std::vector<xv::map::FaceRef_t> faces;
-	for ( const auto &[ face, disp ] : m_Painted )
+	if ( !m_pPaintPreview->isActive() )
 	{
-		faces.push_back( face );
+		m_pPaintPreview->start( 0 );
 	}
-	GetDocument().Preview( xv::map::EditDisplacements( *m_pPaintScene, faces, [ & ]( std::vector<xv::map::DispFace_t> &refs ) {
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Coalesce samples in one event loop pass without dropping their grid changes.
+//-----------------------------------------------------------------------------
+void CMapView3D::PreviewPaint()
+{
+	if ( !m_pPaintScene )
+	{
+		return;
+	}
+	QElapsedTimer timer;
+	timer.start();
+	const xv::map::MapEdit_t edit = xv::map::EditDisplacements( *m_pPaintScene, m_PaintChanged, [ & ]( std::vector<xv::map::DispFace_t> &refs ) {
 		for ( xv::map::DispFace_t &ref : refs )
 		{
 			for ( const auto &[ face, disp ] : m_Painted )
@@ -1050,7 +1133,9 @@ void CMapView3D::PaintStroke( QPointF at )
 			}
 		}
 		return true;
-	} ) );
+	} );
+	m_flDispEditMs = timer.nsecsElapsed() / 1e6;
+	GetDocument().Preview( edit, true );
 }
 
 //-----------------------------------------------------------------------------
@@ -1062,15 +1147,63 @@ void CMapView3D::EndPaint( bool bCommit )
 	{
 		return;
 	}
+	m_pPaintPreview->stop();
 	GetDocument().EndPreview();
 	const std::shared_ptr<const xv::map::CScene> pScene = std::move( m_pPaintScene );
 	m_pPaintScene.reset();
+	std::erase_if( m_Painted, [ this ]( const auto &entry ) { return std::ranges::find( m_PaintChanged, entry.first ) == m_PaintChanged.end(); } );
 	if ( bCommit )
 	{
-		const bool bAlpha = m_Editor.GetFaceEdit().GetDispPaintMode() == DispPaintMode_t::DISP_PAINT_ALPHA;
-		m_Editor.CommitDisplacements( *pScene, m_Painted, bAlpha ? tr( "Paint Alpha" ) : tr( "Paint Geometry" ) );
+		m_Editor.CommitDisplacements( *pScene, m_Painted, m_bPaintSculpt ? tr( "Sculpt" ) : m_bPaintAlpha ? tr( "Paint Alpha" )
+																										  : tr( "Paint Geometry" ) );
 	}
 	m_Painted.clear();
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Seam collapse depends on base geometry and powers, so cache its indices while a
+//          stroke only changes positions. The marker positions still come from the live grid.
+//-----------------------------------------------------------------------------
+void CMapView3D::UpdateCollapsibleVertices()
+{
+	if ( !m_Editor.GetFaceEdit().IsCollapsibleShown() )
+	{
+		m_pCollapsibleScene.reset();
+		m_CollapsibleFaces.clear();
+		m_CollapsibleVertices.clear();
+		return;
+	}
+	const auto pScene = GetDocument().GetDisplacementPreviewBase() ? m_pPaintScene : GetDocument().GetSharedScene();
+	const auto &faces = m_Editor.GetSelectedFaces();
+	if ( !pScene || ( pScene == m_pCollapsibleScene && faces == m_CollapsibleFaces ) )
+		return;
+	m_pCollapsibleScene = pScene;
+	m_CollapsibleFaces = faces;
+	m_CollapsibleVertices.assign( faces.size(), {} );
+	std::vector<xv::map::DispMesh_t> neighbours;
+	for ( std::uint32_t s = 0; s < pScene->m_Map.m_Solids.size(); ++s )
+	{
+		if ( pScene->m_Map.m_Solids[ s ].m_bDeleted )
+			continue;
+		for ( const xv::map::FaceGeometry_t &face : pScene->m_Solids[ s ].m_Faces )
+		{
+			const auto &disp = pScene->m_Map.m_Solids[ s ].m_Sides[ face.m_nSide ].m_pDisp;
+			if ( const auto mesh = disp ? xv::map::BuildDisplacement( *disp, face ) : std::nullopt )
+				neighbours.push_back( *mesh );
+		}
+	}
+	for ( std::size_t f = 0; f < faces.size(); ++f )
+	{
+		const auto &ref = faces[ f ];
+		if ( ref.m_nSolid >= pScene->m_Map.m_Solids.size() || ref.m_nSide >= pScene->m_Map.m_Solids[ ref.m_nSolid ].m_Sides.size() )
+			continue;
+		const auto &disp = pScene->m_Map.m_Solids[ ref.m_nSolid ].m_Sides[ ref.m_nSide ].m_pDisp;
+		const auto *pFace = pScene->m_Solids[ ref.m_nSolid ].FindFace( ref.m_nSide );
+		if ( const auto mesh = disp && pFace ? xv::map::BuildDisplacement( *disp, *pFace ) : std::nullopt )
+		{
+			m_CollapsibleVertices[ f ] = xv::map::CollapsibleVertices( *disp, *mesh, neighbours );
+		}
+	}
 }
 
 //-----------------------------------------------------------------------------
@@ -1078,8 +1211,9 @@ void CMapView3D::EndPaint( bool bCommit )
 //          behind the camera is still drawn where it is in view. A dark edge round each line
 //          keeps it seen against faces of its own colour.
 //-----------------------------------------------------------------------------
-void CMapView3D::PaintTools( QPainter &painter ) const
+void CMapView3D::PaintTools( QPainter &painter )
 {
+	UpdateCollapsibleVertices();
 	const std::optional<xv::map::Box_t> &box = m_Editor.GetNewBox();
 	const std::optional<xv::map::Point_t> &marker = m_Editor.GetEntityMarker();
 	const std::optional<CMapGizmo> gizmo = m_DragGizmo ? m_DragGizmo : GetGizmo();
@@ -1182,17 +1316,31 @@ void CMapView3D::PaintTools( QPainter &painter ) const
 			{
 				painter.setPen( bGrid ? grid : QPen{ Qt::NoPen } );
 				painter.setBrush( bShade ? QBrush{ fill } : QBrush{ Qt::NoBrush } );
-				if ( !bShade && !bGrid )
+				if ( bShade || bGrid )
 				{
-					continue;
-				}
-				for ( std::size_t t = 0; t + 2 < mesh->m_Indices.size(); t += 3 )
-				{
-					if ( project( { mesh->m_Points[ mesh->m_Indices[ t ] ], mesh->m_Points[ mesh->m_Indices[ t + 1 ] ], mesh->m_Points[ mesh->m_Indices[ t + 2 ] ] }, polygon ) )
+					for ( std::size_t t = 0; t + 2 < mesh->m_Indices.size(); t += 3 )
 					{
-						painter.drawPolygon( polygon );
+						if ( project( { mesh->m_Points[ mesh->m_Indices[ t ] ], mesh->m_Points[ mesh->m_Indices[ t + 1 ] ], mesh->m_Points[ mesh->m_Indices[ t + 2 ] ] }, polygon ) )
+						{
+							painter.drawPolygon( polygon );
+						}
 					}
 				}
+				if ( m_Editor.GetFaceEdit().IsCollapsibleShown() )
+				{
+					const auto it = std::ranges::find( m_CollapsibleFaces, face );
+					if ( it != m_CollapsibleFaces.end() )
+					{
+						painter.setPen( Qt::NoPen );
+						painter.setBrush( QColor( 255, 80, 220 ) );
+						for ( const std::size_t i : m_CollapsibleVertices[ static_cast<std::size_t>( it - m_CollapsibleFaces.begin() ) ] )
+						{
+							if ( const auto at = camera.Project( mesh->m_Points[ i ] ) )
+								painter.drawRect( QRectF( ( *at )[ 0 ] - 3, ( *at )[ 1 ] - 3, 6, 6 ) );
+						}
+					}
+				}
+
 				continue;
 			}
 			painter.setPen( edge );
@@ -1264,6 +1412,20 @@ void CMapView3D::PaintTools( QPainter &painter ) const
 			const double a0 = i * 2.0 * std::numbers::pi / SEGMENTS;
 			const double a1 = ( i + 1 ) * 2.0 * std::numbers::pi / SEGMENTS;
 			line( xv::map::Add( centre, xv::map::Add( xv::map::Scale( u, std::cos( a0 ) * flRadius ), xv::map::Scale( v, std::sin( a0 ) * flRadius ) ) ), xv::map::Add( centre, xv::map::Add( xv::map::Scale( u, std::cos( a1 ) * flRadius ), xv::map::Scale( v, std::sin( a1 ) * flRadius ) ) ) );
+		}
+		if ( m_Editor.GetFaceEdit().GetDispPaintMode() == DispPaintMode_t::DISP_PAINT_SCULPT )
+		{
+			const xv::map::SculptBrush_t sculpt = m_Editor.GetFaceEdit().GetSculptBrush();
+			if ( sculpt.m_bCarve )
+			{
+				const double flHeight = sculpt.m_bAdaptive ? sculpt.m_flPercent * flRadius : sculpt.m_flDistance;
+				const xv::map::Point_t across = camera.GetRight();
+				for ( std::size_t i = 0; i + 1 < sculpt.m_Profile.size(); ++i )
+				{
+					auto at = [ & ]( std::size_t n ) { return xv::map::Add( centre, xv::map::Add( xv::map::Scale( across, ( static_cast<double>( n ) / 4.0 - 1 ) * flRadius ), xv::map::Scale( normal, sculpt.m_Profile[ n ] * flHeight ) ) ); };
+					line( at( i ), at( i + 1 ) );
+				}
+			}
 		}
 		line( centre, xv::map::Add( centre, xv::map::Scale( normal, flRadius * 0.5 ) ) );
 		drawEdged( CPreferences::Instance().GetMapPreferences().m_Colors.m_ToolSelection );
@@ -1388,6 +1550,11 @@ void CMapView3D::wheelEvent( QWheelEvent *pEvent )
 //-----------------------------------------------------------------------------
 void CMapView3D::keyPressEvent( QKeyEvent *pEvent )
 {
+	if ( pEvent->key() == Qt::Key_Escape && m_pPaintScene )
+	{
+		EndPaint( false );
+		return;
+	}
 	// Hammer++'s [ and ] shrink and enlarge the brush while painting (they size the grid else).
 	if ( IsPaintingDisplacements() && pEvent->modifiers() == Qt::NoModifier && ( pEvent->key() == Qt::Key_BracketLeft || pEvent->key() == Qt::Key_BracketRight ) )
 	{
