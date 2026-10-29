@@ -40,6 +40,10 @@ struct CompileVariables_t
 	std::string m_szGameExe;
 };
 
+// A launcher in another install uses that install's matching game folder when present.
+// Compiler commands retain the opened game's content paths.
+[[nodiscard]] std::string LaunchGameDir( const CompileVariables_t &variables );
+
 // Hammer's text with its $variables filled in: a value with a space in it is quoted, $$ is a
 // dollar, and Hammer's backslashes between a variable and a name become the system's separators.
 [[nodiscard]] std::string ExpandParameters( std::string_view szText, const CompileVariables_t &variables );

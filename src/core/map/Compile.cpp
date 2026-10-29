@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cstring>
+#include <filesystem>
 #include <regex>
 
 #include "kv1/Kv1.h"
@@ -456,6 +457,20 @@ std::vector<CompileSequence_t> ReadCmdSeq( std::span<const std::byte> bytes )
 }
 
 //-----------------------------------------------------------------------------
+// Purpose: Keep native launchers with their own game binaries while compilers use the
+//          install whose content the map was opened against.
+//-----------------------------------------------------------------------------
+std::string LaunchGameDir( const CompileVariables_t &variables )
+{
+	const std::filesystem::path game( variables.m_szGameDir ), launcher( variables.m_szGameExe );
+	if ( game.empty() || launcher.empty() || launcher.parent_path().lexically_normal() == game.parent_path().lexically_normal() )
+		return variables.m_szGameDir;
+	const auto candidate = launcher.parent_path() / game.filename();
+	std::error_code error;
+	return std::filesystem::is_directory( candidate, error ) ? candidate.string() : variables.m_szGameDir;
+}
+
+//-----------------------------------------------------------------------------
 // Purpose:
 //-----------------------------------------------------------------------------
 std::vector<ResolvedCommand_t> ResolveSequence( const CompileSequence_t &sequence, const CompileVariables_t &variables )
@@ -471,7 +486,13 @@ std::vector<ResolvedCommand_t> ResolveSequence( const CompileSequence_t &sequenc
 		out.m_nSpecial = command.m_nSpecial;
 		out.m_bWait = command.m_bWait;
 		out.m_szEnsure = command.m_bEnsureFile ? ExpandParameters( command.m_szEnsure, variables ) : std::string{};
-		const std::string szParms = ExpandParameters( command.m_szParms, variables );
+		CompileVariables_t effective = variables;
+		const auto program = SplitArguments( ExpandParameters( command.m_szRun, variables ) );
+		if ( command.m_nSpecial == COMPILE_SPECIAL_RUN && !variables.m_szGameExe.empty() && !program.empty() && std::filesystem::path( program.front() ).lexically_normal() == std::filesystem::path( variables.m_szGameExe ).lexically_normal() )
+		{
+			effective.m_szGameDir = LaunchGameDir( variables );
+		}
+		const std::string szParms = ExpandParameters( command.m_szParms, effective );
 		const std::vector<std::string> arguments = SplitArguments( szParms );
 		switch ( command.m_nSpecial )
 		{
