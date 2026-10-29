@@ -183,7 +183,6 @@ private:
 	// Page Up and Page Down step through what was under the last click.
 	std::vector<xv::map::TraceHit_t> m_Hits;
 	std::size_t m_nHit = 0;
-	std::size_t m_nCamera = 0; // the map's camera Page Up and Page Down went to
 	bool m_bStatistics = false;
 	// The gizmo: the axis under the mouse, and a drag on one (from where, on which scene).
 	int m_nGizmoHover = -1;

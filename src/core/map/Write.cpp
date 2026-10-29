@@ -1019,6 +1019,26 @@ std::string CWriter::Run()
 		}
 	}
 
+	if ( m_Map.m_bCamerasChanged )
+	{
+		const std::string nl{ m_szNewline };
+		std::string szBlock = "cameras" + nl + "{" + nl + "\t" + Pair( "activecamera", std::to_string( m_Map.m_nActiveCamera ) ) + nl;
+		for ( const auto &camera : m_Map.m_Cameras )
+			szBlock += "\tcamera" + nl + "\t{" + nl + "\t\t" + Pair( "position", '[' + FormatPoint( camera.m_Position ) + ']' ) + nl + "\t\t" + Pair( "look", '[' + FormatPoint( camera.m_Look ) + ']' ) + nl + "\t}" + nl;
+		szBlock += "}";
+		if ( m_Map.m_CameraSpans.empty() )
+			Replace( m_szText.size(), 0, ( m_szText.empty() || m_szText.back() == '\n' ? std::string{} : nl ) + szBlock + nl );
+		else
+			for ( std::size_t n = 0; n < m_Map.m_CameraSpans.size(); ++n )
+			{
+				const auto span = m_Map.m_CameraSpans[ n ];
+				if ( n == 0 )
+					Replace( span.m_nOffset, span.m_nLength, szBlock );
+				else
+					Remove( span );
+			}
+	}
+
 	// Applied in order; where two touch the same place, the one made first goes first.
 	std::ranges::stable_sort( m_Patches, {}, &Patch_t::m_nAt );
 	std::string szOut;

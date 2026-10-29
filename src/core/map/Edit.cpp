@@ -129,6 +129,15 @@ std::shared_ptr<CScene> ApplyEdit( const CScene &scene, const MapEdit_t &edit, b
 	out.m_bDisplacementEdit = bDisplacementPreview;
 	out.m_Changed.clear();
 	CMap &map = out.m_Map;
+	if ( edit.m_Cameras )
+	{
+		map.m_Cameras = edit.m_Cameras->first;
+		map.m_nActiveCamera = std::clamp( edit.m_Cameras->second, -1, static_cast<int>( map.m_Cameras.size() ) - 1 );
+		map.m_bCamerasChanged = true;
+	}
+	// Camera metadata changes do not rebuild geometry, materials or automatic groups.
+	if ( edit.IsCameraEdit() )
+		return pScene;
 
 	if ( edit.m_World )
 	{
@@ -317,6 +326,8 @@ MapEdit_t InverseOf( const CScene &scene, const MapEdit_t &edit )
 {
 	const CMap &map = scene.m_Map;
 	MapEdit_t inverse;
+	if ( edit.m_Cameras )
+		inverse.m_Cameras = std::pair{ map.m_Cameras, map.m_nActiveCamera };
 	if ( edit.m_World )
 	{
 		inverse.m_World = map.m_World;

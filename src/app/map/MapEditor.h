@@ -118,6 +118,9 @@ public:
 	[[nodiscard]] const std::optional<xv::map::Point_t> &GetEntityMarker() const { return m_EntityMarker; }
 	void SetEntityMarker( std::optional<xv::map::Point_t> at );
 	// A new entity of the entity tool's class at origin, selected.
+	void SetCameras( std::vector<xv::map::Camera_t> cameras, int nActive, const QString &szName );
+	void StepCamera( int nDirection );
+	void DeleteCamera();
 	void CreatePrefab();
 	bool SavePrefab( const QString &szPath, QString *pError = nullptr ) const;
 	void PlacePrefab( const xv::map::Point_t &at );
@@ -277,6 +280,7 @@ private:
 	[[nodiscard]] QWidget *BuildNewObjects();
 	// The entity classes and materials to pick from, once the map's game data is read.
 	void FillNewObjects();
+	void SyncMapCameras();
 	void FillPrefabs();
 	void FillPrefabObjects();
 	void RepaintViews();
@@ -329,6 +333,8 @@ private:
 	std::shared_ptr<const xv::map::CScene> m_pClipPreview; // the selection cut, drawn in white
 	QLineEdit *m_pMaterial = nullptr;
 	QString m_szFacePickKey;
+	std::vector<xv::map::Camera_t> m_LastCameras;
+	int m_nLastActiveCamera = -1;
 	std::vector<xv::map::PrefabLibrary_t> m_PrefabLibraries;
 	QComboBox *m_pObjectCategory = nullptr;
 	QComboBox *m_pPrefabLibrary = nullptr;

@@ -1046,6 +1046,7 @@ void CReader::Read()
 		else if ( Is( szName, "cameras" ) )
 		{
 			nEnd = ReadCameras( nOpen, 1 );
+			m_Map.m_CameraSpans.push_back( SpanOf( key.m_nOffset, nEnd ) );
 		}
 		else if ( Is( szName, "cordon" ) )
 		{

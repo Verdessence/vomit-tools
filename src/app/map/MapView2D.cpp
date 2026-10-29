@@ -5,6 +5,8 @@
 //
 //===========================================================================//
 #include "MapView2D.h"
+#include <QHideEvent>
+#include "map/Edit.h"
 
 #include <algorithm>
 #include <cmath>
@@ -1135,6 +1137,146 @@ void CMapView2D::PaintCamera( QPainter &painter ) const
 }
 
 //-----------------------------------------------------------------------------
+// Purpose: Saved viewpoints use the VDC's line and eye circle; the live view keeps its pyramid.
+//-----------------------------------------------------------------------------
+void CMapView2D::PaintSavedCameras( QPainter &painter ) const
+{
+	const auto *pScene = GetDocument().GetScene();
+	if ( !pScene || m_Editor.GetTool() != MapTool_t::MAP_TOOL_CAMERA )
+		return;
+	painter.setRenderHint( QPainter::Antialiasing, true );
+	for ( std::size_t n = 0; n < pScene->m_Map.m_Cameras.size(); ++n )
+	{
+		const auto &camera = pScene->m_Map.m_Cameras[ n ];
+		const QColor color = static_cast<int>( n ) == pScene->m_Map.m_nActiveCamera ? Look().m_Colors.m_Camera : QColor{ 80, 180, 255 };
+		painter.setPen( QPen{ color, 1.5 } );
+		painter.setBrush( color );
+		const auto eye = ToWidget( Flatten( camera.m_Position ) );
+		const auto target = ToWidget( Flatten( camera.m_Look ) );
+		painter.drawLine( eye, target );
+		painter.drawEllipse( eye, 4, 4 );
+		painter.drawRect( QRectF{ target.x() - 3, target.y() - 3, 6, 6 } );
+	}
+	painter.setBrush( Qt::NoBrush );
+	painter.setRenderHint( QPainter::Antialiasing, false );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Shift begins a new eye-to-target camera; existing endpoints can be dragged directly.
+//-----------------------------------------------------------------------------
+void CMapView2D::PressCamera( QPointF at, Qt::KeyboardModifiers modifiers )
+{
+	const auto *pScene = GetDocument().GetScene();
+	if ( !pScene || GetDocument().IsPreviewing() )
+		return;
+	m_CameraDragList = pScene->m_Map.m_Cameras;
+	m_CameraPressMap = ToMap( at );
+	m_bCameraNew = modifiers.testFlag( Qt::ShiftModifier );
+	m_nCameraDrag = -1;
+	if ( m_bCameraNew )
+	{
+		xv::map::Point_t eye{};
+		const int nHidden = 3 - GetAxis( 0 ) - GetAxis( 1 );
+		if ( const auto camera = m_Editor.GetCamera() )
+			eye[ nHidden ] = camera->m_Eye[ nHidden ];
+		eye[ GetAxis( 0 ) ] = Snap( m_CameraPressMap.x(), modifiers );
+		eye[ GetAxis( 1 ) ] = Snap( m_CameraPressMap.y(), modifiers );
+		m_nCameraDrag = static_cast<int>( m_CameraDragList.size() );
+		m_CameraDragList.push_back( { eye, eye } );
+		m_bCameraTarget = true;
+	}
+	else
+	{
+		double flBest = 9;
+		for ( std::size_t n = 0; n < m_CameraDragList.size(); ++n )
+			for ( const bool bTarget : { false, true } )
+			{
+				const auto point = bTarget ? m_CameraDragList[ n ].m_Look : m_CameraDragList[ n ].m_Position;
+				const double flDistance = QLineF( at, ToWidget( Flatten( point ) ) ).length();
+				if ( flDistance < flBest )
+				{
+					flBest = flDistance;
+					m_nCameraDrag = static_cast<int>( n );
+					m_bCameraTarget = bTarget;
+				}
+			}
+	}
+	if ( m_nCameraDrag < 0 )
+		return;
+	m_pCameraDragBase = GetDocument().GetSharedScene();
+	DragCamera( at, modifiers );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: A camera drag changes only its two visible axes; Ctrl carries both endpoints.
+//-----------------------------------------------------------------------------
+void CMapView2D::DragCamera( QPointF at, Qt::KeyboardModifiers modifiers )
+{
+	if ( !m_pCameraDragBase )
+		return;
+	auto cameras = m_CameraDragList;
+	auto &camera = cameras[ m_nCameraDrag ];
+	const auto where = ToMap( at );
+	const auto delta = where - m_CameraPressMap;
+	auto move = [ & ]( xv::map::Point_t &p ) {
+		p[ GetAxis( 0 ) ] = Snap( p[ GetAxis( 0 ) ] + delta.x(), modifiers );
+		p[ GetAxis( 1 ) ] = Snap( p[ GetAxis( 1 ) ] + delta.y(), modifiers );
+	};
+	if ( m_bCameraNew )
+	{
+		camera.m_Look[ GetAxis( 0 ) ] = Snap( where.x(), modifiers );
+		camera.m_Look[ GetAxis( 1 ) ] = Snap( where.y(), modifiers );
+	}
+	else if ( std::abs( delta.x() ) + std::abs( delta.y() ) > 1e-9 )
+	{
+		if ( modifiers.testFlag( Qt::ControlModifier ) || !m_bCameraTarget )
+			move( camera.m_Position );
+		if ( modifiers.testFlag( Qt::ControlModifier ) || m_bCameraTarget )
+			move( camera.m_Look );
+	}
+	if ( xv::map::Length( xv::map::Subtract( camera.m_Look, camera.m_Position ) ) < 1e-6 )
+		camera.m_Look[ GetAxis( 0 ) ] += 64;
+	m_CameraEdit.m_Cameras = std::pair{ std::move( cameras ), m_nCameraDrag };
+	GetDocument().Preview( m_CameraEdit );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: One camera gesture is one undo step; unchanged clicks and Escape restore the base.
+//-----------------------------------------------------------------------------
+void CMapView2D::EndCameraDrag( bool bCommit )
+{
+	if ( !m_pCameraDragBase )
+		return;
+	const bool bChanged = m_CameraEdit.m_Cameras && ( m_CameraEdit.m_Cameras->first != m_pCameraDragBase->m_Map.m_Cameras || m_CameraEdit.m_Cameras->second != m_pCameraDragBase->m_Map.m_nActiveCamera );
+	const auto szName = m_bCameraNew ? tr( "Create Camera" ) : m_CameraEdit.m_Cameras && m_CameraEdit.m_Cameras->first == m_pCameraDragBase->m_Map.m_Cameras ? tr( "Activate Camera" )
+																																							 : tr( "Move Camera" );
+	m_pCameraDragBase.reset();
+	m_nCameraDrag = -1;
+	if ( bCommit && bChanged )
+		GetDocument().CommitCameraPreview( std::move( m_CameraEdit ), szName );
+	else
+		GetDocument().EndPreview();
+	m_CameraEdit = {};
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Leaving the camera tool or hiding its view must not leave temporary metadata active.
+//-----------------------------------------------------------------------------
+void CMapView2D::CancelCameraDrag()
+{
+	EndCameraDrag( false );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: A hidden tab cannot finish a pointer gesture, so discard its temporary camera edit.
+//-----------------------------------------------------------------------------
+void CMapView2D::hideEvent( QHideEvent *pEvent )
+{
+	CancelCameraDrag();
+	CMapView::hideEvent( pEvent );
+}
+
+//-----------------------------------------------------------------------------
 // Purpose: Report invalidation frequency and the exact cache key fields that caused it.
 //-----------------------------------------------------------------------------
 QString CMapView2D::DescribeLayerChanges( bool bAdvance )
@@ -1152,7 +1294,9 @@ void CMapView2D::PaintLayer()
 {
 	LayerKey_t key;
 	key.m_bPreview = GetDocument().GetDisplacementPreviewBase() != nullptr;
-	key.m_pScene = key.m_bPreview ? GetDocument().GetDisplacementPreviewBase() : m_pBuiltFor;
+	// Camera snapshots share geometry; visibility and geometry edits have their own state counter.
+	const auto *pLayerScene = key.m_bPreview ? GetDocument().GetDisplacementPreviewBase() : GetDocument().GetScene();
+	key.m_pMesh = pLayerScene ? pLayerScene->m_pMesh.get() : nullptr;
 	key.m_pProps = m_pProps.get();
 	key.m_pMaterials = m_Editor.GetRenderData().GetShared().m_pMaterials.get();
 	key.m_nState = key.m_bPreview ? GetDocument().GetPreviewState() : GetDocument().GetStateGeneration();
@@ -1169,7 +1313,7 @@ void CMapView2D::PaintLayer()
 	QStringList reasons;
 	if ( m_Layer.isNull() )
 		reasons << QStringLiteral( "empty" );
-	if ( key.m_pScene != m_LayerKey.m_pScene )
+	if ( key.m_pMesh != m_LayerKey.m_pMesh )
 		reasons << QStringLiteral( "scene" );
 	if ( key.m_bPreview != m_LayerKey.m_bPreview )
 		reasons << QStringLiteral( "stroke boundary" );
@@ -1224,6 +1368,7 @@ void CMapView2D::paintEvent( QPaintEvent * )
 	{
 		PaintObjects( painter, GetVisible(), true );
 	}
+	PaintSavedCameras( painter );
 	PaintCamera( painter );
 	PaintSelection( painter );
 	PaintTools( painter );
@@ -1327,6 +1472,12 @@ void CMapView2D::mousePressEvent( QMouseEvent *pEvent )
 		return;
 	}
 	const MapTool_t nTool = m_Editor.GetTool();
+	if ( nTool == MapTool_t::MAP_TOOL_CAMERA )
+	{
+		if ( pEvent->button() == Qt::LeftButton )
+			PressCamera( at, pEvent->modifiers() );
+		return;
+	}
 	if ( nTool == MapTool_t::MAP_TOOL_MAGNIFY )
 	{
 		if ( pEvent->button() == Qt::LeftButton || pEvent->button() == Qt::RightButton )
@@ -2063,6 +2214,11 @@ void CMapView2D::UpdateCursor( QPointF at )
 void CMapView2D::mouseMoveEvent( QMouseEvent *pEvent )
 {
 	ReportCursor( pEvent->position() );
+	if ( m_pCameraDragBase )
+	{
+		DragCamera( pEvent->position(), pEvent->modifiers() );
+		return;
+	}
 	if ( m_PanFrom )
 	{
 		const QPoint delta = pEvent->position().toPoint() - *m_PanFrom;
@@ -2122,6 +2278,12 @@ void CMapView2D::mouseMoveEvent( QMouseEvent *pEvent )
 //-----------------------------------------------------------------------------
 void CMapView2D::mouseReleaseEvent( QMouseEvent *pEvent )
 {
+	if ( m_pCameraDragBase && pEvent->button() == Qt::LeftButton )
+	{
+		DragCamera( pEvent->position(), pEvent->modifiers() );
+		EndCameraDrag( true );
+		return;
+	}
 	if ( m_PanFrom )
 	{
 		m_PanFrom.reset();
@@ -2371,6 +2533,11 @@ bool CMapView2D::Run( MapAction_t nAction )
 			}
 			return false;
 		case MapAction_t::MAP_ACTION_ESCAPE:
+			if ( m_pCameraDragBase )
+			{
+				EndCameraDrag( false );
+				return true;
+			}
 			// The editor drops the box or marker; the drag mustn't bring it back.
 			m_nBoxDrag = BoxDrag_t::BOX_DRAG_NONE;
 			if ( m_pMoveScene || m_HandleDrag )

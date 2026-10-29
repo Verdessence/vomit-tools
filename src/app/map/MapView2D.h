@@ -69,6 +69,7 @@ public:
 
 	// The scene changed (loaded, or another one): projects it again; after edits (ObjectsChanged
 	// says which objects), only those.
+	void CancelCameraDrag();
 	void Rebuild();
 	void ObjectsChanged( const std::vector<std::uint32_t> &objects );
 	// Fits the whole map in the view.
@@ -109,6 +110,7 @@ protected:
 	void keyPressEvent( QKeyEvent *pEvent ) override;
 	void keyReleaseEvent( QKeyEvent *pEvent ) override;
 	void leaveEvent( QEvent *pEvent ) override;
+	void hideEvent( QHideEvent *pEvent ) override;
 
 private:
 	// The grid and the objects, kept as a picture between repaints: a camera move or a drag
@@ -124,6 +126,17 @@ private:
 	// The block tool's box and the entity tool's marker.
 	void PaintTools( QPainter &painter ) const;
 	void PaintCamera( QPainter &painter ) const;
+	void PaintSavedCameras( QPainter &painter ) const;
+	void PressCamera( QPointF at, Qt::KeyboardModifiers modifiers );
+	void DragCamera( QPointF at, Qt::KeyboardModifiers modifiers );
+	void EndCameraDrag( bool bCommit );
+	std::shared_ptr<const xv::map::CScene> m_pCameraDragBase;
+	std::vector<xv::map::Camera_t> m_CameraDragList;
+	xv::map::MapEdit_t m_CameraEdit;
+	QPointF m_CameraPressMap;
+	int m_nCameraDrag = -1;
+	bool m_bCameraTarget = false;
+	bool m_bCameraNew = false;
 	[[nodiscard]] QColor ColorOf( const MapFlatObject_t &object ) const;
 	void PlaceSolid( const xv::map::CScene &scene, std::uint32_t nSolid, const xv::map::CMapMesh &mesh, xv::map::MeshRange_t range );
 	void PlaceSolid( const xv::map::CScene &scene, std::uint32_t nSolid );
@@ -233,7 +246,7 @@ private:
 	// What the layer was drawn for.
 	struct LayerKey_t
 	{
-		const void *m_pScene = nullptr;
+		const void *m_pMesh = nullptr;
 		bool m_bPreview = false;
 		const void *m_pProps = nullptr;
 		const void *m_pMaterials = nullptr; // textures arriving draw the models again

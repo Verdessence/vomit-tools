@@ -177,6 +177,7 @@ struct Camera_t
 {
 	Point_t m_Position{};
 	Point_t m_Look{};
+	friend bool operator==( const Camera_t &, const Camera_t & ) = default;
 };
 
 struct Cordon_t
@@ -255,6 +256,8 @@ public:
 	std::vector<Group_t> m_Groups;
 	std::vector<Camera_t> m_Cameras;
 	int m_nActiveCamera = -1;
+	std::vector<Span_t> m_CameraSpans;
+	bool m_bCamerasChanged = false;
 	std::vector<Cordon_t> m_Cordons;
 	bool m_bCordonsActive = false;
 	std::vector<Span_t> m_CordonSpans;    // the "cordon" and "cordons" blocks as read

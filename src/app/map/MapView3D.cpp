@@ -2050,11 +2050,7 @@ bool CMapView3D::Run( MapAction_t nAction )
 			const xv::map::CScene *pScene = GetDocument().GetScene();
 			if ( m_Editor.GetTool() == MapTool_t::MAP_TOOL_CAMERA && pScene && !pScene->m_Map.m_Cameras.empty() )
 			{
-				const std::size_t nCount = pScene->m_Map.m_Cameras.size();
-				m_nCamera = ( m_nCamera + ( nAction == MapAction_t::MAP_ACTION_NEXT_HIT ? 1 : nCount - 1 ) ) % nCount;
-				const xv::map::Camera_t &camera = pScene->m_Map.m_Cameras[ m_nCamera ];
-				m_Camera.LookAt( camera.m_Position, camera.m_Look );
-				Changed();
+				m_Editor.StepCamera( nAction == MapAction_t::MAP_ACTION_PREVIOUS_HIT ? 1 : -1 );
 				return true;
 			}
 			if ( m_Hits.size() < 2 )

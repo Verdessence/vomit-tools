@@ -454,6 +454,10 @@ CMapEditor::CMapEditor( const QString &szPath, bool bFromGame, QWidget *pParent 
 			}
 		}
 	} );
+	connect( m_pDocument, &CMapDocument::CamerasChanged, this, [ this ] {
+		SyncMapCameras();
+		RepaintTools();
+	} );
 	connect( m_pDocument, &CMapDocument::ModifiedChanged, this, &CMapEditor::TitleChanged );
 	connect( m_pDocument, &CMapDocument::PointfileChanged, this, &CMapEditor::RepaintTools );
 	UpdateStatus();
@@ -749,6 +753,8 @@ void CMapEditor::Load( CMapDocument::Source_t source )
 void CMapEditor::Loaded()
 {
 	const xv::map::CScene &scene = *m_pDocument->GetScene();
+	m_LastCameras = scene.m_Map.m_Cameras;
+	m_nLastActiveCamera = scene.m_Map.m_nActiveCamera;
 	m_RememberedCamera = RecallCamera();
 	m_Settings.m_nGridSize = GridSizeFor( scene.m_Map.m_ViewSettings.m_nGridSpacing );
 	m_Settings.m_bShowGrid = scene.m_Map.m_ViewSettings.m_bShowGrid;
@@ -844,6 +850,8 @@ void CMapEditor::SetTool( MapTool_t nTool )
 		{
 			p3D->UpdateCursor();
 		}
+		else if ( auto *p2D = qobject_cast<CMapView2D *>( pView ); p2D && nTool != MapTool_t::MAP_TOOL_CAMERA )
+			p2D->CancelCameraDrag();
 	}
 }
 
@@ -1475,6 +1483,14 @@ bool CMapEditor::RunAction( MapAction_t nAction, CMapView *pFrom )
 	const std::vector<std::uint32_t> &selection = m_pDocument->GetSelection();
 	switch ( nAction )
 	{
+		case MapAction_t::MAP_ACTION_NEXT_HIT:
+		case MapAction_t::MAP_ACTION_PREVIOUS_HIT:
+			if ( m_nTool == MapTool_t::MAP_TOOL_CAMERA )
+			{
+				StepCamera( nAction == MapAction_t::MAP_ACTION_PREVIOUS_HIT ? 1 : -1 );
+				return true;
+			}
+			return false;
 		case MapAction_t::MAP_ACTION_VIEW_TOP: return switchTo( MapViewType_t::MAP_VIEW_TYPE_TOP );
 		case MapAction_t::MAP_ACTION_VIEW_SIDE: return switchTo( MapViewType_t::MAP_VIEW_TYPE_SIDE );
 		case MapAction_t::MAP_ACTION_VIEW_FRONT: return switchTo( MapViewType_t::MAP_VIEW_TYPE_FRONT );
@@ -1601,6 +1617,11 @@ bool CMapEditor::RunAction( MapAction_t nAction, CMapView *pFrom )
 																																									   : MapEditMode_t::MAP_EDIT_MODE_RESIZE );
 			return true;
 		case MapAction_t::MAP_ACTION_DELETE:
+			if ( m_nTool == MapTool_t::MAP_TOOL_CAMERA )
+			{
+				DeleteCamera();
+				return true;
+			}
 			if ( !selection.empty() && m_pDocument->GetScene() )
 			{
 				m_pDocument->Edit( xv::map::DeleteObjects( *m_pDocument->GetScene(), selection ), tr( "Delete" ), std::vector<std::uint32_t>{} );
@@ -2142,6 +2163,84 @@ void CMapEditor::SetEntityMarker( std::optional<xv::map::Point_t> at )
 	}
 	m_EntityMarker = at;
 	RepaintTools();
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Camera changes are editor metadata and never rebuild or invalidate brush geometry.
+//-----------------------------------------------------------------------------
+void CMapEditor::SetCameras( std::vector<xv::map::Camera_t> cameras, int nActive, const QString &szName )
+{
+	for ( auto *pView : GetViews() )
+		if ( auto *p2D = qobject_cast<CMapView2D *>( pView ) )
+			p2D->CancelCameraDrag();
+	const auto *pScene = m_pDocument->GetScene();
+	if ( !pScene )
+		return;
+	nActive = std::clamp( nActive, -1, static_cast<int>( cameras.size() ) - 1 );
+	if ( cameras == pScene->m_Map.m_Cameras && nActive == pScene->m_Map.m_nActiveCamera )
+		return;
+	xv::map::MapEdit_t edit;
+	edit.m_Cameras = std::pair{ std::move( cameras ), nActive };
+	m_pDocument->Edit( std::move( edit ), szName );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: PgUp advances and PgDn goes back, from either a 2D or a 3D camera-tool view.
+//-----------------------------------------------------------------------------
+void CMapEditor::StepCamera( int nDirection )
+{
+	for ( auto *pView : GetViews() )
+		if ( auto *p2D = qobject_cast<CMapView2D *>( pView ) )
+			p2D->CancelCameraDrag();
+	const auto *pScene = m_pDocument->GetScene();
+	if ( !pScene || pScene->m_Map.m_Cameras.empty() )
+		return;
+	const int nCount = static_cast<int>( pScene->m_Map.m_Cameras.size() );
+	const int nOld = pScene->m_Map.m_nActiveCamera;
+	const int nActive = nOld < 0 ? ( nDirection > 0 ? 0 : nCount - 1 ) : ( nOld + nCount + nDirection ) % nCount;
+	SetCameras( pScene->m_Map.m_Cameras, nActive, tr( "Activate Camera" ) );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Hammer keeps an origin camera after deleting the last saved viewpoint (VDC).
+//-----------------------------------------------------------------------------
+void CMapEditor::DeleteCamera()
+{
+	for ( auto *pView : GetViews() )
+		if ( auto *p2D = qobject_cast<CMapView2D *>( pView ) )
+			p2D->CancelCameraDrag();
+	const auto *pScene = m_pDocument->GetScene();
+	if ( !pScene || pScene->m_Map.m_Cameras.empty() )
+		return;
+	auto cameras = pScene->m_Map.m_Cameras;
+	const int nActive = std::clamp( pScene->m_Map.m_nActiveCamera, 0, static_cast<int>( cameras.size() ) - 1 );
+	cameras.erase( cameras.begin() + nActive );
+	if ( cameras.empty() )
+		cameras.push_back( { {}, { 0, 64, 0 } } );
+	const int nNext = std::min( nActive, static_cast<int>( cameras.size() ) - 1 );
+	SetCameras( std::move( cameras ), nNext, tr( "Delete Camera" ) );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Only edited camera metadata drives the live view; ordinary edits preserve free flight.
+//-----------------------------------------------------------------------------
+void CMapEditor::SyncMapCameras()
+{
+	const auto *pScene = m_pDocument->GetScene();
+	if ( !pScene || ( m_LastCameras == pScene->m_Map.m_Cameras && m_nLastActiveCamera == pScene->m_Map.m_nActiveCamera ) )
+		return;
+	m_LastCameras = pScene->m_Map.m_Cameras;
+	m_nLastActiveCamera = pScene->m_Map.m_nActiveCamera;
+	if ( m_nLastActiveCamera < 0 || static_cast<std::size_t>( m_nLastActiveCamera ) >= m_LastCameras.size() )
+		return;
+	const auto &saved = m_LastCameras[ m_nLastActiveCamera ];
+	for ( auto *pView : GetViews() )
+		if ( auto *p3D = qobject_cast<CMapView3D *>( pView ) )
+		{
+			auto camera = p3D->GetCamera();
+			camera.LookAt( saved.m_Position, saved.m_Look );
+			p3D->SetCamera( camera );
+		}
 }
 
 //-----------------------------------------------------------------------------

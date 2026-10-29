@@ -142,6 +142,12 @@ void CMapDocument::Edit( xv::map::MapEdit_t edit, const QString &szName, std::op
 //-----------------------------------------------------------------------------
 void CMapDocument::ApplyEditNow( const xv::map::MapEdit_t &edit, bool bDisplacements, std::shared_ptr<const xv::map::CScene> pPrepared )
 {
+	if ( m_pScene && edit.IsCameraEdit() )
+	{
+		m_pScene = pPrepared ? std::move( pPrepared ) : xv::map::ApplyEdit( *m_pScene, edit );
+		emit CamerasChanged();
+		return;
+	}
 	if ( !m_pScene )
 	{
 		return;
@@ -191,6 +197,20 @@ void CMapDocument::BeginDisplacementPreview( std::vector<std::uint32_t> objects 
 }
 
 //-----------------------------------------------------------------------------
+// Purpose: Adopt camera metadata without briefly restoring the old active viewpoint on commit.
+//-----------------------------------------------------------------------------
+void CMapDocument::CommitCameraPreview( xv::map::MapEdit_t edit, const QString &szName )
+{
+	if ( !m_bCamerasPreview || !m_pPreviewBase || !edit.IsCameraEdit() )
+		return;
+	auto back = xv::map::InverseOf( *m_pPreviewBase, edit );
+	auto pPrepared = m_pScene;
+	m_pScene = std::move( m_pPreviewBase );
+	m_bCamerasPreview = false;
+	m_pUndo->push( new CMapEditCommand( *this, std::move( edit ), std::move( back ), m_Selection, std::nullopt, szName, false, std::move( pPrepared ) ) );
+}
+
+//-----------------------------------------------------------------------------
 // Purpose: Put the last preview on the undo stack without rebuilding or briefly restoring the
 //          base scene. Undo and redo replace only these solids' independent meshes.
 //-----------------------------------------------------------------------------
@@ -227,6 +247,13 @@ void CMapDocument::Preview( const xv::map::MapEdit_t &edit, bool bDisplacements 
 	}
 	else if ( !m_pPreviewBase )
 		m_pPreviewBase = m_pScene;
+	if ( edit.IsCameraEdit() )
+	{
+		m_bCamerasPreview = true;
+		m_pScene = xv::map::ApplyEdit( *m_pPreviewBase, edit );
+		emit CamerasChanged();
+		return;
+	}
 	QElapsedTimer timer;
 	timer.start();
 	if ( bDisplacements )
@@ -262,6 +289,12 @@ void CMapDocument::EndPreview()
 	m_pDisplacementBase.reset();
 	m_PreviewObjects.clear();
 	m_pScene = std::move( m_pPreviewBase );
+	if ( m_bCamerasPreview )
+	{
+		m_bCamerasPreview = false;
+		emit CamerasChanged();
+		return;
+	}
 	if ( bDisplacements )
 	{
 		m_nStateGeneration++;
