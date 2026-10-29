@@ -66,6 +66,7 @@ public:
 	// Puts the keyboard in the keys list (Alt+Enter).
 	void FocusKeys();
 	void SetFacePickKey( const QString &szKey );
+	void BrowseInstanceFile();
 	[[nodiscard]] const xv::map::PropertySheet_t &GetSheet() const { return m_Sheet; }
 	[[nodiscard]] QTreeWidget *GetKeys() const { return m_pKeys; }
 	[[nodiscard]] QTreeWidget *GetOutputs() const { return m_pOutputs; }
@@ -112,6 +113,7 @@ private:
 	QToolButton *m_pSmartEdit = nullptr;
 	QTabWidget *m_pTabs = nullptr;
 	QTreeWidget *m_pKeys = nullptr;
+	QPushButton *m_pBrowseInstance = nullptr;
 	QPushButton *m_pPickFaces = nullptr;
 	QString m_szFacePickKey;
 	QPushButton *m_pAddKey = nullptr;

@@ -81,6 +81,7 @@ public:
 	// Writes the map (the text read, patched with every edit) to path, keeping what was there as
 	// Hammer does, in a .vmx beside it. The undo stack is clean afterwards.
 	bool Save( const std::filesystem::path &path, QString *pError );
+	void RefreshInstancesUsing( const std::filesystem::path &path );
 	// An edit's scene, now (the undo stack's commands call it).
 	void ApplyEditNow( const xv::map::MapEdit_t &edit, bool bDisplacements = false, std::shared_ptr<const xv::map::CScene> pPrepared = {} );
 	void BeginDisplacementPreview( std::vector<std::uint32_t> objects );
@@ -137,6 +138,7 @@ public:
 	[[nodiscard]] xv::map::Box_t GetObjectBounds( std::uint32_t nObject ) const;
 
 signals:
+	void Saved( const QString &szPath );
 	void LoadProgress( int nPercent, const QString &szStage );
 	void Loaded();
 	void LoadFailed( const QString &szError );

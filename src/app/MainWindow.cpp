@@ -776,6 +776,10 @@ void CMainWindow::BuildMenus( QAction *pSearchPathsToggle )
 			pMap->RunAction( MapAction_t::MAP_ACTION_CARVE, pMap->GetActiveView() );
 		}
 	} );
+	auto *pInstancing = m_pMapMenu->addMenu( tr( "Instancing" ) );
+	pInstancing->addAction( tr( "Edit Instance" ), this, [ this ] { if ( auto *pMap = GetCurrentMap() ) pMap->EditInstance(); } )->setObjectName( QStringLiteral( "mapEditInstance" ) );
+	pInstancing->addAction( tr( "Collapse Selection" ), this, [ this ] { if ( auto *pMap = GetCurrentMap() ) pMap->CollapseInstances( false ); } )->setObjectName( QStringLiteral( "mapCollapseInstances" ) );
+	pInstancing->addAction( tr( "Collapse All" ), this, [ this ] { if ( auto *pMap = GetCurrentMap() ) pMap->CollapseInstances( true ); } )->setObjectName( QStringLiteral( "mapCollapseAllInstances" ) );
 	m_pMapMenu->addSeparator();
 	QAction *pRunMap = m_pMapMenu->addAction( tr( "&Run Map…" ), this, [ this ] {
 		if ( CMapEditor *pMap = GetCurrentMap() )
@@ -5132,6 +5136,12 @@ void CMainWindow::UpdateMapMenu()
 //-----------------------------------------------------------------------------
 void CMainWindow::AddMapTab( CMapEditor *pEditor )
 {
+	connect( pEditor, &CMapEditor::OpenInstanceRequested, this, [ this ]( const QString &szPath ) { OpenMapFile( szPath ); } );
+	connect( &pEditor->GetDocument(), &CMapDocument::Saved, this, [ this ]( const QString &szPath ) {
+		for ( int n = 0; n < m_pTabs->count(); ++n )
+			if ( auto *pMap = qobject_cast<CMapEditor *>( m_pTabs->widget( n ) ) )
+				pMap->GetDocument().RefreshInstancesUsing( std::filesystem::path{ szPath.toStdString() } );
+	} );
 	connect( pEditor, &CMapEditor::StatusMessage, this, [ this ]( const QString &szText ) { statusBar()->showMessage( szText, 8000 ); } );
 	m_pUndoGroup->addStack( pEditor->GetUndoStack() );
 	connect( pEditor, &CMapEditor::TitleChanged, this, [ this, pEditor ] {

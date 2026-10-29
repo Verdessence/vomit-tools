@@ -5,6 +5,7 @@
 //
 //===========================================================================//
 #include "MapDocument.h"
+#include "map/InstanceEdit.h"
 
 #include "map/Cordon.h"
 
@@ -14,6 +15,7 @@
 #include <unordered_map>
 
 #include <QFile>
+#include <QTimer>
 #include <QSaveFile>
 #include <QUndoStack>
 #include <QElapsedTimer>
@@ -300,8 +302,44 @@ bool CMapDocument::Save( const std::filesystem::path &path, QString *pError )
 		}
 		return false;
 	}
+	auto pScene = std::make_shared<xv::map::CScene>( *m_pScene );
+	pScene->m_InstanceOptions.m_MapFile = path;
+	m_pScene = std::move( pScene );
 	m_pUndo->setClean();
+	emit Saved( szPath );
 	return true;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: A source tab's save refreshes every parent containing that file, including nesting,
+//          without touching the parent's undo history or discarding an in-progress drag.
+//-----------------------------------------------------------------------------
+void CMapDocument::RefreshInstancesUsing( const std::filesystem::path &path )
+{
+	if ( !m_pScene )
+		return;
+	if ( IsPreviewing() )
+	{
+		QTimer::singleShot( 50, this, [ this, path ] { RefreshInstancesUsing( path ); } );
+		return;
+	}
+	std::error_code error;
+	const auto saved = std::filesystem::weakly_canonical( path, error );
+	if ( error )
+		return;
+	bool bUses = false;
+	xv::map::ForEachInstance( *m_pScene, [ & ]( const xv::map::CScene &inner, const xv::map::Transform_t &, std::optional<std::uint32_t> ) {
+		for ( const auto &entity : inner.m_Map.m_Entities )
+			if ( !entity.m_bDeleted && entity.GetClassname() == "func_instance" )
+				if ( const auto found = xv::map::FindInstanceFile( entity.GetValue( "file" ), inner.m_InstanceOptions ); found && *found == saved )
+					bUses = true;
+	} );
+	if ( !bUses )
+		return;
+	m_pScene = xv::map::RefreshInstances( *m_pScene );
+	++m_nStateGeneration;
+	UpdateCordonHidden();
+	emit SceneEdited( m_pScene->m_Changed );
 }
 
 //-----------------------------------------------------------------------------

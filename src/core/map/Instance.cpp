@@ -17,6 +17,8 @@
 #include "map/GameConfig.h"
 #include "map/Scene.h"
 #include "map/Vmf.h"
+#include "map/Edit.h"
+#include "util/Scan.h"
 
 namespace xv::map
 {
@@ -63,21 +65,60 @@ std::vector<std::pair<std::string, std::string>> Replacements( const Entity_t &e
 // Purpose: The text with each $name swapped for its value. VBSP swaps them in entities' keys,
 //          where they are used; nothing else in a map spells one.
 //-----------------------------------------------------------------------------
-void Replace( std::vector<char> &text, const std::vector<std::pair<std::string, std::string>> &replacements )
+void Replace( CMap &map, const std::vector<std::pair<std::string, std::string>> &replacements )
 {
-	if ( replacements.empty() )
+	auto replace = [ & ]( std::string_view szText ) {
+		std::string sz{ szText };
+		for ( const auto &[ szName, szValue ] : replacements )
+			for ( std::size_t nAt = sz.find( szName ); nAt != std::string::npos; nAt = sz.find( szName, nAt + szValue.size() ) )
+				sz.replace( nAt, szName.size(), szValue );
+		return sz;
+	};
+	for ( auto &entity : map.m_Entities )
 	{
-		return;
-	}
-	std::string sz( text.begin(), text.end() );
-	for ( const auto &[ szName, szValue ] : replacements )
-	{
-		for ( std::size_t nAt = sz.find( szName ); nAt != std::string::npos; nAt = sz.find( szName, nAt + szValue.size() ) )
+		if ( kv1::EqualsIgnoreCase( entity.GetClassname(), "func_instance_parms" ) )
+			continue;
+		for ( auto &key : entity.m_Keys )
 		{
-			sz.replace( nAt, szName.size(), szValue );
+			const auto szValue = replace( key.m_szValue );
+			if ( szValue != key.m_szValue )
+			{
+				key.m_szValue = map.Store( szValue );
+				key.m_bChanged = true;
+			}
 		}
+		for ( auto &connection : entity.m_Connections )
+			for ( auto *pValue : { &connection.m_szOutput, &connection.m_szTarget, &connection.m_szInput, &connection.m_szParameter } )
+			{
+				const auto szValue = replace( *pValue );
+				if ( szValue != *pValue )
+				{
+					*pValue = map.Store( szValue );
+					entity.m_bConnectionsChanged = true;
+				}
+			}
 	}
-	text.assign( sz.begin(), sz.end() );
+	for ( auto &solid : map.m_Solids )
+		for ( auto &side : solid.m_Sides )
+		{
+			const auto szMaterial = replace( side.m_szMaterial );
+			if ( szMaterial != side.m_szMaterial )
+			{
+				side.m_szMaterial = map.Store( szMaterial );
+				solid.m_bChanged = true;
+			}
+		}
+	// Side material indices were assigned before substitutions; rebuild that small name table.
+	map.m_Materials.clear();
+	for ( auto &solid : map.m_Solids )
+		for ( auto &side : solid.m_Sides )
+		{
+			const std::string szName = NormalizeMaterial( side.m_szMaterial );
+			const auto found = std::ranges::find( map.m_Materials, szName );
+			side.m_nMaterial = static_cast<std::uint32_t>( found - map.m_Materials.begin() );
+			if ( found == map.m_Materials.end() )
+				map.m_Materials.push_back( szName );
+		}
 }
 
 //-----------------------------------------------------------------------------
@@ -448,11 +489,10 @@ std::optional<std::filesystem::path> FindInstanceFile( std::string_view szFile, 
 //-----------------------------------------------------------------------------
 void LoadInstances( CScene &scene, const SceneOptions_t &options )
 {
+	scene.m_Instances.clear();
+	scene.m_pInstanceMesh = std::make_shared<const CMapMesh>();
+	std::erase_if( scene.m_Problems, []( const auto &szProblem ) { return szProblem.starts_with( "func_instance " ); } );
 	const InstanceOptions_t &instances = options.m_Instances;
-	if ( instances.m_MapFile.empty() )
-	{
-		return;
-	}
 	const std::shared_ptr<CInstanceCache> pCache = instances.m_pCache ? instances.m_pCache : std::make_shared<CInstanceCache>();
 	std::error_code error;
 	const std::filesystem::path self = std::filesystem::weakly_canonical( instances.m_MapFile, error );
@@ -464,7 +504,7 @@ void LoadInstances( CScene &scene, const SceneOptions_t &options )
 	{
 		const Entity_t &entity = scene.m_Map.m_Entities[ e ];
 		const std::string_view szFile = entity.GetValue( "file" );
-		if ( !kv1::EqualsIgnoreCase( entity.GetClassname(), "func_instance" ) || szFile.empty() )
+		if ( entity.m_bDeleted || !kv1::EqualsIgnoreCase( entity.GetClassname(), "func_instance" ) || szFile.empty() )
 		{
 			continue;
 		}
@@ -517,7 +557,6 @@ void LoadInstances( CScene &scene, const SceneOptions_t &options )
 				problem( entity, std::string{ szFile } + " can't be read" );
 				continue;
 			}
-			Replace( text, replacements );
 			std::string szError;
 			std::optional<CMap> map = ReadVmf( std::move( text ), {}, &szError );
 			if ( !map )
@@ -525,6 +564,12 @@ void LoadInstances( CScene &scene, const SceneOptions_t &options )
 				problem( entity, std::string{ szFile } + ": " + szError );
 				continue;
 			}
+			auto values = replacements;
+			for ( const auto &parameter : InstanceParameters( *map ) )
+				if ( std::ranges::none_of( values, [ & ]( const auto &entry ) { return entry.first == parameter.m_szName; } ) )
+					values.emplace_back( parameter.m_szName, parameter.m_szDefault );
+			std::ranges::stable_sort( values, []( const auto &a, const auto &b ) { return a.first.size() > b.first.size(); } );
+			Replace( *map, values );
 			SceneOptions_t inner;
 			inner.m_pCancel = options.m_pCancel;
 			inner.m_Instances = instances;
@@ -541,7 +586,7 @@ void LoadInstances( CScene &scene, const SceneOptions_t &options )
 			{
 				for ( const std::string &szProblem : *pProblems )
 				{
-					scene.m_Problems.push_back( std::string{ szFile } + ": " + szProblem );
+					scene.m_Problems.push_back( "func_instance " + std::to_string( entity.m_nId ) + " (" + std::string{ szFile } + "): " + szProblem );
 				}
 			}
 			found = pCache->m_Scenes.emplace( key, std::move( pInner ) ).first;
@@ -565,6 +610,69 @@ void LoadInstances( CScene &scene, const SceneOptions_t &options )
 	}
 	pCache->m_Reading.pop_back();
 	BuildInstanceMesh( scene );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Read the VDC's "$variable type default value" declarations without losing spaces.
+//-----------------------------------------------------------------------------
+std::vector<InstanceParameter_t> InstanceParameters( const CMap &map )
+{
+	std::vector<InstanceParameter_t> parameters;
+	for ( const auto &entity : map.m_Entities )
+	{
+		if ( entity.m_bDeleted || !kv1::EqualsIgnoreCase( entity.GetClassname(), "func_instance_parms" ) )
+			continue;
+		for ( int n = 1; n <= 10; ++n )
+		{
+			const auto szDeclaration = entity.GetValue( "parm" + std::to_string( n ) );
+			CScanner scanner( szDeclaration );
+			const std::string szName{ scanner.Word() };
+			const std::string szType{ scanner.Word() };
+			if ( !szName.starts_with( '$' ) || szType.empty() )
+				continue;
+			auto szDefault = szDeclaration.substr( scanner.GetPosition() );
+			const auto nFirst = szDefault.find_first_not_of( " \t" );
+			szDefault = nFirst == std::string_view::npos ? std::string_view{} : szDefault.substr( nFirst );
+			parameters.push_back( { szName, szType, std::string{ szDefault } } );
+		}
+	}
+	return parameters;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: An explicit replace slot overrides the instance's declared default.
+//-----------------------------------------------------------------------------
+std::string InstanceParameterValue( const Entity_t &entity, const InstanceParameter_t &parameter )
+{
+	for ( const auto &[ szName, szValue ] : Replacements( entity ) )
+		if ( szName == parameter.m_szName )
+			return szValue;
+	return parameter.m_szDefault;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Keep Hammer's numbered replace keys, showing declared values as typed fields.
+//-----------------------------------------------------------------------------
+bool SetInstanceParameter( const CMap &map, Entity_t &entity, std::string_view szName, std::string_view szValue )
+{
+	std::string szEmpty;
+	for ( int n = 1; n <= 10; ++n )
+	{
+		const std::string szKey = "replace" + std::string( n < 10 ? "0" : "" ) + std::to_string( n );
+		const auto szExisting = entity.GetValue( szKey );
+		CScanner scanner( szExisting );
+		if ( scanner.Word() == szName )
+		{
+			SetKeyValue( map, entity, szKey, std::string{ szName } + " " + std::string{ szValue } );
+			return true;
+		}
+		if ( szEmpty.empty() && szExisting.empty() )
+			szEmpty = szKey;
+	}
+	if ( szEmpty.empty() )
+		return false;
+	SetKeyValue( map, entity, szEmpty, std::string{ szName } + " " + std::string{ szValue } );
+	return true;
 }
 
 } // namespace xv::map

@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <string>
 #include <set>
+#include <map>
 #include <cctype>
 #include <cmath>
 #include <numbers>
@@ -17,6 +18,7 @@
 
 #include "kv1/Kv1.h"
 #include "util/Numbers.h"
+#include "util/Scan.h"
 #include "map/Brushes.h"
 #include "map/Entities.h"
 #include "map/Mesh.h"
@@ -144,8 +146,10 @@ std::shared_ptr<CScene> ApplyEdit( const CScene &scene, const MapEdit_t &edit, b
 	}
 	// Entities first: new solids may belong to new entities.
 	bool bSkybox = false;
+	bool bInstances = false;
 	for ( const auto &[ nIndex, entity ] : EditedEntities( scene, edit ) )
 	{
+		bInstances = bInstances || kv1::EqualsIgnoreCase( entity.GetClassname(), "func_instance" ) || ( nIndex < map.m_Entities.size() && kv1::EqualsIgnoreCase( std::as_const( map.m_Entities )[ nIndex ].GetClassname(), "func_instance" ) );
 		if ( nIndex >= map.m_Entities.size() )
 		{
 			map.m_Entities.push_back( entity );
@@ -257,6 +261,13 @@ std::shared_ptr<CScene> ApplyEdit( const CScene &scene, const MapEdit_t &edit, b
 		out.m_SolidMeshes.clear();
 	}
 
+	if ( bInstances )
+	{
+		SceneOptions_t options;
+		options.m_Instances = out.m_InstanceOptions;
+		options.m_Instances.m_pCache.reset();
+		LoadInstances( out, options );
+	}
 	if ( bDisplacementPreview )
 	{
 		// A preview may overestimate the bounds until commit; culling must never lose a raised
@@ -596,6 +607,7 @@ MapEdit_t AddIncoming( const CScene &scene, Incoming_t incoming, const Transform
 	const auto nFirstEntity = static_cast<std::uint32_t>( map.m_Entities.size() );
 	const auto nFirstSolid = static_cast<std::uint32_t>( map.m_Solids.size() );
 	std::uint32_t nObject = scene.GetObjectCount();
+	std::map<int, int> sideIds;
 	std::vector<Entity_t> entities = std::move( incoming.m_Entities );
 	for ( Entity_t &entity : entities )
 	{
@@ -613,6 +625,7 @@ MapEdit_t AddIncoming( const CScene &scene, Incoming_t incoming, const Transform
 		solid.m_nId = nNextId++;
 		for ( Side_t &side : solid.m_Sides )
 		{
+			sideIds.emplace( side.m_nId, nNextSide );
 			side.m_nId = nNextSide++;
 		}
 		const std::uint32_t nIndex = nFirstSolid + static_cast<std::uint32_t>( i );
@@ -626,6 +639,26 @@ MapEdit_t AddIncoming( const CScene &scene, Incoming_t incoming, const Transform
 			solid.m_nEntity = incoming.m_OwnersKept.empty() ? -1 : incoming.m_OwnersKept[ i ];
 		}
 		edit.m_Solids.emplace_back( nIndex, std::move( solid ) );
+	}
+	for ( auto &entity : entities )
+	{
+		if ( entity.GetClassname() != "info_overlay" && entity.GetClassname() != "info_overlay_transition" )
+			continue;
+		for ( const auto szKey : { "sides", "sides2" } )
+		{
+			if ( !entity.HasKey( szKey ) )
+				continue;
+			CScanner scanner( entity.GetValue( szKey ) );
+			std::string szSides;
+			while ( const auto nSide = scanner.Int() )
+			{
+				if ( !szSides.empty() )
+					szSides += ' ';
+				const auto found = sideIds.find( *nSide );
+				szSides += std::to_string( found == sideIds.end() ? *nSide : found->second );
+			}
+			SetKeyValue( map, entity, szKey, szSides );
+		}
 	}
 	for ( std::size_t i = 0; i < entities.size(); i++ )
 	{

@@ -67,6 +67,7 @@
 #include "map/Entities.h"
 #include "map/Primitives.h"
 #include "map/Overlay.h"
+#include "map/InstanceEdit.h"
 #include "util/Memory.h"
 
 namespace
@@ -2074,6 +2075,57 @@ void CMapEditor::SetEntityMarker( std::optional<xv::map::Point_t> at )
 	}
 	m_EntityMarker = at;
 	RepaintTools();
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Open the selected instance's actual source file, using the viewer's resolver.
+//-----------------------------------------------------------------------------
+void CMapEditor::EditInstance()
+{
+	const auto *pScene = m_pDocument->GetScene();
+	if ( !pScene )
+		return;
+	for ( const auto nObject : m_pDocument->GetSelection() )
+	{
+		if ( pScene->IsSolidObject( nObject ) )
+			continue;
+		const auto &entity = pScene->m_Map.m_Entities[ pScene->GetIndex( nObject ) ];
+		if ( entity.GetClassname() != "func_instance" )
+			continue;
+		if ( const auto path = xv::map::FindInstanceFile( entity.GetValue( "file" ), pScene->m_InstanceOptions ) )
+			emit OpenInstanceRequested( QString::fromStdString( path->string() ) );
+		else
+			emit StatusMessage( tr( "The instance map could not be found" ) );
+		return;
+	}
+	emit StatusMessage( tr( "Select a func_instance to edit its map" ) );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Replace selected or all instances atomically with the objects the viewer resolved.
+//-----------------------------------------------------------------------------
+void CMapEditor::CollapseInstances( bool bAll )
+{
+	const auto *pScene = m_pDocument->GetScene();
+	if ( !pScene )
+		return;
+	auto objects = m_pDocument->GetSelection();
+	if ( bAll )
+	{
+		objects.clear();
+		for ( std::uint32_t e = 0; e < pScene->m_Map.m_Entities.size(); ++e )
+			if ( !pScene->m_Map.m_Entities[ e ].m_bDeleted && pScene->m_Map.m_Entities[ e ].GetClassname() == "func_instance" )
+				objects.push_back( pScene->EntityObject( e ) );
+	}
+	std::vector<std::uint32_t> added;
+	std::string szError;
+	auto edit = xv::map::CollapseInstances( *pScene, objects, &added, &szError );
+	if ( !szError.empty() )
+	{
+		emit StatusMessage( QString::fromStdString( szError ) );
+		return;
+	}
+	m_pDocument->Edit( std::move( edit ), tr( "Collapse Instances" ), std::move( added ) );
 }
 
 //-----------------------------------------------------------------------------

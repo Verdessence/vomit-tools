@@ -28,6 +28,8 @@ add_library(vomit_tools_core STATIC
         map/Fgd.h
         map/GameConfig.cpp
         map/GameConfig.h
+        map/InstanceEdit.cpp
+        map/InstanceEdit.h
         map/Instance.cpp
         map/Instance.h
         map/Geometry.cpp

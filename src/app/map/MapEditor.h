@@ -117,6 +117,8 @@ public:
 	[[nodiscard]] const std::optional<xv::map::Point_t> &GetEntityMarker() const { return m_EntityMarker; }
 	void SetEntityMarker( std::optional<xv::map::Point_t> at );
 	// A new entity of the entity tool's class at origin, selected.
+	void EditInstance();
+	void CollapseInstances( bool bAll );
 	void PlaceOverlay( const xv::map::Point_t &origin, const xv::map::Point_t &normal, xv::map::FaceRef_t face );
 	void AssignOverlayFace( xv::map::FaceRef_t face, const QString &szKey, bool bToggle, bool bReplace );
 	void SetFacePickKey( const QString &szKey );
@@ -259,6 +261,7 @@ protected:
 	void hideEvent( QHideEvent *pEvent ) override;
 
 signals:
+	void OpenInstanceRequested( const QString &szPath );
 	void FacePickChanged( const QString &szKey );
 	void StatusMessage( const QString &szText );
 	// The tab's title changed (saved under another name, or modified).

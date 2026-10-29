@@ -27,6 +27,8 @@
 
 #include "kv1/Kv1.h"
 #include "map/DispEdit.h"
+#include "map/Instance.h"
+#include "FileDialogs.h"
 #include "util/Numbers.h"
 
 namespace
@@ -217,6 +219,11 @@ CMapProperties::CMapProperties( CMapDocument &document, QWidget *pParent )
 	m_pKeys->setItemDelegate( new CPropertyDelegate( *this, *m_pKeys ) );
 	pInfoLayout->addWidget( m_pKeys, 1 );
 	auto *pKeyButtons = new QHBoxLayout;
+	m_pBrowseInstance = new QPushButton( tr( "Browse..." ) );
+	m_pBrowseInstance->setObjectName( QStringLiteral( "mapPropertiesBrowseInstance" ) );
+	m_pBrowseInstance->hide();
+	pKeyButtons->addWidget( m_pBrowseInstance );
+	connect( m_pBrowseInstance, &QPushButton::clicked, this, &CMapProperties::BrowseInstanceFile );
 	m_pPickFaces = new QPushButton( tr( "Pick..." ) );
 	m_pPickFaces->setObjectName( QStringLiteral( "mapPropertiesPickFaces" ) );
 	m_pPickFaces->setCheckable( true );
@@ -470,6 +477,7 @@ void CMapProperties::ShowHelp()
 	if ( i < m_Sheet.m_Rows.size() )
 	{
 		const xv::map::PropertyRow_t &row = m_Sheet.m_Rows[ i ];
+		m_pBrowseInstance->setVisible( row.m_szKey == "file" && m_Sheet.m_szClass == "func_instance" );
 		const bool bSides = ( row.m_szKey == "sides" || row.m_szKey == "sides2" ) && ( m_Sheet.m_szClass == "info_overlay" || m_Sheet.m_szClass == "info_overlay_transition" );
 		m_pPickFaces->setVisible( bSides );
 		if ( !m_szFacePickKey.isEmpty() && ( !bSides || m_szFacePickKey != FromStd( row.m_szKey ) ) )
@@ -478,9 +486,34 @@ void CMapProperties::ShowHelp()
 		return;
 	}
 	m_pPickFaces->hide();
+	m_pBrowseInstance->hide();
 	if ( !m_szFacePickKey.isEmpty() )
 		emit FacePickRequested( {} );
 	m_pHelp->setText( FromStd( m_Sheet.m_szClassHelp ) );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: The instance file key uses the shared chooser and remains editable as a relative path.
+//-----------------------------------------------------------------------------
+void CMapProperties::BrowseInstanceFile()
+{
+	const auto szFile = AskOpenFile( this, tr( "Instance Map" ), {}, tr( "Hammer maps (*.vmf)" ) );
+	if ( szFile.isEmpty() )
+		return;
+	for ( std::size_t n = 0; n < m_Sheet.m_Rows.size(); ++n )
+		if ( m_Sheet.m_Rows[ n ].m_szKey == "file" )
+		{
+			std::string szValue = szFile.toStdString();
+			if ( const auto *pScene = m_Document.GetScene(); pScene && !pScene->m_InstanceOptions.m_MapFile.empty() )
+			{
+				std::error_code error;
+				const auto relative = std::filesystem::relative( std::filesystem::path{ szValue }, pScene->m_InstanceOptions.m_MapFile.parent_path(), error );
+				if ( !error )
+					szValue = relative.generic_string();
+			}
+			CommitKey( n, szValue );
+			break;
+		}
 }
 
 //-----------------------------------------------------------------------------
@@ -615,7 +648,11 @@ void CMapProperties::CommitKey( std::size_t nRow, const std::string &szValue )
 	const bool bRemove = szValue.empty() && !row.m_szType.empty();
 	Apply( tr( "Change %1" ).arg( FromStd( szKey ) ), [ this, szKey, szValue, bRemove, selection = m_Document.GetSelection() ]( const xv::map::CScene &scene ) {
 		return EditShown( scene, selection, [ & ]( xv::map::Entity_t &entity ) {
-			if ( bRemove )
+			if ( szKey.starts_with( '$' ) )
+			{
+				(void)xv::map::SetInstanceParameter( scene.m_Map, entity, szKey, szValue );
+			}
+			else if ( bRemove )
 			{
 				xv::map::RemoveKey( entity, szKey );
 			}

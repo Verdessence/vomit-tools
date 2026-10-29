@@ -11,6 +11,7 @@
 
 #include "kv1/Kv1.h"
 #include "map/Scene.h"
+#include "map/Instance.h"
 #include "util/Numbers.h"
 
 namespace xv::map
@@ -262,6 +263,25 @@ PropertySheet_t DescribeSelection( const CScene &scene, const std::vector<std::u
 		return sheet;
 	}
 	PropertySheet_t described = DescribeEntities( scene, entities, entityObjects, bSmartEdit, true );
+	if ( bSmartEdit && described.m_szClass == "func_instance" && !entityObjects.empty() )
+	{
+		const auto placed = std::ranges::find_if( scene.m_Instances, [ & ]( const auto &entry ) { return entry.m_nObject == entityObjects.front(); } );
+		if ( placed != scene.m_Instances.end() )
+			for ( const auto &parameter : InstanceParameters( placed->m_pScene->m_Map ) )
+			{
+				PropertyRow_t row;
+				row.m_szKey = row.m_szName = parameter.m_szName;
+				row.m_szType = parameter.m_szType;
+				row.m_szHelp = "Instance parameter (" + parameter.m_szType + "), default: " + parameter.m_szDefault;
+				row.m_szValue = InstanceParameterValue( *entities.front(), parameter );
+				for ( const auto *pEntity : entities )
+					row.m_bDiffers |= InstanceParameterValue( *pEntity, parameter ) != row.m_szValue;
+				if ( row.m_bDiffers )
+					row.m_szValue.clear();
+				row.m_szShown = row.m_szValue;
+				described.m_Rows.push_back( std::move( row ) );
+			}
+	}
 	described.m_nWorldSolids = sheet.m_nWorldSolids;
 	return described;
 }

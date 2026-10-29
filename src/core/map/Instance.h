@@ -16,6 +16,7 @@
 #include <memory>
 #include <optional>
 #include <string_view>
+#include <string>
 #include <vector>
 
 #include "map/Geometry.h"
@@ -26,6 +27,21 @@ namespace xv::map
 
 class CScene;
 struct SceneOptions_t;
+
+class CMap;
+struct Entity_t;
+
+struct InstanceParameter_t
+{
+	std::string m_szName;
+	std::string m_szType;
+	std::string m_szDefault;
+};
+// Declarations retain their names even after the scene's entity values have been substituted.
+[[nodiscard]] std::vector<InstanceParameter_t> InstanceParameters( const CMap &map );
+[[nodiscard]] std::string InstanceParameterValue( const Entity_t &entity, const InstanceParameter_t &parameter );
+// Set or clear one of the ten replacement slots. False when every slot is occupied.
+[[nodiscard]] bool SetInstanceParameter( const CMap &map, Entity_t &entity, std::string_view szName, std::string_view szValue );
 
 // A turn (with any scale or shear) and then a move, in doubles.
 struct Transform_t
