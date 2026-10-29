@@ -107,3 +107,80 @@ MaterialPicture_t LoadMaterialPicture( const xv::vfs::CFileSystem &fileSystem, c
 	}
 	return result;
 }
+
+//-----------------------------------------------------------------------------
+// Purpose: The sheet owns one loader, created without starting work until it has a game.
+//-----------------------------------------------------------------------------
+CMaterialPictureLoader::CMaterialPictureLoader( QObject *pParent )
+	: QObject( pParent )
+{
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Finish the current decode before its request receiver is destroyed.
+//-----------------------------------------------------------------------------
+CMaterialPictureLoader::~CMaterialPictureLoader()
+{
+	{
+		const std::lock_guard lock( m_Mutex );
+		m_bStop = true;
+	}
+	m_Wake.notify_all();
+	if ( m_Worker.joinable() )
+		m_Worker.join();
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Replace a pending request; only its generation may publish back to the sheet.
+//-----------------------------------------------------------------------------
+void CMaterialPictureLoader::Request( const xv::vfs::CGameInfo &game, const QString &szName )
+{
+	const std::uint64_t nGeneration = ++m_nGeneration;
+	{
+		const std::lock_guard lock( m_Mutex );
+		m_Job = Job_t{ game, szName, nGeneration };
+	}
+	if ( !m_Worker.joinable() )
+		m_Worker = std::thread( [ this ] { Run(); } );
+	m_Wake.notify_one();
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Blank or mixed selections discard both queued and already decoding pictures.
+//-----------------------------------------------------------------------------
+void CMaterialPictureLoader::Cancel()
+{
+	++m_nGeneration;
+	const std::lock_guard lock( m_Mutex );
+	m_Job.reset();
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Mount once per game and deliver QImages through the receiver's GUI event queue.
+//-----------------------------------------------------------------------------
+void CMaterialPictureLoader::Run()
+{
+	std::unique_ptr<xv::vfs::CFileSystem> pFileSystem;
+	std::filesystem::path mounted;
+	while ( true )
+	{
+		std::optional<Job_t> job;
+		{
+			std::unique_lock lock( m_Mutex );
+			m_Wake.wait( lock, [ this ] { return m_bStop || m_Job.has_value(); } );
+			if ( m_bStop )
+				return;
+			job = std::move( m_Job );
+			m_Job.reset();
+		}
+		if ( !pFileSystem || mounted != job->m_Game.m_GameDir )
+		{
+			pFileSystem = std::make_unique<xv::vfs::CFileSystem>();
+			pFileSystem->Mount( job->m_Game );
+			mounted = job->m_Game.m_GameDir;
+		}
+		const auto picture = LoadMaterialPicture( *pFileSystem, QString::fromStdString( mounted.string() ), job->m_szName, 128 );
+		QMetaObject::invokeMethod( this, [ this, nGeneration = job->m_nGeneration, picture ] {
+			if ( nGeneration == m_nGeneration ) emit Ready( picture.m_Image, picture.m_Size ); }, Qt::QueuedConnection );
+	}
+}

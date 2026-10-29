@@ -204,7 +204,7 @@ public:
 
 	// The Texture Application tool's faces.
 	[[nodiscard]] const std::vector<xv::map::FaceRef_t> &GetSelectedFaces() const { return m_SelectedFaces; }
-	void SetSelectedFaces( std::vector<xv::map::FaceRef_t> faces );
+	void SetSelectedFaces( std::vector<xv::map::FaceRef_t> faces, bool bLiftFirst = false );
 	void ToggleFace( const xv::map::FaceRef_t &face );
 	// One step to undo: pfnEdit gets each selected face's side, its plane's normal and its points.
 	void EditSelectedFaces( const QString &szName, const std::function<void( xv::map::Side_t &, const xv::map::Point_t &, const std::vector<xv::map::Point_t> & )> &pfnEdit );
@@ -257,6 +257,7 @@ signals:
 	void StatusMessage( const QString &szText );
 	// The tab's title changed (saved under another name, or modified).
 	void TitleChanged();
+	void CurrentMaterialChanged( const QString &szMaterial );
 
 private:
 	void BuildToolBars( QVBoxLayout *pLayout );

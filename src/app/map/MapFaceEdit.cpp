@@ -13,6 +13,8 @@
 #include <QCheckBox>
 #include <QSettings>
 #include <QPainter>
+#include <QPixmap>
+#include "MaterialPictures.h"
 #include <QMouseEvent>
 #include <QScrollArea>
 #include <QComboBox>
@@ -243,6 +245,23 @@ CMapFaceEdit::CMapFaceEdit( CMapEditor &editor, QWidget *pParent )
 	pBrowse->setObjectName( QStringLiteral( "mapFaceBrowse" ) );
 	pTexture->addWidget( pBrowse );
 	pLayout->addLayout( pTexture );
+	m_pTexturePicture = new QLabel;
+	m_pTexturePicture->setObjectName( QStringLiteral( "mapFaceTexturePicture" ) );
+	m_pTexturePicture->setFixedSize( 64, 64 );
+	m_pTexturePicture->setAlignment( Qt::AlignCenter );
+	m_pTextureSize = new QLabel;
+	m_pTextureSize->setObjectName( QStringLiteral( "mapFaceTextureSize" ) );
+	auto *pPictureRow = new QHBoxLayout;
+	pPictureRow->addWidget( m_pTexturePicture );
+	pPictureRow->addWidget( m_pTextureSize );
+	pPictureRow->addStretch();
+	pLayout->addLayout( pPictureRow );
+	m_pPictureLoader = new CMaterialPictureLoader( this );
+	connect( m_pPictureLoader, &CMaterialPictureLoader::Ready, this, [ this ]( const QImage &image, QSize size ) {
+		m_pTexturePicture->setPixmap( QPixmap::fromImage( image.scaled( 64, 64, Qt::KeepAspectRatio, Qt::SmoothTransformation ) ) );
+		m_pTextureSize->setText( size.isValid() ? QStringLiteral( "%1×%2" ).arg( size.width() ).arg( size.height() ) : QString{} );
+	} );
+	connect( &m_Editor, &CMapEditor::CurrentMaterialChanged, this, &CMapFaceEdit::ShowMaterial );
 
 	auto *pBottom = new QHBoxLayout;
 	pBottom->addWidget( new QLabel( tr( "Mode" ) ) );
@@ -287,7 +306,12 @@ CMapFaceEdit::CMapFaceEdit( CMapEditor &editor, QWidget *pParent )
 	} );
 	connect( m_pAlignWorld, &QRadioButton::clicked, this, [ this ] { Align( true ); } );
 	connect( m_pAlignFace, &QRadioButton::clicked, this, [ this ] { Align( false ); } );
-	connect( m_pTexture, &QLineEdit::editingFinished, this, [ this ] { m_Editor.SetCurrentMaterial( m_pTexture->text() ); } );
+	connect( m_pTexture, &QLineEdit::editingFinished, this, [ this ] {
+		if ( m_pTexture->text().trimmed().isEmpty() )
+			ShowMaterial( {} );
+		else
+			m_Editor.SetCurrentMaterial( m_pTexture->text() );
+	} );
 	connect( pBrowse, &QPushButton::clicked, this, [ this ] { m_Editor.BrowseMaterial(); } );
 	connect( pApply, &QPushButton::clicked, this, [ this ] { m_Editor.ApplyCurrentTexture( true ); } );
 }
@@ -825,6 +849,26 @@ FaceEditMode_t CMapFaceEdit::GetMode() const
 }
 
 //-----------------------------------------------------------------------------
+// Purpose: Display a selected or newly chosen material. A mixed selection is empty without
+//          changing the editor's independent current material used by Apply.
+//-----------------------------------------------------------------------------
+void CMapFaceEdit::ShowMaterial( const QString &szName )
+{
+	m_pTexture->setText( szName );
+	const auto &game = m_Editor.GetDocument().GetGame();
+	const QString szGame = game ? QString::fromStdString( game->m_GameDir.string() ) : QString{};
+	if ( szName == m_szPictureName && szGame == m_szPictureGame )
+		return;
+	m_szPictureName = szName;
+	m_szPictureGame = szGame;
+	m_pTexturePicture->clear();
+	m_pTextureSize->clear();
+	m_pPictureLoader->Cancel();
+	if ( game && !szName.isEmpty() )
+		m_pPictureLoader->Request( *game, szName );
+}
+
+//-----------------------------------------------------------------------------
 // Purpose: A field blank (its "differs" minimum) where the faces don't agree.
 //-----------------------------------------------------------------------------
 void CMapFaceEdit::Refresh()
@@ -832,7 +876,7 @@ void CMapFaceEdit::Refresh()
 	const xv::map::CScene *pScene = m_Editor.GetDocument().GetScene();
 	const std::vector<xv::map::FaceRef_t> &faces = m_Editor.GetSelectedFaces();
 	m_bFilling = true;
-	m_pTexture->setText( m_Editor.GetCurrentMaterial() );
+	std::optional<QString> szMaterial;
 	std::optional<double> flScaleX, flScaleY, flShiftX, flShiftY, flRotation;
 	std::optional<int> nLightmap;
 	std::optional<bool> bWorld;
@@ -854,6 +898,7 @@ void CMapFaceEdit::Refresh()
 			continue;
 		}
 		const xv::map::Side_t &side = pScene->m_Map.m_Solids[ face.m_nSolid ].m_Sides[ face.m_nSide ];
+		common( szMaterial, QString::fromUtf8( side.m_szMaterial.data(), static_cast<qsizetype>( side.m_szMaterial.size() ) ).toUpper() );
 		common( flScaleX, side.m_UAxis.m_flScale );
 		common( flScaleY, side.m_VAxis.m_flScale );
 		common( flShiftX, side.m_UAxis.m_flShift );
@@ -864,6 +909,7 @@ void CMapFaceEdit::Refresh()
 		common( bWorld, pFace && xv::map::IsWorldAligned( side, pFace->m_Plane.m_Normal ) );
 		bFirst = false;
 	}
+	ShowMaterial( faces.empty() ? m_Editor.GetCurrentMaterial() : szMaterial.value_or( QString{} ) );
 	auto show = []( QDoubleSpinBox *pSpin, const std::optional<double> &value ) { pSpin->setValue( value.value_or( pSpin->minimum() ) ); };
 	show( m_pScaleX, flScaleX );
 	show( m_pScaleY, flScaleY );
@@ -913,7 +959,7 @@ void CMapFaceEdit::LiftFrom( const xv::map::Side_t &side )
 	m_pLightmap->setValue( side.m_nLightmapScale );
 	m_bFilling = false;
 	m_Editor.SetCurrentMaterial( QString::fromUtf8( side.m_szMaterial.data(), static_cast<qsizetype>( side.m_szMaterial.size() ) ) );
-	m_pTexture->setText( m_Editor.GetCurrentMaterial() );
+	ShowMaterial( m_Editor.GetCurrentMaterial() );
 }
 
 //-----------------------------------------------------------------------------

@@ -492,6 +492,7 @@ QWidget *CMapEditor::BuildNewObjects()
 	m_pEntityClass->setToolTip( tr( "The class the entity tool places (%1)" ).arg( MapActionKey( MapAction_t::MAP_ACTION_TOOL_ENTITY ).toString( QKeySequence::NativeText ) ) );
 	m_pEntityClass->addItem( QString::fromStdString( m_pDocument->GetDefaults().m_szPointEntity ) );
 	m_pMaterial = new QLineEdit( QStringLiteral( "DEV/DEV_MEASUREGENERIC01" ) );
+	connect( m_pMaterial, &QLineEdit::editingFinished, this, [ this ] { SetCurrentMaterial( m_pMaterial->text() ); } );
 	m_pMaterial->setObjectName( QStringLiteral( "mapNewMaterial" ) );
 	m_pMaterial->setToolTip( tr( "The material the block tool gives new blocks (%1)" ).arg( MapActionKey( MapAction_t::MAP_ACTION_TOOL_BLOCK ).toString( QKeySequence::NativeText ) ) );
 	// Hammer's Objects box: the block tool's shape, and its Faces box for the round ones.
@@ -711,7 +712,7 @@ void CMapEditor::SetTool( MapTool_t nTool )
 	{
 		// A brush picked before opening Face Edit supplies its faces, as in Hammer. Otherwise
 		// its selection tint would promise painting permission the face selection didn't hold.
-		SetSelectedFaces( xv::map::FacesOf( *m_pDocument->GetScene(), m_pDocument->GetSelection() ) );
+		SetSelectedFaces( xv::map::FacesOf( *m_pDocument->GetScene(), m_pDocument->GetSelection() ), true );
 	}
 	if ( bTexture )
 	{
@@ -2113,12 +2114,12 @@ QString CMapEditor::GetCurrentMaterial() const
 void CMapEditor::SetCurrentMaterial( const QString &szMaterial )
 {
 	const QString szClean = szMaterial.trimmed().toUpper();
-	if ( szClean.isEmpty() || szClean == m_pMaterial->text() )
+	if ( szClean.isEmpty() )
 	{
 		return;
 	}
 	m_pMaterial->setText( szClean );
-	m_pFaceEdit->Refresh();
+	emit CurrentMaterialChanged( szClean );
 }
 
 //-----------------------------------------------------------------------------
@@ -2146,11 +2147,18 @@ void CMapEditor::BrowseMaterial()
 //-----------------------------------------------------------------------------
 // Purpose:
 //-----------------------------------------------------------------------------
-void CMapEditor::SetSelectedFaces( std::vector<xv::map::FaceRef_t> faces )
+void CMapEditor::SetSelectedFaces( std::vector<xv::map::FaceRef_t> faces, bool bLiftFirst )
 {
 	std::ranges::sort( faces );
 	faces.erase( std::ranges::unique( faces ).begin(), faces.end() );
 	m_SelectedFaces = std::move( faces );
+	const auto *pScene = m_pDocument->GetScene();
+	if ( bLiftFirst && m_pFaceEdit->GetMode() == FaceEditMode_t::FACE_EDIT_MODE_LIFT_SELECT && pScene && !m_SelectedFaces.empty() )
+	{
+		const auto &face = m_SelectedFaces.front();
+		if ( face.m_nSolid < pScene->m_Map.m_Solids.size() && face.m_nSide < pScene->m_Map.m_Solids[ face.m_nSolid ].m_Sides.size() )
+			m_pFaceEdit->LiftFrom( pScene->m_Map.m_Solids[ face.m_nSolid ].m_Sides[ face.m_nSide ] );
+	}
 	m_pFaceEdit->Refresh();
 	RepaintTools();
 }
@@ -2492,10 +2500,10 @@ void CMapEditor::ClickFace( const xv::map::FaceRef_t &face, Qt::KeyboardModifier
 				faces.push_back( one );
 			}
 		}
-		SetSelectedFaces( std::move( faces ) );
+		SetSelectedFaces( std::move( faces ), modifiers.testFlag( Qt::ShiftModifier ) );
 		return;
 	}
-	SetSelectedFaces( std::move( picked ) );
+	SetSelectedFaces( std::move( picked ), modifiers.testFlag( Qt::ShiftModifier ) );
 }
 
 //-----------------------------------------------------------------------------

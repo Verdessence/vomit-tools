@@ -19,6 +19,7 @@
 #include "map/Faces.h"
 
 class CMapEditor;
+class CMaterialPictureLoader;
 class QButtonGroup;
 class QCheckBox;
 class QComboBox;
@@ -117,6 +118,7 @@ protected:
 
 private:
 	void BuildDisplacementTab( QWidget *pPage );
+	void ShowMaterial( const QString &szName );
 	// A field typed: the selected faces take it.
 	void FieldChanged( const QString &szName, const std::function<void( xv::map::Side_t & )> &pfnSet );
 	void Align( bool bWorld );
@@ -133,6 +135,11 @@ private:
 	QRadioButton *m_pAlignWorld = nullptr;
 	QRadioButton *m_pAlignFace = nullptr;
 	QLineEdit *m_pTexture = nullptr;
+	QLabel *m_pTexturePicture = nullptr;
+	QLabel *m_pTextureSize = nullptr;
+	CMaterialPictureLoader *m_pPictureLoader = nullptr;
+	QString m_szPictureName;
+	QString m_szPictureGame;
 	QComboBox *m_pMode = nullptr;
 	QTabWidget *m_pTabs = nullptr;
 	QSpinBox *m_pPower = nullptr;
