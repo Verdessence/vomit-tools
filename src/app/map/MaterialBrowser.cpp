@@ -227,7 +227,6 @@ CMaterialBrowser::CMaterialBrowser( const xv::vfs::CGameInfo &game, QStringList 
 	pTop->addWidget( new QLabel( tr( "Filter" ) ) );
 	m_pWords = new QLineEdit;
 	m_pWords->setObjectName( QStringLiteral( "materialBrowserFilter" ) );
-	m_pWords->setPlaceholderText( tr( "Words the name must have" ) );
 	m_pWords->setClearButtonEnabled( true );
 	pTop->addWidget( m_pWords, 1 );
 	m_pSize = new QComboBox;
