@@ -13,6 +13,7 @@
 #include <span>
 #include <string>
 #include <vector>
+#include <utility>
 
 #include "map/Geometry.h"
 #include "map/Mesh.h"
@@ -21,6 +22,16 @@ namespace xv::map
 {
 
 class CScene;
+class CMap;
+struct MapEdit_t;
+struct Entity_t;
+struct Transform_t;
+
+// Carry an overlay's projection frame and corners through the same transform as its faces.
+void TransformOverlay( const CMap &map, Entity_t &entity, const Transform_t &transform );
+// Overlay entity changes implied by solid edits: transformed projections and surviving face IDs.
+// Explicit overlay edits are respected, so selecting a face and its overlay never moves it twice.
+[[nodiscard]] std::vector<std::pair<std::uint32_t, Entity_t>> FollowOverlayFaces( const CScene &scene, const MapEdit_t &edit );
 
 // How far pieces sit off their faces, so they show over them without fighting for depth.
 inline constexpr double OVERLAY_LIFT = 0.25;

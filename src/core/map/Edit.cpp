@@ -5,6 +5,7 @@
 //
 //===========================================================================//
 #include "Edit.h"
+#include "map/Overlay.h"
 
 #include <algorithm>
 #include <string>
@@ -99,6 +100,23 @@ std::uint32_t ResolveMaterial( CScene &scene, std::string_view szSpelling )
 } // namespace
 
 //-----------------------------------------------------------------------------
+// Purpose: Merge dependent overlay changes before application and undo capture alike.
+//-----------------------------------------------------------------------------
+static std::vector<std::pair<std::uint32_t, Entity_t>> EditedEntities( const CScene &scene, const MapEdit_t &edit )
+{
+	auto entities = edit.m_Entities;
+	for ( auto &[ nEntity, entity ] : FollowOverlayFaces( scene, edit ) )
+	{
+		const auto found = std::ranges::find_if( entities, [ & ]( const auto &entry ) { return entry.first == nEntity; } );
+		if ( found == entities.end() )
+			entities.emplace_back( nEntity, std::move( entity ) );
+		else
+			found->second = std::move( entity );
+	}
+	return entities;
+}
+
+//-----------------------------------------------------------------------------
 // Purpose:
 //-----------------------------------------------------------------------------
 std::shared_ptr<CScene> ApplyEdit( const CScene &scene, const MapEdit_t &edit, bool bDisplacementPreview )
@@ -126,7 +144,7 @@ std::shared_ptr<CScene> ApplyEdit( const CScene &scene, const MapEdit_t &edit, b
 	}
 	// Entities first: new solids may belong to new entities.
 	bool bSkybox = false;
-	for ( const auto &[ nIndex, entity ] : edit.m_Entities )
+	for ( const auto &[ nIndex, entity ] : EditedEntities( scene, edit ) )
 	{
 		if ( nIndex >= map.m_Entities.size() )
 		{
@@ -300,7 +318,7 @@ MapEdit_t InverseOf( const CScene &scene, const MapEdit_t &edit )
 	{
 		inverse.m_RemovedGroups.push_back( group.m_nId );
 	}
-	for ( const auto &[ nIndex, entity ] : edit.m_Entities )
+	for ( const auto &[ nIndex, entity ] : EditedEntities( scene, edit ) )
 	{
 		if ( nIndex < map.m_Entities.size() )
 		{
@@ -471,6 +489,7 @@ MapEdit_t TransformObjects( const CScene &scene, const std::vector<std::uint32_t
 	for ( const std::uint32_t nSolid : set.m_Solids )
 	{
 		edit.m_Solids.emplace_back( nSolid, TransformSolid( scene.m_Map.m_Solids[ nSolid ], transform, bTextureLock, bScaleLock ) );
+		edit.m_SolidTransforms.emplace_back( nSolid, transform );
 	}
 	for ( const std::uint32_t nEntity : set.m_Entities )
 	{
@@ -1172,6 +1191,8 @@ MapEdit_t EditWorld( const CScene &scene, const std::function<void( Entity_t & )
 Entity_t TransformEntity( const CMap &map, const Entity_t &entity, const Transform_t &transform )
 {
 	Entity_t out = entity;
+	if ( entity.GetClassname() == "info_overlay" || entity.GetClassname() == "info_overlay_transition" )
+		TransformOverlay( map, out, transform );
 	if ( const auto origin = ParsePoint( entity.GetValue( "origin" ) ) )
 	{
 		SetKeyValue( map, out, "origin", FormatPoint( transform.Apply( *origin ) ) );

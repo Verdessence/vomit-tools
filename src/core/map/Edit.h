@@ -37,6 +37,9 @@ struct MapEdit_t
 	// added) by its spelling, m_szMaterial.
 	std::vector<std::pair<std::uint32_t, Solid_t>> m_Solids;
 	std::vector<std::pair<std::uint32_t, Entity_t>> m_Entities;
+	// Transforms of existing solids, also applied to overlays attached to their faces. Geometry
+	// replacements without a transform (clip/delete) only remove references to vanished faces.
+	std::vector<std::pair<std::uint32_t, Transform_t>> m_SolidTransforms;
 	// The world's keys, outputs and editor notes as they are to be (its solids stay as they are).
 	std::optional<Entity_t> m_World;
 	// Groups to add (Hammer's group blocks in the world), and groups an earlier edit added to take

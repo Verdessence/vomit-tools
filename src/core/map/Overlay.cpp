@@ -14,10 +14,13 @@
 #include <cmath>
 #include <map>
 #include <optional>
+#include <set>
+#include "map/Edit.h"
 #include <unordered_map>
 
 #include "map/Scene.h"
 #include "map/Vmf.h"
+#include "map/VmfValues.h"
 #include "util/Numbers.h"
 #include "util/Scan.h"
 
@@ -449,6 +452,118 @@ CMapMesh BuildOverlayMesh( const CScene &scene, std::span<const OverlayMaterial_
 		mesh.m_Lines.push_back( nBase + n );
 	}
 	return mesh;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Re-express transformed corners in a stable orthonormal projection frame. This also
+//          handles scale, mirroring and shear without leaving the corners at their old size.
+//-----------------------------------------------------------------------------
+void TransformOverlay( const CMap &map, Entity_t &entity, const Transform_t &transform )
+{
+	const auto origin = VectorOf( entity.GetValue( "BasisOrigin" ) );
+	if ( !origin )
+		return;
+	SetKeyValue( map, entity, "BasisOrigin", FormatPoint( transform.Apply( *origin ) ) );
+	const auto u = VectorOf( entity.GetValue( "BasisU" ) );
+	const auto v = VectorOf( entity.GetValue( "BasisV" ) );
+	const auto normal = VectorOf( entity.GetValue( "BasisNormal" ) );
+	if ( !u || !v || !normal )
+		return;
+	const Point_t oldU = Normalized( *u ), oldV = Normalized( *v );
+	const Point_t turnedU = transform.Rotate( oldU ), turnedV = transform.Rotate( oldV );
+	const Point_t newU = Normalized( turnedU );
+	const Point_t newV = Normalized( Subtract( turnedV, Scale( newU, Dot( turnedV, newU ) ) ) );
+	if ( Length( newU ) < 0.5 || Length( newV ) < 0.5 )
+		return;
+	Point_t newNormal = Normalized( Cross( newU, newV ) );
+	if ( Dot( Cross( oldU, oldV ), *normal ) < 0 )
+		newNormal = Scale( newNormal, -1 );
+	SetKeyValue( map, entity, "BasisU", FormatPoint( newU ) );
+	SetKeyValue( map, entity, "BasisV", FormatPoint( newV ) );
+	SetKeyValue( map, entity, "BasisNormal", FormatPoint( newNormal ) );
+	for ( int n = 0; n < 4; ++n )
+	{
+		const std::string szKey = "uv" + std::to_string( n );
+		if ( const auto corner = VectorOf( entity.GetValue( szKey ) ) )
+		{
+			const Point_t offset = transform.Rotate( Add( Scale( oldU, ( *corner )[ 0 ] ), Scale( oldV, ( *corner )[ 1 ] ) ) );
+			SetKeyValue( map, entity, szKey, FormatPoint( { Dot( offset, newU ), Dot( offset, newV ), ( *corner )[ 2 ] } ) );
+		}
+	}
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Preserve attachments by face ID across ordinary edits. A projection spanning faces
+//          with different transforms follows the first transformed face in its sides list.
+//-----------------------------------------------------------------------------
+std::vector<std::pair<std::uint32_t, Entity_t>> FollowOverlayFaces( const CScene &scene, const MapEdit_t &edit )
+{
+	std::set<int> removed, surviving;
+	std::map<int, Transform_t> transforms;
+	for ( const auto &[ nSolid, solid ] : edit.m_Solids )
+	{
+		if ( nSolid < scene.m_Map.m_Solids.size() )
+			for ( const Side_t &side : scene.m_Map.m_Solids[ nSolid ].m_Sides )
+				removed.insert( side.m_nId );
+		if ( !solid.m_bDeleted )
+			for ( const Side_t &side : solid.m_Sides )
+				surviving.insert( side.m_nId );
+	}
+	for ( const int nId : surviving )
+		removed.erase( nId );
+	for ( const auto &[ nSolid, transform ] : edit.m_SolidTransforms )
+	{
+		if ( nSolid < scene.m_Map.m_Solids.size() )
+			for ( const Side_t &side : scene.m_Map.m_Solids[ nSolid ].m_Sides )
+				transforms.emplace( side.m_nId, transform );
+	}
+	std::vector<std::pair<std::uint32_t, Entity_t>> entities;
+	if ( removed.empty() && transforms.empty() )
+		return entities;
+	for ( std::uint32_t e = 0; e < scene.m_Map.m_Entities.size(); ++e )
+	{
+		const auto explicitEdit = std::ranges::find_if( edit.m_Entities, [ & ]( const auto &entry ) { return entry.first == e; } );
+		const Entity_t &entity = explicitEdit != edit.m_Entities.end() ? explicitEdit->second : scene.m_Map.m_Entities[ e ];
+		if ( entity.m_bDeleted || ( entity.GetClassname() != "info_overlay" && entity.GetClassname() != "info_overlay_transition" ) )
+			continue;
+		Entity_t out = entity;
+		bool bChanged = false, bTransformed = explicitEdit != edit.m_Entities.end();
+		for ( const std::string_view szKey : { "sides", "sides2" } )
+		{
+			if ( !entity.HasKey( szKey ) )
+				continue;
+			CScanner scanner( entity.GetValue( szKey ) );
+			std::string szSides;
+			bool bRemoved = false;
+			while ( const auto nId = scanner.Int() )
+			{
+				if ( removed.contains( *nId ) )
+				{
+					bRemoved = true;
+					continue;
+				}
+				if ( !szSides.empty() )
+					szSides += ' ';
+				szSides += std::to_string( *nId );
+				if ( !bTransformed )
+				{
+					if ( const auto found = transforms.find( *nId ); found != transforms.end() )
+					{
+						out = TransformEntity( scene.m_Map, out, found->second );
+						bTransformed = bChanged = true;
+					}
+				}
+			}
+			if ( bRemoved )
+			{
+				SetKeyValue( scene.m_Map, out, szKey, szSides );
+				bChanged = true;
+			}
+		}
+		if ( bChanged )
+			entities.emplace_back( e, std::move( out ) );
+	}
+	return entities;
 }
 
 } // namespace xv::map

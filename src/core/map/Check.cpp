@@ -122,6 +122,8 @@ std::vector<Problem_t> CheckMap( const CScene &scene, const std::function<bool( 
 		{
 			continue;
 		}
+		if ( ( szClass == "info_overlay" || szClass == "info_overlay_transition" ) && entity.GetValue( "sides" ).find_first_not_of( " \t\r\n" ) == std::string_view::npos )
+			problems.push_back( { ProblemKind_t::PROBLEM_OVERLAY_NO_FACES, nObject, "Overlay has no assigned faces.", "sides", false } );
 		const FgdClass_t *pClass = scene.m_pFgd ? scene.m_pFgd->Find( szClass ) : nullptr;
 		const bool bSolids = std::ranges::any_of( entity.m_Solids, [ & ]( std::uint32_t nSolid ) { return nSolid < map.m_Solids.size() && !map.m_Solids[ nSolid ].m_bDeleted; } );
 		if ( pClass )

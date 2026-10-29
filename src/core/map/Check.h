@@ -31,6 +31,7 @@ enum class ProblemKind_t
 	PROBLEM_POINT_CLASS_SOLIDS,  // a point class with solids
 	PROBLEM_SOLID_CLASS_POINT,   // a brush class without
 	PROBLEM_MISSING_TARGET,      // an output to a name nothing has
+	PROBLEM_OVERLAY_NO_FACES,    // overlay with no assigned faces
 	PROBLEM_NO_PLAYER_START,     // no info_player_* entity
 };
 
