@@ -65,7 +65,9 @@ public:
 	// Edits (map/Edit.h): the solids drawn from the edit mesh rather than the mesh as read (sorted
 	// solid indices), how many edits made this snapshot, and the objects the last one changed.
 	std::shared_ptr<const CMapMesh> m_pEditMesh = std::make_shared<const CMapMesh>();
-	std::shared_ptr<const CMapMesh> m_pPreviewBaseMesh; // edited solids outside a displacement stroke
+	// Painted solids retain independent meshes across strokes; the bulk edit mesh stays uploaded.
+	std::vector<std::pair<std::uint32_t, std::shared_ptr<const CMapMesh>>> m_SolidMeshes;
+	bool m_bDisplacementEdit = false;
 	std::vector<std::uint32_t> m_EditedSolids;
 	std::uint64_t m_nRevision = 0;
 	std::vector<std::uint32_t> m_Changed;
@@ -79,6 +81,7 @@ public:
 	[[nodiscard]] const CMapMesh &GetMesh() const { return *m_pMesh; }
 	[[nodiscard]] const CMapMesh &GetInstanceMesh() const { return *m_pInstanceMesh; }
 	[[nodiscard]] const CMapMesh &GetEditMesh() const { return *m_pEditMesh; }
+	[[nodiscard]] const CMapMesh &GetSolidMesh( std::uint32_t nSolid ) const;
 	// Whether a solid is drawn from the edit mesh (so not from the mesh as read).
 	[[nodiscard]] bool IsEditedSolid( std::uint32_t nSolid ) const;
 	[[nodiscard]] std::uint32_t GetObjectCount() const { return static_cast<std::uint32_t>( m_Objects.size() ); }

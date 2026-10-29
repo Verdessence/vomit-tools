@@ -135,6 +135,7 @@ private:
 	[[nodiscard]] bool IsPaintingDisplacements() const;
 	void PaintStroke( QPointF at );
 	void PreviewPaint();
+	void PaintFrameSubmitted();
 	void EndPaint( bool bCommit );
 	[[nodiscard]] xv::map::RasterMode_t GetMode() const;
 
@@ -193,6 +194,13 @@ private:
 	bool m_bPaintSculpt = false;
 	std::vector<xv::map::FaceRef_t> m_PaintChanged;
 	QTimer *m_pPaintPreview = nullptr;
+	bool m_bPaintPending = false;
+	bool m_bPaintPreviewUsed = false;
+	int m_nPaintSamples = 0;
+	int m_nPaintPreviews = 0;
+	double m_flPaintStartMs = 0;
+	double m_flPaintCommitMs = 0;
+	QElapsedTimer m_PaintClock;
 	double m_flGridPaintMs = 0.0;
 	double m_flDispEditMs = 0.0;
 	std::shared_ptr<const xv::map::CScene> m_pPaintScene;

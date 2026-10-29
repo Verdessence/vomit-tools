@@ -99,24 +99,6 @@ std::uint32_t ResolveMaterial( CScene &scene, std::string_view szSpelling )
 } // namespace
 
 //-----------------------------------------------------------------------------
-// Purpose: Keep earlier edits outside the stroke in a mesh that survives every sample.
-//-----------------------------------------------------------------------------
-std::shared_ptr<CScene> PrepareDisplacementPreview( const CScene &scene, const MapEdit_t &edit )
-{
-	auto pScene = std::make_shared<CScene>( scene );
-	std::vector<MeshSolid_t> solids;
-	for ( const std::uint32_t nSolid : scene.m_EditedSolids )
-	{
-		if ( !scene.m_Map.m_Solids[ nSolid ].m_bDeleted && std::ranges::none_of( edit.m_Solids, [ nSolid ]( const auto &entry ) { return entry.first == nSolid; } ) )
-		{
-			solids.push_back( { nSolid, scene.SolidObject( nSolid ), &scene.m_Solids[ nSolid ] } );
-		}
-	}
-	pScene->m_pPreviewBaseMesh = std::make_shared<const CMapMesh>( BuildMesh( scene.m_Map, std::span<const MeshSolid_t>{ solids } ) );
-	return pScene;
-}
-
-//-----------------------------------------------------------------------------
 // Purpose:
 //-----------------------------------------------------------------------------
 std::shared_ptr<CScene> ApplyEdit( const CScene &scene, const MapEdit_t &edit, bool bDisplacementPreview )
@@ -124,6 +106,7 @@ std::shared_ptr<CScene> ApplyEdit( const CScene &scene, const MapEdit_t &edit, b
 	auto pScene = std::make_shared<CScene>( scene );
 	CScene &out = *pScene;
 	out.m_nRevision = scene.m_nRevision + 1;
+	out.m_bDisplacementEdit = bDisplacementPreview;
 	out.m_Changed.clear();
 	CMap &map = out.m_Map;
 
@@ -227,16 +210,34 @@ std::shared_ptr<CScene> ApplyEdit( const CScene &scene, const MapEdit_t &edit, b
 		out.m_nNextObjectId = std::max( out.m_nNextObjectId, group.m_nId + 1 );
 	}
 
-	// The edit mesh: every solid edits have touched, as it is now.
-	std::vector<MeshSolid_t> edited;
-	for ( const std::uint32_t nSolid : out.m_EditedSolids )
+	if ( bDisplacementPreview )
 	{
-		if ( !std::as_const( map.m_Solids )[ nSolid ].m_bDeleted && ( !bDisplacementPreview || std::ranges::any_of( edit.m_Solids, [ nSolid ]( const auto &entry ) { return entry.first == nSolid; } ) ) )
+		for ( const auto &[ nSolid, solid ] : edit.m_Solids )
 		{
-			edited.push_back( { nSolid, out.SolidObject( nSolid ), &std::as_const( out.m_Solids )[ nSolid ] } );
+			const MeshSolid_t given{ nSolid, out.SolidObject( nSolid ), &std::as_const( out.m_Solids )[ nSolid ] };
+			auto pMesh = std::make_shared<const CMapMesh>( BuildMesh( std::as_const( map ), std::span<const MeshSolid_t>{ &given, 1 } ) );
+			const auto it = std::ranges::lower_bound( out.m_SolidMeshes, nSolid, {}, []( const auto &entry ) { return entry.first; } );
+			if ( it != out.m_SolidMeshes.end() && it->first == nSolid )
+				it->second = std::move( pMesh );
+			else
+				out.m_SolidMeshes.insert( it, { nSolid, std::move( pMesh ) } );
 		}
 	}
-	out.m_pEditMesh = std::make_shared<const CMapMesh>( BuildMesh( std::as_const( map ), std::span<const MeshSolid_t>{ edited } ) );
+	else
+	{
+		// The edit mesh: every solid edits have touched, as it is now.
+		std::vector<MeshSolid_t> edited;
+		for ( const std::uint32_t nSolid : out.m_EditedSolids )
+		{
+			if ( !std::as_const( map.m_Solids )[ nSolid ].m_bDeleted && ( !bDisplacementPreview || std::ranges::any_of( edit.m_Solids, [ nSolid ]( const auto &entry ) { return entry.first == nSolid; } ) ) )
+			{
+				edited.push_back( { nSolid, out.SolidObject( nSolid ), &std::as_const( out.m_Solids )[ nSolid ] } );
+			}
+		}
+		out.m_pEditMesh = std::make_shared<const CMapMesh>( BuildMesh( std::as_const( map ), std::span<const MeshSolid_t>{ edited } ) );
+
+		out.m_SolidMeshes.clear();
+	}
 
 	if ( bDisplacementPreview )
 	{
@@ -270,7 +271,6 @@ std::shared_ptr<CScene> ApplyEdit( const CScene &scene, const MapEdit_t &edit, b
 			out.m_Bounds.Add( chunk.m_Bounds );
 		}
 		out.m_AutoVisgroups = BuildAutoVisgroups( out );
-		out.m_pPreviewBaseMesh.reset();
 	}
 	if ( bSkybox )
 	{

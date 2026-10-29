@@ -408,7 +408,7 @@ void CMapView2D::PlaceSolid( const xv::map::CScene &scene, std::uint32_t nSolid 
 		PlaceSolid( scene, nSolid, mesh, nSolid < mesh.m_SolidLines.size() ? mesh.m_SolidLines[ nSolid ] : xv::map::MeshRange_t{} );
 		return;
 	}
-	const xv::map::CMapMesh &edits = scene.m_pPreviewBaseMesh && !std::ranges::binary_search( scene.m_Changed, scene.SolidObject( nSolid ) ) ? *scene.m_pPreviewBaseMesh : scene.GetEditMesh();
+	const xv::map::CMapMesh &edits = scene.GetSolidMesh( nSolid );
 	const auto it = std::ranges::lower_bound( edits.m_SolidIndices, nSolid );
 	const xv::map::MeshRange_t range = it != edits.m_SolidIndices.end() && *it == nSolid ? edits.m_SolidLines[ static_cast<std::size_t>( it - edits.m_SolidIndices.begin() ) ] : xv::map::MeshRange_t{};
 	PlaceSolid( scene, nSolid, edits, range );
@@ -483,7 +483,6 @@ void CMapView2D::Patch( const xv::map::CScene &scene )
 		}
 	}
 	m_PendingObjects.clear();
-	update();
 }
 
 //-----------------------------------------------------------------------------
@@ -849,7 +848,7 @@ void CMapView2D::PaintObjects( QPainter &painter, const QRectF &visible, bool bP
 	};
 	for ( const MapFlatObject_t &object : m_Objects )
 	{
-		if ( document.GetDisplacementPreviewBase() && std::ranges::binary_search( pScene->m_Changed, object.m_nObject ) != bPreviewOnly )
+		if ( document.GetDisplacementPreviewBase() && std::ranges::binary_search( document.GetPreviewObjects(), object.m_nObject ) != bPreviewOnly )
 		{
 			continue;
 		}
@@ -1136,6 +1135,17 @@ void CMapView2D::PaintCamera( QPainter &painter ) const
 }
 
 //-----------------------------------------------------------------------------
+// Purpose: Report invalidation frequency and the exact cache key fields that caused it.
+//-----------------------------------------------------------------------------
+QString CMapView2D::DescribeLayerChanges( bool bAdvance )
+{
+	const QString sz = tr( "%1 layer redraws since log; last: %2" ).arg( m_nLayerPaints - m_nLayersAtLog ).arg( m_szLayerReason );
+	if ( bAdvance )
+		m_nLayersAtLog = m_nLayerPaints;
+	return sz;
+}
+
+//-----------------------------------------------------------------------------
 // Purpose:
 //-----------------------------------------------------------------------------
 void CMapView2D::PaintLayer()
@@ -1145,7 +1155,7 @@ void CMapView2D::PaintLayer()
 	key.m_pScene = key.m_bPreview ? GetDocument().GetDisplacementPreviewBase() : m_pBuiltFor;
 	key.m_pProps = m_pProps.get();
 	key.m_pMaterials = m_Editor.GetRenderData().GetShared().m_pMaterials.get();
-	key.m_nState = GetDocument().GetStateGeneration();
+	key.m_nState = key.m_bPreview ? GetDocument().GetPreviewState() : GetDocument().GetStateGeneration();
 	key.m_Settings = m_Editor.GetSettings();
 	key.m_Center = m_Center;
 	key.m_flZoom = m_flZoom;
@@ -1156,6 +1166,30 @@ void CMapView2D::PaintLayer()
 	{
 		return;
 	}
+	QStringList reasons;
+	if ( m_Layer.isNull() )
+		reasons << QStringLiteral( "empty" );
+	if ( key.m_pScene != m_LayerKey.m_pScene )
+		reasons << QStringLiteral( "scene" );
+	if ( key.m_bPreview != m_LayerKey.m_bPreview )
+		reasons << QStringLiteral( "stroke boundary" );
+	if ( key.m_nState != m_LayerKey.m_nState )
+		reasons << QStringLiteral( "visibility/selection" );
+	if ( key.m_pProps != m_LayerKey.m_pProps )
+		reasons << QStringLiteral( "props" );
+	if ( key.m_pMaterials != m_LayerKey.m_pMaterials )
+		reasons << QStringLiteral( "materials" );
+	if ( key.m_Settings != m_LayerKey.m_Settings )
+		reasons << QStringLiteral( "view settings" );
+	if ( key.m_Center != m_LayerKey.m_Center )
+		reasons << QStringLiteral( "pan" );
+	if ( key.m_flZoom != m_LayerKey.m_flZoom )
+		reasons << QStringLiteral( "zoom" );
+	if ( key.m_Size != m_LayerKey.m_Size || key.m_flRatio != m_LayerKey.m_flRatio )
+		reasons << QStringLiteral( "size/scale" );
+	if ( key.m_nRevision != m_LayerKey.m_nRevision )
+		reasons << QStringLiteral( "preferences" );
+	m_szLayerReason = reasons.join( QStringLiteral( ", " ) );
 	m_LayerKey = key;
 	m_nLayerPaints++;
 	if ( m_Layer.size() != size() * key.m_flRatio )

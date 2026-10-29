@@ -82,7 +82,11 @@ public:
 	// Hammer does, in a .vmx beside it. The undo stack is clean afterwards.
 	bool Save( const std::filesystem::path &path, QString *pError );
 	// An edit's scene, now (the undo stack's commands call it).
-	void ApplyEditNow( const xv::map::MapEdit_t &edit );
+	void ApplyEditNow( const xv::map::MapEdit_t &edit, bool bDisplacements = false, std::shared_ptr<const xv::map::CScene> pPrepared = {} );
+	void BeginDisplacementPreview( std::vector<std::uint32_t> objects );
+	void CommitDisplacementPreview( xv::map::MapEdit_t edit, const QString &szName );
+	[[nodiscard]] const std::vector<std::uint32_t> &GetPreviewObjects() const { return m_PreviewObjects; }
+	[[nodiscard]] std::uint64_t GetPreviewState() const { return m_nPreviewState; }
 	// While a drag goes on: edit shown on the scene as it was when the drag began, outside the undo
 	// stack. EndPreview puts that scene back (before the drag's edit goes through Edit, or when
 	// it is cancelled).
@@ -157,7 +161,8 @@ private:
 	QStringList m_EditListenerCosts;
 	double m_flPreviewMs = 0.0;
 	double m_flPreviewNotifyMs = 0.0;
-	std::vector<std::uint32_t> m_PreviewSolids;
+	std::vector<std::uint32_t> m_PreviewObjects;
+	std::uint64_t m_nPreviewState = 0;
 	std::shared_ptr<const xv::map::CScene> m_pDisplacementBase;
 	std::shared_ptr<const xv::map::CScene> m_pPreviewBase; // the scene before the drag
 	std::optional<xv::vfs::CGameInfo> m_Game;

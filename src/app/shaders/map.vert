@@ -55,6 +55,6 @@ void main() {
 	// Not shown (or, while the 3D skybox is drawn, not in its room): outside every clip plane, so
 	// the triangle is dropped.
 	// A mesh as read (pass.y) leaves out the old shapes of objects edits have changed.
-	bool shown = (flags & 1) != 0 && (frame.pass.x < 0.5 || (flags & 16) != 0) && (frame.pass.y < 0.5 || (flags & 32) == 0);
+	bool shown = (flags & 1) != 0 && (frame.pass.x < 0.5 || (flags & 16) != 0) && (frame.pass.y < 0.5 || (frame.pass.y < 1.5 ? (flags & 32) == 0 : (flags & 128) == 0));
 	gl_Position = shown ? frame.viewProjection * vec4(eyeRelative(position), 1.0) : vec4(2.0, 2.0, 2.0, 1.0);
 }

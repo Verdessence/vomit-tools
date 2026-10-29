@@ -70,14 +70,11 @@ xv::map::RasterScene_t MapFrame_t::MakeScene() const
 		{
 			scene.m_Meshes.push_back( &m_pScene->GetInstanceMesh() );
 		}
-		if ( m_pScene->m_pPreviewBaseMesh && !m_pScene->m_pPreviewBaseMesh->m_Vertices.empty() )
-		{
-			scene.m_Meshes.push_back( m_pScene->m_pPreviewBaseMesh.get() );
-		}
-		if ( !m_pScene->GetEditMesh().m_Vertices.empty() )
-		{
-			scene.m_Meshes.push_back( &m_pScene->GetEditMesh() );
-		}
+		// Keep this slot even when empty, so the other GPU buffers retain their positions.
+		scene.m_Meshes.push_back( &m_pScene->GetEditMesh() );
+		scene.m_Overridden.push_back( &m_pScene->GetEditMesh() );
+		for ( const auto &[ nSolid, pMesh ] : m_pScene->m_SolidMeshes )
+			scene.m_Meshes.push_back( pMesh.get() );
 	}
 	if ( m_pEntityMesh )
 	{
@@ -297,7 +294,7 @@ void CMapRenderData::Refresh()
 {
 	m_pBuiltFor = m_Document.GetScene();
 	m_Frame.m_pScene = m_Document.GetSharedScene();
-	if ( m_Document.GetDisplacementPreviewBase() )
+	if ( m_Frame.m_pScene && m_Frame.m_pScene->m_bDisplacementEdit )
 	{
 		m_nGeneration++;
 		return;
@@ -574,6 +571,10 @@ MapFrame_t CMapRenderData::Snapshot( const xv::map::CViewCamera &camera, const x
 		for ( const std::uint32_t nSolid : pScene->m_EditedSolids )
 		{
 			( *pFlags )[ pScene->SolidObject( nSolid ) ] |= xv::map::RASTER_OBJECT_EDITED;
+		}
+		for ( const auto &[ nSolid, pMesh ] : pScene->m_SolidMeshes )
+		{
+			( *pFlags )[ pScene->SolidObject( nSolid ) ] |= xv::map::RASTER_OBJECT_OVERRIDDEN;
 		}
 		for ( std::uint32_t n = 0; n < pScene->GetObjectCount(); n++ )
 		{

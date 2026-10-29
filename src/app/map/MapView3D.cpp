@@ -13,6 +13,7 @@
 #include <numbers>
 
 #include <QApplication>
+#include <QAbstractEventDispatcher>
 #include <QGuiApplication>
 #include <QCursor>
 #include <QKeyEvent>
@@ -40,6 +41,57 @@
 
 namespace
 {
+
+// One clock shared by all views, so opening another pane does not double-count event work.
+class CMapEventClock : public QObject
+{
+public:
+	CMapEventClock()
+		: QObject( QCoreApplication::instance() )
+	{
+		m_Wall.start();
+		m_Busy.start();
+		auto *pDispatcher = QAbstractEventDispatcher::instance();
+		connect( pDispatcher, &QAbstractEventDispatcher::awake, this, [ this ] { if ( !m_Busy.isValid() ) m_Busy.start(); } );
+		connect( pDispatcher, &QAbstractEventDispatcher::aboutToBlock, this, [ this ] {
+			if ( m_Busy.isValid() )
+			{
+				m_flBusyMs += m_Busy.nsecsElapsed() / 1e6;
+				m_Busy.invalidate();
+			}
+		} );
+	}
+	//-----------------------------------------------------------------------------
+	// Purpose: Report busy time over the last completed one-second observation window.
+	//-----------------------------------------------------------------------------
+	QString Describe()
+	{
+		const double flWall = m_Wall.nsecsElapsed() / 1e6;
+		const double flBusy = m_flBusyMs + ( m_Busy.isValid() ? m_Busy.nsecsElapsed() / 1e6 : 0 );
+		if ( flWall >= 1000 )
+		{
+			m_flLastBusy = flBusy;
+			m_flLastWall = flWall;
+			m_flBusyMs = 0;
+			m_Wall.restart();
+			if ( m_Busy.isValid() )
+				m_Busy.restart();
+		}
+		return QStringLiteral( "event loop: %1 ms busy / %2 ms elapsed" ).arg( m_flLastBusy, 0, 'f', 1 ).arg( m_flLastWall, 0, 'f', 1 );
+	}
+	//-----------------------------------------------------------------------------
+	// Purpose: Share one clock across all map panes.
+	//-----------------------------------------------------------------------------
+	static CMapEventClock &Get()
+	{
+		static auto *pClock = new CMapEventClock;
+		return *pClock;
+	}
+
+private:
+	QElapsedTimer m_Wall, m_Busy;
+	double m_flBusyMs = 0, m_flLastBusy = 0, m_flLastWall = 0;
+};
 
 constexpr int TICK_MS = 16;
 constexpr int SETTLE_MS = 150;
@@ -90,6 +142,7 @@ CMapView3D::CMapView3D( CMapEditor &editor, MapViewType_t nType, QWidget *pParen
 	// Not ApplyPreferences: that tells the editor, which is still making its panes.
 	m_Camera.m_flFov = CPreferences::Instance().GetMapPreferences().m_flFov;
 	m_Camera.m_flFar = CPreferences::Instance().GetMapPreferences().m_flRenderDistance;
+	static_cast<void>( CMapEventClock::Get() );
 	m_pPaintPreview = new QTimer( this );
 	m_pPaintPreview->setSingleShot( true );
 	connect( m_pPaintPreview, &QTimer::timeout, this, &CMapView3D::PreviewPaint );
@@ -138,6 +191,7 @@ void CMapView3D::SetUseGpu( bool bOn )
 			return MakeFrame( size );
 		} ),
 			this );
+		connect( m_pGpu, &QRhiWidget::frameSubmitted, this, &CMapView3D::PaintFrameSubmitted );
 		m_pGpu->setAttribute( Qt::WA_TransparentForMouseEvents );
 		m_pGpu->setFocusPolicy( Qt::NoFocus );
 		m_pGpu->setGeometry( rect() );
@@ -377,6 +431,8 @@ QImage CMapView3D::RenderNow( QSize size )
 //-----------------------------------------------------------------------------
 void CMapView3D::paintEvent( QPaintEvent * )
 {
+	if ( !m_pGpu )
+		PaintFrameSubmitted();
 	if ( m_pGpu )
 	{
 		return; // the card draws, the overlay labels
@@ -435,15 +491,17 @@ void CMapView3D::PaintLabels( QPainter &painter )
 		{
 			lines << tr( "software: %1 ms a frame%2" ).arg( m_flRenderMs, 0, 'f', 1 ).arg( m_bReduced ? tr( " (half size while moving)" ) : QString{} );
 		}
-		if ( m_pPaintScene )
+		if ( m_PaintClock.isValid() )
 		{
 			lines << GetPaintCosts();
 		}
+		const bool bLog = !m_LogClock.isValid() || m_LogClock.elapsed() > 1000;
+		lines << CMapEventClock::Get().Describe();
 		for ( CMapView *pView : m_Editor.GetViews() )
 		{
 			if ( auto *p2D = qobject_cast<CMapView2D *>( pView ) )
 			{
-				lines << tr( "%1: %2 ms a repaint (%3 patch, %4 layer), %5 repaints" ).arg( CMapPane::TypeName( p2D->GetType() ) ).arg( p2D->GetLastPaintTime(), 0, 'f', 1 ).arg( p2D->GetLastPatchTime(), 0, 'f', 2 ).arg( p2D->GetLastLayerTime(), 0, 'f', 2 ).arg( p2D->GetPaintCount() );
+				lines << tr( "%1: %2 ms a repaint (%3 patch, %4 layer), %5 repaints" ).arg( CMapPane::TypeName( p2D->GetType() ) ).arg( p2D->GetLastPaintTime(), 0, 'f', 1 ).arg( p2D->GetLastPatchTime(), 0, 'f', 2 ).arg( p2D->GetLastLayerTime(), 0, 'f', 2 ).arg( p2D->GetPaintCount() ) + QStringLiteral( "; " ) + p2D->DescribeLayerChanges( bLog );
 			}
 		}
 		lines << GetDocument().GetEditListenerCosts();
@@ -452,7 +510,7 @@ void CMapView3D::PaintLabels( QPainter &painter )
 		painter.fillRect( text.adjusted( -6, -3, 6, 3 ), mapstyle::OVERLAY_BACKING );
 		painter.setPen( Qt::white );
 		painter.drawText( rect().adjusted( 0, 4, -8, 0 ), Qt::AlignRight | Qt::AlignTop, szText );
-		if ( !m_LogClock.isValid() || m_LogClock.elapsed() > 1000 )
+		if ( bLog )
 		{
 			m_LogClock.start();
 			DebugLog() << "map 3D view:" << lines.join( QStringLiteral( "; " ) );
@@ -627,6 +685,11 @@ void CMapView3D::mousePressEvent( QMouseEvent *pEvent )
 		const std::vector<xv::map::FaceRef_t> faces = m_Editor.GetPaintFaces( FaceAt( pEvent->position() ) );
 		if ( !faces.empty() )
 		{
+			m_PaintClock.start();
+			QElapsedTimer start;
+			start.start();
+			m_nPaintSamples = m_nPaintPreviews = 0;
+			m_bPaintPending = m_bPaintPreviewUsed = false;
 			m_pPaintScene = GetDocument().GetSharedScene();
 			m_Painted.clear();
 			m_PaintChanged.clear();
@@ -634,6 +697,11 @@ void CMapView3D::mousePressEvent( QMouseEvent *pEvent )
 			{
 				m_Painted.emplace_back( face, *m_pPaintScene->m_Map.m_Solids[ face.m_nSolid ].m_Sides[ face.m_nSide ].m_pDisp );
 			}
+			std::vector<std::uint32_t> objects;
+			for ( const auto &face : faces )
+				objects.push_back( m_pPaintScene->SolidObject( face.m_nSolid ) );
+			GetDocument().BeginDisplacementPreview( std::move( objects ) );
+			m_flPaintStartMs = start.nsecsElapsed() / 1e6;
 			m_SculptApplied.assign( m_Painted.size(), {} );
 			m_PaintModifiers = pEvent->modifiers();
 			m_bPaintAlpha = m_Editor.GetFaceEdit().GetDispPaintMode() == DispPaintMode_t::DISP_PAINT_ALPHA;
@@ -947,7 +1015,7 @@ std::optional<xv::map::FaceRef_t> CMapView3D::FaceAt( QPointF at )
 	}
 	const xv::map::TraceHit_t &hit = hits.front();
 	const xv::map::CMapMesh &mesh = *scene.m_Meshes[ hit.m_nMesh ];
-	if ( ( &mesh != &frame.m_pScene->GetMesh() && &mesh != &frame.m_pScene->GetEditMesh() && &mesh != frame.m_pScene->m_pPreviewBaseMesh.get() ) || hit.m_nTriangle >= mesh.m_TriangleFaces.size() )
+	if ( ( &mesh != &frame.m_pScene->GetMesh() && &mesh != &frame.m_pScene->GetEditMesh() && std::ranges::none_of( frame.m_pScene->m_SolidMeshes, [ &mesh ]( const auto &entry ) { return entry.second.get() == &mesh; } ) ) || hit.m_nTriangle >= mesh.m_TriangleFaces.size() )
 	{
 		return std::nullopt;
 	}
@@ -993,7 +1061,7 @@ std::optional<std::pair<xv::map::Point_t, xv::map::Point_t>> CMapView3D::Surface
 //-----------------------------------------------------------------------------
 QString CMapView3D::GetPaintCosts() const
 {
-	return tr( "paint: %1 grid, %2 edit, %3 scene, %4 notify (ms)" ).arg( m_flGridPaintMs, 0, 'f', 2 ).arg( m_flDispEditMs, 0, 'f', 2 ).arg( GetDocument().GetPreviewTime(), 0, 'f', 2 ).arg( GetDocument().GetPreviewNotifyTime(), 0, 'f', 2 );
+	return tr( "paint: %1 grid, %2 edit, %3 scene, %4 notify (ms)" ).arg( m_flGridPaintMs, 0, 'f', 2 ).arg( m_flDispEditMs, 0, 'f', 2 ).arg( GetDocument().GetPreviewTime(), 0, 'f', 2 ).arg( GetDocument().GetPreviewNotifyTime(), 0, 'f', 2 ) + tr( "; %1 samples, %2 previews in %3 ms; start %4 ms, commit %5 ms" ).arg( m_nPaintSamples ).arg( m_nPaintPreviews ).arg( m_PaintClock.isValid() ? m_PaintClock.elapsed() : 0 ).arg( m_flPaintStartMs, 0, 'f', 2 ).arg( m_flPaintCommitMs, 0, 'f', 2 ) + QStringLiteral( "; " ) + CMapEventClock::Get().Describe();
 }
 
 //-----------------------------------------------------------------------------
@@ -1037,6 +1105,7 @@ void CMapView3D::PaintStroke( QPointF at )
 	{
 		return;
 	}
+	++m_nPaintSamples;
 	m_BrushAt = surface;
 	const CMapFaceEdit &sheet = m_Editor.GetFaceEdit();
 	const bool bAlpha = m_bPaintAlpha;
@@ -1104,10 +1173,20 @@ void CMapView3D::PaintStroke( QPointF at )
 	{
 		return;
 	}
-	if ( !m_pPaintPreview->isActive() )
-	{
+	m_bPaintPending = true;
+	if ( !m_bPaintPreviewUsed && !m_pPaintPreview->isActive() )
 		m_pPaintPreview->start( 0 );
-	}
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: A submitted frame permits one more preview; mouse samples keep accumulating in
+//          the grids while the GPU or software view is busy with the previous frame.
+//-----------------------------------------------------------------------------
+void CMapView3D::PaintFrameSubmitted()
+{
+	m_bPaintPreviewUsed = false;
+	if ( m_bPaintPending && !m_pPaintPreview->isActive() )
+		m_pPaintPreview->start( 0 );
 }
 
 //-----------------------------------------------------------------------------
@@ -1115,10 +1194,13 @@ void CMapView3D::PaintStroke( QPointF at )
 //-----------------------------------------------------------------------------
 void CMapView3D::PreviewPaint()
 {
-	if ( !m_pPaintScene )
-	{
+	if ( !m_pPaintScene || !m_bPaintPending )
 		return;
-	}
+	if ( m_bPaintPreviewUsed )
+		return;
+	m_bPaintPending = false;
+	m_bPaintPreviewUsed = true;
+	++m_nPaintPreviews;
 	QElapsedTimer timer;
 	timer.start();
 	const xv::map::MapEdit_t edit = xv::map::EditDisplacements( *m_pPaintScene, m_PaintChanged, [ & ]( std::vector<xv::map::DispFace_t> &refs ) {
@@ -1147,16 +1229,25 @@ void CMapView3D::EndPaint( bool bCommit )
 	{
 		return;
 	}
+	QElapsedTimer timer;
+	timer.start();
 	m_pPaintPreview->stop();
-	GetDocument().EndPreview();
-	const std::shared_ptr<const xv::map::CScene> pScene = std::move( m_pPaintScene );
-	m_pPaintScene.reset();
-	std::erase_if( m_Painted, [ this ]( const auto &entry ) { return std::ranges::find( m_PaintChanged, entry.first ) == m_PaintChanged.end(); } );
-	if ( bCommit )
+	if ( bCommit && m_bPaintPending )
 	{
-		m_Editor.CommitDisplacements( *pScene, m_Painted, m_bPaintSculpt ? tr( "Sculpt" ) : m_bPaintAlpha ? tr( "Paint Alpha" )
-																										  : tr( "Paint Geometry" ) );
+		m_bPaintPreviewUsed = false;
+		PreviewPaint();
 	}
+	std::erase_if( m_Painted, [ this ]( const auto &entry ) { return std::ranges::find( m_PaintChanged, entry.first ) == m_PaintChanged.end(); } );
+	if ( bCommit && !m_Painted.empty() )
+	{
+		m_Editor.CommitDisplacements( *m_pPaintScene, m_Painted, m_bPaintSculpt ? tr( "Sculpt" ) : m_bPaintAlpha ? tr( "Paint Alpha" )
+																												 : tr( "Paint Geometry" ) );
+	}
+	else
+		GetDocument().EndPreview();
+	m_bPaintPending = false;
+	m_pPaintScene.reset();
+	m_flPaintCommitMs = timer.nsecsElapsed() / 1e6;
 	m_Painted.clear();
 }
 

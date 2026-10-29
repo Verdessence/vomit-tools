@@ -97,6 +97,7 @@ public:
 	[[nodiscard]] double GetLastPaintTime() const { return m_flPaintMs; }
 	[[nodiscard]] int GetPaintCount() const { return m_nPaints; }
 	[[nodiscard]] int GetLayerPaintCount() const { return m_nLayerPaints; }
+	[[nodiscard]] QString DescribeLayerChanges( bool bAdvance = false );
 
 protected:
 	void paintEvent( QPaintEvent *pEvent ) override;
@@ -225,6 +226,8 @@ private:
 	double m_flLayerMs = 0.0;
 	double m_flPaintMs = 0.0;
 	int m_nPaints = 0;
+	int m_nLayersAtLog = 0;
+	QString m_szLayerReason;
 	int m_nLayerPaints = 0;      // how many of those drew the layer again
 
 	// What the layer was drawn for.

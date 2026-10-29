@@ -174,7 +174,7 @@ void CMapRenderer::Initialize( QRhi *pRhi, QRhiRenderTarget * )
 		// Four frames' uniforms: the world's and the 3D skybox's camera's, each for meshes as read
 		// (which leave out edited objects' old shapes) and the others.
 		m_nFrameStride = m_pRhi->ubufAligned( sizeof( FrameUniforms_t ) );
-		m_pFrame.reset( m_pRhi->newBuffer( QRhiBuffer::Dynamic, QRhiBuffer::UniformBuffer, m_nFrameStride * 4 ) );
+		m_pFrame.reset( m_pRhi->newBuffer( QRhiBuffer::Dynamic, QRhiBuffer::UniformBuffer, m_nFrameStride * 6 ) );
 		m_pFrame->create();
 		for ( std::size_t i = 0; i < m_Samplers.size(); i++ )
 		{
@@ -203,11 +203,15 @@ void CMapRenderer::Initialize( QRhi *pRhi, QRhiRenderTarget * )
 void CMapRenderer::UploadMeshes( const MapFrame_t &frame, QRhiResourceUpdateBatch *pUpdates )
 {
 	const std::vector<const xv::map::CMapMesh *> meshes = frame.MakeScene().m_Meshes;
+	std::vector<Mesh_t> retained = std::move( m_Meshes );
 	m_Meshes.resize( meshes.size() );
 	for ( std::size_t i = 0; i < meshes.size(); i++ )
 	{
 		Mesh_t &mesh = m_Meshes[ i ];
 		const xv::map::CMapMesh *pMesh = meshes[ i ];
+		const auto it = std::ranges::find( retained, pMesh, &Mesh_t::m_pFor );
+		if ( it != retained.end() )
+			mesh = std::move( *it );
 		if ( mesh.m_pFor == pMesh )
 		{
 			continue;
@@ -622,6 +626,8 @@ void CMapRenderer::Render( QRhiCommandBuffer *pCommands, QRhiRenderTarget *pTarg
 	m_Interval.start();
 	m_Stats.m_nFrames++;
 	m_Stats.m_nUploads = 0;
+	m_Stats.m_flBindingsMs = 0;
+	m_Stats.m_nBindingChanges = 0;
 	const MapFrame_t frame = m_pfnSource ? m_pfnSource( size ) : MapFrame_t{};
 	m_Stats.m_flSnapshotMs = static_cast<double>( timer.nsecsElapsed() ) / 1e6;
 	QRhiResourceUpdateBatch *pUpdates = m_pRhi->nextResourceUpdateBatch();
@@ -685,6 +691,8 @@ void CMapRenderer::Render( QRhiCommandBuffer *pCommands, QRhiRenderTarget *pTarg
 		pUpdates->updateDynamicBuffer( m_pFrame.get(), m_nFrameStride * nSlot, sizeof uniforms, &uniforms );
 		uniforms.m_Pass[ 1 ] = 1.0f;
 		pUpdates->updateDynamicBuffer( m_pFrame.get(), m_nFrameStride * ( nSlot + 1 ), sizeof uniforms, &uniforms );
+		uniforms.m_Pass[ 1 ] = 2.0f;
+		pUpdates->updateDynamicBuffer( m_pFrame.get(), m_nFrameStride * ( nSlot + 2 ), sizeof uniforms, &uniforms );
 	};
 	upload( uniformsFor( frame.m_Camera, false ), 0 );
 	xv::map::CViewCamera skyCamera;
@@ -693,13 +701,16 @@ void CMapRenderer::Render( QRhiCommandBuffer *pCommands, QRhiRenderTarget *pTarg
 		skyCamera = *frame.m_Options.m_SkyboxCamera;
 		skyCamera.m_nWidth = frame.m_Camera.m_nWidth;
 		skyCamera.m_nHeight = frame.m_Camera.m_nHeight;
-		upload( uniformsFor( skyCamera, true ), 2 );
+		upload( uniformsFor( skyCamera, true ), 3 );
 	}
 
 	// Under a 3D skybox the picture starts see-through: what the skybox draws is opaque, and
 	// the world's sky faces show the sky only where it is still see-through.
 	const auto &background = frame.m_Options.m_Background;
+	QElapsedTimer passClock;
+	passClock.start();
 	pCommands->beginPass( pTarget, QColor( background[ 0 ], background[ 1 ], background[ 2 ], bSky ? 0 : 255 ), { 1.0f, 0 }, pUpdates );
+	m_Stats.m_flPassMs = passClock.nsecsElapsed() / 1e6;
 	m_nDrawCalls = 0;
 	const xv::map::RasterScene_t scene = frame.MakeScene();
 	auto materialOf = [ &scene ]( std::uint32_t n ) -> const xv::map::RasterMaterial_t * { return n < scene.m_Materials.size() ? &scene.m_Materials[ n ] : nullptr; };
@@ -713,15 +724,23 @@ void CMapRenderer::Render( QRhiCommandBuffer *pCommands, QRhiRenderTarget *pTarg
 	quint32 nBoundOffset = 0;
 	QRhiGraphicsPipeline *pPipeline = nullptr;
 	quint32 nFrameOffset = 0; // the pass's slot: the world's or the 3D skybox's
-	auto isAsRead = [ &scene ]( std::size_t nMesh ) { return std::ranges::find( scene.m_AsRead, scene.m_Meshes[ nMesh ] ) != scene.m_AsRead.end(); };
-	auto bind = [ & ]( QRhiShaderResourceBindings *pBindings, bool bAsRead ) {
-		const quint32 nOffset = nFrameOffset + ( bAsRead ? m_nFrameStride : 0 );
+	auto meshPass = [ &scene ]( std::size_t nMesh ) {
+		if ( std::ranges::find( scene.m_AsRead, scene.m_Meshes[ nMesh ] ) != scene.m_AsRead.end() )
+			return 1u;
+		return std::ranges::find( scene.m_Overridden, scene.m_Meshes[ nMesh ] ) != scene.m_Overridden.end() ? 2u : 0u;
+	};
+	auto bind = [ & ]( QRhiShaderResourceBindings *pBindings, quint32 nPass ) {
+		const quint32 nOffset = nFrameOffset + m_nFrameStride * nPass;
 		if ( pBindings == pBound && nOffset == nBoundOffset )
 		{
 			return;
 		}
 		const QRhiCommandBuffer::DynamicOffset offset( 0, nOffset );
+		QElapsedTimer bindingClock;
+		bindingClock.start();
 		pCommands->setShaderResources( pBindings, 1, &offset );
+		m_Stats.m_flBindingsMs += bindingClock.nsecsElapsed() / 1e6;
+		++m_Stats.m_nBindingChanges;
 		pBound = pBindings;
 		nBoundOffset = nOffset;
 	};
@@ -733,7 +752,7 @@ void CMapRenderer::Render( QRhiCommandBuffer *pCommands, QRhiRenderTarget *pTarg
 			pBound = nullptr;
 		}
 		QRhiShaderResourceBindings *pBindings = batch.m_nMaterial < m_Materials.size() ? m_Materials[ batch.m_nMaterial ].m_pBindings.get() : m_LinesAll.m_pBindings.get();
-		bind( pBindings, isAsRead( nMesh ) );
+		bind( pBindings, meshPass( nMesh ) );
 		const QRhiCommandBuffer::VertexInput input( m_Meshes[ nMesh ].m_pVertices.get(), 0 );
 		pCommands->setVertexInput( 0, 1, &input, m_Meshes[ nMesh ].m_pIndices.get(), 0, QRhiCommandBuffer::IndexUInt32 );
 		pCommands->drawIndexed( batch.m_nIndexCount, 1, batch.m_nFirstIndex );
@@ -785,7 +804,7 @@ void CMapRenderer::Render( QRhiCommandBuffer *pCommands, QRhiRenderTarget *pTarg
 	{
 		// The 3D skybox first, from its own camera, kept behind everything the world draws.
 		pCommands->setViewport( { 0, 0, flWidth, flHeight, 0.5f, 1.0f } );
-		nFrameOffset = m_nFrameStride * 2;
+		nFrameOffset = m_nFrameStride * 3;
 		faces( skyCamera, true );
 		nFrameOffset = 0;
 		pBound = nullptr;
@@ -803,7 +822,7 @@ void CMapRenderer::Render( QRhiCommandBuffer *pCommands, QRhiRenderTarget *pTarg
 		{
 			const xv::map::CMapMesh &mesh = *scene.m_Meshes[ nMesh ];
 			const bool bModels = std::ranges::find( scene.m_Models, &mesh ) != scene.m_Models.end();
-			bind( ( bModels ? models : material ).m_pBindings.get(), isAsRead( nMesh ) );
+			bind( ( bModels ? models : material ).m_pBindings.get(), meshPass( nMesh ) );
 			if ( !m_Meshes[ nMesh ].m_pLines || !m_Meshes[ nMesh ].m_pVertices || ( bWireframe && std::ranges::find( scene.m_NoWireframe, &mesh ) != scene.m_NoWireframe.end() ) )
 			{
 				continue;

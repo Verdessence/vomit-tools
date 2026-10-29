@@ -18,6 +18,9 @@ struct MapRenderStats_t
 	double m_flSnapshotMs = 0.0;  // making the frame from the document (MakeFrame)
 	double m_flUploadMs = 0.0;    // meshes, state and materials that changed
 	double m_flRecordMs = 0.0;    // recording the draw calls
+	double m_flPassMs = 0.0;
+	double m_flBindingsMs = 0.0;
+	int m_nBindingChanges = 0;
 	double m_flGpuMs = -1.0;      // the card's own time, when the QRhi can say (timestamps on)
 	int m_nDrawCalls = 0;
 	int m_nTriangles = 0;

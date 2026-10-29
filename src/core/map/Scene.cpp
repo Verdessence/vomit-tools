@@ -13,6 +13,15 @@ namespace xv::map
 {
 
 //-----------------------------------------------------------------------------
+// Purpose: A painted solid's latest grid, or the bulk edit mesh for other edited solids.
+//-----------------------------------------------------------------------------
+const CMapMesh &CScene::GetSolidMesh( std::uint32_t nSolid ) const
+{
+	const auto it = std::ranges::lower_bound( m_SolidMeshes, nSolid, {}, []( const auto &entry ) { return entry.first; } );
+	return it != m_SolidMeshes.end() && it->first == nSolid ? *it->second : GetEditMesh();
+}
+
+//-----------------------------------------------------------------------------
 // Purpose:
 //-----------------------------------------------------------------------------
 int CScene::GetObjectEntity( std::uint32_t nObject ) const

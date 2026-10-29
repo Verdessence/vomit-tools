@@ -47,19 +47,21 @@ void SortUnique( std::vector<std::uint32_t> &objects )
 class CMapEditCommand : public QUndoCommand
 {
 public:
-	CMapEditCommand( CMapDocument &document, xv::map::MapEdit_t forward, xv::map::MapEdit_t back, std::vector<std::uint32_t> selectionBefore, std::optional<std::vector<std::uint32_t>> selectionAfter, const QString &szName )
+	CMapEditCommand( CMapDocument &document, xv::map::MapEdit_t forward, xv::map::MapEdit_t back, std::vector<std::uint32_t> selectionBefore, std::optional<std::vector<std::uint32_t>> selectionAfter, const QString &szName, bool bDisplacements = false, std::shared_ptr<const xv::map::CScene> pPrepared = {} )
 		: QUndoCommand( szName ),
 		  m_Document( document ),
 		  m_Forward( std::move( forward ) ),
 		  m_Back( std::move( back ) ),
 		  m_SelectionBefore( std::move( selectionBefore ) ),
-		  m_SelectionAfter( std::move( selectionAfter ) )
+		  m_SelectionAfter( std::move( selectionAfter ) ),
+		  m_bDisplacements( bDisplacements ),
+		  m_pPrepared( std::move( pPrepared ) )
 	{
 	}
 
 	void redo() override
 	{
-		m_Document.ApplyEditNow( m_Forward );
+		m_Document.ApplyEditNow( m_Forward, m_bDisplacements, std::move( m_pPrepared ) );
 		if ( m_SelectionAfter )
 		{
 			m_Document.SetSelection( *m_SelectionAfter );
@@ -68,7 +70,7 @@ public:
 
 	void undo() override
 	{
-		m_Document.ApplyEditNow( m_Back );
+		m_Document.ApplyEditNow( m_Back, m_bDisplacements );
 		m_Document.SetSelection( m_SelectionBefore );
 	}
 
@@ -78,6 +80,8 @@ private:
 	xv::map::MapEdit_t m_Back;
 	std::vector<std::uint32_t> m_SelectionBefore;
 	std::optional<std::vector<std::uint32_t>> m_SelectionAfter;
+	bool m_bDisplacements = false;
+	std::shared_ptr<const xv::map::CScene> m_pPrepared;
 };
 
 } // namespace
@@ -134,13 +138,13 @@ void CMapDocument::Edit( xv::map::MapEdit_t edit, const QString &szName, std::op
 // Purpose: The new snapshot, and the views' state for the objects it adds (shown, as new
 //          objects are) or deletes (no longer selected).
 //-----------------------------------------------------------------------------
-void CMapDocument::ApplyEditNow( const xv::map::MapEdit_t &edit )
+void CMapDocument::ApplyEditNow( const xv::map::MapEdit_t &edit, bool bDisplacements, std::shared_ptr<const xv::map::CScene> pPrepared )
 {
 	if ( !m_pScene )
 	{
 		return;
 	}
-	std::shared_ptr<const xv::map::CScene> pScene = xv::map::ApplyEdit( *m_pScene, edit );
+	std::shared_ptr<const xv::map::CScene> pScene = pPrepared ? std::move( pPrepared ) : xv::map::ApplyEdit( *m_pScene, edit, bDisplacements );
 	const std::uint32_t nObjects = pScene->GetObjectCount();
 	for ( std::uint32_t n = static_cast<std::uint32_t>( m_UserShown.size() ); n < nObjects; n++ )
 	{
@@ -170,6 +174,40 @@ void CMapDocument::MeasureEditListener( const QString &szName, const std::functi
 }
 
 //-----------------------------------------------------------------------------
+// Purpose: Fix the background's exclusions for the whole stroke, before any sample changes.
+//-----------------------------------------------------------------------------
+void CMapDocument::BeginDisplacementPreview( std::vector<std::uint32_t> objects )
+{
+	if ( !m_pScene || m_pPreviewBase )
+		return;
+	m_pPreviewBase = m_pScene;
+	m_pDisplacementBase = m_pScene;
+	SortUnique( objects );
+	m_PreviewObjects = std::move( objects );
+	m_nPreviewState = ++m_nStateGeneration;
+	emit ScenePreviewed( m_PreviewObjects );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Put the last preview on the undo stack without rebuilding or briefly restoring the
+//          base scene. Undo and redo replace only these solids' independent meshes.
+//-----------------------------------------------------------------------------
+void CMapDocument::CommitDisplacementPreview( xv::map::MapEdit_t edit, const QString &szName )
+{
+	if ( !m_pPreviewBase || edit.IsEmpty() )
+	{
+		EndPreview();
+		return;
+	}
+	auto back = xv::map::InverseOf( *m_pPreviewBase, edit );
+	auto pPrepared = m_pScene;
+	m_pScene = std::move( m_pPreviewBase );
+	m_pDisplacementBase.reset();
+	m_pUndo->push( new CMapEditCommand( *this, std::move( edit ), std::move( back ), m_Selection, std::nullopt, szName, true, std::move( pPrepared ) ) );
+	m_PreviewObjects.clear();
+}
+
+//-----------------------------------------------------------------------------
 // Purpose:
 //-----------------------------------------------------------------------------
 void CMapDocument::Preview( const xv::map::MapEdit_t &edit, bool bDisplacements )
@@ -178,26 +216,23 @@ void CMapDocument::Preview( const xv::map::MapEdit_t &edit, bool bDisplacements 
 	{
 		return;
 	}
-	if ( !m_pPreviewBase )
+	if ( bDisplacements && !m_pPreviewBase )
 	{
-		m_pPreviewBase = m_pScene;
+		std::vector<std::uint32_t> objects;
+		for ( const auto &[ nSolid, solid ] : edit.m_Solids )
+			objects.push_back( m_pScene->SolidObject( nSolid ) );
+		BeginDisplacementPreview( std::move( objects ) );
 	}
+	else if ( !m_pPreviewBase )
+		m_pPreviewBase = m_pScene;
 	QElapsedTimer timer;
 	timer.start();
 	if ( bDisplacements )
 	{
-		std::vector<std::uint32_t> solids;
-		for ( const auto &[ nSolid, solid ] : edit.m_Solids )
-		{
-			solids.push_back( nSolid );
-		}
-		if ( !m_pDisplacementBase || solids != m_PreviewSolids )
-		{
-			m_pDisplacementBase = xv::map::PrepareDisplacementPreview( *m_pPreviewBase, edit );
-			m_PreviewSolids = std::move( solids );
-			m_nStateGeneration++;
-		}
+		const auto nOldMeshes = m_pScene->m_SolidMeshes.size();
 		m_pScene = xv::map::ApplyEdit( *m_pDisplacementBase, edit, true );
+		if ( m_pScene->m_SolidMeshes.size() != nOldMeshes )
+			++m_nStateGeneration;
 		m_flPreviewMs = timer.nsecsElapsed() / 1e6;
 		timer.restart();
 		emit ScenePreviewed( m_pScene->m_Changed );
@@ -220,9 +255,10 @@ void CMapDocument::EndPreview()
 	{
 		return;
 	}
-	const std::vector<std::uint32_t> changed = m_pScene->m_Changed;
+	const std::vector<std::uint32_t> changed = m_pDisplacementBase ? m_PreviewObjects : m_pScene->m_Changed;
 	const bool bDisplacements = m_pDisplacementBase != nullptr;
 	m_pDisplacementBase.reset();
+	m_PreviewObjects.clear();
 	m_pScene = std::move( m_pPreviewBase );
 	if ( bDisplacements )
 	{

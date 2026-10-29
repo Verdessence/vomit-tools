@@ -37,7 +37,7 @@ void main() {
 	int width = int(frame.state.x);
 	ivec2 at = ivec2(n % width, n / width);
 	int flags = int(texelFetch(stateTexture, at, 0).a * 255.0 + 0.5);
-	bool shown = (flags & 1) != 0 && (frame.pass.y < 0.5 || (flags & 32) == 0);
+	bool shown = (flags & 1) != 0 && (frame.pass.y < 0.5 || (frame.pass.y < 1.5 ? (flags & 32) == 0 : (flags & 128) == 0));
 	// A model that shows its box when selected (flag 64) draws its own edges as unselected ones
 	// in a models' mesh; its box, in a mesh of its own, is the selection's.
 	bool boxed = (flags & 64) != 0 && material.kind.z > 0.5;

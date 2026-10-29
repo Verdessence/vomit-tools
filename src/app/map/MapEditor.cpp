@@ -2412,7 +2412,14 @@ void CMapEditor::CommitDisplacements( const xv::map::CScene &scene, const std::v
 	} );
 	if ( !edit.IsEmpty() )
 	{
-		m_pDocument->Edit( std::move( edit ), szName );
+		if ( m_pDocument->IsPreviewing() )
+		{
+			if ( m_pFaceEdit->IsAutosew() )
+				m_pDocument->Preview( edit, true );
+			m_pDocument->CommitDisplacementPreview( std::move( edit ), szName );
+		}
+		else
+			m_pDocument->Edit( std::move( edit ), szName );
 	}
 }
 
