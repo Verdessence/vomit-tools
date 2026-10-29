@@ -7,6 +7,7 @@
 #include "MapFaceEdit.h"
 
 #include <cmath>
+#include <cstdint>
 #include <optional>
 
 #include <QButtonGroup>
@@ -19,6 +20,8 @@
 #include <QScrollArea>
 #include <QComboBox>
 #include <QDoubleSpinBox>
+#include <QDialog>
+#include <QDialogButtonBox>
 #include <QFormLayout>
 #include <QGridLayout>
 #include <QGroupBox>
@@ -192,6 +195,10 @@ CMapFaceEdit::CMapFaceEdit( CMapEditor &editor, QWidget *pParent )
 	pGrid->addWidget( new QLabel( tr( "Lightmap" ) ), 2, 2 );
 	pGrid->addWidget( m_pLightmap, 2, 3 );
 	pLayout->addLayout( pGrid );
+	auto *pSmoothing = new QPushButton( tr( "Smoothing Groups…" ) );
+	pSmoothing->setObjectName( QStringLiteral( "mapFaceSmoothingGroups" ) );
+	connect( pSmoothing, &QPushButton::clicked, this, &CMapFaceEdit::ShowSmoothingGroups );
+	pLayout->addWidget( pSmoothing );
 
 	auto *pJustify = new QHBoxLayout;
 	pJustify->addWidget( new QLabel( tr( "Justify" ) ) );
@@ -314,6 +321,93 @@ CMapFaceEdit::CMapFaceEdit( CMapEditor &editor, QWidget *pParent )
 	} );
 	connect( pBrowse, &QPushButton::clicked, this, [ this ] { m_Editor.BrowseMaterial(); } );
 	connect( pApply, &QPushButton::clicked, this, [ this ] { m_Editor.ApplyCurrentTexture( true ); } );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Edit memberships immediately, so each group click has its own undo step.
+//-----------------------------------------------------------------------------
+void CMapFaceEdit::ShowSmoothingGroups()
+{
+	if ( !m_pSmoothingGroups )
+	{
+		m_pSmoothingGroups = new QDialog( this );
+		m_pSmoothingGroups->setObjectName( QStringLiteral( "mapSmoothingGroups" ) );
+		m_pSmoothingGroups->setWindowTitle( tr( "Smoothing Groups" ) );
+		auto *pLayout = new QVBoxLayout( m_pSmoothingGroups );
+		auto *pHint = new QLabel( tr( "Assign the selected faces to groups. A mixed box means only some faces belong.\nSmoothing affects compiled brush lighting; displacements use their own smoothing." ) );
+		pHint->setWordWrap( true );
+		pLayout->addWidget( pHint );
+		auto *pGrid = new QGridLayout;
+		for ( int i = 0; i < 24; ++i )
+		{
+			auto *pGroup = new QCheckBox( QString::number( i + 1 ) );
+			pGroup->setObjectName( QStringLiteral( "mapSmoothingGroup%1" ).arg( i + 1 ) );
+			pGroup->setTristate();
+			connect( pGroup, &QCheckBox::clicked, this, [ this, i ] { ToggleSmoothingGroup( i ); } );
+			m_SmoothingGroups[ i ] = pGroup;
+			pGrid->addWidget( pGroup, i / 8, i % 8 );
+		}
+		pLayout->addLayout( pGrid );
+		auto *pClose = new QDialogButtonBox( QDialogButtonBox::Close );
+		connect( pClose, &QDialogButtonBox::rejected, m_pSmoothingGroups, &QDialog::reject );
+		pLayout->addWidget( pClose );
+	}
+	RefreshSmoothingGroups();
+	m_pSmoothingGroups->show();
+	m_pSmoothingGroups->raise();
+	m_pSmoothingGroups->activateWindow();
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Show shared and mixed memberships after selection changes, edits and undo.
+//-----------------------------------------------------------------------------
+void CMapFaceEdit::RefreshSmoothingGroups()
+{
+	if ( !m_pSmoothingGroups )
+		return;
+	const auto *pScene = m_Editor.GetDocument().GetScene();
+	std::uint32_t nAll = ~std::uint32_t{ 0 }, nAny = 0;
+	bool bHasFaces = false;
+	for ( const auto &face : m_Editor.GetSelectedFaces() )
+	{
+		if ( !pScene || face.m_nSolid >= pScene->m_Map.m_Solids.size() || face.m_nSide >= pScene->m_Map.m_Solids[ face.m_nSolid ].m_Sides.size() )
+			continue;
+		const auto nGroups = pScene->m_Map.m_Solids[ face.m_nSolid ].m_Sides[ face.m_nSide ].m_nSmoothingGroups;
+		nAll &= nGroups;
+		nAny |= nGroups;
+		bHasFaces = true;
+	}
+	for ( int i = 0; i < 24; ++i )
+	{
+		const auto nBit = std::uint32_t{ 1 } << i;
+		m_SmoothingGroups[ i ]->setEnabled( bHasFaces );
+		m_SmoothingGroups[ i ]->setCheckState( bHasFaces && ( nAll & nBit ) ? Qt::Checked : ( nAny & nBit ) ? Qt::PartiallyChecked
+																											: Qt::Unchecked );
+	}
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: A mixed or absent group joins every face; a shared group leaves every face.
+//-----------------------------------------------------------------------------
+void CMapFaceEdit::ToggleSmoothingGroup( int nGroup )
+{
+	const auto *pScene = m_Editor.GetDocument().GetScene();
+	if ( !pScene )
+		return;
+	const auto nBit = std::uint32_t{ 1 } << nGroup;
+	bool bAll = true;
+	for ( const auto &face : m_Editor.GetSelectedFaces() )
+	{
+		if ( face.m_nSolid < pScene->m_Map.m_Solids.size() && face.m_nSide < pScene->m_Map.m_Solids[ face.m_nSolid ].m_Sides.size() )
+			bAll &= ( pScene->m_Map.m_Solids[ face.m_nSolid ].m_Sides[ face.m_nSide ].m_nSmoothingGroups & nBit ) != 0;
+	}
+	FieldChanged( tr( "Smoothing Group %1" ).arg( nGroup + 1 ), [ nBit, bAll ]( xv::map::Side_t &side ) {
+		if ( bAll )
+			side.m_nSmoothingGroups &= ~nBit;
+		else
+			side.m_nSmoothingGroups |= nBit;
+	} );
+	RefreshSmoothingGroups();
 }
 
 //-----------------------------------------------------------------------------
@@ -943,6 +1037,7 @@ void CMapFaceEdit::Refresh()
 		m_pElevation->setValue( *flElevation );
 	}
 	m_bFilling = false;
+	RefreshSmoothingGroups();
 }
 
 //-----------------------------------------------------------------------------

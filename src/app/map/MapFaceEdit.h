@@ -4,13 +4,14 @@
 // Purpose: Hammer's Face Edit sheet, shown in the side panel while the Texture Application
 //          tool is on: the selected faces' texture scale, shift, rotation and lightmap scale
 //          (typed, and applied as typed), Justify, Align, the current texture with Browse and
-//          Apply, and the Mode a click in 3D works in. Its Displacement tab, as Hammer's:
+//          Apply, smoothing groups, and the Mode a click in 3D works in. Its Displacement tab, as Hammer's:
 //          Create, Destroy, Sew, Subdivide, Noise, Invert Alpha, the power and elevation, and
 //          the paint brush the 3D views paint geometry or alpha with.
 //
 //===========================================================================//
 #pragma once
 
+#include <array>
 #include <optional>
 
 #include <QWidget>
@@ -24,6 +25,7 @@ class QButtonGroup;
 class QCheckBox;
 class QComboBox;
 class QDoubleSpinBox;
+class QDialog;
 class QLabel;
 class QLineEdit;
 class QRadioButton;
@@ -118,6 +120,9 @@ protected:
 
 private:
 	void BuildDisplacementTab( QWidget *pPage );
+	void ShowSmoothingGroups();
+	void RefreshSmoothingGroups();
+	void ToggleSmoothingGroup( int nGroup );
 	void ShowMaterial( const QString &szName );
 	// A field typed: the selected faces take it.
 	void FieldChanged( const QString &szName, const std::function<void( xv::map::Side_t & )> &pfnSet );
@@ -125,6 +130,8 @@ private:
 
 	CMapEditor &m_Editor;
 	bool m_bFilling = false;
+	QDialog *m_pSmoothingGroups = nullptr;
+	std::array<QCheckBox *, 24> m_SmoothingGroups{};
 	QDoubleSpinBox *m_pScaleX = nullptr;
 	QDoubleSpinBox *m_pScaleY = nullptr;
 	QDoubleSpinBox *m_pShiftX = nullptr;
