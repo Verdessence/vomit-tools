@@ -10,6 +10,7 @@
 
 #include <array>
 #include <cstdint>
+#include <map>
 #include <span>
 #include <optional>
 #include <string>
@@ -60,7 +61,11 @@ struct OverlayMaterial_t
 
 // Every overlay and decal in pieces on the faces they cover; materials lines up with
 // OverlayMaterialNames. Each overlay's corners are outlined, for the wireframe.
-[[nodiscard]] CMapMesh BuildOverlayMesh( const CScene &scene, std::span<const OverlayMaterial_t> materials );
+// nObject limits rebuilding to one entity while retaining the scene's receiving faces.
+[[nodiscard]] CMapMesh BuildOverlayMesh( const CScene &scene, std::span<const OverlayMaterial_t> materials, std::optional<std::uint32_t> nObject = std::nullopt );
+
+// Rebuild several entity parts with one lookup of the scene's receiving triangles.
+[[nodiscard]] std::map<std::uint32_t, CMapMesh> BuildOverlayMeshes( const CScene &scene, std::span<const OverlayMaterial_t> materials, std::span<const std::uint32_t> objects );
 
 // Where p lies in the quad c0..c3 as (s, t), where c0 is (0, 0), c1 (0, 1), c2 (1, 1) and
 // c3 (1, 0) and the edges between are straight: the inverse of bilinear interpolation.

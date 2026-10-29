@@ -93,6 +93,8 @@ public:
 	// stack. EndPreview puts that scene back (before the drag's edit goes through Edit, or when
 	// it is cancelled).
 	void Preview( const xv::map::MapEdit_t &edit, bool bDisplacements = false );
+	[[nodiscard]] const xv::map::CScene *GetEntityPreviewBase() const { return m_bEntityPreview ? m_pPreviewBase.get() : nullptr; }
+	[[nodiscard]] const xv::map::CScene *GetGeometryPreviewBase() const { return m_bEntityPreview || m_pDisplacementBase ? m_pPreviewBase.get() : nullptr; }
 	[[nodiscard]] const xv::map::CScene *GetDisplacementPreviewBase() const { return m_pDisplacementBase ? m_pPreviewBase.get() : nullptr; }
 	[[nodiscard]] double GetPreviewTime() const { return m_flPreviewMs; }
 	[[nodiscard]] double GetPreviewNotifyTime() const { return m_flPreviewNotifyMs; }
@@ -166,6 +168,8 @@ private:
 	double m_flPreviewMs = 0.0;
 	double m_flPreviewNotifyMs = 0.0;
 	std::vector<std::uint32_t> m_PreviewObjects;
+	bool m_bEntityPreview = false;
+	bool m_bEntityPreviewDisabled = false;
 	std::uint64_t m_nPreviewState = 0;
 	std::shared_ptr<const xv::map::CScene> m_pDisplacementBase;
 	bool m_bCamerasPreview = false;

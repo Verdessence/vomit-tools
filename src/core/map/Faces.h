@@ -24,16 +24,6 @@
 namespace xv::map
 {
 
-// A side of a solid, by their indices in the map.
-struct FaceRef_t
-{
-	std::uint32_t m_nSolid = 0;
-	std::uint32_t m_nSide = 0;
-
-	friend bool operator==( const FaceRef_t &, const FaceRef_t & ) = default;
-	friend auto operator<=>( const FaceRef_t &, const FaceRef_t & ) = default;
-};
-
 // The texture axes Hammer gives a face aligned to the world: the two world axes of the plane the
 // face most faces (floors and ceilings x and -y, walls their horizontal axis and -z).
 [[nodiscard]] std::pair<Point_t, Point_t> WorldAxes( const Point_t &normal );

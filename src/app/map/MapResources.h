@@ -19,6 +19,7 @@
 #include <QObject>
 
 #include "map/Materials.h"
+#include "map/Overlay.h"
 #include "map/Props.h"
 #include "model/Model.h"
 #include "map/Raster.h"
@@ -50,9 +51,9 @@ public:
 	// Reads materials of the scene an edit brought in (indices past those it had at Start) into
 	// their places; false when they don't fit the places kept for them (Start again then).
 	[[nodiscard]] bool LoadMaterials( std::shared_ptr<const xv::map::CScene> pScene, const std::vector<std::uint32_t> &materials );
-	// After edits to entities: their sprites and props placed again (reading what is new), in
-	// the background.
-	void Refresh( std::shared_ptr<const xv::map::CScene> pScene );
+	// Replaces changed entities' placements in the background, reading new assets as needed.
+	// An empty changed list refreshes everything, including overlays on edited receiving faces.
+	void Refresh( std::shared_ptr<const xv::map::CScene> pScene, std::vector<std::uint32_t> changed = {} );
 	// Where the entity boxes' material is in the table (past the places kept for new ones).
 	[[nodiscard]] std::uint32_t GetEntityMaterial() const { return m_nEntityMaterial; }
 
@@ -69,11 +70,15 @@ public:
 	[[nodiscard]] std::shared_ptr<const std::vector<xv::map::SpritePlacement_t>> GetSprites() const { return m_pSprites; }
 	// The overlays and decals laid on the faces.
 	[[nodiscard]] std::shared_ptr<const xv::map::CMapMesh> GetOverlays() const { return m_pOverlays; }
+	[[nodiscard]] std::shared_ptr<const xv::map::MeshParts_t> GetPropParts() const { return m_pPropParts; }
+	[[nodiscard]] std::shared_ptr<const xv::map::MeshParts_t> GetOverlayParts() const { return m_pOverlayParts; }
+	[[nodiscard]] xv::map::CMapMesh BuildEntityPreview( const xv::map::CScene &scene, const std::vector<std::uint32_t> &objects, xv::map::Point_t right, xv::map::Point_t up, const xv::map::CScene *pBase = nullptr ) const;
 	[[nodiscard]] int GetModelsLoaded() const { return m_nModels; }
 	[[nodiscard]] int GetModelsTotal() const { return m_nModelsTotal; }
 	[[nodiscard]] int GetLoaded() const { return m_nLoaded; }
 	[[nodiscard]] int GetTotal() const { return m_nTotal; }
 	[[nodiscard]] bool IsFinished() const { return m_bFinished; }
+	[[nodiscard]] bool IsRefreshing() const { return m_bRefreshing || m_pRefreshNext != nullptr; }
 
 signals:
 	void Arrived();
@@ -109,13 +114,19 @@ private:
 		std::vector<std::array<int, 2>> m_Sizes;                       // by table place: the base texture's size
 		std::vector<bool> m_Drawable;
 		std::vector<bool> m_Additive;
+		std::vector<double> m_DecalScales;
+		std::map<std::string, std::uint32_t, std::less<>> m_OverlayPlaces;
+		xv::map::MeshParts_t m_OverlayParts;
+		xv::map::MeshParts_t m_PropParts;
+		std::map<std::uint32_t, std::vector<xv::map::SpritePlacement_t>> m_SpritePlacements;
 		std::uint32_t m_nNext = 0;                                     // the table's next free place
 	};
 	using ReadMaterials_t = std::function<void( const std::vector<std::pair<std::uint32_t, std::string>> &, MaterialUse_t )>;
 	using Post_t = std::function<void( std::function<void()> )>;
 
 	void Run( std::shared_ptr<const xv::map::CScene> pScene, xv::vfs::CGameInfo game, int nMaxSize, bool bDecoded, int nGeneration );
-	void PlaceEntities( const xv::map::CScene &scene, Placing_t &placing, const ReadMaterials_t &readMaterials, const xv::model::Reader_t &readModel, const Post_t &post );
+	void PlaceEntities( const xv::map::CScene &scene, Placing_t &placing, const ReadMaterials_t &readMaterials, const xv::model::Reader_t &readModel, const Post_t &post, const std::vector<std::uint32_t> &changed = {} );
+	void PlaceOverlays( const xv::map::CScene &scene, Placing_t &placing, const ReadMaterials_t &readMaterials, const Post_t &post, const std::vector<std::uint32_t> &changed = {} );
 	// Reads materials (their index and name) through read, textures decoded on every core.
 	[[nodiscard]] static std::vector<Loaded_t> ReadMaterials( const std::vector<std::pair<std::uint32_t, std::string>> &todo, MaterialUse_t nUse, const xv::material::Reader_t &read, int nMaxSize, bool bDecoded, const std::vector<bool> &additive );
 	void Take( std::vector<Loaded_t> batch );
@@ -128,6 +139,7 @@ private:
 	Placing_t m_Placing;
 	bool m_bRefreshing = false;
 	std::shared_ptr<const xv::map::CScene> m_pRefreshNext;
+	std::vector<std::uint32_t> m_RefreshChanged;
 	std::atomic<bool> m_bStop{ false };
 	int m_nGeneration = 0;
 	std::vector<xv::map::RasterMaterial_t> m_Current;
@@ -139,6 +151,8 @@ private:
 	std::vector<std::uint32_t> m_PropObjects;
 	std::shared_ptr<const std::vector<xv::map::SpritePlacement_t>> m_pSprites;
 	std::shared_ptr<const xv::map::CMapMesh> m_pOverlays;
+	std::shared_ptr<const xv::map::MeshParts_t> m_pPropParts;
+	std::shared_ptr<const xv::map::MeshParts_t> m_pOverlayParts;
 	int m_nModels = 0;
 	int m_nModelsTotal = 0;
 	int m_nLoaded = 0;

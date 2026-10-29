@@ -12,6 +12,8 @@
 #include <array>
 #include <cstdint>
 #include <span>
+#include <map>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -78,6 +80,8 @@ public:
 	std::vector<std::uint32_t> m_SolidIndices;  // the solid each entry above is; empty: entry i is solid i
 	std::vector<std::string> m_Problems;        // displacements drawn flat, and why
 };
+
+using MeshParts_t = std::map<std::uint32_t, std::shared_ptr<const CMapMesh>>;
 
 struct MeshOptions_t
 {

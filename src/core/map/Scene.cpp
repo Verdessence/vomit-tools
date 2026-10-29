@@ -13,6 +13,25 @@ namespace xv::map
 {
 
 //-----------------------------------------------------------------------------
+// Purpose: Resolve Hammer side IDs once per snapshot; workers and views can ask concurrently.
+//-----------------------------------------------------------------------------
+std::optional<FaceRef_t> CScene::FindSide( int nId ) const
+{
+	std::call_once( m_pSideFaces->m_Once, [ this ] {
+		for ( std::uint32_t nSolid = 0; nSolid < m_Map.m_Solids.size(); ++nSolid )
+		{
+			const auto &solid = m_Map.m_Solids[ nSolid ];
+			if ( solid.m_bDeleted )
+				continue;
+			for ( std::uint32_t nSide = 0; nSide < solid.m_Sides.size(); ++nSide )
+				m_pSideFaces->m_Faces.try_emplace( solid.m_Sides[ nSide ].m_nId, FaceRef_t{ nSolid, nSide } );
+		}
+	} );
+	const auto found = m_pSideFaces->m_Faces.find( nId );
+	return found == m_pSideFaces->m_Faces.end() ? std::nullopt : std::optional<FaceRef_t>{ found->second };
+}
+
+//-----------------------------------------------------------------------------
 // Purpose: A painted solid's latest grid, or the bulk edit mesh for other edited solids.
 //-----------------------------------------------------------------------------
 const CMapMesh &CScene::GetSolidMesh( std::uint32_t nSolid ) const

@@ -685,7 +685,7 @@ void CRasterizer::Run()
 	const bool bWireframe = m_Options.m_Shade.m_nMode == RasterMode_t::RASTER_MODE_WIREFRAME;
 	for ( const CMapMesh *pMesh : m_Scene.m_Meshes )
 	{
-		if ( std::ranges::find( m_Scene.m_NoWireframe, pMesh ) != m_Scene.m_NoWireframe.end() )
+		if ( m_Scene.m_NoWireframe.contains( pMesh ) )
 		{
 			continue;
 		}

@@ -26,6 +26,7 @@ struct SpritePlacement_t
 	double m_flHalfHeight = 8.0;
 	std::array<int, 2> m_TextureSize{ 64, 64 };
 	std::array<std::uint8_t, 3> m_Tint{ 255, 255, 255 }; // a light's colour; white otherwise
+	friend bool operator==( const SpritePlacement_t &, const SpritePlacement_t & ) = default;
 };
 
 // Each sprite as a square in the plane of the camera's right and up directions, wound as

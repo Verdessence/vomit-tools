@@ -247,6 +247,26 @@ void CMapDocument::Preview( const xv::map::MapEdit_t &edit, bool bDisplacements 
 	}
 	else if ( !m_pPreviewBase )
 		m_pPreviewBase = m_pScene;
+	const bool bExistingEntities = !bDisplacements && edit.m_Solids.empty() && !edit.m_Entities.empty() &&
+		std::ranges::all_of( edit.m_Entities, [ & ]( const auto &entry ) { return entry.first < m_pPreviewBase->m_Entities.size(); } );
+	// A copy preview introduces object IDs and placements. Keep the ordinary edit path for the
+	// rest of that gesture so dropping Shift also removes its temporary resources.
+	if ( !bDisplacements && !edit.IsCameraEdit() && !bExistingEntities )
+		m_bEntityPreviewDisabled = true;
+	const bool bEntityPreview = bExistingEntities && !m_bEntityPreviewDisabled;
+	std::vector<std::uint32_t> objects;
+	if ( bEntityPreview )
+	{
+		for ( const auto &[ nEntity, entity ] : edit.m_Entities )
+			objects.push_back( m_pPreviewBase->EntityObject( nEntity ) );
+		SortUnique( objects );
+	}
+	if ( bEntityPreview != m_bEntityPreview || ( bEntityPreview && objects != m_PreviewObjects ) )
+	{
+		m_bEntityPreview = bEntityPreview;
+		m_PreviewObjects = std::move( objects );
+		m_nPreviewState = ++m_nStateGeneration;
+	}
 	if ( edit.IsCameraEdit() )
 	{
 		m_bCamerasPreview = true;
@@ -256,7 +276,15 @@ void CMapDocument::Preview( const xv::map::MapEdit_t &edit, bool bDisplacements 
 	}
 	QElapsedTimer timer;
 	timer.start();
-	if ( bDisplacements )
+	if ( m_bEntityPreview )
+	{
+		m_pScene = xv::map::ApplyEdit( *m_pPreviewBase, edit, false, true );
+		m_flPreviewMs = timer.nsecsElapsed() / 1e6;
+		timer.restart();
+		emit ScenePreviewed( m_pScene->m_Changed );
+		m_flPreviewNotifyMs = timer.nsecsElapsed() / 1e6;
+	}
+	else if ( bDisplacements )
 	{
 		const auto nOldMeshes = m_pScene->m_SolidMeshes.size();
 		m_pScene = xv::map::ApplyEdit( *m_pDisplacementBase, edit, true );
@@ -269,8 +297,14 @@ void CMapDocument::Preview( const xv::map::MapEdit_t &edit, bool bDisplacements 
 	}
 	else
 	{
+		const std::uint32_t nPreviousObjects = m_pScene->GetObjectCount();
 		m_pScene = m_pPreviewBase;
 		ApplyEditNow( edit );
+		std::vector<std::uint32_t> removed;
+		for ( std::uint32_t n = m_pScene->GetObjectCount(); n < nPreviousObjects; ++n )
+			removed.push_back( n );
+		if ( !removed.empty() )
+			emit SceneEdited( removed );
 		m_flPreviewMs = timer.nsecsElapsed() / 1e6;
 	}
 }
@@ -284,8 +318,10 @@ void CMapDocument::EndPreview()
 	{
 		return;
 	}
-	const std::vector<std::uint32_t> changed = m_pDisplacementBase ? m_PreviewObjects : m_pScene->m_Changed;
-	const bool bDisplacements = m_pDisplacementBase != nullptr;
+	const std::vector<std::uint32_t> changed = ( m_pDisplacementBase || m_bEntityPreview ) ? m_PreviewObjects : m_pScene->m_Changed;
+	const bool bDisplacements = m_pDisplacementBase != nullptr || m_bEntityPreview;
+	m_bEntityPreview = false;
+	m_bEntityPreviewDisabled = false;
 	m_pDisplacementBase.reset();
 	m_PreviewObjects.clear();
 	m_pScene = std::move( m_pPreviewBase );

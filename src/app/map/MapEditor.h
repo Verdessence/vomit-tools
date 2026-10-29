@@ -177,7 +177,7 @@ public:
 	// Replace Textures (Ctrl+Shift+R) and what it does: the faces found replaced, or marked
 	// (selected, with the texture tool) when bMarkOnly; among the selection or everything shown
 	// (and hidden too). Returns how many faces.
-	void ShowReplaceTextures();
+	void ShowReplaceTextures( bool bCurrentAsNew = false );
 	std::size_t ReplaceTextures( const xv::map::ReplaceTextures_t &how, bool bMarkOnly, bool bSelectedOnly, bool bHiddenToo );
 	// The Entity Report and Check for Problems (Alt+P) windows, one of each, beside the views.
 	CMapEntityReport *ShowEntityReport();
@@ -216,6 +216,9 @@ public:
 	void BrowseMaterial();
 	[[nodiscard]] QString GetEntityClass() const;
 
+	[[nodiscard]] const std::vector<xv::map::FaceRef_t> &GetHighlightedSides() const { return m_HighlightedSides; }
+	[[nodiscard]] bool IsSecondarySides() const { return m_bSecondarySides; }
+	[[nodiscard]] bool IsFaceMaskHidden() const { return m_bHideFaceMask; }
 	// The Texture Application tool's faces.
 	[[nodiscard]] const std::vector<xv::map::FaceRef_t> &GetSelectedFaces() const { return m_SelectedFaces; }
 	void SetSelectedFaces( std::vector<xv::map::FaceRef_t> faces, bool bLiftFirst = false );
@@ -274,10 +277,13 @@ signals:
 	// The tab's title changed (saved under another name, or modified).
 	void TitleChanged();
 	void CurrentMaterialChanged( const QString &szMaterial );
+	void TextureGameChanged();
 
 private:
 	void BuildToolBars( QVBoxLayout *pLayout );
 	[[nodiscard]] QWidget *BuildNewObjects();
+	[[nodiscard]] QWidget *BuildTexturePanel();
+	void HighlightSides( const QString &szKey, const QString &szValue );
 	// The entity classes and materials to pick from, once the map's game data is read.
 	void FillNewObjects();
 	void SyncMapCameras();
@@ -332,6 +338,10 @@ private:
 	xv::map::ClipKeep_t m_nClipMode = xv::map::ClipKeep_t::CLIP_KEEP_FRONT;
 	std::shared_ptr<const xv::map::CScene> m_pClipPreview; // the selection cut, drawn in white
 	QLineEdit *m_pMaterial = nullptr;
+	QComboBox *m_pRecentMaterials = nullptr;
+	bool m_bHideFaceMask = false;
+	std::vector<xv::map::FaceRef_t> m_HighlightedSides;
+	bool m_bSecondarySides = false;
 	QString m_szFacePickKey;
 	std::vector<xv::map::Camera_t> m_LastCameras;
 	int m_nLastActiveCamera = -1;

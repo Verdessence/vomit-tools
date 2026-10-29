@@ -3,6 +3,20 @@
 ## Unreleased
 
 ### Hammer maps (new)
+- Entity drags preview without refreshing assets or property panels. Props, sprites, decals and
+  overlays retain independent meshes, so only changed entities need new GPU buffers; the 2D
+  backgrounds stay cached during drags. The event-loop timing includes handler work and reports
+  nested loops.
+- Selecting `sides` or `sides2` in Object Properties highlights its faces while the value is
+  edited, with missing IDs listed below. Transition overlays use a second colour for `sides2`.
+- A Texture section in the side panel shows the current material's picture and size, Browse,
+  Replace and Hide Mask, with ten recent materials remembered per map. It shares the current
+  material with Face Edit and the creation tools.
+- Brush corner dots in 2D are off by default; saved preferences are preserved.
+- Fixed: newly placed overlays and decals load their textures; moving, editing, deleting and
+  undoing them updates their projected picture. Projections follow edited receiving faces, and
+  new ones show a flat selection-coloured surface while their texture loads. Overlay-only edits
+  keep the existing props and sprites.
 - **Map editor:** open Hammer maps (`.vmf`) in a tab laid out as Hammer++'s: a 3D view and the
   Top, Front and Side views in four panes, its keys, colours, grid and camera (fly with WASD, look
   with Z or the mouse), from Hammer++'s own settings.

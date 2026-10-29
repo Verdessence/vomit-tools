@@ -13,6 +13,8 @@
 #include <filesystem>
 #include <functional>
 #include <memory>
+#include <map>
+#include <mutex>
 #include <optional>
 #include <string_view>
 #include <vector>
@@ -28,6 +30,17 @@
 
 namespace xv::map
 {
+
+struct OverlaySurface_t;
+
+// A side of a solid, by their indices in the map.
+struct FaceRef_t
+{
+	std::uint32_t m_nSolid = 0;
+	std::uint32_t m_nSide = 0;
+	friend bool operator==( const FaceRef_t &, const FaceRef_t & ) = default;
+	friend auto operator<=>( const FaceRef_t &, const FaceRef_t & ) = default;
+};
 
 // What an object number stands for: a solid or an entity of the map, by its index.
 struct ObjectRef_t
@@ -79,6 +92,15 @@ public:
 	std::vector<std::uint32_t> m_SolidObjects;  // by solid: its object number
 	std::vector<std::uint32_t> m_EntityObjects; // by entity: its object number
 
+	[[nodiscard]] std::optional<FaceRef_t> FindSide( int nId ) const;
+	struct SideLookup_t
+	{
+		std::once_flag m_Once;
+		std::once_flag m_OverlayOnce;
+		std::shared_ptr<const OverlaySurface_t> m_pOverlaySurface;
+		std::map<int, FaceRef_t> m_Faces;
+	};
+	std::shared_ptr<SideLookup_t> m_pSideFaces = std::make_shared<SideLookup_t>();
 	[[nodiscard]] const CMapMesh &GetMesh() const { return *m_pMesh; }
 	[[nodiscard]] const CMapMesh &GetInstanceMesh() const { return *m_pInstanceMesh; }
 	[[nodiscard]] const CMapMesh &GetEditMesh() const { return *m_pEditMesh; }

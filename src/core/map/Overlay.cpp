@@ -29,6 +29,16 @@
 namespace xv::map
 {
 
+struct OverlayTriangle_t
+{
+	const CMapMesh *m_pMesh = nullptr;
+	std::uint32_t m_nTriangle = 0;
+};
+struct OverlaySurface_t
+{
+	std::unordered_map<int, std::vector<OverlayTriangle_t>> m_BySide;
+};
+
 namespace
 {
 
@@ -132,21 +142,32 @@ std::vector<Point2_t> Clip2( std::vector<Point2_t> polygon, std::span<const Poin
 }
 
 // The mesh's triangles by the side they were made from.
-using SideTriangles_t = std::unordered_map<int, std::vector<std::uint32_t>>;
+using SideTriangles_t = std::unordered_map<int, std::vector<OverlayTriangle_t>>;
 
 //-----------------------------------------------------------------------------
 // Purpose:
 //-----------------------------------------------------------------------------
-SideTriangles_t TrianglesBySide( const CScene &scene )
+const SideTriangles_t &TrianglesBySide( const CScene &scene )
 {
-	SideTriangles_t triangles;
-	const CMapMesh &mesh = scene.GetMesh();
-	for ( std::uint32_t t = 0; t < mesh.m_TriangleFaces.size(); t++ )
-	{
-		const MeshFace_t &face = mesh.m_Faces[ mesh.m_TriangleFaces[ t ] ];
-		triangles[ scene.m_Map.m_Solids[ face.m_nSolid ].m_Sides[ face.m_nSide ].m_nId ].push_back( t );
-	}
-	return triangles;
+	std::call_once( scene.m_pSideFaces->m_OverlayOnce, [ & ] {
+		auto pSurface = std::make_shared<OverlaySurface_t>();
+		auto &triangles = pSurface->m_BySide;
+		std::vector<const CMapMesh *> meshes{ &scene.GetMesh(), &scene.GetEditMesh() };
+		for ( const auto &[ nSolid, pMesh ] : scene.m_SolidMeshes )
+			meshes.push_back( pMesh.get() );
+		for ( const CMapMesh *pMesh : meshes )
+		{
+			for ( std::uint32_t t = 0; t < pMesh->m_TriangleFaces.size(); t++ )
+			{
+				const MeshFace_t &face = pMesh->m_Faces[ pMesh->m_TriangleFaces[ t ] ];
+				if ( scene.m_Map.m_Solids[ face.m_nSolid ].m_bDeleted || ( scene.IsEditedSolid( face.m_nSolid ) ? &scene.GetSolidMesh( face.m_nSolid ) : &scene.GetMesh() ) != pMesh )
+					continue;
+				triangles[ scene.m_Map.m_Solids[ face.m_nSolid ].m_Sides[ face.m_nSide ].m_nId ].push_back( { pMesh, t } );
+			}
+		}
+		scene.m_pSideFaces->m_pOverlaySurface = std::move( pSurface );
+	} );
+	return scene.m_pSideFaces->m_pOverlaySurface->m_BySide;
 }
 
 //-----------------------------------------------------------------------------
@@ -155,12 +176,13 @@ SideTriangles_t TrianglesBySide( const CScene &scene )
 //          triangle along the frame's normal, a little off it. Triangles facing away from the
 //          frame, or edge on to it, are skipped.
 //-----------------------------------------------------------------------------
-void LayOnto( CMapMesh &out, const CScene &scene, std::span<const std::uint32_t> triangles, const Frame_t &frame, const OverlayMaterial_t &material, std::uint32_t nObject )
+void LayOnto( CMapMesh &out, std::span<const OverlayTriangle_t> triangles, const Frame_t &frame, const OverlayMaterial_t &material, std::uint32_t nObject )
 {
-	const CMapMesh &mesh = scene.GetMesh();
 	const std::vector<Point2_t> quad( frame.m_Corners.begin(), frame.m_Corners.end() );
-	for ( const std::uint32_t t : triangles )
+	for ( const OverlayTriangle_t &triangle : triangles )
 	{
+		const CMapMesh &mesh = *triangle.m_pMesh;
+		const auto t = triangle.m_nTriangle;
 		std::array<Point_t, 3> corners{};
 		for ( std::size_t k = 0; k < 3; k++ )
 		{
@@ -297,7 +319,7 @@ std::vector<std::string> OverlayMaterialNames( const CScene &scene )
 		const EntityVisual_t &visual = scene.m_Entities[ e ];
 		const std::string_view szKey = visual.m_bOverlay ? "material" : visual.m_bDecal ? "texture"
 																						: "";
-		if ( szKey.empty() )
+		if ( szKey.empty() || scene.m_Map.m_Entities[ e ].m_bDeleted )
 		{
 			continue;
 		}
@@ -313,7 +335,7 @@ std::vector<std::string> OverlayMaterialNames( const CScene &scene )
 //-----------------------------------------------------------------------------
 // Purpose:
 //-----------------------------------------------------------------------------
-CMapMesh BuildOverlayMesh( const CScene &scene, std::span<const OverlayMaterial_t> materials )
+static CMapMesh BuildOverlayPart( const CScene &scene, std::span<const OverlayMaterial_t> materials, std::optional<std::uint32_t> nOnlyObject, const SideTriangles_t &bySide )
 {
 	CMapMesh mesh;
 	const std::vector<std::string> names = OverlayMaterialNames( scene );
@@ -321,7 +343,6 @@ CMapMesh BuildOverlayMesh( const CScene &scene, std::span<const OverlayMaterial_
 	{
 		return mesh;
 	}
-	const SideTriangles_t bySide = TrianglesBySide( scene );
 	// Pieces are gathered by material, so each material is one batch.
 	std::map<std::uint32_t, CMapMesh> byMaterial;
 	CMapMesh outlines;
@@ -329,7 +350,7 @@ CMapMesh BuildOverlayMesh( const CScene &scene, std::span<const OverlayMaterial_
 	{
 		const EntityVisual_t &visual = scene.m_Entities[ e ];
 		const Entity_t &entity = scene.m_Map.m_Entities[ e ];
-		if ( !visual.m_bOverlay && !visual.m_bDecal )
+		if ( entity.m_bDeleted || ( nOnlyObject && scene.EntityObject( e ) != *nOnlyObject ) || ( !visual.m_bOverlay && !visual.m_bDecal ) )
 		{
 			continue;
 		}
@@ -379,7 +400,7 @@ CMapMesh BuildOverlayMesh( const CScene &scene, std::span<const OverlayMaterial_
 			{
 				if ( const auto it = bySide.find( *nSide ); it != bySide.end() )
 				{
-					LayOnto( out, scene, it->second, frame, material, nObject );
+					LayOnto( out, it->second, frame, material, nObject );
 				}
 			}
 			Outline( outlines, frame, nObject );
@@ -426,7 +447,7 @@ CMapMesh BuildOverlayMesh( const CScene &scene, std::span<const OverlayMaterial_
 				frame.m_U = Normalized( Cross( Scale( frame.m_Normal, -1.0 ), Normalized( up ) ) );
 				frame.m_Corners = { Point2_t{ -flHalfWidth, -flHalfHeight }, Point2_t{ -flHalfWidth, flHalfHeight }, Point2_t{ flHalfWidth, flHalfHeight }, Point2_t{ flHalfWidth, -flHalfHeight } };
 				frame.m_Texcoords = { Point2_t{ 0, 0 }, Point2_t{ 0, 1 }, Point2_t{ 1, 1 }, Point2_t{ 1, 0 } };
-				LayOnto( out, scene, it->second, frame, material, nObject );
+				LayOnto( out, it->second, frame, material, nObject );
 				Outline( outlines, frame, nObject );
 			}
 		}
@@ -454,6 +475,28 @@ CMapMesh BuildOverlayMesh( const CScene &scene, std::span<const OverlayMaterial_
 		mesh.m_Lines.push_back( nBase + n );
 	}
 	return mesh;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Project onto the active receiving geometry, including edited and painted solids.
+//-----------------------------------------------------------------------------
+CMapMesh BuildOverlayMesh( const CScene &scene, std::span<const OverlayMaterial_t> materials, std::optional<std::uint32_t> nObject )
+{
+	return BuildOverlayPart( scene, materials, nObject, TrianglesBySide( scene ) );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Share the receiving triangle lookup across the entities of an initial load or edit.
+//-----------------------------------------------------------------------------
+std::map<std::uint32_t, CMapMesh> BuildOverlayMeshes( const CScene &scene, std::span<const OverlayMaterial_t> materials, std::span<const std::uint32_t> objects )
+{
+	std::map<std::uint32_t, CMapMesh> parts;
+	if ( objects.empty() )
+		return parts;
+	const auto &bySide = TrianglesBySide( scene );
+	for ( const auto nObject : objects )
+		parts.emplace( nObject, BuildOverlayPart( scene, materials, nObject, bySide ) );
+	return parts;
 }
 
 //-----------------------------------------------------------------------------

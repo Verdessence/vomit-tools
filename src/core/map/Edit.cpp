@@ -121,10 +121,12 @@ static std::vector<std::pair<std::uint32_t, Entity_t>> EditedEntities( const CSc
 //-----------------------------------------------------------------------------
 // Purpose:
 //-----------------------------------------------------------------------------
-std::shared_ptr<CScene> ApplyEdit( const CScene &scene, const MapEdit_t &edit, bool bDisplacementPreview )
+std::shared_ptr<CScene> ApplyEdit( const CScene &scene, const MapEdit_t &edit, bool bDisplacementPreview, bool bEntityPreview )
 {
 	auto pScene = std::make_shared<CScene>( scene );
 	CScene &out = *pScene;
+	if ( !edit.m_Solids.empty() )
+		out.m_pSideFaces = std::make_shared<CScene::SideLookup_t>();
 	out.m_nRevision = scene.m_nRevision + 1;
 	out.m_bDisplacementEdit = bDisplacementPreview;
 	out.m_Changed.clear();
@@ -241,44 +243,54 @@ std::shared_ptr<CScene> ApplyEdit( const CScene &scene, const MapEdit_t &edit, b
 		out.m_nNextObjectId = std::max( out.m_nNextObjectId, group.m_nId + 1 );
 	}
 
-	if ( bDisplacementPreview )
+	if ( !edit.m_Solids.empty() )
 	{
-		for ( const auto &[ nSolid, solid ] : edit.m_Solids )
+		if ( bDisplacementPreview )
 		{
-			const MeshSolid_t given{ nSolid, out.SolidObject( nSolid ), &std::as_const( out.m_Solids )[ nSolid ] };
-			auto pMesh = std::make_shared<const CMapMesh>( BuildMesh( std::as_const( map ), std::span<const MeshSolid_t>{ &given, 1 } ) );
-			const auto it = std::ranges::lower_bound( out.m_SolidMeshes, nSolid, {}, []( const auto &entry ) { return entry.first; } );
-			if ( it != out.m_SolidMeshes.end() && it->first == nSolid )
-				it->second = std::move( pMesh );
-			else
-				out.m_SolidMeshes.insert( it, { nSolid, std::move( pMesh ) } );
-		}
-	}
-	else
-	{
-		// The edit mesh: every solid edits have touched, as it is now.
-		std::vector<MeshSolid_t> edited;
-		for ( const std::uint32_t nSolid : out.m_EditedSolids )
-		{
-			if ( !std::as_const( map.m_Solids )[ nSolid ].m_bDeleted && ( !bDisplacementPreview || std::ranges::any_of( edit.m_Solids, [ nSolid ]( const auto &entry ) { return entry.first == nSolid; } ) ) )
+			for ( const auto &[ nSolid, solid ] : edit.m_Solids )
 			{
-				edited.push_back( { nSolid, out.SolidObject( nSolid ), &std::as_const( out.m_Solids )[ nSolid ] } );
+				const MeshSolid_t given{ nSolid, out.SolidObject( nSolid ), &std::as_const( out.m_Solids )[ nSolid ] };
+				auto pMesh = std::make_shared<const CMapMesh>( BuildMesh( std::as_const( map ), std::span<const MeshSolid_t>{ &given, 1 } ) );
+				const auto it = std::ranges::lower_bound( out.m_SolidMeshes, nSolid, {}, []( const auto &entry ) { return entry.first; } );
+				if ( it != out.m_SolidMeshes.end() && it->first == nSolid )
+					it->second = std::move( pMesh );
+				else
+					out.m_SolidMeshes.insert( it, { nSolid, std::move( pMesh ) } );
 			}
 		}
-		out.m_pEditMesh = std::make_shared<const CMapMesh>( BuildMesh( std::as_const( map ), std::span<const MeshSolid_t>{ edited } ) );
+		else
+		{
+			// The edit mesh: every solid edits have touched, as it is now.
+			std::vector<MeshSolid_t> edited;
+			for ( const std::uint32_t nSolid : out.m_EditedSolids )
+			{
+				if ( !std::as_const( map.m_Solids )[ nSolid ].m_bDeleted && ( !bDisplacementPreview || std::ranges::any_of( edit.m_Solids, [ nSolid ]( const auto &entry ) { return entry.first == nSolid; } ) ) )
+				{
+					edited.push_back( { nSolid, out.SolidObject( nSolid ), &std::as_const( out.m_Solids )[ nSolid ] } );
+				}
+			}
+			out.m_pEditMesh = std::make_shared<const CMapMesh>( BuildMesh( std::as_const( map ), std::span<const MeshSolid_t>{ edited } ) );
 
-		out.m_SolidMeshes.clear();
+			out.m_SolidMeshes.clear();
+		}
 	}
-
-	if ( bInstances )
+	if ( bInstances && !bEntityPreview )
 	{
 		SceneOptions_t options;
 		options.m_Instances = out.m_InstanceOptions;
 		options.m_Instances.m_pCache.reset();
 		LoadInstances( out, options );
 	}
-	if ( bDisplacementPreview )
+	if ( bInstances && bEntityPreview )
+		for ( auto &placed : out.m_Instances )
+		{
+			const auto &visual = out.m_Entities[ out.GetIndex( placed.m_nObject ) ];
+			placed.m_ToParent = Transform_t::FromAngles( visual.m_Origin, visual.m_Angles );
+		}
+	if ( bDisplacementPreview || bEntityPreview )
 	{
+		for ( const auto &[ nEntity, entity ] : edit.m_Entities )
+			out.m_Bounds.Add( out.GetEntityBox( nEntity ) );
 		// A preview may overestimate the bounds until commit; culling must never lose a raised
 		// vertex. Collision flags and the automatic groups cannot change during painting.
 		for ( const auto &[ nSolid, solid ] : edit.m_Solids )

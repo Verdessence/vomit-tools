@@ -10,6 +10,7 @@
 
 #include <algorithm>
 #include <cstring>
+#include <unordered_map>
 
 #include <QMatrix4x4>
 #include <rhi/qrhi.h>
@@ -205,13 +206,17 @@ void CMapRenderer::UploadMeshes( const MapFrame_t &frame, QRhiResourceUpdateBatc
 	const std::vector<const xv::map::CMapMesh *> meshes = frame.MakeScene().m_Meshes;
 	std::vector<Mesh_t> retained = std::move( m_Meshes );
 	m_Meshes.resize( meshes.size() );
+	std::unordered_map<const xv::map::CMapMesh *, std::size_t> retainedIndex;
+	retainedIndex.reserve( retained.size() );
+	for ( std::size_t i = 0; i < retained.size(); ++i )
+		retainedIndex.emplace( retained[ i ].m_pFor, i );
 	for ( std::size_t i = 0; i < meshes.size(); i++ )
 	{
 		Mesh_t &mesh = m_Meshes[ i ];
 		const xv::map::CMapMesh *pMesh = meshes[ i ];
-		const auto it = std::ranges::find( retained, pMesh, &Mesh_t::m_pFor );
-		if ( it != retained.end() )
-			mesh = std::move( *it );
+		const auto it = retainedIndex.find( pMesh );
+		if ( it != retainedIndex.end() )
+			mesh = std::move( retained[ it->second ] );
 		if ( mesh.m_pFor == pMesh )
 		{
 			continue;
@@ -725,9 +730,9 @@ void CMapRenderer::Render( QRhiCommandBuffer *pCommands, QRhiRenderTarget *pTarg
 	QRhiGraphicsPipeline *pPipeline = nullptr;
 	quint32 nFrameOffset = 0; // the pass's slot: the world's or the 3D skybox's
 	auto meshPass = [ &scene ]( std::size_t nMesh ) {
-		if ( std::ranges::find( scene.m_AsRead, scene.m_Meshes[ nMesh ] ) != scene.m_AsRead.end() )
+		if ( scene.m_AsRead.contains( scene.m_Meshes[ nMesh ] ) )
 			return 1u;
-		return std::ranges::find( scene.m_Overridden, scene.m_Meshes[ nMesh ] ) != scene.m_Overridden.end() ? 2u : 0u;
+		return scene.m_Overridden.contains( scene.m_Meshes[ nMesh ] ) ? 2u : 0u;
 	};
 	auto bind = [ & ]( QRhiShaderResourceBindings *pBindings, quint32 nPass ) {
 		const quint32 nOffset = nFrameOffset + m_nFrameStride * nPass;
@@ -821,9 +826,9 @@ void CMapRenderer::Render( QRhiCommandBuffer *pCommands, QRhiRenderTarget *pTarg
 		for ( std::size_t nMesh = 0; nMesh < scene.m_Meshes.size(); nMesh++ )
 		{
 			const xv::map::CMapMesh &mesh = *scene.m_Meshes[ nMesh ];
-			const bool bModels = std::ranges::find( scene.m_Models, &mesh ) != scene.m_Models.end();
+			const bool bModels = scene.m_Models.contains( &mesh );
 			bind( ( bModels ? models : material ).m_pBindings.get(), meshPass( nMesh ) );
-			if ( !m_Meshes[ nMesh ].m_pLines || !m_Meshes[ nMesh ].m_pVertices || ( bWireframe && std::ranges::find( scene.m_NoWireframe, &mesh ) != scene.m_NoWireframe.end() ) )
+			if ( !m_Meshes[ nMesh ].m_pLines || !m_Meshes[ nMesh ].m_pVertices || ( bWireframe && scene.m_NoWireframe.contains( &mesh ) ) )
 			{
 				continue;
 			}

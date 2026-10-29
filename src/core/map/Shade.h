@@ -82,6 +82,7 @@ struct ShadeMaterial_t
 	CVec3 m_vecColor{ 1, 1, 1 };
 	int m_nWidth = 128;                        // what texels divide by when there's no texture
 	int m_nHeight = 128;
+	friend bool operator==( const ShadeMaterial_t &, const ShadeMaterial_t & ) = default;
 };
 
 struct ShadeInput_t

@@ -16,6 +16,7 @@
 #include <QHeaderView>
 #include <QLabel>
 #include <QLineEdit>
+#include <QRegularExpression>
 #include <QPlainTextEdit>
 #include <QPushButton>
 #include <QSignalBlocker>
@@ -113,7 +114,10 @@ QWidget *CPropertyDelegate::createEditor( QWidget *pParent, const QStyleOptionVi
 	const std::vector<std::pair<std::string, std::string>> choices = &m_List == m_Panel.GetKeys() ? m_Panel.GetKeyChoices( nRow ) : m_Panel.GetOutputChoices( nRow, index.column() );
 	if ( choices.empty() )
 	{
-		return new QLineEdit( pParent );
+		auto *pLine = new QLineEdit( pParent );
+		if ( &m_List == m_Panel.GetKeys() && index.column() == 1 )
+			connect( pLine, &QLineEdit::textChanged, &m_Panel, [ this, nRow ]( const QString &szValue ) { m_Panel.PreviewSides( nRow, szValue ); } );
+		return pLine;
 	}
 	auto *pCombo = new QComboBox( pParent );
 	pCombo->setEditable( true );
@@ -216,7 +220,9 @@ CMapProperties::CMapProperties( CMapDocument &document, QWidget *pParent )
 	auto *pInfoLayout = new QVBoxLayout( pInfo );
 	pInfoLayout->setContentsMargins( 2, 2, 2, 2 );
 	m_pKeys = MakeList( QStringLiteral( "mapPropertiesKeys" ), { tr( "Property Name" ), tr( "Value" ) } );
-	m_pKeys->setItemDelegate( new CPropertyDelegate( *this, *m_pKeys ) );
+	auto *pDelegate = new CPropertyDelegate( *this, *m_pKeys );
+	m_pKeys->setItemDelegate( pDelegate );
+	connect( pDelegate, &QAbstractItemDelegate::closeEditor, this, [ this ] { ShowHelp(); } );
 	pInfoLayout->addWidget( m_pKeys, 1 );
 	auto *pKeyButtons = new QHBoxLayout;
 	m_pBrowseInstance = new QPushButton( tr( "Browse..." ) );
@@ -248,6 +254,10 @@ CMapProperties::CMapProperties( CMapDocument &document, QWidget *pParent )
 	m_pHelp->setTextFormat( Qt::PlainText );
 	m_pHelp->setTextInteractionFlags( Qt::TextSelectableByMouse );
 	pInfoLayout->addWidget( m_pHelp );
+	m_pMissingSides = new QLabel;
+	m_pMissingSides->setObjectName( "mapPropertiesMissingSides" );
+	m_pMissingSides->setWordWrap( true );
+	pInfoLayout->addWidget( m_pMissingSides );
 	pInfoLayout->addWidget( new QLabel( tr( "Comments:" ) ) );
 	m_pComments = new QPlainTextEdit;
 	m_pComments->setObjectName( QStringLiteral( "mapPropertiesComments" ) );
@@ -480,16 +490,44 @@ void CMapProperties::ShowHelp()
 		m_pBrowseInstance->setVisible( row.m_szKey == "file" && m_Sheet.m_szClass == "func_instance" );
 		const bool bSides = ( row.m_szKey == "sides" || row.m_szKey == "sides2" ) && ( m_Sheet.m_szClass == "info_overlay" || m_Sheet.m_szClass == "info_overlay_transition" );
 		m_pPickFaces->setVisible( bSides );
+		PreviewSides( i, FromStd( row.m_szValue ) );
 		if ( !m_szFacePickKey.isEmpty() && ( !bSides || m_szFacePickKey != FromStd( row.m_szKey ) ) )
 			emit FacePickRequested( {} );
 		m_pHelp->setText( row.m_szHelp.empty() ? FromStd( row.m_szKey ) : QStringLiteral( "%1: %2" ).arg( FromStd( row.m_szKey ), FromStd( row.m_szHelp ) ) );
 		return;
 	}
+	m_pMissingSides->clear();
+	emit FacesHighlighted( {}, {} );
 	m_pPickFaces->hide();
 	m_pBrowseInstance->hide();
 	if ( !m_szFacePickKey.isEmpty() )
 		emit FacePickRequested( {} );
 	m_pHelp->setText( FromStd( m_Sheet.m_szClassHelp ) );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Show receiving faces while a side list is current, including unfinished value edits.
+//-----------------------------------------------------------------------------
+void CMapProperties::PreviewSides( std::size_t nRow, const QString &szValue )
+{
+	const auto *pScene = m_Document.GetScene();
+	const std::string szKey = nRow < m_Sheet.m_Rows.size() ? m_Sheet.m_Rows[ nRow ].m_szKey : "";
+	if ( ( szKey != "sides" && szKey != "sides2" ) || !pScene )
+	{
+		m_pMissingSides->clear();
+		emit FacesHighlighted( {}, {} );
+		return;
+	}
+	QStringList missing;
+	for ( const QString &szId : szValue.split( QRegularExpression( "\\s+" ), Qt::SkipEmptyParts ) )
+	{
+		bool bNumber = false;
+		const int nId = szId.toInt( &bNumber );
+		if ( bNumber && !pScene->FindSide( nId ) )
+			missing << szId;
+	}
+	m_pMissingSides->setText( missing.empty() ? QString{} : tr( "Missing sides: %1" ).arg( missing.join( ", " ) ) );
+	emit FacesHighlighted( FromStd( szKey ), szValue );
 }
 
 //-----------------------------------------------------------------------------

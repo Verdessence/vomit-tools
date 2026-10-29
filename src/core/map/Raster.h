@@ -15,6 +15,7 @@
 #include <cstdint>
 #include <span>
 #include <vector>
+#include <unordered_set>
 
 #include "map/Mesh.h"
 #include "map/Shade.h"
@@ -44,6 +45,7 @@ struct RasterMaterial_t
 	bool m_bTool = false;        // hidden when tool textures are toggled off
 	bool m_bNoCull = false;      // both sides drawn
 	bool m_bObjectColor = false; // entity boxes: the object's colour, shaded, in every mode
+	friend bool operator==( const RasterMaterial_t &, const RasterMaterial_t & ) = default;
 };
 
 struct RasterLine_t
@@ -57,10 +59,10 @@ struct RasterLine_t
 struct RasterScene_t
 {
 	std::vector<const CMapMesh *> m_Meshes;            // the map's, then entity boxes and the like
-	std::vector<const CMapMesh *> m_NoWireframe;       // of those, the ones whose edges the wireframe view leaves out
-	std::vector<const CMapMesh *> m_AsRead;            // of those, the ones from before any edit (edited objects' old shapes)
-	std::vector<const CMapMesh *> m_Overridden; // bulk meshes whose painted solids have separate meshes
-	std::vector<const CMapMesh *> m_Models;            // of those, the models': a boxed object's edges there aren't the selection's
+	std::unordered_set<const CMapMesh *> m_NoWireframe;       // of those, the ones whose edges the wireframe view leaves out
+	std::unordered_set<const CMapMesh *> m_AsRead;            // of those, the ones from before any edit (edited objects' old shapes)
+	std::unordered_set<const CMapMesh *> m_Overridden; // bulk meshes whose painted solids have separate meshes
+	std::unordered_set<const CMapMesh *> m_Models;            // of those, the models': a boxed object's edges there aren't the selection's
 	std::span<const RasterMaterial_t> m_Materials;     // by the meshes' material indices
 	std::span<const std::uint8_t> m_ObjectFlags;       // RasterObject_t bits, by object
 	std::span<const std::array<std::uint8_t, 3>> m_ObjectColors; // flat colours, by object
@@ -91,8 +93,8 @@ struct RasterOptions_t
 	{
 		return false;
 	}
-	return ( ( nFlags & RASTER_OBJECT_EDITED ) == 0 || std::find( scene.m_AsRead.begin(), scene.m_AsRead.end(), pMesh ) == scene.m_AsRead.end() ) &&
-		( ( nFlags & RASTER_OBJECT_OVERRIDDEN ) == 0 || std::find( scene.m_Overridden.begin(), scene.m_Overridden.end(), pMesh ) == scene.m_Overridden.end() );
+	return ( ( nFlags & RASTER_OBJECT_EDITED ) == 0 || !scene.m_AsRead.contains( pMesh ) ) &&
+		( ( nFlags & RASTER_OBJECT_OVERRIDDEN ) == 0 || !scene.m_Overridden.contains( pMesh ) );
 }
 
 // Whether an object's lines in pMesh are drawn as the selection's edges (over everything): it is
@@ -103,7 +105,7 @@ struct RasterOptions_t
 	{
 		return false;
 	}
-	return ( nFlags & RASTER_OBJECT_BOXED ) == 0 || std::find( scene.m_Models.begin(), scene.m_Models.end(), pMesh ) == scene.m_Models.end();
+	return ( nFlags & RASTER_OBJECT_BOXED ) == 0 || !scene.m_Models.contains( pMesh );
 }
 
 // Draws into out, sized to the camera's image.

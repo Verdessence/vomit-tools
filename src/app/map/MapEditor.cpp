@@ -23,6 +23,10 @@
 #include <QCryptographicHash>
 #include <QDateTime>
 #include <QSettings>
+#include <QCheckBox>
+#include <QRegularExpression>
+#include <QStringListModel>
+#include "MaterialPictures.h"
 #include <QSignalBlocker>
 #include <QSaveFile>
 #include <QPushButton>
@@ -220,7 +224,9 @@ CMapEditor::CMapEditor( const QString &szPath, bool bFromGame, QWidget *pParent 
 	m_pDocument = new CMapDocument( this );
 	m_pRenderData = std::make_unique<CMapRenderData>( *m_pDocument );
 	m_pResources = new CMapResources( this );
+	m_pRenderData->SetResources( m_pResources );
 	connect( m_pResources, &CMapResources::Arrived, this, &CMapEditor::ResourcesArrived );
+	connect( m_pResources, &CMapResources::Finished, this, [ this ] { m_pRenderData->CompactEntityBoxes(); } );
 	connect( m_pResources, &CMapResources::Finished, this, &CMapEditor::UpdateGameStatus );
 	// Reading textures and models frees as much as it keeps.
 	connect( m_pResources, &CMapResources::Finished, this, [] { QTimer::singleShot( 0, QCoreApplication::instance(), [] { xv::ReleaseFreedMemory(); } ); } );
@@ -288,6 +294,7 @@ CMapEditor::CMapEditor( const QString &szPath, bool bFromGame, QWidget *pParent 
 	connect( m_pFilter, &CMapFilterControl::CordonEditWanted, this, [ this ] { SetTool( MapTool_t::MAP_TOOL_CORDON ); } );
 	m_pProperties = new CMapProperties( *m_pDocument );
 	connect( m_pProperties, &CMapProperties::FacePickRequested, this, &CMapEditor::SetFacePickKey );
+	connect( m_pProperties, &CMapProperties::FacesHighlighted, this, &CMapEditor::HighlightSides );
 	connect( this, &CMapEditor::FacePickChanged, m_pProperties, &CMapProperties::SetFacePickKey );
 	m_pFaceEdit = new CMapFaceEdit( *this );
 	// Hammer opens Face Edit as a window of its own; here it takes Object Properties' place
@@ -322,6 +329,7 @@ CMapEditor::CMapEditor( const QString &szPath, bool bFromGame, QWidget *pParent 
 	m_pPanelTitle = section( tr( "Object Properties" ), m_pPanelStack );
 	PlaceFaceEdit();
 	section( tr( "New Objects" ), BuildNewObjects() );
+	section( tr( "Texture" ), BuildTexturePanel() );
 	m_pSidePanel->setStretchFactor( 0, 2 );
 	m_pSidePanel->setStretchFactor( 1, 3 );
 	m_pSidePanel->setStretchFactor( 2, 0 );
@@ -434,14 +442,6 @@ CMapEditor::CMapEditor( const QString &szPath, bool bFromGame, QWidget *pParent 
 	connect( m_pDocument, &CMapDocument::VisibilityChanged, this, repaint );
 	connect( m_pDocument, &CMapDocument::SceneEdited, this, [ this ]( const std::vector<std::uint32_t> &changed ) { m_pDocument->MeasureEditListener( tr( "Editor and views" ), [ & ] { SceneEdited( changed ); } ); } );
 	connect( m_pDocument, &CMapDocument::ScenePreviewed, this, [ this ]( const std::vector<std::uint32_t> &changed ) {
-		const auto *pScene = m_pDocument->GetScene();
-		if ( pScene && std::ranges::any_of( changed, [ & ]( std::uint32_t nObject ) {
-				 if ( pScene->IsSolidObject( nObject ) )
-					 return false;
-				 const auto &entity = pScene->m_Map.m_Entities[ pScene->GetIndex( nObject ) ];
-				 return entity.GetClassname() == "info_overlay" || entity.GetClassname() == "info_overlay_transition";
-			 } ) )
-			m_pResources->Refresh( m_pDocument->GetSharedScene() );
 		for ( CMapView *pView : GetViews() )
 		{
 			if ( auto *p2D = qobject_cast<CMapView2D *>( pView ) )
@@ -571,7 +571,7 @@ QWidget *CMapEditor::BuildNewObjects()
 	m_pOverlayKind->addItem( tr( "Overlay" ), false );
 	m_pOverlayKind->addItem( tr( "Water transition" ), true );
 	pForm->addRow( tr( "Overlay" ), m_pOverlayKind );
-	pForm->addRow( tr( "Texture" ), m_pMaterial );
+
 	auto *pCreatePrefab = new QPushButton( tr( "Create Prefab..." ) );
 	pCreatePrefab->setObjectName( QStringLiteral( "mapCreatePrefab" ) );
 	pForm->addRow( pCreatePrefab );
@@ -587,6 +587,83 @@ QWidget *CMapEditor::BuildNewObjects()
 	connect( m_pObjectCategory, &QComboBox::currentIndexChanged, this, categoryChanged );
 	categoryChanged();
 	return pBox;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: One current texture for all creation tools and Face Edit, with its source dimensions.
+//-----------------------------------------------------------------------------
+QWidget *CMapEditor::BuildTexturePanel()
+{
+	auto *pPanel = new QWidget;
+	pPanel->setObjectName( "mapTexturePanel" );
+	auto *pLayout = new QVBoxLayout( pPanel );
+	pLayout->setContentsMargins( 0, 0, 0, 0 );
+	auto *pRow = new QHBoxLayout;
+	auto *pPicture = new QLabel;
+	pPicture->setObjectName( "mapTexturePicture" );
+	pPicture->setFixedSize( 64, 64 );
+	pPicture->setAlignment( Qt::AlignCenter );
+	auto *pSize = new QLabel;
+	pSize->setObjectName( "mapTextureSize" );
+	pRow->addWidget( pPicture );
+	pRow->addWidget( pSize );
+	pLayout->addLayout( pRow );
+	m_pRecentMaterials = new QComboBox;
+	m_pRecentMaterials->setObjectName( "mapTextureName" );
+	m_pRecentMaterials->setEditable( true );
+	m_pRecentMaterials->setInsertPolicy( QComboBox::NoInsert );
+	m_pRecentMaterials->setLineEdit( m_pMaterial );
+	pLayout->addWidget( m_pRecentMaterials );
+	connect( m_pRecentMaterials, &QComboBox::textActivated, this, &CMapEditor::SetCurrentMaterial );
+	auto *pButtons = new QHBoxLayout;
+	auto *pBrowse = new QPushButton( tr( "Browse..." ) );
+	pBrowse->setObjectName( "mapTextureBrowse" );
+	auto *pReplace = new QPushButton( tr( "Replace..." ) );
+	pReplace->setObjectName( "mapTextureReplace" );
+	pButtons->addWidget( pBrowse );
+	pButtons->addWidget( pReplace );
+	pLayout->addLayout( pButtons );
+	connect( pBrowse, &QPushButton::clicked, this, &CMapEditor::BrowseMaterial );
+	connect( pReplace, &QPushButton::clicked, this, [ this ] { ShowReplaceTextures( true ); } );
+	auto *pHide = new QCheckBox( tr( "Hide Mask" ) );
+	pHide->setObjectName( "mapTextureHideMask" );
+	pLayout->addWidget( pHide );
+	connect( pHide, &QCheckBox::toggled, this, [ this ]( bool bHide ) { m_bHideFaceMask = bHide; RepaintTools(); } );
+	auto *pLoader = new CMaterialPictureLoader( pPanel );
+	connect( pLoader, &CMaterialPictureLoader::Ready, pPanel, [ pPicture, pSize ]( const QImage &image, QSize size ) {
+		pPicture->setPixmap( QPixmap::fromImage( image.scaled( 64, 64, Qt::KeepAspectRatio, Qt::SmoothTransformation ) ) );
+		pSize->setText( QStringLiteral( "%1×%2" ).arg( size.width() ).arg( size.height() ) );
+	} );
+	auto refresh = [ this, pLoader, pPicture, pSize ]( const QString &szName ) {
+		pLoader->Cancel();
+		pPicture->clear();
+		pSize->clear();
+		if ( const auto &game = m_pDocument->GetGame(); game )
+			pLoader->Request( *game, szName );
+	};
+	connect( this, &CMapEditor::CurrentMaterialChanged, pPanel, refresh );
+	connect( this, &CMapEditor::TextureGameChanged, pPanel, [ this, refresh ] { refresh( GetCurrentMaterial() ); } );
+	return pPanel;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Side-list focus is independent of the face picker and the texture tool's selection.
+//-----------------------------------------------------------------------------
+void CMapEditor::HighlightSides( const QString &szKey, const QString &szValue )
+{
+	m_HighlightedSides.clear();
+	m_bSecondarySides = szKey == "sides2";
+	if ( const auto *pScene = m_pDocument->GetScene(); pScene && !szKey.isEmpty() )
+		for ( const auto &szId : szValue.split( QRegularExpression( "\\s+" ), Qt::SkipEmptyParts ) )
+		{
+			bool bNumber = false;
+			const int nId = szId.toInt( &bNumber );
+			if ( const auto face = bNumber ? pScene->FindSide( nId ) : std::nullopt )
+				m_HighlightedSides.push_back( *face );
+		}
+	std::ranges::sort( m_HighlightedSides );
+	m_HighlightedSides.erase( std::unique( m_HighlightedSides.begin(), m_HighlightedSides.end() ), m_HighlightedSides.end() );
+	RepaintTools();
 }
 
 //-----------------------------------------------------------------------------
@@ -632,6 +709,14 @@ void CMapEditor::FillNewObjects()
 	pCompleter->setFilterMode( Qt::MatchContains );
 	delete m_pMaterial->completer();
 	m_pMaterial->setCompleter( pCompleter );
+	const QString szBefore = GetCurrentMaterial();
+	const auto recent = QSettings{}.value( QStringLiteral( "mapTextures/" ) + GetCameraKey() ).toStringList();
+	{
+		const QSignalBlocker blocker( m_pRecentMaterials );
+		m_pRecentMaterials->clear();
+		m_pRecentMaterials->addItems( recent );
+	}
+	SetCurrentMaterial( recent.empty() ? szBefore : recent.front() );
 	FillPrefabs();
 }
 
@@ -2530,6 +2615,28 @@ void CMapEditor::SetCurrentMaterial( const QString &szMaterial )
 	{
 		return;
 	}
+	if ( m_pRecentMaterials )
+	{
+		QStringList recent;
+		recent << szClean;
+		for ( int i = 0; i < m_pRecentMaterials->count() && recent.size() < 10; ++i )
+			if ( m_pRecentMaterials->itemText( i ) != szClean )
+				recent << m_pRecentMaterials->itemText( i );
+		const QSignalBlocker blocker( m_pRecentMaterials );
+		m_pRecentMaterials->clear();
+		m_pRecentMaterials->addItems( recent );
+		QSettings{}.setValue( QStringLiteral( "mapTextures/" ) + GetCameraKey(), recent );
+	}
+	QStringList suggestions;
+	for ( const auto &szName : m_pDocument->GetScene() ? m_pDocument->GetScene()->m_Materials : std::vector<std::string>{} )
+		suggestions << QString::fromStdString( szName ).toUpper();
+	if ( m_pRecentMaterials )
+		for ( int i = 0; i < m_pRecentMaterials->count(); ++i )
+			suggestions << m_pRecentMaterials->itemText( i );
+	suggestions.removeDuplicates();
+	if ( auto *pCompleter = m_pMaterial->completer() )
+		if ( auto *pModel = qobject_cast<QStringListModel *>( pCompleter->model() ) )
+			pModel->setStringList( suggestions );
 	m_pMaterial->setText( szClean );
 	emit CurrentMaterialChanged( szClean );
 }
@@ -3104,7 +3211,7 @@ void CMapEditor::PasteSpecial( xv::map::PasteSpecial_t how, bool bStartAtView )
 //-----------------------------------------------------------------------------
 // Purpose: The dialog remembers its last answers for the session.
 //-----------------------------------------------------------------------------
-void CMapEditor::ShowReplaceTextures()
+void CMapEditor::ShowReplaceTextures( bool bCurrentAsNew )
 {
 	static xv::map::ReplaceTextures_t s_Last;
 	static bool s_bMarkOnly = false, s_bSelectedOnly = false, s_bHiddenToo = false;
@@ -3119,6 +3226,8 @@ void CMapEditor::ShowReplaceTextures()
 			s_Last.m_szFind = std::string{ scene.m_Map.m_Solids[ face.m_nSolid ].m_Sides[ face.m_nSide ].m_szMaterial };
 		}
 	}
+	if ( bCurrentAsNew )
+		s_Last.m_szReplace = GetCurrentMaterial().toStdString();
 	dialog.SetValues( s_Last, s_bMarkOnly, s_bSelectedOnly, s_bHiddenToo );
 	if ( dialog.exec() != QDialog::Accepted )
 	{
@@ -3415,6 +3524,10 @@ bool CMapEditor::SaveAs()
 	}
 	m_szPath = QFileInfo{ szFile }.absoluteFilePath();
 	m_bFromGame = false;
+	QStringList recent;
+	for ( int i = 0; m_pRecentMaterials && i < m_pRecentMaterials->count(); ++i )
+		recent << m_pRecentMaterials->itemText( i );
+	QSettings{}.setValue( QStringLiteral( "mapTextures/" ) + GetCameraKey(), recent );
 	emit TitleChanged();
 	emit StatusMessage( tr( "Saved %1" ).arg( QDir::toNativeSeparators( m_szPath ) ) );
 	return true;
@@ -3443,10 +3556,10 @@ void CMapEditor::SceneEdited( const std::vector<std::uint32_t> &changed )
 	{
 		StartResources();
 	}
-	// Entities moved, added or deleted: their sprites and props follow.
-	else if ( pScene && std::ranges::any_of( changed, [ pScene ]( std::uint32_t n ) { return n < pScene->GetObjectCount() && !pScene->IsSolidObject( n ); } ) )
+	// Projected textures also depend on the receiving solids, including decals not selected.
+	else if ( pScene && !changed.empty() )
 	{
-		m_pResources->Refresh( m_pDocument->GetSharedScene() );
+		m_pResources->Refresh( m_pDocument->GetSharedScene(), changed );
 	}
 	for ( CMapView *pView : GetViews() )
 	{
@@ -3522,7 +3635,9 @@ void CMapEditor::GameChanged( const xv::vfs::CGameInfo *pGame )
 	if ( m_pDocument->IsLoaded() )
 	{
 		StartResources();
+		m_pFaceEdit->Refresh();
 	}
+	emit TextureGameChanged();
 }
 
 //-----------------------------------------------------------------------------
@@ -3532,9 +3647,9 @@ void CMapEditor::ResourcesArrived()
 {
 	m_pRenderData->SetMaterials( m_pResources->GetMaterials(), m_pResources->GetTextures(), m_pResources->GetEntityMaterial() );
 	m_pRenderData->SetSky( m_pResources->GetSky() );
-	m_pRenderData->SetProps( m_pResources->GetProps(), m_pResources->GetPropObjects() );
+	m_pRenderData->SetProps( m_pResources->GetProps(), m_pResources->GetPropObjects(), m_pResources->GetPropParts() );
 	m_pRenderData->SetSprites( m_pResources->GetSprites() );
-	m_pRenderData->SetOverlays( m_pResources->GetOverlays() );
+	m_pRenderData->SetOverlays( m_pResources->GetOverlays(), m_pResources->GetOverlayParts() );
 	for ( CMapView *pView : GetViews() )
 	{
 		if ( auto *p3D = qobject_cast<CMapView3D *>( pView ) )

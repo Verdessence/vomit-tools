@@ -16,6 +16,8 @@
 #include "map/MapResources.h"
 #include "map/MapConstants.h"
 #include "map/MapDocument.h"
+#include "map/Overlay.h"
+#include "map/Props.h"
 
 namespace
 {
@@ -65,41 +67,57 @@ xv::map::RasterScene_t MapFrame_t::MakeScene() const
 	if ( m_pScene )
 	{
 		scene.m_Meshes.push_back( &m_pScene->GetMesh() );
-		scene.m_AsRead.push_back( &m_pScene->GetMesh() );
+		scene.m_AsRead.insert( &m_pScene->GetMesh() );
 		if ( !m_pScene->GetInstanceMesh().m_Vertices.empty() )
 		{
 			scene.m_Meshes.push_back( &m_pScene->GetInstanceMesh() );
+			if ( m_bEntityPreview )
+				scene.m_AsRead.insert( &m_pScene->GetInstanceMesh() );
 		}
 		// Keep this slot even when empty, so the other GPU buffers retain their positions.
 		scene.m_Meshes.push_back( &m_pScene->GetEditMesh() );
-		scene.m_Overridden.push_back( &m_pScene->GetEditMesh() );
+		scene.m_Overridden.insert( &m_pScene->GetEditMesh() );
 		for ( const auto &[ nSolid, pMesh ] : m_pScene->m_SolidMeshes )
 			scene.m_Meshes.push_back( pMesh.get() );
 	}
-	if ( m_pEntityMesh )
-	{
-		scene.m_Meshes.push_back( m_pEntityMesh.get() );
-	}
-	if ( m_pPropMesh )
-	{
-		scene.m_Meshes.push_back( m_pPropMesh.get() );
-		scene.m_Models.push_back( m_pPropMesh.get() );
-		if ( !m_bModelEdges )
+	auto append = [ & ]( const std::shared_ptr<const xv::map::CMapMesh> &pMesh, bool bModel = false, bool bBefore = false ) {
+		if ( !pMesh )
+			return;
+		scene.m_Meshes.push_back( pMesh.get() );
+		if ( bBefore )
+			scene.m_AsRead.insert( pMesh.get() );
+		if ( bModel )
 		{
-			scene.m_NoWireframe.push_back( m_pPropMesh.get() );
+			scene.m_Models.insert( pMesh.get() );
+			if ( !m_bModelEdges )
+				scene.m_NoWireframe.insert( pMesh.get() );
 		}
-	}
-	if ( m_pOverlayMesh )
+	};
+	auto appendParts = [ & ]( const auto &pParts, const auto &pCombined, bool bModel = false ) {
+		if ( pParts )
+			for ( const auto &[ nObject, pPart ] : *pParts )
+				append( pPart, bModel, m_bEntityPreview && std::ranges::binary_search( m_EntityPreviewObjects, nObject ) );
+		else
+			append( pCombined, bModel, m_bEntityPreview );
+	};
+	if ( m_pEntityBaseMesh )
 	{
-		scene.m_Meshes.push_back( m_pOverlayMesh.get() );
+		scene.m_Meshes.push_back( m_pEntityBaseMesh.get() );
+		scene.m_AsRead.insert( m_pEntityBaseMesh.get() );
+		appendParts( m_pEntityParts, std::shared_ptr<const xv::map::CMapMesh>{} );
 	}
-	if ( m_pSpriteMesh )
-	{
-		scene.m_Meshes.push_back( m_pSpriteMesh.get() );
-	}
+	else
+		appendParts( m_pEntityParts, std::shared_ptr<const xv::map::CMapMesh>{} );
+	appendParts( m_pPropParts, m_pPropMesh, true );
+	appendParts( m_pOverlayParts, m_pOverlayMesh );
+	appendParts( m_pSpriteParts, m_pSpriteMesh );
+	if ( m_pEntityPreviewMesh )
+		scene.m_Meshes.push_back( m_pEntityPreviewMesh.get() );
 	if ( m_pModelBoxMesh )
 	{
 		scene.m_Meshes.push_back( m_pModelBoxMesh.get() );
+		if ( m_bEntityPreview )
+			scene.m_AsRead.insert( m_pModelBoxMesh.get() );
 	}
 	if ( m_pMaterials )
 	{
@@ -260,6 +278,8 @@ void CMapRenderData::Rebuild()
 	}
 	m_pBuiltFor = pScene;
 	m_pBuiltMesh = pScene ? pScene->m_pMesh.get() : nullptr;
+	m_pEntityBaseParts.reset();
+	m_pEntityAllParts.reset();
 	m_nEntityMaterial = pScene ? static_cast<std::uint32_t>( pScene->m_Materials.size() ) + MAP_MATERIAL_RESERVE : 0;
 	m_nStateFor = ~0ull;
 	m_LineColorsFor = {};
@@ -294,6 +314,15 @@ void CMapRenderData::Refresh()
 {
 	m_pBuiltFor = m_Document.GetScene();
 	m_Frame.m_pScene = m_Document.GetSharedScene();
+	m_Frame.m_bEntityPreview = m_Document.GetEntityPreviewBase() != nullptr;
+	m_Frame.m_EntityPreviewObjects = m_Frame.m_bEntityPreview ? m_Document.GetPreviewObjects() : std::vector<std::uint32_t>{};
+	if ( m_Frame.m_bEntityPreview )
+	{
+		UpdateEntityPreview( m_PreviewRight, m_PreviewUp );
+		m_nGeneration++;
+		return;
+	}
+	m_Frame.m_pEntityPreviewMesh.reset();
 	if ( m_Frame.m_pScene && m_Frame.m_pScene->m_bDisplacementEdit )
 	{
 		m_nGeneration++;
@@ -304,6 +333,44 @@ void CMapRenderData::Refresh()
 	BuildEntityBoxes();
 	UpdateFlatColors();
 	m_nGeneration++;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Keep a drag's changing geometry separate from every committed GPU buffer.
+//-----------------------------------------------------------------------------
+void CMapRenderData::UpdateEntityPreview( xv::map::Point_t right, xv::map::Point_t up )
+{
+	m_PreviewRight = right;
+	m_PreviewUp = up;
+	const auto *pScene = m_Document.GetScene();
+	auto pMesh = std::make_shared<xv::map::CMapMesh>( m_pResources && pScene ? m_pResources->BuildEntityPreview( *pScene, m_Document.GetPreviewObjects(), right, up, m_Document.GetEntityPreviewBase() ) : xv::map::CMapMesh{} );
+	for ( const auto nObject : m_Document.GetPreviewObjects() )
+	{
+		if ( !pScene || pScene->IsDeleted( nObject ) || std::ranges::any_of( pMesh->m_Vertices, [ & ]( const auto &vertex ) { return vertex.m_nObject == nObject; } ) )
+			continue;
+		const auto nFirst = static_cast<std::uint32_t>( pMesh->m_Indices.size() );
+		AddBox( *pMesh, pScene->GetEntityBox( pScene->GetIndex( nObject ) ), nObject );
+		pMesh->m_Batches.push_back( { GetEntityMaterial(), ~0u, nFirst, static_cast<std::uint32_t>( pMesh->m_Indices.size() ) - nFirst } );
+	}
+	m_Frame.m_pEntityPreviewMesh = std::move( pMesh );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Once initial models, sprites and projections arrive, omit their temporary boxes from
+//          the base buffer so maps with many entities keep a small number of draw calls.
+//-----------------------------------------------------------------------------
+void CMapRenderData::CompactEntityBoxes()
+{
+	if ( !m_Document.GetScene() )
+		return;
+	if ( m_Document.GetScene() != m_pBuiltFor )
+		Rebuild();
+	m_pEntityBaseParts.reset();
+	m_pEntityAllParts.reset();
+	m_Frame.m_pEntityBaseMesh.reset();
+	BuildEntityBoxes();
+	m_nStateFor = ~0ull;
+	++m_nGeneration;
 }
 
 //-----------------------------------------------------------------------------
@@ -348,8 +415,7 @@ void CMapRenderData::UpdateFlatColors()
 //-----------------------------------------------------------------------------
 void CMapRenderData::BuildEntityBoxes()
 {
-	const xv::map::CScene *pScene = m_Document.GetScene();
-	auto pEntities = std::make_shared<xv::map::CMapMesh>();
+	const xv::map::CScene *pScene = m_Document.GetEntityPreviewBase() ? m_Document.GetEntityPreviewBase() : m_Document.GetScene();
 	// func_instances whose file was read show what it holds instead.
 	std::vector<std::uint32_t> instances;
 	if ( pScene )
@@ -360,23 +426,83 @@ void CMapRenderData::BuildEntityBoxes()
 		}
 	}
 	std::ranges::sort( instances );
+	std::vector<bool> projected( pScene ? pScene->GetObjectCount() : 0, false );
+	if ( m_Frame.m_pOverlayMesh )
+		for ( const auto &vertex : m_Frame.m_pOverlayMesh->m_Vertices )
+			if ( vertex.m_nObject < projected.size() )
+				projected[ vertex.m_nObject ] = true;
+	std::map<std::uint32_t, xv::map::CMapMesh> pending;
+	if ( pScene )
+	{
+		std::vector<std::uint32_t> objects;
+		for ( std::size_t e = 0; e < pScene->m_Entities.size(); e++ )
+		{
+			const auto &visual = pScene->m_Entities[ e ];
+			const auto nObject = pScene->EntityObject( e );
+			if ( ( visual.m_bOverlay || visual.m_bDecal ) && !projected[ nObject ] && !pScene->m_Map.m_Entities[ e ].m_bDeleted )
+				objects.push_back( nObject );
+		}
+		if ( !objects.empty() )
+		{
+			const std::vector<xv::map::OverlayMaterial_t> materials( xv::map::OverlayMaterialNames( *pScene ).size(), { GetEntityMaterial(), { 128, 128 }, 1.0 } );
+			pending = xv::map::BuildOverlayMeshes( *pScene, materials, objects );
+		}
+	}
+	const bool bSolidChanged = pScene && std::ranges::any_of( pScene->m_Changed, [ pScene ]( std::uint32_t n ) { return n < pScene->GetObjectCount() && pScene->IsSolidObject( n ); } );
+	auto pParts = std::make_shared<xv::map::MeshParts_t>();
 	for ( std::size_t e = 0; pScene && e < pScene->m_Entities.size(); e++ )
 	{
 		const std::uint32_t nObject = pScene->EntityObject( e );
-		if ( pScene->m_Entities[ e ].m_bPoint && !std::ranges::binary_search( instances, nObject ) && !std::ranges::binary_search( m_PropObjects, nObject ) && !std::ranges::binary_search( m_SpriteObjects, nObject ) )
+		if ( !pScene->m_Entities[ e ].m_bPoint || pScene->m_Map.m_Entities[ e ].m_bDeleted || projected[ nObject ] ||
+			std::ranges::binary_search( instances, nObject ) || std::ranges::binary_search( m_PropObjects, nObject ) || std::ranges::binary_search( m_SpriteObjects, nObject ) )
+			continue;
+		if ( m_pEntityAllParts && m_pEntityAllParts->contains( nObject ) &&
+			!m_pEntityAllParts->at( nObject )->m_Batches.empty() && m_pEntityAllParts->at( nObject )->m_Batches.front().m_nMaterial == GetEntityMaterial() &&
+			!( bSolidChanged && pending.contains( nObject ) ) && std::ranges::find( pScene->m_Changed, nObject ) == pScene->m_Changed.end() )
+			( *pParts )[ nObject ] = m_pEntityAllParts->at( nObject );
+		else
 		{
-			AddBox( *pEntities, pScene->GetEntityBox( e ), nObject );
+			auto pPart = std::make_shared<xv::map::CMapMesh>();
+			if ( const auto found = pending.find( nObject ); found != pending.end() && !found->second.m_Indices.empty() )
+				*pPart = found->second;
+			else
+				AddBox( *pPart, pScene->GetEntityBox( e ), nObject );
+			pPart->m_Batches = { { GetEntityMaterial(), ~0u, 0, static_cast<std::uint32_t>( pPart->m_Indices.size() ) } };
+			( *pParts )[ nObject ] = std::move( pPart );
 		}
 	}
-	xv::map::MeshBatch_t batch;
-	batch.m_nMaterial = GetEntityMaterial();
-	batch.m_nChunk = ~0u; // no area: always considered
-	batch.m_nIndexCount = static_cast<std::uint32_t>( pEntities->m_Indices.size() );
-	if ( batch.m_nIndexCount > 0 )
+	if ( !m_pEntityBaseParts )
 	{
-		pEntities->m_Batches.push_back( batch );
+		auto pEntities = std::make_shared<xv::map::CMapMesh>();
+		for ( const auto &[ nObject, pPart ] : *pParts )
+			xv::map::AppendPlaced( *pEntities, *pPart, xv::map::Transform_t{}, std::nullopt );
+		pEntities->m_Batches.clear();
+		if ( !pEntities->m_Indices.empty() )
+			pEntities->m_Batches.push_back( { GetEntityMaterial(), ~0u, 0, static_cast<std::uint32_t>( pEntities->m_Indices.size() ) } );
+		m_pEntityBaseParts = pParts;
+		m_Frame.m_pEntityBaseMesh = std::move( pEntities );
 	}
-	m_Frame.m_pEntityMesh = pEntities;
+	auto pOverrides = std::make_shared<xv::map::MeshParts_t>();
+	std::vector<std::uint32_t> changed;
+	for ( const auto &[ nObject, pPart ] : *pParts )
+	{
+		const auto found = m_pEntityBaseParts->find( nObject );
+		if ( found == m_pEntityBaseParts->end() || found->second != pPart )
+		{
+			( *pOverrides )[ nObject ] = pPart;
+			changed.push_back( nObject );
+		}
+	}
+	for ( const auto &[ nObject, pPart ] : *m_pEntityBaseParts )
+		if ( !pParts->contains( nObject ) )
+			changed.push_back( nObject );
+	std::ranges::sort( changed );
+	changed.erase( std::unique( changed.begin(), changed.end() ), changed.end() );
+	if ( changed != m_Frame.m_EntityOverrides )
+		m_nStateFor = ~0ull;
+	m_Frame.m_EntityOverrides = std::move( changed );
+	m_pEntityAllParts = pParts;
+	m_Frame.m_pEntityParts = std::move( pOverrides );
 }
 
 //-----------------------------------------------------------------------------
@@ -391,8 +517,25 @@ void CMapRenderData::SetMaterials( std::shared_ptr<const std::vector<xv::map::Ra
 	if ( nEntityMaterial != m_nEntityMaterial )
 	{
 		m_nEntityMaterial = nEntityMaterial;
+		m_pEntityBaseParts.reset();
+		m_pEntityAllParts.reset();
+		m_Frame.m_pEntityBaseMesh.reset();
 		BuildEntityBoxes();
 	}
+	if ( pMaterials == m_pReceivedMaterials && pTextures == m_Frame.m_pTextures )
+		return;
+	if ( m_Frame.m_pPropMesh )
+		for ( const auto &batch : m_Frame.m_pPropMesh->m_Batches )
+		{
+			const auto n = batch.m_nMaterial;
+			if ( !m_pReceivedMaterials || !pMaterials || n >= m_pReceivedMaterials->size() || n >= pMaterials->size() ||
+				( *m_pReceivedMaterials )[ n ] != ( *pMaterials )[ n ] )
+			{
+				++m_nPropMaterialsRevision;
+				break;
+			}
+		}
+	m_pReceivedMaterials = pMaterials;
 	// The map's materials, then the one entity boxes are drawn with, then the props'.
 	auto pAll = std::make_shared<std::vector<xv::map::RasterMaterial_t>>( pMaterials ? *pMaterials : std::vector<xv::map::RasterMaterial_t>{} );
 	const std::uint32_t nEntity = GetEntityMaterial();
@@ -411,7 +554,7 @@ void CMapRenderData::SetMaterials( std::shared_ptr<const std::vector<xv::map::Ra
 //-----------------------------------------------------------------------------
 // Purpose:
 //-----------------------------------------------------------------------------
-void CMapRenderData::SetProps( std::shared_ptr<const xv::map::CMapMesh> pProps, std::vector<std::uint32_t> objects )
+void CMapRenderData::SetProps( std::shared_ptr<const xv::map::CMapMesh> pProps, std::vector<std::uint32_t> objects, std::shared_ptr<const xv::map::MeshParts_t> pParts )
 {
 	if ( m_Document.GetScene() != m_pBuiltFor )
 	{
@@ -421,6 +564,8 @@ void CMapRenderData::SetProps( std::shared_ptr<const xv::map::CMapMesh> pProps, 
 	{
 		return;
 	}
+	m_Frame.m_pPropParts = std::move( pParts );
+	++m_nPropsRevision;
 	m_Frame.m_pPropMesh = std::move( pProps );
 	m_PropObjects = std::move( objects );
 	std::ranges::sort( m_PropObjects );
@@ -444,7 +589,7 @@ void CMapRenderData::SetProps( std::shared_ptr<const xv::map::CMapMesh> pProps, 
 //-----------------------------------------------------------------------------
 // Purpose:
 //-----------------------------------------------------------------------------
-void CMapRenderData::SetOverlays( std::shared_ptr<const xv::map::CMapMesh> pOverlays )
+void CMapRenderData::SetOverlays( std::shared_ptr<const xv::map::CMapMesh> pOverlays, std::shared_ptr<const xv::map::MeshParts_t> pParts )
 {
 	if ( m_Document.GetScene() != m_pBuiltFor )
 	{
@@ -452,7 +597,9 @@ void CMapRenderData::SetOverlays( std::shared_ptr<const xv::map::CMapMesh> pOver
 	}
 	if ( pOverlays != m_Frame.m_pOverlayMesh )
 	{
+		m_Frame.m_pOverlayParts = std::move( pParts );
 		m_Frame.m_pOverlayMesh = std::move( pOverlays );
+		BuildEntityBoxes();
 		m_nGeneration++;
 	}
 }
@@ -583,6 +730,11 @@ MapFrame_t CMapRenderData::Snapshot( const xv::map::CViewCamera &camera, const x
 			nFlags |= pScene->IsSolidObject( n ) && !pScene->m_Solids[ pScene->GetIndex( n ) ].IsValid() ? xv::map::RASTER_OBJECT_INVALID : 0;
 			( *pFlags )[ n ] = nFlags;
 		}
+		for ( const auto nObject : m_Frame.m_EntityOverrides )
+			( *pFlags )[ nObject ] |= xv::map::RASTER_OBJECT_EDITED;
+		if ( m_Document.GetEntityPreviewBase() )
+			for ( const auto nObject : m_Document.GetPreviewObjects() )
+				( *pFlags )[ nObject ] |= xv::map::RASTER_OBJECT_EDITED;
 		// Selected models that show their box: flagged, and their boxes' edges in a mesh of their own.
 		auto pBoxes = std::make_shared<xv::map::CMapMesh>();
 		for ( const std::uint32_t n : m_Document.GetSelection() )
@@ -612,18 +764,35 @@ MapFrame_t CMapRenderData::Snapshot( const xv::map::CViewCamera &camera, const x
 			UpdateFlatColors();
 		}
 	}
-	// Sprites face the camera: made again whenever it turns.
+	// Each sprite has a buffer of its own; moving one retains all other billboards.
 	if ( m_pSprites && !m_pSprites->empty() )
 	{
-		const xv::map::Point_t right = camera.GetRight();
-		const xv::map::Point_t up = camera.GetUp();
+		const auto right = camera.GetRight(), up = camera.GetUp();
 		if ( !m_Frame.m_pSpriteMesh || right != m_SpritesRight || up != m_SpritesUp )
 		{
+			const bool bTurned = right != m_SpritesRight || up != m_SpritesUp;
 			m_SpritesRight = right;
 			m_SpritesUp = up;
+			auto pParts = std::make_shared<xv::map::MeshParts_t>();
+			std::map<std::uint32_t, std::vector<xv::map::SpritePlacement_t>> placements;
+			for ( const auto &sprite : *m_pSprites )
+				placements[ sprite.m_nObject ].push_back( sprite );
+			for ( const auto &[ nObject, sprites ] : placements )
+			{
+				if ( !bTurned && m_Frame.m_pSpriteParts && m_SpritePlacements.contains( nObject ) && m_SpritePlacements.at( nObject ) == sprites && m_Frame.m_pSpriteParts->contains( nObject ) )
+					( *pParts )[ nObject ] = m_Frame.m_pSpriteParts->at( nObject );
+				else
+					( *pParts )[ nObject ] = std::make_shared<const xv::map::CMapMesh>( xv::map::BuildSpriteMesh( sprites, right, up ) );
+			}
+			m_SpritePlacements = std::move( placements );
+			m_Frame.m_pSpriteParts = pParts;
 			m_Frame.m_pSpriteMesh = std::make_shared<const xv::map::CMapMesh>( xv::map::BuildSpriteMesh( *m_pSprites, right, up ) );
 		}
 	}
+	else
+		m_Frame.m_pSpriteParts.reset();
+	if ( m_Frame.m_bEntityPreview && ( camera.GetRight() != m_PreviewRight || camera.GetUp() != m_PreviewUp ) )
+		UpdateEntityPreview( camera.GetRight(), camera.GetUp() );
 	MapFrame_t frame = m_Frame;
 	frame.m_Camera = camera;
 	frame.m_Options = options;

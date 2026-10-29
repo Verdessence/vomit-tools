@@ -248,8 +248,8 @@ private:
 	{
 		const void *m_pMesh = nullptr;
 		bool m_bPreview = false;
-		const void *m_pProps = nullptr;
-		const void *m_pMaterials = nullptr; // textures arriving draw the models again
+		std::uint64_t m_nProps = 0;
+		std::uint64_t m_nPropMaterials = 0; // only textures used by models invalidate their picture
 		std::uint64_t m_nState = ~0ull;
 		MapViewSettings_t m_Settings;
 		QPointF m_Center;

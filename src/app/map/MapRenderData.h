@@ -22,12 +22,21 @@
 #include "map/Sprites.h"
 
 class CMapDocument;
+class CMapResources;
 
 // One picture's worth of everything; copies are cheap and share the data.
 struct MapFrame_t
 {
 	std::shared_ptr<const xv::map::CScene> m_pScene;
-	std::shared_ptr<const xv::map::CMapMesh> m_pEntityMesh;
+	std::shared_ptr<const xv::map::CMapMesh> m_pEntityBaseMesh;
+	std::vector<std::uint32_t> m_EntityOverrides;
+	std::shared_ptr<const xv::map::MeshParts_t> m_pEntityParts;
+	std::shared_ptr<const xv::map::MeshParts_t> m_pPropParts;
+	std::shared_ptr<const xv::map::MeshParts_t> m_pOverlayParts;
+	std::shared_ptr<const xv::map::MeshParts_t> m_pSpriteParts;
+	std::shared_ptr<const xv::map::CMapMesh> m_pEntityPreviewMesh;
+	bool m_bEntityPreview = false;
+	std::vector<std::uint32_t> m_EntityPreviewObjects;
 	std::shared_ptr<const xv::map::CMapMesh> m_pPropMesh;
 	std::shared_ptr<const xv::map::CMapMesh> m_pOverlayMesh;
 	std::shared_ptr<const xv::map::CMapMesh> m_pSpriteMesh; // facing this frame's camera
@@ -61,6 +70,9 @@ class CMapRenderData
 {
 public:
 	explicit CMapRenderData( const CMapDocument &document );
+	void SetResources( const CMapResources *pResources ) { m_pResources = pResources; }
+	[[nodiscard]] std::uint64_t GetPropsRevision() const { return m_nPropsRevision; }
+	[[nodiscard]] std::uint64_t GetPropMaterialsRevision() const { return m_nPropMaterialsRevision; }
 
 	// What frames share, as it stands, without a camera or per-view state (the 2D views draw props
 	// from it).
@@ -74,12 +86,14 @@ public:
 	// the map; the entity boxes' own is added after them.
 	void SetMaterials( std::shared_ptr<const std::vector<xv::map::RasterMaterial_t>> pMaterials, std::shared_ptr<const void> pTextures, std::uint32_t nEntityMaterial );
 	[[nodiscard]] std::uint32_t GetEntityMaterial() const;
+	// Once initial assets arrive, discard obsolete placeholder boxes from the shared buffer.
+	void CompactEntityBoxes();
 	// The map's sky, drawn on its sky faces.
 	void SetSky( std::shared_ptr<const xv::sky::CCube> pSky );
 	// The props placed in the world, and the entities they draw: those show no box.
-	void SetProps( std::shared_ptr<const xv::map::CMapMesh> pProps, std::vector<std::uint32_t> objects );
+	void SetProps( std::shared_ptr<const xv::map::CMapMesh> pProps, std::vector<std::uint32_t> objects, std::shared_ptr<const xv::map::MeshParts_t> pParts = {} );
 	// The overlays and decals laid on the faces.
-	void SetOverlays( std::shared_ptr<const xv::map::CMapMesh> pOverlays );
+	void SetOverlays( std::shared_ptr<const xv::map::CMapMesh> pOverlays, std::shared_ptr<const xv::map::MeshParts_t> pParts = {} );
 	// The entities drawn as sprites, tinted by their own colours: those show no box either.
 	void SetSprites( std::shared_ptr<const std::vector<xv::map::SpritePlacement_t>> pSprites );
 
@@ -89,10 +103,18 @@ private:
 	void Rebuild();
 	void Refresh();
 	void BuildEntityBoxes();
+	void UpdateEntityPreview( xv::map::Point_t right, xv::map::Point_t up );
 	void UpdateFlatColors();
 	void ApplySprites();
 
 	const CMapDocument &m_Document;
+	const CMapResources *m_pResources = nullptr;
+	std::shared_ptr<const xv::map::MeshParts_t> m_pEntityBaseParts;
+	std::shared_ptr<const xv::map::MeshParts_t> m_pEntityAllParts;
+	std::shared_ptr<const std::vector<xv::map::RasterMaterial_t>> m_pReceivedMaterials;
+	std::uint64_t m_nPropsRevision = 0, m_nPropMaterialsRevision = 0;
+	xv::map::Point_t m_PreviewRight{ 1, 0, 0 }, m_PreviewUp{ 0, 0, 1 };
+	std::map<std::uint32_t, std::vector<xv::map::SpritePlacement_t>> m_SpritePlacements;
 	const xv::map::CScene *m_pBuiltFor = nullptr;
 	const xv::map::CMapMesh *m_pBuiltMesh = nullptr; // the mesh as read of the map it was built for
 	std::uint32_t m_nEntityMaterial = 0;            // where entity boxes' material is in the table

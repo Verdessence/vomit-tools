@@ -103,6 +103,9 @@ EntityVisual_t DescribeEntity( const Entity_t &entity, const CFgd *pFgd )
 	EntityVisual_t visual;
 	visual.m_pClass = pFgd ? pFgd->Find( entity.GetClassname() ) : nullptr;
 	visual.m_bPoint = entity.m_Solids.empty();
+	// The placement tools also work before game definitions have been loaded.
+	visual.m_bOverlay = entity.GetClassname() == "info_overlay" || entity.GetClassname() == "info_overlay_transition";
+	visual.m_bDecal = entity.GetClassname() == "infodecal";
 	visual.m_szName = entity.GetValue( "targetname" );
 	if ( const auto origin = ParseTriple( entity.GetValue( "origin" ) ) )
 	{

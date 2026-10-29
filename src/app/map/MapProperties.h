@@ -87,7 +87,10 @@ public:
 	[[nodiscard]] std::vector<std::pair<std::string, std::string>> GetKeyChoices( std::size_t nRow ) const;
 	[[nodiscard]] std::vector<std::pair<std::string, std::string>> GetOutputChoices( std::size_t nRow, int nColumn ) const;
 
+	void PreviewSides( std::size_t nRow, const QString &szValue );
+
 signals:
+	void FacesHighlighted( const QString &szKey, const QString &szValue );
 	void FacePickRequested( const QString &szKey );
 
 protected:
@@ -119,6 +122,7 @@ private:
 	QPushButton *m_pAddKey = nullptr;
 	QPushButton *m_pRemoveKey = nullptr;
 	QLabel *m_pHelp = nullptr;
+	QLabel *m_pMissingSides = nullptr;
 	QPlainTextEdit *m_pComments = nullptr;
 	QTreeWidget *m_pFlags = nullptr;
 	QTreeWidget *m_pOutputs = nullptr;

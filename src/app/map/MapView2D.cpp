@@ -26,6 +26,7 @@
 
 #include "Preferences.h"
 #include "map/Cordon.h"
+#include "map/Displacement.h"
 #include "map/Vertex.h"
 #include "map/MapConstants.h"
 #include "map/MapDocument.h"
@@ -272,7 +273,7 @@ void CMapView2D::Rebuild()
 	}
 	// The same map edited: only what the edits changed is projected again, while what is left
 	// behind stays under a third of the segments.
-	if ( pScene && m_pBuiltFor && pProps == m_pProps && pScene->m_pMesh.get() == m_pBuiltMesh && ( GetDocument().GetDisplacementPreviewBase() || m_nStaleSegments * 3 < m_Segments.size() ) )
+	if ( pScene && m_pBuiltFor && pProps == m_pProps && pScene->m_pMesh.get() == m_pBuiltMesh && ( GetDocument().GetGeometryPreviewBase() || m_nStaleSegments * 3 < m_Segments.size() ) )
 	{
 		Patch( *pScene );
 		return;
@@ -705,7 +706,7 @@ void CMapView2D::PaintModels( QPainter &painter, const QRectF &visible ) const
 	bool bAny = false;
 	for ( const MapFlatObject_t &object : m_Objects )
 	{
-		if ( object.m_nModelLineCount == 0 || !Overlaps( object.m_Bounds, visible ) || !document.IsShown( object.m_nObject ) || ( document.IsSelected( object.m_nObject ) && MapSelectedModelEdges( *pScene, object.m_nObject ) ) )
+		if ( ( document.GetGeometryPreviewBase() && std::ranges::binary_search( document.GetPreviewObjects(), object.m_nObject ) ) || object.m_nModelLineCount == 0 || !Overlaps( object.m_Bounds, visible ) || !document.IsShown( object.m_nObject ) || ( document.IsSelected( object.m_nObject ) && MapSelectedModelEdges( *pScene, object.m_nObject ) ) )
 		{
 			continue;
 		}
@@ -759,6 +760,18 @@ void CMapView2D::PaintObjects( QPainter &painter, const QRectF &visible, bool bP
 	const xv::map::CScene *pScene = document.GetScene();
 	if ( !pScene )
 	{
+		return;
+	}
+	if ( bPreviewOnly && document.GetEntityPreviewBase() )
+	{
+		const auto frame = m_Editor.GetRenderData().GetShared();
+		if ( frame.m_pEntityPreviewMesh )
+		{
+			const auto &mesh = *frame.m_pEntityPreviewMesh;
+			painter.setPen( QPen{ Look().m_Colors.m_Selection, 1.0 } );
+			for ( std::size_t i = 0; i + 1 < mesh.m_Lines.size(); i += 2 )
+				painter.drawLine( ToWidget( Flatten( xv::map::ToPoint( mesh.m_Vertices[ mesh.m_Lines[ i ] ].m_vecPosition ) ) ), ToWidget( Flatten( xv::map::ToPoint( mesh.m_Vertices[ mesh.m_Lines[ i + 1 ] ].m_vecPosition ) ) ) );
+		}
 		return;
 	}
 	const MapViewSettings_t &settings = m_Editor.GetSettings();
@@ -850,7 +863,7 @@ void CMapView2D::PaintObjects( QPainter &painter, const QRectF &visible, bool bP
 	};
 	for ( const MapFlatObject_t &object : m_Objects )
 	{
-		if ( document.GetDisplacementPreviewBase() && std::ranges::binary_search( document.GetPreviewObjects(), object.m_nObject ) != bPreviewOnly )
+		if ( document.GetGeometryPreviewBase() && std::ranges::binary_search( document.GetPreviewObjects(), object.m_nObject ) != bPreviewOnly )
 		{
 			continue;
 		}
@@ -1292,13 +1305,16 @@ QString CMapView2D::DescribeLayerChanges( bool bAdvance )
 //-----------------------------------------------------------------------------
 void CMapView2D::PaintLayer()
 {
+	// A commit's geometry and streamed placements become one background revision.
+	if ( !GetDocument().IsPreviewing() && m_Editor.GetResources().IsRefreshing() && !m_Layer.isNull() )
+		return;
 	LayerKey_t key;
-	key.m_bPreview = GetDocument().GetDisplacementPreviewBase() != nullptr;
+	key.m_bPreview = GetDocument().GetGeometryPreviewBase() != nullptr;
 	// Camera snapshots share geometry; visibility and geometry edits have their own state counter.
-	const auto *pLayerScene = key.m_bPreview ? GetDocument().GetDisplacementPreviewBase() : GetDocument().GetScene();
+	const auto *pLayerScene = key.m_bPreview ? GetDocument().GetGeometryPreviewBase() : GetDocument().GetScene();
 	key.m_pMesh = pLayerScene ? pLayerScene->m_pMesh.get() : nullptr;
-	key.m_pProps = m_pProps.get();
-	key.m_pMaterials = m_Editor.GetRenderData().GetShared().m_pMaterials.get();
+	key.m_nProps = m_Editor.GetRenderData().GetPropsRevision();
+	key.m_nPropMaterials = m_Editor.GetRenderData().GetPropMaterialsRevision();
 	key.m_nState = key.m_bPreview ? GetDocument().GetPreviewState() : GetDocument().GetStateGeneration();
 	key.m_Settings = m_Editor.GetSettings();
 	key.m_Center = m_Center;
@@ -1319,9 +1335,9 @@ void CMapView2D::PaintLayer()
 		reasons << QStringLiteral( "stroke boundary" );
 	if ( key.m_nState != m_LayerKey.m_nState )
 		reasons << QStringLiteral( "visibility/selection" );
-	if ( key.m_pProps != m_LayerKey.m_pProps )
+	if ( key.m_nProps != m_LayerKey.m_nProps )
 		reasons << QStringLiteral( "props" );
-	if ( key.m_pMaterials != m_LayerKey.m_pMaterials )
+	if ( key.m_nPropMaterials != m_LayerKey.m_nPropMaterials )
 		reasons << QStringLiteral( "materials" );
 	if ( key.m_Settings != m_LayerKey.m_Settings )
 		reasons << QStringLiteral( "view settings" );
@@ -1364,13 +1380,43 @@ void CMapView2D::paintEvent( QPaintEvent * )
 	m_flLayerMs = ( timer.nsecsElapsed() - nLayerStart ) / 1e6;
 	QPainter painter( this );
 	painter.drawPixmap( 0, 0, m_Layer );
-	if ( GetDocument().GetDisplacementPreviewBase() )
+	if ( GetDocument().GetGeometryPreviewBase() )
 	{
 		PaintObjects( painter, GetVisible(), true );
 	}
 	PaintSavedCameras( painter );
 	PaintCamera( painter );
 	PaintSelection( painter );
+	if ( const auto *pScene = GetDocument().GetScene() )
+	{
+		painter.setPen( QPen{ m_Editor.IsSecondarySides() ? QColor{ 0, 180, 255 } : Look().m_Colors.m_Selection, 2.0 } );
+		painter.setBrush( Qt::NoBrush );
+		for ( const auto &ref : m_Editor.GetHighlightedSides() )
+			if ( ref.m_nSolid < pScene->m_Solids.size() )
+				if ( const auto *pFace = pScene->m_Solids[ ref.m_nSolid ].FindFace( ref.m_nSide ) )
+				{
+					QPolygonF polygon;
+					const auto &side = pScene->m_Map.m_Solids[ ref.m_nSolid ].m_Sides[ ref.m_nSide ];
+					const auto displacement = side.m_pDisp ? xv::map::BuildDisplacement( *side.m_pDisp, *pFace ) : std::nullopt;
+					if ( displacement )
+					{
+						const int n = displacement->m_nSize;
+						auto add = [ & ]( int x, int y ) { polygon << ToWidget( Flatten( displacement->m_Points[ static_cast<std::size_t>( y * n + x ) ] ) ); };
+						for ( int x = 0; x < n; ++x )
+							add( x, 0 );
+						for ( int y = 1; y < n; ++y )
+							add( n - 1, y );
+						for ( int x = n - 2; x >= 0; --x )
+							add( x, n - 1 );
+						for ( int y = n - 2; y > 0; --y )
+							add( 0, y );
+					}
+					else
+						for ( const auto &point : pFace->m_Points )
+							polygon << ToWidget( Flatten( point ) );
+					painter.drawPolygon( polygon );
+				}
+	}
 	PaintTools( painter );
 	if ( hasFocus() )
 	{

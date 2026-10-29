@@ -6,6 +6,8 @@
 //
 //===========================================================================//
 #include "MapView3D.h"
+#include "MapEventClock.h"
+#include <QThread>
 
 #include <algorithm>
 #include <array>
@@ -41,59 +43,93 @@
 #endif
 #include "map/MapRenderer.h"
 
+//-----------------------------------------------------------------------------
+// Purpose: Bind to the application's dispatcher; an event filter starts accounting before
+//          handlers even on dispatchers whose awake signal follows event delivery.
+//-----------------------------------------------------------------------------
+CMapEventClock::CMapEventClock()
+	: QObject( QCoreApplication::instance() )
+{
+	m_Wall.start();
+	Awake();
+	auto *pApplication = QCoreApplication::instance();
+	auto *pDispatcher = QAbstractEventDispatcher::instance( pApplication->thread() );
+	connect( pDispatcher, &QAbstractEventDispatcher::awake, this, &CMapEventClock::Awake, Qt::DirectConnection );
+	connect( pDispatcher, &QAbstractEventDispatcher::aboutToBlock, this, &CMapEventClock::Block, Qt::DirectConnection );
+	pApplication->installEventFilter( this );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Count work once, even when a handler enters another event loop.
+//-----------------------------------------------------------------------------
+void CMapEventClock::Awake()
+{
+	if ( !m_Busy.isValid() )
+		m_Busy.start();
+	const int nLevel = QThread::currentThread()->loopLevel();
+	if ( nLevel > 1 && nLevel > m_nLastLoopLevel )
+		++m_nNestedLoops;
+	m_nLastLoopLevel = nLevel;
+	m_nMaximumLoopLevel = std::max( m_nMaximumLoopLevel, nLevel );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Exclude time spent sleeping in both outer and nested dispatchers.
+//-----------------------------------------------------------------------------
+void CMapEventClock::Block()
+{
+	if ( m_Busy.isValid() )
+	{
+		m_flBusyMs += m_Busy.nsecsElapsed() / 1e6;
+		m_Busy.invalidate();
+	}
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: A handler must be timed from its beginning, before its dispatcher announces awake.
+//-----------------------------------------------------------------------------
+bool CMapEventClock::eventFilter( QObject *, QEvent * )
+{
+	Awake();
+	return false;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Cumulative work, including the active handler, for measurements and regression tests.
+//-----------------------------------------------------------------------------
+double CMapEventClock::GetBusyTime() const
+{
+	return m_flBusyMs + ( m_Busy.isValid() ? m_Busy.nsecsElapsed() / 1e6 : 0.0 );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Report the most recently completed observation window without losing active work.
+//-----------------------------------------------------------------------------
+QString CMapEventClock::Describe()
+{
+	const double flWall = m_Wall.nsecsElapsed() / 1e6;
+	const double flBusy = GetBusyTime();
+	if ( flWall >= 1000 )
+	{
+		m_flLastBusy = flBusy - m_flWindowStart;
+		m_flWindowStart = flBusy;
+		m_flLastWall = flWall;
+		m_Wall.restart();
+	}
+	return QStringLiteral( "event loop: %1 ms busy / %2 ms elapsed; %3 nested loops, depth %4" ).arg( m_flLastBusy, 0, 'f', 1 ).arg( m_flLastWall, 0, 'f', 1 ).arg( m_nNestedLoops ).arg( m_nMaximumLoopLevel );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: One clock for every map pane, with the application's lifetime.
+//-----------------------------------------------------------------------------
+CMapEventClock &CMapEventClock::Get()
+{
+	static auto *pClock = new CMapEventClock;
+	return *pClock;
+}
+
 namespace
 {
-
-// One clock shared by all views, so opening another pane does not double-count event work.
-class CMapEventClock : public QObject
-{
-public:
-	CMapEventClock()
-		: QObject( QCoreApplication::instance() )
-	{
-		m_Wall.start();
-		m_Busy.start();
-		auto *pDispatcher = QAbstractEventDispatcher::instance();
-		connect( pDispatcher, &QAbstractEventDispatcher::awake, this, [ this ] { if ( !m_Busy.isValid() ) m_Busy.start(); } );
-		connect( pDispatcher, &QAbstractEventDispatcher::aboutToBlock, this, [ this ] {
-			if ( m_Busy.isValid() )
-			{
-				m_flBusyMs += m_Busy.nsecsElapsed() / 1e6;
-				m_Busy.invalidate();
-			}
-		} );
-	}
-	//-----------------------------------------------------------------------------
-	// Purpose: Report busy time over the last completed one-second observation window.
-	//-----------------------------------------------------------------------------
-	QString Describe()
-	{
-		const double flWall = m_Wall.nsecsElapsed() / 1e6;
-		const double flBusy = m_flBusyMs + ( m_Busy.isValid() ? m_Busy.nsecsElapsed() / 1e6 : 0 );
-		if ( flWall >= 1000 )
-		{
-			m_flLastBusy = flBusy;
-			m_flLastWall = flWall;
-			m_flBusyMs = 0;
-			m_Wall.restart();
-			if ( m_Busy.isValid() )
-				m_Busy.restart();
-		}
-		return QStringLiteral( "event loop: %1 ms busy / %2 ms elapsed" ).arg( m_flLastBusy, 0, 'f', 1 ).arg( m_flLastWall, 0, 'f', 1 );
-	}
-	//-----------------------------------------------------------------------------
-	// Purpose: Share one clock across all map panes.
-	//-----------------------------------------------------------------------------
-	static CMapEventClock &Get()
-	{
-		static auto *pClock = new CMapEventClock;
-		return *pClock;
-	}
-
-private:
-	QElapsedTimer m_Wall, m_Busy;
-	double m_flBusyMs = 0, m_flLastBusy = 0, m_flLastWall = 0;
-};
 
 constexpr int TICK_MS = 16;
 constexpr int SETTLE_MS = 150;
@@ -1491,7 +1527,9 @@ void CMapView3D::PaintTools( QPainter &painter )
 	const std::optional<xv::map::Box_t> &box = m_Editor.GetNewBox();
 	const std::optional<xv::map::Point_t> &marker = m_Editor.GetEntityMarker();
 	const std::optional<CMapGizmo> gizmo = m_DragGizmo ? m_DragGizmo : GetGizmo();
-	const std::vector<xv::map::FaceRef_t> &faces = m_Editor.GetSelectedFaces();
+	std::vector<xv::map::FaceRef_t> faces = m_Editor.GetSelectedFaces();
+	const auto &highlighted = m_Editor.GetHighlightedSides();
+	faces.insert( faces.end(), highlighted.begin(), highlighted.end() );
 	const std::optional<std::vector<xv::map::Point_t>> &pointfile = GetDocument().GetPointfile();
 	const bool bBrush = HasPaintBrushRing();
 	const bool bOverlay = m_Editor.GetTool() == MapTool_t::MAP_TOOL_OVERLAY && !GetDocument().GetSelection().empty();
@@ -1586,12 +1624,15 @@ void CMapView3D::PaintTools( QPainter &painter )
 		QColor gridColor = colors.m_SelectionEdge3D;
 		gridColor.setAlpha( 200 );
 		const QPen grid{ gridColor, 1.0 };
-		const bool bShade = !m_Editor.GetFaceEdit().IsSelectMasked();
+
 		const bool bGrid = !m_Editor.GetFaceEdit().IsGridMasked();
 		painter.setRenderHint( QPainter::Antialiasing, true );
 
 		for ( const xv::map::FaceRef_t &face : faces )
 		{
+			const bool bShade = std::ranges::find( highlighted, face ) != highlighted.end() || ( !m_Editor.GetFaceEdit().IsSelectMasked() && !m_Editor.IsFaceMaskHidden() );
+			fill = m_Editor.IsSecondarySides() && std::ranges::find( highlighted, face ) != highlighted.end() ? QColor{ 0, 180, 255, 110 } : colors.m_Selection3D;
+			fill.setAlpha( 110 );
 			const xv::map::FaceGeometry_t *pFace = face.m_nSolid < pScene->m_Solids.size() ? pScene->m_Solids[ face.m_nSolid ].FindFace( face.m_nSide ) : nullptr;
 			if ( !pFace )
 			{
@@ -1627,7 +1668,7 @@ void CMapView3D::PaintTools( QPainter &painter )
 				continue;
 			}
 			painter.setPen( edge );
-			painter.setBrush( fill );
+			painter.setBrush( bShade ? QBrush{ fill } : QBrush{ Qt::NoBrush } );
 			painter.drawPolygon( project( pFace->m_Points ) );
 		}
 		painter.setBrush( Qt::NoBrush );
