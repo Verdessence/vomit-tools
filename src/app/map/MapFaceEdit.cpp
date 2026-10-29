@@ -158,6 +158,11 @@ CMapFaceEdit::CMapFaceEdit( CMapEditor &editor, QWidget *pParent )
 	m_pTabs->addTab( pDispScroll, tr( "Displacement" ) );
 	pOuter->addWidget( m_pTabs );
 	BuildDisplacementTab( pDispPage );
+	connect( m_pTabs, &QTabWidget::currentChanged, this, [ this ]( int nTab ) {
+		if ( nTab != 1 )
+			SetDispPaintMode( DispPaintMode_t::DISP_PAINT_NONE );
+		emit PaintModeChanged();
+	} );
 	auto *pLayout = new QVBoxLayout( pTexturePage );
 	pLayout->setContentsMargins( 0, 0, 0, 0 );
 	auto *pGrid = new QGridLayout;
@@ -773,6 +778,34 @@ void CMapFaceEdit::SetBrushRadius( double flRadius )
 int CMapFaceEdit::GetDispPower() const
 {
 	return m_pPower->value();
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Painting belongs to the visible Displacement sheet, independently of its window
+//          or side-panel placement and of which window has keyboard focus.
+//-----------------------------------------------------------------------------
+bool CMapFaceEdit::IsDisplacementTabVisible() const
+{
+	return isVisible() && m_pTabs->currentIndex() == 1;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Restore the view cursor when the sheet is shown.
+//-----------------------------------------------------------------------------
+void CMapFaceEdit::showEvent( QShowEvent *pEvent )
+{
+	QWidget::showEvent( pEvent );
+	emit PaintModeChanged();
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: A hidden paint sheet cannot leave the map in a painting mode.
+//-----------------------------------------------------------------------------
+void CMapFaceEdit::hideEvent( QHideEvent *pEvent )
+{
+	SetDispPaintMode( DispPaintMode_t::DISP_PAINT_NONE );
+	QWidget::hideEvent( pEvent );
+	emit PaintModeChanged();
 }
 
 //-----------------------------------------------------------------------------

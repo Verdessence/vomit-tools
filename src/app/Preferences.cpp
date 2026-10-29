@@ -61,6 +61,7 @@ void ForEachMapPreference( Preferences_t &map, Visit_t &&pfnVisit )
 	pfnVisit( "maps/carve", map.m_nCarve );
 	pfnVisit( "maps/groupCarve", map.m_bGroupCarve );
 	pfnVisit( "maps/faceEditWindow", map.m_bFaceEditWindow );
+	pfnVisit( "maps/showDisplacementBrush", map.m_bShowDisplacementBrush );
 	pfnVisit( "maps/hideSmallGrid", map.m_bHideSmallGrid );
 	pfnVisit( "maps/hideGridBelow", map.m_flHideGridBelow );
 	pfnVisit( "maps/highlightEvery", map.m_nHighlightEvery );

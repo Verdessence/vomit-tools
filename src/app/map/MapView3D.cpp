@@ -868,7 +868,7 @@ void CMapView3D::mouseMoveEvent( QMouseEvent *pEvent )
 		}
 		return;
 	}
-	if ( pEvent->buttons() == Qt::NoButton && !m_bMouselook && IsPaintingDisplacements() )
+	if ( pEvent->buttons() == Qt::NoButton && !m_bMouselook && IsDisplacementBrushShown() )
 	{
 		m_BrushAt = SurfaceAt( pEvent->position() );
 		RedrawLabels();
@@ -1069,6 +1069,8 @@ QString CMapView3D::GetPaintCosts() const
 //-----------------------------------------------------------------------------
 void CMapView3D::UpdateCursor()
 {
+	if ( m_pPaintScene && !IsPaintingDisplacements() )
+		EndPaint( false );
 	if ( m_bMouselook )
 	{
 		return;
@@ -1078,7 +1080,13 @@ void CMapView3D::UpdateCursor()
 	{
 		setCursor( nShape );
 	}
-	if ( !IsPaintingDisplacements() && m_BrushAt && !m_pPaintScene )
+	if ( IsDisplacementBrushShown() && !m_pPaintScene )
+	{
+		const QPoint at = mapFromGlobal( QCursor::pos() );
+		if ( rect().contains( at ) )
+			m_BrushAt = SurfaceAt( at );
+	}
+	if ( !IsDisplacementBrushShown() && m_BrushAt && !m_pPaintScene )
 	{
 		m_BrushAt.reset();
 		RedrawLabels();
@@ -1090,7 +1098,23 @@ void CMapView3D::UpdateCursor()
 //-----------------------------------------------------------------------------
 bool CMapView3D::IsPaintingDisplacements() const
 {
-	return m_Editor.GetTool() == MapTool_t::MAP_TOOL_TEXTURE && m_Editor.GetFaceEdit().GetDispPaintMode() != DispPaintMode_t::DISP_PAINT_NONE;
+	return m_Editor.GetTool() == MapTool_t::MAP_TOOL_TEXTURE && m_Editor.GetFaceEdit().IsDisplacementTabVisible() && m_Editor.GetFaceEdit().GetDispPaintMode() != DispPaintMode_t::DISP_PAINT_NONE;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Select can display an aiming ring without granting permission to paint.
+//-----------------------------------------------------------------------------
+bool CMapView3D::IsDisplacementBrushShown() const
+{
+	return IsPaintingDisplacements() || ( m_Editor.GetTool() == MapTool_t::MAP_TOOL_TEXTURE && m_Editor.GetFaceEdit().IsDisplacementTabVisible() && CPreferences::Instance().GetMapPreferences().m_bShowDisplacementBrush );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Expose whether the view currently has a surface to draw the permitted ring on.
+//-----------------------------------------------------------------------------
+bool CMapView3D::HasPaintBrushRing() const
+{
+	return m_BrushAt.has_value() && IsDisplacementBrushShown();
 }
 
 //-----------------------------------------------------------------------------
@@ -1310,7 +1334,7 @@ void CMapView3D::PaintTools( QPainter &painter )
 	const std::optional<CMapGizmo> gizmo = m_DragGizmo ? m_DragGizmo : GetGizmo();
 	const std::vector<xv::map::FaceRef_t> &faces = m_Editor.GetSelectedFaces();
 	const std::optional<std::vector<xv::map::Point_t>> &pointfile = GetDocument().GetPointfile();
-	const bool bBrush = m_BrushAt && IsPaintingDisplacements();
+	const bool bBrush = HasPaintBrushRing();
 	const bool bWalkable = m_Editor.GetSettings().m_bWalkable && GetDocument().GetScene();
 	if ( !box && !marker && !gizmo && faces.empty() && !pointfile && !bBrush && !bWalkable )
 	{

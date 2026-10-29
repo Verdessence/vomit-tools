@@ -99,6 +99,7 @@ public:
 	void SetBrushRadius( double flRadius );
 	[[nodiscard]] int GetDispPower() const;
 	void ShowTab( int nTab );
+	[[nodiscard]] bool IsDisplacementTabVisible() const;
 	// Alt+right-click on a face: its normal is the brush's axis for every displacement.
 	void SetPaintNormal( const xv::map::Point_t &normal );
 	[[nodiscard]] bool IsAutosew() const;
@@ -109,6 +110,10 @@ public:
 signals:
 	// What a click in 3D does changed, or how selected displacements show: the views redraw.
 	void PaintModeChanged();
+
+protected:
+	void showEvent( QShowEvent *pEvent ) override;
+	void hideEvent( QHideEvent *pEvent ) override;
 
 private:
 	void BuildDisplacementTab( QWidget *pPage );

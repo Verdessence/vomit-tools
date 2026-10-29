@@ -95,6 +95,7 @@ public:
 	[[nodiscard]] std::optional<CMapGizmo> GetGizmo() const;
 	// A cross while the Displacement tab's brush is on, else the arrow (not during mouselook).
 	void UpdateCursor();
+	[[nodiscard]] bool HasPaintBrushRing() const;
 	[[nodiscard]] QString GetPaintCosts() const;
 	// The brush face under a widget point (the nearest hit's triangle, when it is a brush's).
 	[[nodiscard]] std::optional<xv::map::FaceRef_t> FaceAt( QPointF at );
@@ -133,6 +134,7 @@ private:
 	// The Displacement tab's brush: whether a press paints, a stroke's sample at a point
 	// (previewed), and the stroke made one undo step (or dropped).
 	[[nodiscard]] bool IsPaintingDisplacements() const;
+	[[nodiscard]] bool IsDisplacementBrushShown() const;
 	void PaintStroke( QPointF at );
 	void PreviewPaint();
 	void PaintFrameSubmitted();
