@@ -29,6 +29,8 @@ namespace xv::map
 // Objects written out whole as Hammer writes them: from their name to their closing brace,
 // their lines indented one tab further than szIndent (the indentation of the line they start on).
 [[nodiscard]] std::string WriteSolid( const CMap &map, const Solid_t &solid, std::string_view szIndent );
+// A group and its editor notes, used when exporting a selection.
+[[nodiscard]] std::string WriteGroup( const CMap &map, const Group_t &group, std::string_view szIndent );
 // With its solids (those not deleted).
 [[nodiscard]] std::string WriteEntity( const CMap &map, const Entity_t &entity, std::string_view szIndent );
 

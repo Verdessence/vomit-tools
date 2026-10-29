@@ -21,6 +21,7 @@
 #include "EditorTab.h"
 #include "map/Clip.h"
 #include "map/DispEdit.h"
+#include "map/Prefab.h"
 #include "map/Faces.h"
 #include "map/Vertex.h"
 #include "map/MapDocument.h"
@@ -117,6 +118,9 @@ public:
 	[[nodiscard]] const std::optional<xv::map::Point_t> &GetEntityMarker() const { return m_EntityMarker; }
 	void SetEntityMarker( std::optional<xv::map::Point_t> at );
 	// A new entity of the entity tool's class at origin, selected.
+	void CreatePrefab();
+	bool SavePrefab( const QString &szPath, QString *pError = nullptr ) const;
+	void PlacePrefab( const xv::map::Point_t &at );
 	void EditInstance();
 	void CollapseInstances( bool bAll );
 	void PlaceOverlay( const xv::map::Point_t &origin, const xv::map::Point_t &normal, xv::map::FaceRef_t face );
@@ -273,6 +277,8 @@ private:
 	[[nodiscard]] QWidget *BuildNewObjects();
 	// The entity classes and materials to pick from, once the map's game data is read.
 	void FillNewObjects();
+	void FillPrefabs();
+	void FillPrefabObjects();
 	void RepaintViews();
 	void RepaintTools();
 	void Loaded();
@@ -323,6 +329,11 @@ private:
 	std::shared_ptr<const xv::map::CScene> m_pClipPreview; // the selection cut, drawn in white
 	QLineEdit *m_pMaterial = nullptr;
 	QString m_szFacePickKey;
+	std::vector<xv::map::PrefabLibrary_t> m_PrefabLibraries;
+	QComboBox *m_pObjectCategory = nullptr;
+	QComboBox *m_pPrefabLibrary = nullptr;
+	QComboBox *m_pPrefabObjects = nullptr;
+	QStackedWidget *m_pObjectChoices = nullptr;
 	QComboBox *m_pOverlayKind = nullptr;
 	QComboBox *m_pEntityClass = nullptr;
 	MapVertexMode_t m_nVertexMode = MapVertexMode_t::MAP_VERTEX_MODE_BOTH;

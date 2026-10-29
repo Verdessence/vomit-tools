@@ -233,6 +233,7 @@ bool Flatten( const PlacedInstance_t &placed, const Entity_t &owner, const Trans
 	std::vector<std::uint32_t> newObjects;
 	auto edit = ObjectsFromText( *pWorking, ObjectsToText( *prepared, objects ), toWorld, &newObjects );
 	pWorking = ApplyEdit( *pWorking, edit );
+	result.m_Groups.insert( result.m_Groups.end(), edit.m_Groups.begin(), edit.m_Groups.end() );
 	result.m_Solids.insert( result.m_Solids.end(), edit.m_Solids.begin(), edit.m_Solids.end() );
 	result.m_Entities.insert( result.m_Entities.end(), edit.m_Entities.begin(), edit.m_Entities.end() );
 	added.insert( added.end(), newObjects.begin(), newObjects.end() );

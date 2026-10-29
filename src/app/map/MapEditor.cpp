@@ -23,6 +23,9 @@
 #include <QCryptographicHash>
 #include <QDateTime>
 #include <QSettings>
+#include <QSignalBlocker>
+#include <QSaveFile>
+#include <QPushButton>
 #include <QActionGroup>
 #include <QFileInfo>
 #include <QHBoxLayout>
@@ -520,6 +523,16 @@ QWidget *CMapEditor::BuildNewObjects()
 	m_pEntityClass->setInsertPolicy( QComboBox::NoInsert );
 	m_pEntityClass->setToolTip( tr( "The class the entity tool places (%1)" ).arg( MapActionKey( MapAction_t::MAP_ACTION_TOOL_ENTITY ).toString( QKeySequence::NativeText ) ) );
 	m_pEntityClass->addItem( QString::fromStdString( m_pDocument->GetDefaults().m_szPointEntity ) );
+	m_pObjectCategory = new QComboBox;
+	m_pObjectCategory->setObjectName( QStringLiteral( "mapNewObjectCategory" ) );
+	m_pObjectCategory->addItems( { tr( "Entities" ), tr( "Prefabs" ) } );
+	m_pPrefabLibrary = new QComboBox;
+	m_pPrefabLibrary->setObjectName( QStringLiteral( "mapPrefabLibrary" ) );
+	m_pPrefabObjects = new QComboBox;
+	m_pPrefabObjects->setObjectName( QStringLiteral( "mapPrefabObjects" ) );
+	m_pObjectChoices = new QStackedWidget;
+	m_pObjectChoices->addWidget( m_pEntityClass );
+	m_pObjectChoices->addWidget( m_pPrefabObjects );
 	m_pMaterial = new QLineEdit( QStringLiteral( "DEV/DEV_MEASUREGENERIC01" ) );
 	connect( m_pMaterial, &QLineEdit::editingFinished, this, [ this ] { SetCurrentMaterial( m_pMaterial->text() ); } );
 	m_pMaterial->setObjectName( QStringLiteral( "mapNewMaterial" ) );
@@ -544,8 +557,10 @@ QWidget *CMapEditor::BuildNewObjects()
 	};
 	connect( m_pPrimitive, &QComboBox::currentIndexChanged, this, enableSides );
 	enableSides();
-	pForm->addRow( tr( "Entity" ), m_pEntityClass );
-	pForm->addRow( tr( "Objects" ), m_pPrimitive );
+	pForm->addRow( tr( "Categories" ), m_pObjectCategory );
+	pForm->addRow( tr( "Library" ), m_pPrefabLibrary );
+	pForm->addRow( tr( "Objects" ), m_pObjectChoices );
+	pForm->addRow( tr( "Primitive" ), m_pPrimitive );
 	pForm->addRow( tr( "Faces" ), m_pSides );
 	m_pOverlayKind = new QComboBox;
 	m_pOverlayKind->setObjectName( QStringLiteral( "mapNewOverlayKind" ) );
@@ -553,6 +568,20 @@ QWidget *CMapEditor::BuildNewObjects()
 	m_pOverlayKind->addItem( tr( "Water transition" ), true );
 	pForm->addRow( tr( "Overlay" ), m_pOverlayKind );
 	pForm->addRow( tr( "Texture" ), m_pMaterial );
+	auto *pCreatePrefab = new QPushButton( tr( "Create Prefab..." ) );
+	pCreatePrefab->setObjectName( QStringLiteral( "mapCreatePrefab" ) );
+	pForm->addRow( pCreatePrefab );
+	connect( pCreatePrefab, &QPushButton::clicked, this, &CMapEditor::CreatePrefab );
+	connect( m_pPrefabLibrary, &QComboBox::currentIndexChanged, this, &CMapEditor::FillPrefabObjects );
+	auto categoryChanged = [ this, pForm ] {
+		const bool bPrefab = m_pObjectCategory->currentIndex() == 1;
+		m_pObjectChoices->setCurrentIndex( bPrefab ? 1 : 0 );
+		pForm->setRowVisible( m_pPrefabLibrary, bPrefab );
+		if ( bPrefab )
+			FillPrefabs();
+	};
+	connect( m_pObjectCategory, &QComboBox::currentIndexChanged, this, categoryChanged );
+	categoryChanged();
 	return pBox;
 }
 
@@ -599,6 +628,41 @@ void CMapEditor::FillNewObjects()
 	pCompleter->setFilterMode( Qt::MatchContains );
 	delete m_pMaterial->completer();
 	m_pMaterial->setCompleter( pCompleter );
+	FillPrefabs();
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Rescan Source's prefab roots when the category is opened or a prefab is saved.
+//-----------------------------------------------------------------------------
+void CMapEditor::FillPrefabs()
+{
+	const auto szWas = m_pPrefabLibrary->currentText();
+	const QSignalBlocker blocker( m_pPrefabLibrary );
+	m_PrefabLibraries = m_pDocument->GetGame() ? xv::map::FindPrefabs( xv::map::PrefabFolders( m_pDocument->GetGame()->m_GameDir ) ) : std::vector<xv::map::PrefabLibrary_t>{};
+	m_pPrefabLibrary->clear();
+	for ( const auto &library : m_PrefabLibraries )
+		m_pPrefabLibrary->addItem( QString::fromStdString( library.m_szName ) );
+	const int nWas = m_pPrefabLibrary->findText( szWas );
+	if ( nWas >= 0 )
+		m_pPrefabLibrary->setCurrentIndex( nWas );
+	FillPrefabObjects();
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Each library offers its VMFs by name, keeping the selected file when possible.
+//-----------------------------------------------------------------------------
+void CMapEditor::FillPrefabObjects()
+{
+	const auto szWas = m_pPrefabObjects->currentData().toString();
+	m_pPrefabObjects->clear();
+	const int nLibrary = m_pPrefabLibrary->currentIndex();
+	if ( nLibrary < 0 || static_cast<std::size_t>( nLibrary ) >= m_PrefabLibraries.size() )
+		return;
+	for ( const auto &prefab : m_PrefabLibraries[ nLibrary ].m_Prefabs )
+		m_pPrefabObjects->addItem( QString::fromStdString( prefab.m_szName ), QString::fromStdString( prefab.m_File.string() ) );
+	const int nWas = m_pPrefabObjects->findData( szWas );
+	if ( nWas >= 0 )
+		m_pPrefabObjects->setCurrentIndex( nWas );
 }
 
 //-----------------------------------------------------------------------------
@@ -1630,6 +1694,9 @@ bool CMapEditor::RunAction( MapAction_t nAction, CMapView *pFrom )
 		case MapAction_t::MAP_ACTION_TOOL_BLOCK:
 			SetTool( MapTool_t::MAP_TOOL_BLOCK );
 			return true;
+		case MapAction_t::MAP_ACTION_CREATE_PREFAB:
+			CreatePrefab();
+			return true;
 		case MapAction_t::MAP_ACTION_TOOL_OVERLAY:
 			SetTool( MapTool_t::MAP_TOOL_OVERLAY );
 			return true;
@@ -2078,6 +2145,84 @@ void CMapEditor::SetEntityMarker( std::optional<xv::map::Point_t> at )
 }
 
 //-----------------------------------------------------------------------------
+// Purpose: A prefab VMF is the selection at its current coordinates, referenced to map origin.
+//-----------------------------------------------------------------------------
+bool CMapEditor::SavePrefab( const QString &szPath, QString *pError ) const
+{
+	const auto *pScene = m_pDocument->GetScene();
+	const auto szText = pScene ? xv::map::SelectionToPrefab( *pScene, m_pDocument->GetSelection() ) : std::string{};
+	if ( szText.empty() )
+	{
+		if ( pError )
+			*pError = tr( "Select objects to create a prefab" );
+		return false;
+	}
+	QSaveFile file( szPath );
+	if ( !file.open( QIODevice::WriteOnly ) || file.write( szText.data(), static_cast<qint64>( szText.size() ) ) != static_cast<qint64>( szText.size() ) || !file.commit() )
+	{
+		if ( pError )
+			*pError = file.errorString();
+		return false;
+	}
+	return true;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Save through the shared chooser, starting in this game's dedicated prefab folder.
+//-----------------------------------------------------------------------------
+void CMapEditor::CreatePrefab()
+{
+	if ( m_pDocument->GetSelection().empty() )
+	{
+		emit StatusMessage( tr( "Select objects to create a prefab" ) );
+		return;
+	}
+	QString szStart = QStringLiteral( "selection.vmf" );
+	if ( const auto &game = m_pDocument->GetGame(); game )
+	{
+		const auto folder = game->m_GameDir / "prefabs";
+		QDir{}.mkpath( QString::fromStdString( folder.string() ) );
+		szStart = QString::fromStdString( ( folder / "selection.vmf" ).string() );
+	}
+	auto szFile = AskSaveFile( this, tr( "Create Prefab" ), szStart, tr( "Hammer prefabs (*.vmf)" ) );
+	if ( szFile.isEmpty() )
+		return;
+	if ( !szFile.endsWith( QStringLiteral( ".vmf" ), Qt::CaseInsensitive ) )
+		szFile += QStringLiteral( ".vmf" );
+	QString szError;
+	if ( !SavePrefab( szFile, &szError ) )
+	{
+		emit StatusMessage( szError );
+		return;
+	}
+	FillPrefabs();
+	emit StatusMessage( tr( "Prefab saved to %1" ).arg( QDir::toNativeSeparators( szFile ) ) );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: The Entity tool inserts a chosen prefab at the marker or traced surface, at full size.
+//-----------------------------------------------------------------------------
+void CMapEditor::PlacePrefab( const xv::map::Point_t &at )
+{
+	const auto *pScene = m_pDocument->GetScene();
+	const auto szFile = m_pPrefabObjects->currentData().toString();
+	if ( !pScene || szFile.isEmpty() )
+	{
+		emit StatusMessage( tr( "Choose a prefab from a library" ) );
+		return;
+	}
+	std::vector<std::uint32_t> added;
+	std::string szError;
+	auto edit = xv::map::PlacePrefab( *pScene, std::filesystem::path{ szFile.toStdString() }, at, &added, &szError );
+	if ( !szError.empty() )
+	{
+		emit StatusMessage( QString::fromStdString( szError ) );
+		return;
+	}
+	m_pDocument->Edit( std::move( edit ), tr( "Insert Prefab" ), std::move( added ) );
+}
+
+//-----------------------------------------------------------------------------
 // Purpose: Open the selected instance's actual source file, using the viewer's resolver.
 //-----------------------------------------------------------------------------
 void CMapEditor::EditInstance()
@@ -2194,6 +2339,11 @@ void CMapEditor::PlaceDecal( const xv::map::Point_t &origin )
 //-----------------------------------------------------------------------------
 void CMapEditor::PlaceEntity( const xv::map::Point_t &origin )
 {
+	if ( m_pObjectCategory->currentIndex() == 1 )
+	{
+		PlacePrefab( origin );
+		return;
+	}
 	const xv::map::CScene *pScene = m_pDocument->GetScene();
 	const std::string szClass = GetEntityClass().trimmed().toStdString();
 	if ( !pScene )
@@ -2223,6 +2373,11 @@ void CMapEditor::PlaceEntity( const xv::map::Point_t &origin )
 //-----------------------------------------------------------------------------
 void CMapEditor::PlaceEntityOn( const xv::map::Point_t &point, const xv::map::Point_t &normal )
 {
+	if ( m_pObjectCategory->currentIndex() == 1 )
+	{
+		PlacePrefab( point );
+		return;
+	}
 	const xv::map::CScene *pScene = m_pDocument->GetScene();
 	if ( !pScene )
 	{

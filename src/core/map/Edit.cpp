@@ -521,6 +521,8 @@ struct Incoming_t
 {
 	std::vector<Solid_t> m_Solids;    // m_nEntity: an index into m_Entities, or -1 (the world, or kept)
 	std::vector<Entity_t> m_Entities;
+	std::vector<Group_t> m_Groups;
+	bool m_bNewGroups = false;
 	std::vector<int> m_OwnersKept;    // per solid: an entity of the map it stays in, or -1
 };
 
@@ -535,6 +537,8 @@ void Adopt( const CMap &map, Solid_t &solid, bool bForeign )
 	solid.m_bDeleted = false;
 	solid.m_bInHidden = false;
 	solid.m_Editor.m_Span = {};
+	if ( bForeign )
+		solid.m_Editor.m_Visgroups.clear();
 	for ( Side_t &side : solid.m_Sides )
 	{
 		side.m_Span = {};
@@ -565,6 +569,8 @@ void Adopt( const CMap &map, Entity_t &entity, bool bForeign )
 	entity.m_bDeleted = false;
 	entity.m_bInHidden = false;
 	entity.m_Editor.m_Span = {};
+	if ( bForeign )
+		entity.m_Editor.m_Visgroups.clear();
 	entity.m_Solids.clear();
 	std::erase_if( entity.m_Keys, []( const EntityKey_t &key ) { return key.m_bDeleted; } );
 	for ( EntityKey_t &key : entity.m_Keys )
@@ -607,10 +613,30 @@ MapEdit_t AddIncoming( const CScene &scene, Incoming_t incoming, const Transform
 	const auto nFirstEntity = static_cast<std::uint32_t>( map.m_Entities.size() );
 	const auto nFirstSolid = static_cast<std::uint32_t>( map.m_Solids.size() );
 	std::uint32_t nObject = scene.GetObjectCount();
+	std::map<int, int> groupIds;
+	for ( const auto &group : incoming.m_Groups )
+		groupIds.emplace( group.m_nId, nNextId++ );
+	auto remapGroup = [ & ]( EditorInfo_t &editor ) {
+		if ( !incoming.m_bNewGroups )
+			return;
+		const auto found = groupIds.find( editor.m_nGroup );
+		editor.m_nGroup = found == groupIds.end() ? 0 : found->second;
+	};
+	for ( auto group : incoming.m_Groups )
+	{
+		group.m_nId = groupIds.at( group.m_nId );
+		group.m_Span = {};
+		group.m_Editor.m_Span = {};
+		group.m_Editor.m_Visgroups.clear();
+		group.m_Editor.m_szComments = map.Store( std::string{ group.m_Editor.m_szComments } );
+		remapGroup( group.m_Editor );
+		edit.m_Groups.push_back( std::move( group ) );
+	}
 	std::map<int, int> sideIds;
 	std::vector<Entity_t> entities = std::move( incoming.m_Entities );
 	for ( Entity_t &entity : entities )
 	{
+		remapGroup( entity.m_Editor );
 		entity = TransformEntity( map, entity, transform );
 		entity.m_nId = nNextId++;
 		if ( pAdded )
@@ -621,6 +647,7 @@ MapEdit_t AddIncoming( const CScene &scene, Incoming_t incoming, const Transform
 	for ( std::size_t i = 0; i < incoming.m_Solids.size(); i++ )
 	{
 		Solid_t solid = TransformSolid( incoming.m_Solids[ i ], transform, bTextureLock );
+		remapGroup( solid.m_Editor );
 		solid.m_bChanged = false;
 		solid.m_nId = nNextId++;
 		for ( Side_t &side : solid.m_Sides )
@@ -730,6 +757,25 @@ std::string ObjectsToText( const CScene &scene, const std::vector<std::uint32_t>
 			szWorld += '\t' + WriteSolid( map, solid, "\t" ) + szNewline;
 		}
 	}
+	std::vector<int> pending;
+	for ( const auto nSolid : set.m_Solids )
+		pending.push_back( map.m_Solids[ nSolid ].m_Editor.m_nGroup );
+	for ( const auto nEntity : set.m_Entities )
+		pending.push_back( map.m_Entities[ nEntity ].m_Editor.m_nGroup );
+	std::set<int> groups;
+	while ( !pending.empty() )
+	{
+		const int nGroup = pending.back();
+		pending.pop_back();
+		if ( nGroup == 0 || !groups.insert( nGroup ).second )
+			continue;
+		const auto found = std::ranges::find_if( map.m_Groups, [ & ]( const auto &group ) { return group.m_nId == nGroup; } );
+		if ( found != map.m_Groups.end() )
+			pending.push_back( found->m_Editor.m_nGroup );
+	}
+	for ( const auto &group : map.m_Groups )
+		if ( groups.contains( group.m_nId ) )
+			szWorld += '\t' + WriteGroup( map, group, "\t" ) + szNewline;
 	if ( !szWorld.empty() )
 	{
 		szText += "world" + szNewline + "{" + szNewline + "\t\"id\" \"1\"" + szNewline + "\t\"classname\" \"worldspawn\"" + szNewline + szWorld + "}" + szNewline;
@@ -753,6 +799,8 @@ MapEdit_t ObjectsFromText( const CScene &scene, std::string_view szText, const T
 	}
 	const CMap &map = scene.m_Map;
 	Incoming_t incoming;
+	incoming.m_Groups = clip->m_Groups;
+	incoming.m_bNewGroups = true;
 	for ( const Entity_t &source : clip->m_Entities )
 	{
 		Entity_t entity = source;

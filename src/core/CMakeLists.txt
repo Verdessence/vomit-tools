@@ -55,6 +55,8 @@ add_library(vomit_tools_core STATIC
         map/Compile.h
         map/Faces.cpp
         map/Faces.h
+        map/Prefab.cpp
+        map/Prefab.h
         map/Primitives.cpp
         map/Primitives.h
         map/Properties.cpp

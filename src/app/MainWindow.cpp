@@ -810,6 +810,11 @@ void CMainWindow::BuildMenus( QAction *pSearchPathsToggle )
 	m_pMapMenu->menuAction()->setVisible( false );
 
 	// Simple or regular names, everywhere and remembered.
+	auto *pTools = menuBar()->addMenu( tr( "&Tools" ) );
+	auto *pCreatePrefab = pTools->addAction( tr( "Create Prefab..." ), this, [ this ] { if ( auto *pMap = GetCurrentMap() ) pMap->CreatePrefab(); } );
+	pCreatePrefab->setObjectName( QStringLiteral( "mapCreatePrefabAction" ) );
+	connect( pTools, &QMenu::aboutToShow, this, [ this, pCreatePrefab ] { pCreatePrefab->setEnabled( GetCurrentMap() && !GetCurrentMap()->GetDocument().GetSelection().empty() ); } );
+
 	auto *pView = menuBar()->addMenu( tr( "&View" ) );
 	QAction *pSimple = pView->addAction( tr( "&Simple Interface" ) );
 	pSimple->setObjectName( QStringLiteral( "simpleInterface" ) );

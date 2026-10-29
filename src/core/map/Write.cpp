@@ -157,6 +157,7 @@ public:
 	// Whole objects, as Hammer writes them (see Write.h).
 	[[nodiscard]] std::string Solid( const Solid_t &solid, std::string_view szIndent ) const;
 	[[nodiscard]] std::string Entity( const Entity_t &entity, std::string_view szIndent ) const;
+	[[nodiscard]] std::string Group( const Group_t &group, std::string_view szIndent ) const;
 
 private:
 	struct Patch_t
@@ -1037,6 +1038,16 @@ std::string CWriter::Run()
 	return szOut;
 }
 
+//-----------------------------------------------------------------------------
+// Purpose: A selection export includes its groups, so importing it can allocate their IDs too.
+//-----------------------------------------------------------------------------
+std::string CWriter::Group( const Group_t &group, std::string_view szIndent ) const
+{
+	const std::string szIn = std::string{ szIndent } + '\t';
+	const std::string nl{ m_szNewline };
+	return "group" + nl + std::string{ szIndent } + '{' + nl + szIn + Pair( "id", std::to_string( group.m_nId ) ) + nl + szIn + Editor( group.m_Editor, szIn, nullptr ) + nl + std::string{ szIndent } + '}';
+}
+
 } // namespace
 
 //-----------------------------------------------------------------------------
@@ -1061,6 +1072,14 @@ std::string WriteSolid( const CMap &map, const Solid_t &solid, std::string_view 
 std::string WriteEntity( const CMap &map, const Entity_t &entity, std::string_view szIndent )
 {
 	return CWriter{ map }.Entity( entity, szIndent );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Export group hierarchy alongside the objects belonging to it.
+//-----------------------------------------------------------------------------
+std::string WriteGroup( const CMap &map, const Group_t &group, std::string_view szIndent )
+{
+	return CWriter{ map }.Group( group, szIndent );
 }
 
 //-----------------------------------------------------------------------------
