@@ -961,6 +961,26 @@ void CMapView3D::mouseReleaseEvent( QMouseEvent *pEvent )
 	{
 		Select( pEvent->position(), pEvent->modifiers().testFlag( Qt::ControlModifier ) );
 	}
+	else if ( m_Editor.GetTool() == MapTool_t::MAP_TOOL_DECAL )
+	{
+		if ( pEvent->modifiers().testFlag( Qt::ShiftModifier ) )
+		{
+			const auto *pScene = GetDocument().GetScene();
+			for ( const auto &hit : HitsAt( pEvent->position() ) )
+			{
+				if ( pScene && !pScene->IsSolidObject( hit.m_nObject ) && pScene->m_Map.m_Entities[ pScene->GetIndex( hit.m_nObject ) ].GetClassname() == "infodecal" )
+				{
+					GetDocument().SetSelection( { hit.m_nObject } );
+					break;
+				}
+			}
+		}
+		else if ( FaceAt( pEvent->position() ) )
+		{
+			if ( const auto surface = SurfaceAt( pEvent->position() ) )
+				m_Editor.PlaceDecal( surface->first );
+		}
+	}
 	else if ( m_Editor.GetTool() == MapTool_t::MAP_TOOL_ENTITY )
 	{
 		// Hammer's entity tool puts it straight on what was clicked.

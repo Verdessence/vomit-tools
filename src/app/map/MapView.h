@@ -45,6 +45,7 @@ enum class MapTool_t
 	MAP_TOOL_TEXTURE, // Hammer's Texture Application: faces picked in 3D, the Face Edit sheet
 	MAP_TOOL_CLIP,    // Hammer's clipping tool: a line dragged in 2D, Enter cuts the selection
 	MAP_TOOL_CORDON,  // Hammer's Edit Cordon Bounds: the cordon's box dragged like a new block's
+	MAP_TOOL_DECAL,   // Shift+D: place an infodecal on a picked surface
 	MAP_TOOL_VERTEX,  // Hammer's Vertex Tool: the selected solids' corners and edges dragged in 2D
 };
 

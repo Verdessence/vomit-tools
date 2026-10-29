@@ -117,6 +117,7 @@ public:
 	[[nodiscard]] const std::optional<xv::map::Point_t> &GetEntityMarker() const { return m_EntityMarker; }
 	void SetEntityMarker( std::optional<xv::map::Point_t> at );
 	// A new entity of the entity tool's class at origin, selected.
+	void PlaceDecal( const xv::map::Point_t &origin );
 	void PlaceEntity( const xv::map::Point_t &origin );
 	// The same, standing on a surface (a click in 3D): its box touches the surface at point, on
 	// the side normal faces.

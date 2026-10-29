@@ -54,4 +54,7 @@ enum class Primitive_t
 // classname and origin. Its text is kept in map's store.
 [[nodiscard]] Entity_t MakePointEntity( const CMap &map, const CFgd *pFgd, std::string_view szClass, const Point_t &origin );
 
+// A surface decal at the picked point, using the texture toolbar's current material.
+[[nodiscard]] Entity_t MakeDecal( const CMap &map, Point_t origin, std::string_view szMaterial );
+
 } // namespace xv::map

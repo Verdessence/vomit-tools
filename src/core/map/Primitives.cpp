@@ -275,4 +275,14 @@ Entity_t MakePointEntity( const CMap &map, const CFgd *pFgd, std::string_view sz
 	return entity;
 }
 
+//-----------------------------------------------------------------------------
+// Purpose: Decals are ordinary point entities; their origin picks the surface at compile time.
+//-----------------------------------------------------------------------------
+Entity_t MakeDecal( const CMap &map, Point_t origin, std::string_view szMaterial )
+{
+	Entity_t entity = MakePointEntity( map, nullptr, "infodecal", origin );
+	SetKeyValue( map, entity, "texture", szMaterial );
+	return entity;
+}
+
 } // namespace xv::map

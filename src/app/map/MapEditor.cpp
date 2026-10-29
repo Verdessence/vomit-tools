@@ -79,6 +79,7 @@ enum class MapIcon_t
 	MAP_ICON_ENTITY,
 	MAP_ICON_BLOCK,
 	MAP_ICON_TEXTURE,
+	MAP_ICON_DECAL,
 	MAP_ICON_CLIP,
 	MAP_ICON_CORDON,
 	MAP_ICON_VERTEX,
@@ -160,6 +161,13 @@ QIcon MakeIcon( MapIcon_t nIcon, const QColor &color )
 			painter.drawRect( QRectF{ 6, 8, 20, 16 } );
 			painter.setPen( QPen{ color, 2.5, Qt::DashLine, Qt::RoundCap } );
 			painter.drawLine( QPointF{ 3, 28 }, QPointF{ 29, 4 } );
+			break;
+		case MapIcon_t::MAP_ICON_DECAL:
+			// A stamp above a marked surface.
+			painter.drawLine( QPointF{ 4, 26 }, QPointF{ 28, 26 } );
+			painter.drawRect( QRectF{ 9, 15, 14, 6 } );
+			painter.drawLine( QPointF{ 16, 6 }, QPointF{ 16, 15 } );
+			painter.drawEllipse( QPointF{ 16, 6 }, 3, 3 );
 			break;
 		case MapIcon_t::MAP_ICON_TEXTURE:
 			// A face with a texture's checker on it.
@@ -333,6 +341,7 @@ CMapEditor::CMapEditor( const QString &szPath, bool bFromGame, QWidget *pParent 
 		{ MapTool_t::MAP_TOOL_ENTITY, MapIcon_t::MAP_ICON_ENTITY, tr( "Entity Tool" ), MapAction_t::MAP_ACTION_TOOL_ENTITY },
 		{ MapTool_t::MAP_TOOL_BLOCK, MapIcon_t::MAP_ICON_BLOCK, tr( "Block Tool" ), MapAction_t::MAP_ACTION_TOOL_BLOCK },
 		{ MapTool_t::MAP_TOOL_TEXTURE, MapIcon_t::MAP_ICON_TEXTURE, tr( "Texture Application" ), MapAction_t::MAP_ACTION_TOOL_TEXTURE },
+		{ MapTool_t::MAP_TOOL_DECAL, MapIcon_t::MAP_ICON_DECAL, tr( "Apply Decals" ), MapAction_t::MAP_ACTION_TOOL_DECAL },
 		{ MapTool_t::MAP_TOOL_CLIP, MapIcon_t::MAP_ICON_CLIP, tr( "Clipping Tool" ), MapAction_t::MAP_ACTION_TOOL_CLIP },
 		{ MapTool_t::MAP_TOOL_VERTEX, MapIcon_t::MAP_ICON_VERTEX, tr( "Vertex Tool" ), MapAction_t::MAP_ACTION_TOOL_VERTEX },
 		{ MapTool_t::MAP_TOOL_CORDON, MapIcon_t::MAP_ICON_CORDON, tr( "Edit Cordon Bounds" ), MapAction_t::MAP_ACTION_TOOL_CORDON },
@@ -1590,6 +1599,9 @@ bool CMapEditor::RunAction( MapAction_t nAction, CMapView *pFrom )
 		case MapAction_t::MAP_ACTION_TOOL_BLOCK:
 			SetTool( MapTool_t::MAP_TOOL_BLOCK );
 			return true;
+		case MapAction_t::MAP_ACTION_TOOL_DECAL:
+			SetTool( MapTool_t::MAP_TOOL_DECAL );
+			return true;
 		case MapAction_t::MAP_ACTION_TOOL_TEXTURE:
 			SetTool( MapTool_t::MAP_TOOL_TEXTURE );
 			return true;
@@ -2029,6 +2041,19 @@ void CMapEditor::SetEntityMarker( std::optional<xv::map::Point_t> at )
 	}
 	m_EntityMarker = at;
 	RepaintTools();
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Stamp the current material exactly on the picked floor, wall or ceiling.
+//-----------------------------------------------------------------------------
+void CMapEditor::PlaceDecal( const xv::map::Point_t &origin )
+{
+	const auto *pScene = m_pDocument->GetScene();
+	if ( !pScene )
+		return;
+	std::vector<std::uint32_t> added;
+	auto edit = xv::map::AddObjects( *pScene, {}, { xv::map::MakeDecal( pScene->m_Map, origin, GetCurrentMaterial().toStdString() ) }, &added );
+	m_pDocument->Edit( std::move( edit ), tr( "Create Decal" ), std::move( added ) );
 }
 
 //-----------------------------------------------------------------------------

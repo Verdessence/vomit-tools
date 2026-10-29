@@ -49,6 +49,7 @@ enum class MapAction_t
 	MAP_ACTION_TOOL_CAMERA,          // Shift+C
 	MAP_ACTION_TOOL_ENTITY,          // Shift+E
 	MAP_ACTION_TOOL_BLOCK,           // Shift+B
+	MAP_ACTION_TOOL_DECAL,           // Shift+D
 	MAP_ACTION_TOOL_TEXTURE,         // Shift+A
 	MAP_ACTION_RUN_MAP,              // F9
 	MAP_ACTION_TOOL_CLIP,            // Shift+X (again: the next clip mode)
