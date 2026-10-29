@@ -178,6 +178,8 @@ add_library(vomit_tools_ui STATIC
         map/MapView2D.h
         map/MapView3D.cpp
         map/MapView3D.h
+        map/MaterialPictures.cpp
+        map/MaterialPictures.h
         map/MaterialBrowser.cpp
         map/MaterialBrowser.h
         PointerLock.cpp

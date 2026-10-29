@@ -20,6 +20,9 @@
 #include <QListView>
 #include <QPainter>
 #include <QPixmap>
+#include <QTimer>
+#include <QThread>
+#include "MaterialPictures.h"
 #include <QSortFilterProxyModel>
 #include <QStandardPaths>
 #include <QVBoxLayout>
@@ -32,7 +35,6 @@
 namespace
 {
 
-constexpr int PICTURE_VERSION = 2;
 constexpr int SMALL_PICTURE = 128; // what is kept for every material; smaller sizes are scaled from it
 constexpr int LARGE_PICTURE = 512; // made only for those shown at 256 or 512
 
@@ -51,54 +53,6 @@ QString HammerName( const std::string &szPath )
 		szName.chop( 4 );
 	}
 	return szName.toUpper();
-}
-
-//-----------------------------------------------------------------------------
-// Purpose:
-//-----------------------------------------------------------------------------
-QString PicturePath( const QString &szName, int nPictureSize )
-{
-	const QByteArray hash = QCryptographicHash::hash( szName.toUtf8(), QCryptographicHash::Md5 ).toHex();
-	return QStringLiteral( "%1/%2/%3.png" ).arg( CMaterialBrowser::CacheFolder() ).arg( nPictureSize ).arg( QString::fromLatin1( hash ) );
-}
-
-//-----------------------------------------------------------------------------
-// Purpose: A see-through material over a grey checkerboard (eight squares across), its alpha
-//          showing; any other without its alpha, which is something else there (a mask). A
-//          texture smaller than the picture is blown up in whole pixels.
-//-----------------------------------------------------------------------------
-QImage Composed( QImage picture, bool bSeeThrough, int nPictureSize )
-{
-	if ( !bSeeThrough )
-	{
-		// The colour as it is, the alpha ignored: before scaling, which premultiplies (and so
-		// blacks out what the alpha hides).
-		picture = picture.convertToFormat( QImage::Format_RGBA8888 );
-		picture.reinterpretAsFormat( QImage::Format_RGBX8888 );
-	}
-	const int nLargest = std::max( picture.width(), picture.height() );
-	if ( nLargest > 0 && nLargest < nPictureSize )
-	{
-		const int nTimes = nPictureSize / nLargest;
-		picture = picture.scaled( picture.width() * nTimes, picture.height() * nTimes, Qt::IgnoreAspectRatio, Qt::FastTransformation );
-	}
-	QImage composed( picture.size(), QImage::Format_RGB32 );
-	composed.fill( Qt::black );
-	if ( bSeeThrough )
-	{
-		const int nSquare = std::max( 1, std::max( picture.width(), picture.height() ) / 8 );
-		QPainter checker( &composed );
-		for ( int y = 0; y < composed.height(); y += nSquare )
-		{
-			for ( int x = 0; x < composed.width(); x += nSquare )
-			{
-				checker.fillRect( x, y, nSquare, nSquare, ( ( x / nSquare + y / nSquare ) % 2 ) ? QColor( 102, 102, 102 ) : QColor( 153, 153, 153 ) );
-			}
-		}
-	}
-	QPainter painter( &composed );
-	painter.drawImage( 0, 0, picture );
-	return composed;
 }
 
 // Every word typed must be in the name; "Only used" keeps the map's materials.
@@ -129,6 +83,15 @@ protected:
 CMaterialList::CMaterialList( QObject *pParent )
 	: QAbstractListModel( pParent )
 {
+	m_pNotify = new QTimer( this );
+	m_pNotify->setSingleShot( true );
+	m_pNotify->setInterval( 30 );
+	connect( m_pNotify, &QTimer::timeout, this, [ this ] {
+		if ( m_nFirstPending <= m_nLastPending )
+			emit dataChanged( index( m_nFirstPending ), index( m_nLastPending ), { Qt::DecorationRole } );
+		m_nFirstPending = std::numeric_limits<int>::max();
+		m_nLastPending = -1;
+	} );
 }
 
 //-----------------------------------------------------------------------------
@@ -181,6 +144,9 @@ QVariant CMaterialList::data( const QModelIndex &index, int nRole ) const
 //-----------------------------------------------------------------------------
 void CMaterialList::SetNames( QStringList names )
 {
+	m_pNotify->stop();
+	m_nFirstPending = std::numeric_limits<int>::max();
+	m_nLastPending = -1;
 	beginResetModel();
 	m_Names = std::move( names );
 	m_Pictures.assign( static_cast<std::size_t>( m_Names.size() ), QIcon{} );
@@ -190,14 +156,18 @@ void CMaterialList::SetNames( QStringList names )
 //-----------------------------------------------------------------------------
 // Purpose:
 //-----------------------------------------------------------------------------
-void CMaterialList::SetPicture( int nRow, const QIcon &icon, int nPictureSize )
+void CMaterialList::SetPicture( int nRow, const QImage &picture, int nPictureSize )
 {
 	if ( nRow < 0 || nRow >= m_Names.size() || nPictureSize != m_nPictureSize )
 	{
 		return;
 	}
-	m_Pictures[ static_cast<std::size_t>( nRow ) ] = icon;
-	emit dataChanged( index( nRow ), index( nRow ), { Qt::DecorationRole } );
+	Q_ASSERT( QThread::currentThread() == thread() );
+	m_Pictures[ static_cast<std::size_t>( nRow ) ] = QIcon( QPixmap::fromImage( picture ) );
+	m_nFirstPending = std::min( m_nFirstPending, nRow );
+	m_nLastPending = std::max( m_nLastPending, nRow );
+	if ( !m_pNotify->isActive() )
+		m_pNotify->start();
 }
 
 //-----------------------------------------------------------------------------
@@ -225,8 +195,12 @@ void CMaterialList::SetSize( int nSize )
 std::vector<int> CMaterialList::TakeWanted()
 {
 	const std::lock_guard lock( m_Mutex );
-	std::vector<int> wanted = std::move( m_Wanted );
-	m_Wanted.clear();
+	std::vector<int> wanted;
+	if ( !m_Wanted.empty() )
+	{
+		wanted.push_back( m_Wanted.front() );
+		m_Wanted.erase( m_Wanted.begin() );
+	}
 	return wanted;
 }
 
@@ -276,6 +250,7 @@ CMaterialBrowser::CMaterialBrowser( const xv::vfs::CGameInfo &game, QStringList 
 	m_pFilter = pFilter;
 	m_pView = new QListView;
 	m_pView->setObjectName( QStringLiteral( "materialBrowserView" ) );
+	connect( m_pList, &CMaterialList::dataChanged, m_pView, [ this ] { m_pView->viewport()->update(); } );
 	m_pView->setModel( m_pFilter );
 	m_pView->setViewMode( QListView::IconMode );
 	m_pView->setResizeMode( QListView::Adjust );
@@ -324,7 +299,7 @@ CMaterialBrowser::~CMaterialBrowser()
 //-----------------------------------------------------------------------------
 QString CMaterialBrowser::CacheFolder()
 {
-	return QStandardPaths::writableLocation( QStandardPaths::CacheLocation ) + QStringLiteral( "/material-pictures/v%1" ).arg( PICTURE_VERSION );
+	return MaterialPictureCacheFolder();
 }
 
 //-----------------------------------------------------------------------------
@@ -369,14 +344,6 @@ void CMaterialBrowser::Run()
 		m_pList->SetNames( names );
 		m_bListed = true;
 		ApplyFilter(); }, Qt::QueuedConnection );
-	// Pictures made the older ways aren't read any more.
-	for ( int nVersion = 1; nVersion < PICTURE_VERSION; nVersion++ )
-	{
-		QDir( QStandardPaths::writableLocation( QStandardPaths::CacheLocation ) + QStringLiteral( "/material-pictures/v%1" ).arg( nVersion ) ).removeRecursively();
-	}
-	QDir().mkpath( CacheFolder() + QStringLiteral( "/%1" ).arg( SMALL_PICTURE ) );
-	QDir().mkpath( CacheFolder() + QStringLiteral( "/%1" ).arg( LARGE_PICTURE ) );
-	const xv::material::Reader_t read = [ &fileSystem ]( std::string_view szPath ) { return fileSystem.Read( szPath ); };
 	std::vector<bool> done( paths.size(), false );
 	std::size_t nNext = 0;
 	int nDoneSize = SMALL_PICTURE;
@@ -420,30 +387,8 @@ void CMaterialBrowser::Run()
 		}
 		done[ static_cast<std::size_t>( nRow ) ] = true;
 		const QString szName = names[ nRow ];
-		const QString szFile = PicturePath( szName, nPictureSize );
-		QImage picture( szFile );
-		if ( picture.isNull() )
-		{
-			// ReadMaterialInfo takes a map's name for the material, without materials/ and .vmt.
-			const std::string &szPath = paths[ static_cast<std::size_t>( nRow ) ];
-			const xv::map::MaterialInfo_t info = xv::map::ReadMaterialInfo( szPath.substr( 10, szPath.size() - 14 ), read );
-			if ( const auto vtf = info.m_szTexture.empty() ? std::nullopt : fileSystem.Read( "materials/" + info.m_szTexture + ".vtf" ) )
-			{
-				if ( const auto pTexture = ReadMapTexture( *vtf, nPictureSize, true ); pTexture && !pTexture->m_Mips.empty() )
-				{
-					picture = Composed( ToQImage( pTexture->m_Mips.front() ).copy(), info.IsSeeThrough() || info.m_bAlphaTest, nPictureSize );
-					picture.save( szFile );
-				}
-			}
-		}
-		if ( picture.isNull() )
-		{
-			// Nothing to draw: a grey square, so the row stops asking.
-			picture = QImage( 16, 16, QImage::Format_RGB32 );
-			picture.fill( QColor( 96, 96, 96 ) );
-		}
-		const QIcon icon( QPixmap::fromImage( picture ) );
-		QMetaObject::invokeMethod( this, [ this, nRow, icon, nPictureSize ] { m_pList->SetPicture( nRow, icon, nPictureSize ); }, Qt::QueuedConnection );
+		const QImage picture = LoadMaterialPicture( fileSystem, QString::fromStdString( m_Game.m_GameDir.string() ), szName, nPictureSize ).m_Image;
+		QMetaObject::invokeMethod( this, [ this, nRow, picture, nPictureSize ] { m_pList->SetPicture( nRow, picture, nPictureSize ); }, Qt::QueuedConnection );
 	}
 }
 

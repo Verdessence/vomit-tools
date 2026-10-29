@@ -20,6 +20,9 @@
 #include <QAbstractListModel>
 #include <QDialog>
 #include <QIcon>
+#include <QImage>
+#include <limits>
+class QTimer;
 #include <QStringList>
 
 #include "vfs/Vfs.h"
@@ -44,7 +47,7 @@ public:
 
 	void SetNames( QStringList names );
 	// A picture made at nPictureSize; one made for the size before a change is dropped.
-	void SetPicture( int nRow, const QIcon &icon, int nPictureSize );
+	void SetPicture( int nRow, const QImage &picture, int nPictureSize );
 	// The size rows are shown at; past 128 the pictures are made again, bigger.
 	void SetSize( int nSize );
 	[[nodiscard]] int GetPictureSize() const { return m_nPictureSize; }
@@ -55,6 +58,9 @@ public:
 	static constexpr int ROLE_NAME = Qt::UserRole;
 
 private:
+	QTimer *m_pNotify = nullptr;
+	int m_nFirstPending = std::numeric_limits<int>::max();
+	int m_nLastPending = -1;
 	QStringList m_Names;
 	std::vector<QIcon> m_Pictures;
 	mutable std::mutex m_Mutex;
