@@ -11,15 +11,19 @@
 //===========================================================================//
 #pragma once
 
+#include <optional>
+
 #include <QWidget>
 
 #include "map/DispEdit.h"
 #include "map/Faces.h"
 
 class CMapEditor;
+class QButtonGroup;
 class QCheckBox;
 class QComboBox;
 class QDoubleSpinBox;
+class QLabel;
 class QLineEdit;
 class QRadioButton;
 class QSpinBox;
@@ -69,6 +73,16 @@ public:
 	void SetBrushRadius( double flRadius );
 	[[nodiscard]] int GetDispPower() const;
 	void ShowTab( int nTab );
+	// Alt+right-click on a face: its normal is the brush's axis for every displacement.
+	void SetPaintNormal( const xv::map::Point_t &normal );
+	[[nodiscard]] bool IsAutosew() const;
+	// The Masks: the selected displacements drawn without their grid, or without their shading.
+	[[nodiscard]] bool IsGridMasked() const;
+	[[nodiscard]] bool IsSelectMasked() const;
+
+signals:
+	// What a click in 3D does changed, or how selected displacements show: the views redraw.
+	void PaintModeChanged();
 
 private:
 	void BuildDisplacementTab( QWidget *pPage );
@@ -92,11 +106,22 @@ private:
 	QTabWidget *m_pTabs = nullptr;
 	QSpinBox *m_pPower = nullptr;
 	QDoubleSpinBox *m_pElevation = nullptr;
-	QComboBox *m_pPaintMode = nullptr;
+	QButtonGroup *m_pPaintModes = nullptr;
 	QComboBox *m_pEffect = nullptr;
 	QComboBox *m_pAxis = nullptr;
 	QDoubleSpinBox *m_pRadius = nullptr;
-	QDoubleSpinBox *m_pAmount = nullptr;
+	QDoubleSpinBox *m_pAmount = nullptr;     // Paint Geometry's Distance
+	QDoubleSpinBox *m_pAlphaValue = nullptr; // Paint Alpha's Value
+	QLabel *m_pAmountLabel = nullptr;
+	QCheckBox *m_pSoftEdge = nullptr;
+	QCheckBox *m_pAutosew = nullptr;
+	std::optional<xv::map::Point_t> m_PaintNormal;
 	QDoubleSpinBox *m_pNoiseMin = nullptr;
 	QDoubleSpinBox *m_pNoiseMax = nullptr;
+	QDoubleSpinBox *m_pScale = nullptr;
+	QCheckBox *m_pNoPhysics = nullptr;
+	QCheckBox *m_pNoHull = nullptr;
+	QCheckBox *m_pNoRay = nullptr;
+	QCheckBox *m_pGridMask = nullptr;
+	QCheckBox *m_pSelectMask = nullptr;
 };

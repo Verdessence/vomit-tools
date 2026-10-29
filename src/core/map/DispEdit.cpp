@@ -29,11 +29,15 @@ constexpr double WALKABLE_UP = 0.7;  // and walked up
 // Purpose: How much of the brush a point this far from its centre gets: all at the centre,
 //          none at the radius, smooth between.
 //-----------------------------------------------------------------------------
-double Weight( double flDistance, double flRadius )
+double Weight( double flDistance, double flRadius, bool bSoft = true )
 {
 	if ( flRadius <= 0.0 || flDistance >= flRadius )
 	{
 		return 0.0;
+	}
+	if ( !bSoft )
+	{
+		return 1.0;
 	}
 	const double t = flDistance / flRadius;
 	return 1.0 - t * t * ( 3.0 - 2.0 * t );
@@ -313,7 +317,7 @@ bool PaintGeometry( DispInfo_t &disp, const FaceGeometry_t &face, const DispBrus
 	for ( std::size_t i = 0; i < mesh->m_Points.size(); i++ )
 	{
 		const Point_t &p = mesh->m_Points[ i ];
-		const double w = Weight( Length( Subtract( p, brush.m_Centre ) ), brush.m_flRadius );
+		const double w = Weight( Length( Subtract( p, brush.m_Centre ) ), brush.m_flRadius, brush.m_bSoftEdge );
 		if ( w <= 0.0 )
 		{
 			continue;
@@ -365,7 +369,7 @@ bool PaintAlpha( DispInfo_t &disp, const FaceGeometry_t &face, const DispBrush_t
 	bool bChanged = false;
 	for ( std::size_t i = 0; i < mesh->m_Points.size() && i < disp.m_Alphas.size(); i++ )
 	{
-		const double w = Weight( Length( Subtract( mesh->m_Points[ i ], brush.m_Centre ) ), brush.m_flRadius );
+		const double w = Weight( Length( Subtract( mesh->m_Points[ i ], brush.m_Centre ) ), brush.m_flRadius, brush.m_bSoftEdge );
 		if ( w <= 0.0 )
 		{
 			continue;
@@ -397,6 +401,17 @@ bool PaintAlpha( DispInfo_t &disp, const FaceGeometry_t &face, const DispBrush_t
 		disp.m_Alphas[ i ] = flNew;
 	}
 	return bChanged;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: The offsets (Hammer's own nudges) stay; what the normals and distances make scales.
+//-----------------------------------------------------------------------------
+void ScaleDisplacement( DispInfo_t &disp, double flScale )
+{
+	for ( float &flDistance : disp.m_Distances )
+	{
+		flDistance = static_cast<float>( flDistance * flScale );
+	}
 }
 
 //-----------------------------------------------------------------------------

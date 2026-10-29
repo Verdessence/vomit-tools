@@ -693,6 +693,20 @@ void CWriter::PatchDisp( const DispInfo_t &disp, const Node_t &node )
 				ReplaceValue( child, std::to_string( disp.m_nPower ) );
 			}
 		}
+		else if ( Is( child.m_szName, "flags" ) )
+		{
+			if ( !ParseNumbers( child.m_szValue, 1, values ) || values[ 0 ] != disp.m_nFlags )
+			{
+				ReplaceValue( child, std::to_string( disp.m_nFlags ) );
+			}
+		}
+		else if ( Is( child.m_szName, "subdiv" ) )
+		{
+			if ( !ParseNumbers( child.m_szValue, 1, values ) || ( values[ 0 ] != 0.0 ) != disp.m_bSubdivided )
+			{
+				ReplaceValue( child, disp.m_bSubdivided ? "1" : "0" );
+			}
+		}
 	}
 	// The grids are only written again when their numbers changed (a displacement edit).
 	if ( !disp.m_bValid )

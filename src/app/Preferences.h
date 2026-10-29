@@ -124,6 +124,7 @@ struct MapPreferences_t
 	bool m_bPivot = true;            // what a map opens with (Hammer++'s Pivot): turns go about a point that can be moved
 	MapCarve_t m_nCarve = MapCarve_t::MAP_CARVE_AUTO;
 	bool m_bGroupCarve = true;       // a carved brush's pieces grouped (Hammer++'s GroupCarve)
+	bool m_bFaceEditWindow = true;   // Face Edit in a window of its own, as Hammer's (else in the side panel)
 
 	// The 2D views.
 	bool m_bHideSmallGrid = true;

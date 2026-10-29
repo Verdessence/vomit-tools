@@ -93,6 +93,8 @@ public:
 	void PaintLabels( QPainter &painter );
 	// The gizmo at the selection, if there is one to show, and the camera at this view's size.
 	[[nodiscard]] std::optional<CMapGizmo> GetGizmo() const;
+	// A cross while the Displacement tab's brush is on, else the arrow (not during mouselook).
+	void UpdateCursor();
 	// The brush face under a widget point (the nearest hit's triangle, when it is a brush's).
 	[[nodiscard]] std::optional<xv::map::FaceRef_t> FaceAt( QPointF at );
 	[[nodiscard]] xv::map::CViewCamera GetSizedCamera() const;
@@ -184,5 +186,8 @@ private:
 	bool m_bPaintLower = false;
 	QPoint m_PaintLast;
 	std::optional<std::pair<xv::map::Point_t, xv::map::Point_t>> m_BrushAt;
+	// Alt+drag sizing the brush: where it began and the radius then.
+	std::optional<QPoint> m_RadiusFrom;
+	double m_flRadiusFrom = 0.0;
 	QElapsedTimer m_LogClock; // the statistics go to the debug log once a second
 };

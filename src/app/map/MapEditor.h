@@ -225,7 +225,9 @@ public:
 	void SubdivideDisplacements();
 	void NoiseDisplacements( double flMin, double flMax );
 	void InvertDisplacementAlpha();
-	void SetDisplacementAttributes( int nPower, double flElevation );
+	void SetDisplacementAttributes( int nPower, double flElevation, double flScale = 1.0, std::optional<int> nFlags = std::nullopt );
+	// Hammer's Face Edit Sheet as a window of its own (Preferences), else nothing.
+	[[nodiscard]] QDialog *GetFaceEditWindow() const { return m_pFaceEditWindow; }
 	// The displacements a brush paints: the selected faces', else the one under the mouse.
 	[[nodiscard]] std::vector<xv::map::FaceRef_t> GetPaintFaces( const std::optional<xv::map::FaceRef_t> &under ) const;
 	// A stroke's result (the painted copies, from pScene) made one undo step.
@@ -245,6 +247,11 @@ public:
 	bool ConfirmClose() override;
 	bool Save() override;
 	bool SaveAs() override;
+
+protected:
+	// The Face Edit window goes with the tab: hidden while another tab shows.
+	void showEvent( QShowEvent *pEvent ) override;
+	void hideEvent( QHideEvent *pEvent ) override;
 
 signals:
 	void StatusMessage( const QString &szText );
@@ -313,6 +320,9 @@ private:
 	QComboBox *m_pPrimitive = nullptr; // the block tool's shape (Hammer's Objects box)
 	QSpinBox *m_pSides = nullptr;      // its Faces box
 	QPointer<QDialog> m_pCompileDialog;
+	QDialog *m_pFaceEditWindow = nullptr; // holds Face Edit when it is a window of its own
+	// Face Edit where Preferences wants it: its window, or the side panel under Object Properties.
+	void PlaceFaceEdit();
 	// The cordon and box the cordon tool's box belongs to (the Cordons tab's pick when the tool
 	// took it up).
 	std::size_t m_nCordonPick = 0;

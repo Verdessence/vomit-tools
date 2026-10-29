@@ -46,6 +46,8 @@
 #include <QGuiApplication>
 #include <QDir>
 #include <QMessageBox>
+#include <QHideEvent>
+#include <QShowEvent>
 #include <QTimer>
 #include <QVBoxLayout>
 
@@ -269,10 +271,34 @@ CMapEditor::CMapEditor( const QString &szPath, bool bFromGame, QWidget *pParent 
 	// Hammer opens Face Edit as a window of its own; here it takes Object Properties' place
 	// while the texture tool is on.
 	m_pPanelStack = new QStackedWidget;
+	m_pPanelStack->setObjectName( QStringLiteral( "mapPanelStack" ) );
 	m_pPanelStack->addWidget( m_pProperties );
 	m_pPanelStack->addWidget( m_pFaceEdit );
+	// Hammer's Face Edit Sheet is a window of its own; closing it puts the selection tool back.
+	m_pFaceEditWindow = new QDialog( this, Qt::Tool );
+	m_pFaceEditWindow->setObjectName( QStringLiteral( "mapFaceEditWindow" ) );
+	m_pFaceEditWindow->setWindowTitle( tr( "Face Edit Sheet" ) );
+	m_pFaceEditWindow->setModal( false );
+	new QVBoxLayout( m_pFaceEditWindow );
+	connect( m_pFaceEditWindow, &QDialog::finished, this, [ this ] {
+		if ( m_nTool == MapTool_t::MAP_TOOL_TEXTURE )
+		{
+			SetTool( MapTool_t::MAP_TOOL_SELECT );
+		}
+	} );
+	connect( m_pFaceEdit, &CMapFaceEdit::PaintModeChanged, this, [ this ] {
+		for ( CMapView *pView : GetViews() )
+		{
+			if ( auto *p3D = qobject_cast<CMapView3D *>( pView ) )
+			{
+				p3D->UpdateCursor();
+			}
+		}
+		RepaintTools();
+	} );
 	section( tr( "Filter Control" ), m_pFilter );
 	m_pPanelTitle = section( tr( "Object Properties" ), m_pPanelStack );
+	PlaceFaceEdit();
 	section( tr( "New Objects" ), BuildNewObjects() );
 	m_pSidePanel->setStretchFactor( 0, 2 );
 	m_pSidePanel->setStretchFactor( 1, 3 );
@@ -662,8 +688,7 @@ void CMapEditor::SetTool( MapTool_t nTool )
 		SetNewBox( GetCordonBox() );
 	}
 	const bool bTexture = nTool == MapTool_t::MAP_TOOL_TEXTURE;
-	m_pPanelStack->setCurrentWidget( bTexture ? static_cast<QWidget *>( m_pFaceEdit ) : m_pProperties );
-	m_pPanelTitle->setText( bTexture ? tr( "Face Edit" ) : tr( "Object Properties" ) );
+	PlaceFaceEdit();
 	if ( !bTexture && !m_SelectedFaces.empty() )
 	{
 		SetSelectedFaces( {} );
@@ -692,6 +717,66 @@ void CMapEditor::SetTool( MapTool_t nTool )
 	for ( QAction *pAction : m_pTools->actions() )
 	{
 		pAction->setChecked( pAction->data().toInt() == static_cast<int>( nTool ) );
+	}
+	for ( CMapView *pView : GetViews() )
+	{
+		if ( auto *p3D = qobject_cast<CMapView3D *>( pView ) )
+		{
+			p3D->UpdateCursor();
+		}
+	}
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+void CMapEditor::showEvent( QShowEvent *pEvent )
+{
+	QWidget::showEvent( pEvent );
+	PlaceFaceEdit();
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+void CMapEditor::hideEvent( QHideEvent *pEvent )
+{
+	QWidget::hideEvent( pEvent );
+	if ( m_pFaceEditWindow && !pEvent->spontaneous() )
+	{
+		m_pFaceEditWindow->hide();
+	}
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: The sheet moves between the window and the side panel when Preferences changes;
+//          the window shows only while the texture tool is on.
+//-----------------------------------------------------------------------------
+void CMapEditor::PlaceFaceEdit()
+{
+	const bool bWindow = CPreferences::Instance().GetMapPreferences().m_bFaceEditWindow;
+	const bool bTexture = m_nTool == MapTool_t::MAP_TOOL_TEXTURE;
+	if ( bWindow && m_pFaceEdit->parentWidget() != m_pFaceEditWindow )
+	{
+		m_pPanelStack->removeWidget( m_pFaceEdit );
+		m_pFaceEditWindow->layout()->addWidget( m_pFaceEdit );
+		m_pFaceEdit->show();
+	}
+	else if ( !bWindow && m_pFaceEdit->parentWidget() == m_pFaceEditWindow )
+	{
+		m_pFaceEditWindow->layout()->removeWidget( m_pFaceEdit );
+		m_pPanelStack->addWidget( m_pFaceEdit );
+	}
+	m_pPanelStack->setCurrentWidget( bTexture && !bWindow ? static_cast<QWidget *>( m_pFaceEdit ) : m_pProperties );
+	m_pPanelTitle->setText( bTexture && !bWindow ? tr( "Face Edit" ) : tr( "Object Properties" ) );
+	if ( bWindow && bTexture && !m_pFaceEditWindow->isVisible() && isVisible() )
+	{
+		m_pFaceEditWindow->adjustSize();
+		m_pFaceEditWindow->show();
+	}
+	else if ( ( !bWindow || !bTexture ) && m_pFaceEditWindow->isVisible() )
+	{
+		m_pFaceEditWindow->hide();
 	}
 }
 
@@ -878,6 +963,7 @@ void CMapEditor::PreferencesChanged()
 {
 	const int nTextureSize = m_nTextureSize;
 	TakePreferences();
+	PlaceFaceEdit();
 	for ( CMapView *pView : GetViews() )
 	{
 		if ( auto *p3D = qobject_cast<CMapView3D *>( pView ) )
@@ -2218,18 +2304,27 @@ void CMapEditor::InvertDisplacementAlpha()
 //-----------------------------------------------------------------------------
 // Purpose:
 //-----------------------------------------------------------------------------
-void CMapEditor::SetDisplacementAttributes( int nPower, double flElevation )
+void CMapEditor::SetDisplacementAttributes( int nPower, double flElevation, double flScale, std::optional<int> nFlags )
 {
 	EditDisplacementFaces( tr( "Displacement Attributes" ), [ = ]( std::vector<xv::map::DispFace_t> &refs ) {
 		bool bAny = false;
 		for ( xv::map::DispFace_t &ref : refs )
 		{
-			if ( ref.m_pDisp && ( ref.m_pDisp->m_nPower != nPower || ref.m_pDisp->m_flElevation != flElevation ) )
+			if ( !ref.m_pDisp || ( ref.m_pDisp->m_nPower == nPower && ref.m_pDisp->m_flElevation == flElevation && flScale == 1.0 && ( !nFlags || ref.m_pDisp->m_nFlags == *nFlags ) ) )
 			{
-				xv::map::SetDisplacementPower( *ref.m_pDisp, nPower );
-				ref.m_pDisp->m_flElevation = flElevation;
-				bAny = true;
+				continue;
 			}
+			xv::map::SetDisplacementPower( *ref.m_pDisp, nPower );
+			ref.m_pDisp->m_flElevation = flElevation;
+			if ( flScale != 1.0 )
+			{
+				xv::map::ScaleDisplacement( *ref.m_pDisp, flScale );
+			}
+			if ( nFlags )
+			{
+				ref.m_pDisp->m_nFlags = *nFlags;
+			}
+			bAny = true;
 		}
 		return bAny; }, tr( "The selected displacements have those already" ) );
 }
@@ -2272,6 +2367,11 @@ void CMapEditor::CommitDisplacements( const xv::map::CScene &scene, const std::v
 					*ref.m_pDisp = disp;
 				}
 			}
+		}
+		// Hammer's Autosew: the painted displacements sewn after the stroke.
+		if ( m_pFaceEdit->IsAutosew() && szName == tr( "Paint Geometry" ) )
+		{
+			xv::map::SewDisplacements( refs );
 		}
 		return true;
 	} );

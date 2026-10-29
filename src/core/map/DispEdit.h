@@ -55,15 +55,23 @@ struct DispBrush_t
 	double m_flAmount = 8.0;
 	Point_t m_Axis{ 0, 0, 1 }; // a unit vector; the face's normal is the usual choice
 	PaintEffect_t m_nEffect = PaintEffect_t::PAINT_EFFECT_RAISE_LOWER;
+	bool m_bSoftEdge = true;   // Hammer's Soft-Edge; Hard-Edge gives every point inside all of it
 };
 // The displacement on face painted; true when a point changed. Alpha painting takes the amount
 // as alpha (0 to 255) added (Raise/Lower), set (Raise To) or averaged in (Smooth).
 bool PaintGeometry( DispInfo_t &disp, const FaceGeometry_t &face, const DispBrush_t &brush );
 bool PaintAlpha( DispInfo_t &disp, const FaceGeometry_t &face, const DispBrush_t &brush );
 
+// Hammer's Scale attribute: every point's height off its face (its distance) times flScale.
+void ScaleDisplacement( DispInfo_t &disp, double flScale );
 // Hammer's Noise: every point moved along the axis by a random amount between the two.
 void AddNoise( DispInfo_t &disp, double flMin, double flMax, const Point_t &axis, std::uint32_t nSeed );
 void InvertAlpha( DispInfo_t &disp );
+
+// The collision flags (Attributes: No Physics, No Hull, No Ray Collision).
+inline constexpr int DISP_FLAG_NO_PHYSICS = 2;
+inline constexpr int DISP_FLAG_NO_HULL = 4;
+inline constexpr int DISP_FLAG_NO_RAY = 8;
 
 // The tags the game reads (9: level enough to build on, 1: steep but walkable, 0: too steep),
 // from each triangle's slope, as Hammer writes them.

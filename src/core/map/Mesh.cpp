@@ -61,9 +61,16 @@ MeshVertex_t MakeVertex( Point_t position, Point_t normal, Point_t textured, con
 void BuildPart( const Solid_t &solid, const SolidGeometry_t &geometry, std::uint32_t nSolid, std::uint32_t nObject, SolidPart_t &part )
 {
 	part.m_Solids.push_back( { static_cast<std::uint32_t>( part.m_Faces.size() ), static_cast<std::uint32_t>( part.m_Lines.size() ) } );
+	// A brush that carries a displacement is drawn as its displacements alone, as Hammer draws
+	// it (vbsp doesn't build the rest of it either).
+	const bool bHostsDisplacement = std::ranges::any_of( solid.m_Sides, []( const Side_t &side ) { return static_cast<bool>( side.m_pDisp ); } );
 	for ( const FaceGeometry_t &face : geometry.m_Faces )
 	{
 		const Side_t &side = solid.m_Sides[ face.m_nSide ];
+		if ( bHostsDisplacement && !side.m_pDisp )
+		{
+			continue;
+		}
 		MeshFace_t meshFace;
 		meshFace.m_nSolid = nSolid;
 		meshFace.m_nSide = face.m_nSide;

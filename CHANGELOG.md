@@ -78,7 +78,12 @@
   selected displacements smoothed together); Noise; Invert Alpha; the power (resampled) and
   elevation. Triangle tags are written as Hammer's (9, 1, 0 by slope), and the Walkable button
   tints the selected displacements' steep triangles. New and destroyed displacements, and
-  changed powers, are saved in place.
+  changed powers, are saved in place. As Hammer: a brush carrying a displacement is drawn as
+  the displacement alone; a selected displacement shows its triangles and grid (the Grid and
+  Select masks hide either); Soft or hard edge, Autosew, Alt+drag to size the brush and
+  Alt+right-click to take a face's normal; Scale and the no-collision flags under Attributes.
+- **Face Edit** opens as a window of its own, as Hammer's (Preferences → Maps puts it back in
+  the side panel); closing it goes back to the selection tool.
 - **Block tool** (Shift+B): drag a box in a 2D view, pull its handles in the others, Enter (or the
   right button's Create Object) makes a block with the current texture; the New Objects panel's
   Objects box picks a wedge, cylinder, spike or sphere instead, with its Faces count. **Entity tool** (Shift+E):

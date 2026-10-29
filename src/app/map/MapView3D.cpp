@@ -511,7 +511,14 @@ void CMapView3D::SetMouselook( bool bOn )
 		return;
 	}
 	m_bMouselook = bOn;
-	setCursor( bOn ? Qt::BlankCursor : Qt::ArrowCursor );
+	if ( bOn )
+	{
+		setCursor( Qt::BlankCursor );
+	}
+	else
+	{
+		UpdateCursor();
+	}
 	if ( bOn )
 	{
 		// The cursor goes back here afterwards. Meanwhile the pointer is pinned (Wayland), or
@@ -579,6 +586,28 @@ void CMapView3D::mousePressEvent( QMouseEvent *pEvent )
 	}
 	// The Displacement tab's brush: a press starts a stroke on the displacements under it (the
 	// selected ones, else the one hit); the right button lowers.
+	// Alt with the brush: Alt+right-click takes the face's normal as the axis, Alt+drag sizes it.
+	if ( IsPaintingDisplacements() && pEvent->modifiers().testFlag( Qt::AltModifier ) && !m_bSpaceHeld && !m_bMouselook )
+	{
+		CMapFaceEdit &sheet = m_Editor.GetFaceEdit();
+		if ( pEvent->button() == Qt::RightButton )
+		{
+			if ( const auto face = FaceAt( pEvent->position() ) )
+			{
+				if ( const xv::map::FaceGeometry_t *pFace = GetDocument().GetScene()->m_Solids[ face->m_nSolid ].FindFace( face->m_nSide ) )
+				{
+					sheet.SetPaintNormal( pFace->m_Plane.m_Normal );
+				}
+			}
+			return;
+		}
+		if ( pEvent->button() == Qt::LeftButton )
+		{
+			m_RadiusFrom = pEvent->position().toPoint();
+			m_flRadiusFrom = sheet.GetBrushRadius();
+			return;
+		}
+	}
 	if ( IsPaintingDisplacements() && ( pEvent->button() == Qt::LeftButton || pEvent->button() == Qt::RightButton ) && !m_bSpaceHeld && !m_bMouselook )
 	{
 		const std::vector<xv::map::FaceRef_t> faces = m_Editor.GetPaintFaces( FaceAt( pEvent->position() ) );
@@ -730,6 +759,13 @@ void CMapView3D::mouseMoveEvent( QMouseEvent *pEvent )
 		PreviewGizmo( pEvent->position(), pEvent->modifiers() );
 		return;
 	}
+	if ( m_RadiusFrom && ( pEvent->buttons() & Qt::LeftButton ) )
+	{
+		// A hundred pixels right makes the brush about 2.7 times as big.
+		m_Editor.GetFaceEdit().SetBrushRadius( std::clamp( m_flRadiusFrom * std::exp( ( at.x() - m_RadiusFrom->x() ) / 100.0 ), 1.0, 8192.0 ) );
+		RedrawLabels();
+		return;
+	}
 	if ( m_pPaintScene && ( pEvent->buttons() & ( Qt::LeftButton | Qt::RightButton ) ) )
 	{
 		// A stroke paints again every few pixels along the way.
@@ -749,6 +785,10 @@ void CMapView3D::mouseMoveEvent( QMouseEvent *pEvent )
 	{
 		m_BrushAt.reset();
 		RedrawLabels();
+	}
+	if ( pEvent->buttons() == Qt::NoButton && !m_bMouselook )
+	{
+		UpdateCursor();
 	}
 	if ( pEvent->buttons() == Qt::NoButton && !m_bMouselook && m_Editor.GetTool() == MapTool_t::MAP_TOOL_SELECT )
 	{
@@ -809,6 +849,11 @@ void CMapView3D::mouseReleaseEvent( QMouseEvent *pEvent )
 	if ( m_nGizmoDrag >= 0 && pEvent->button() == Qt::LeftButton )
 	{
 		EndGizmo( true, pEvent->position(), pEvent->modifiers() );
+		return;
+	}
+	if ( m_RadiusFrom && pEvent->button() == Qt::LeftButton )
+	{
+		m_RadiusFrom.reset();
 		return;
 	}
 	if ( m_pPaintScene && ( pEvent->button() == Qt::LeftButton || pEvent->button() == Qt::RightButton ) )
@@ -917,6 +962,27 @@ std::optional<std::pair<xv::map::Point_t, xv::map::Point_t>> CMapView3D::Surface
 		normal = xv::map::Scale( normal, -1.0 );
 	}
 	return std::pair{ xv::map::Add( from, xv::map::Scale( dir, hit.m_flDistance ) ), normal };
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+void CMapView3D::UpdateCursor()
+{
+	if ( m_bMouselook )
+	{
+		return;
+	}
+	const Qt::CursorShape nShape = IsPaintingDisplacements() ? Qt::CrossCursor : Qt::ArrowCursor;
+	if ( cursor().shape() != nShape )
+	{
+		setCursor( nShape );
+	}
+	if ( !IsPaintingDisplacements() && m_BrushAt && !m_pPaintScene )
+	{
+		m_BrushAt.reset();
+		RedrawLabels();
+	}
 }
 
 //-----------------------------------------------------------------------------
@@ -1074,14 +1140,36 @@ void CMapView3D::PaintTools( QPainter &painter ) const
 		painter.setBrush( Qt::NoBrush );
 		painter.setRenderHint( QPainter::Antialiasing, false );
 	}
-	// The texture tool's faces, tinted (over everything: a face behind another still shows).
+	// The texture tool's faces, tinted (over everything: a face behind another still shows). A
+	// displacement shows as its triangles, tinted, with its grid, as Hammer shows a selected one
+	// (the Displacement tab's masks leave out either).
 	if ( const xv::map::CScene *pScene = GetDocument().GetScene(); !faces.empty() && pScene )
 	{
-		QColor fill = CPreferences::Instance().GetMapPreferences().m_Colors.m_Selection3D;
+		const MapColors_t &colors = CPreferences::Instance().GetMapPreferences().m_Colors;
+		QColor fill = colors.m_Selection3D;
 		fill.setAlpha( 110 );
+		const QPen edge{ colors.m_SelectionEdge3D, 1.5 };
+		QColor gridColor = colors.m_SelectionEdge3D;
+		gridColor.setAlpha( 200 );
+		const QPen grid{ gridColor, 1.0 };
+		const bool bShade = !m_Editor.GetFaceEdit().IsSelectMasked();
+		const bool bGrid = !m_Editor.GetFaceEdit().IsGridMasked();
 		painter.setRenderHint( QPainter::Antialiasing, true );
-		painter.setPen( QPen{ CPreferences::Instance().GetMapPreferences().m_Colors.m_SelectionEdge3D, 1.5 } );
-		painter.setBrush( fill );
+		auto project = [ & ]( const std::vector<xv::map::Point_t> &points, QPolygonF &polygon ) {
+			polygon.clear();
+			for ( const xv::map::Point_t &p : points )
+			{
+				const auto at = camera.Project( p );
+				if ( !at )
+				{
+					polygon.clear();
+					return false;
+				}
+				polygon << QPointF{ ( *at )[ 0 ], ( *at )[ 1 ] };
+			}
+			return polygon.size() >= 3;
+		};
+		QPolygonF polygon;
 		for ( const xv::map::FaceRef_t &face : faces )
 		{
 			const xv::map::FaceGeometry_t *pFace = face.m_nSolid < pScene->m_Solids.size() ? pScene->m_Solids[ face.m_nSolid ].FindFace( face.m_nSide ) : nullptr;
@@ -1089,18 +1177,27 @@ void CMapView3D::PaintTools( QPainter &painter ) const
 			{
 				continue;
 			}
-			QPolygonF polygon;
-			for ( const xv::map::Point_t &p : pFace->m_Points )
+			const xv::map::Side_t &side = pScene->m_Map.m_Solids[ face.m_nSolid ].m_Sides[ face.m_nSide ];
+			if ( const std::optional<xv::map::DispMesh_t> mesh = side.m_pDisp ? xv::map::BuildDisplacement( *side.m_pDisp, *pFace ) : std::nullopt )
 			{
-				const auto at = camera.Project( p );
-				if ( !at )
+				painter.setPen( bGrid ? grid : QPen{ Qt::NoPen } );
+				painter.setBrush( bShade ? QBrush{ fill } : QBrush{ Qt::NoBrush } );
+				if ( !bShade && !bGrid )
 				{
-					polygon.clear();
-					break;
+					continue;
 				}
-				polygon << QPointF{ ( *at )[ 0 ], ( *at )[ 1 ] };
+				for ( std::size_t t = 0; t + 2 < mesh->m_Indices.size(); t += 3 )
+				{
+					if ( project( { mesh->m_Points[ mesh->m_Indices[ t ] ], mesh->m_Points[ mesh->m_Indices[ t + 1 ] ], mesh->m_Points[ mesh->m_Indices[ t + 2 ] ] }, polygon ) )
+					{
+						painter.drawPolygon( polygon );
+					}
+				}
+				continue;
 			}
-			if ( polygon.size() >= 3 )
+			painter.setPen( edge );
+			painter.setBrush( fill );
+			if ( project( pFace->m_Points, polygon ) )
 			{
 				painter.drawPolygon( polygon );
 			}

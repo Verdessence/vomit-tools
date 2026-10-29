@@ -9,11 +9,13 @@
 #include <cmath>
 #include <optional>
 
+#include <QButtonGroup>
 #include <QCheckBox>
 #include <QComboBox>
 #include <QDoubleSpinBox>
 #include <QFormLayout>
 #include <QGridLayout>
+#include <QGroupBox>
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QLineEdit>
@@ -60,7 +62,7 @@ CMapFaceEdit::CMapFaceEdit( CMapEditor &editor, QWidget *pParent )
 	m_pTabs->setObjectName( QStringLiteral( "mapFaceEditTabs" ) );
 	auto *pTexturePage = new QWidget;
 	auto *pDispPage = new QWidget;
-	m_pTabs->addTab( pTexturePage, tr( "Texture" ) );
+	m_pTabs->addTab( pTexturePage, tr( "Materials" ) );
 	m_pTabs->addTab( pDispPage, tr( "Displacement" ) );
 	pOuter->addWidget( m_pTabs );
 	BuildDisplacementTab( pDispPage );
@@ -201,64 +203,47 @@ void CMapFaceEdit::BuildDisplacementTab( QWidget *pPage )
 {
 	auto *pLayout = new QVBoxLayout( pPage );
 	pLayout->setContentsMargins( 0, 0, 0, 0 );
-	auto button = [ & ]( QGridLayout *pGrid, int nRow, int nColumn, const QString &szText, const QString &szName, const QString &szTip, auto pfn ) {
+	auto button = [ & ]( QGridLayout *pGrid, int nRow, int nColumn, const QString &szText, const QString &szName, const QString &szTip ) {
 		auto *pButton = new QPushButton( szText );
 		pButton->setObjectName( szName );
 		pButton->setToolTip( szTip );
-		connect( pButton, &QPushButton::clicked, this, pfn );
 		pGrid->addWidget( pButton, nRow, nColumn );
 		return pButton;
 	};
+	// Hammer's buttons: Select, Paint Geometry and Paint Alpha say what a click in 3D does; the
+	// rest work on the selected faces at once.
 	auto *pButtons = new QGridLayout;
-	button( pButtons, 0, 0, tr( "Create" ), QStringLiteral( "mapDispCreate" ), tr( "A displacement at the power below on each selected four-sided face" ), [ this ] { m_Editor.CreateDisplacements( GetDispPower() ); } );
-	button( pButtons, 0, 1, tr( "Destroy" ), QStringLiteral( "mapDispDestroy" ), tr( "The selected faces' displacements taken off: plain faces again" ), [ this ] { m_Editor.DestroyDisplacements(); } );
-	button( pButtons, 0, 2, tr( "Invert Alpha" ), QStringLiteral( "mapDispInvertAlpha" ), tr( "The two textures of a blended material swapped over the selected displacements" ), [ this ] { m_Editor.InvertDisplacementAlpha(); } );
-	button( pButtons, 1, 0, tr( "Sew" ), QStringLiteral( "mapDispSew" ), tr( "The selected displacements' edges put together where their faces meet (and onto plain faces among them)" ), [ this ] { m_Editor.SewDisplacements(); } );
-	button( pButtons, 1, 1, tr( "Subdivide" ), QStringLiteral( "mapDispSubdivide" ), tr( "The selected displacements smoothed together as one surface" ), [ this ] { m_Editor.SubdivideDisplacements(); } );
-	button( pButtons, 1, 2, tr( "Noise" ), QStringLiteral( "mapDispNoise" ), tr( "Every point moved along its face's normal by a random amount in the range" ), [ this ] { m_Editor.NoiseDisplacements( m_pNoiseMin->value(), m_pNoiseMax->value() ); } );
+	m_pPaintModes = new QButtonGroup( this );
+	const struct
+	{
+		DispPaintMode_t m_nMode;
+		QString m_szText;
+		QString m_szName;
+		QString m_szTip;
+		int m_nRow;
+	} modes[] = {
+		{ DispPaintMode_t::DISP_PAINT_NONE, tr( "Select" ), QStringLiteral( "mapDispSelect" ), tr( "A click picks faces (Ctrl adds, Shift takes the brush)" ), 0 },
+		{ DispPaintMode_t::DISP_PAINT_GEOMETRY, tr( "Paint Geometry" ), QStringLiteral( "mapDispPaintGeometry" ), tr( "The left button raises the selected displacements under the brush, the right lowers; Alt+drag sizes the brush, Alt+right-click takes a face's normal as the axis" ), 1 },
+		{ DispPaintMode_t::DISP_PAINT_ALPHA, tr( "Paint Alpha" ), QStringLiteral( "mapDispPaintAlpha" ), tr( "The left button paints in the second texture of a blended material, the right paints it out" ), 1 },
+	};
+	for ( const auto &mode : modes )
+	{
+		QPushButton *pButton = button( pButtons, mode.m_nRow, mode.m_nMode == DispPaintMode_t::DISP_PAINT_ALPHA ? 1 : 0, mode.m_szText, mode.m_szName, mode.m_szTip );
+		pButton->setCheckable( true );
+		m_pPaintModes->addButton( pButton, static_cast<int>( mode.m_nMode ) );
+	}
+	m_pPaintModes->button( static_cast<int>( DispPaintMode_t::DISP_PAINT_NONE ) )->setChecked( true );
+	connect( button( pButtons, 0, 1, tr( "Create" ), QStringLiteral( "mapDispCreate" ), tr( "A displacement at the power below on each selected four-sided face" ) ), &QPushButton::clicked, this, [ this ] { m_Editor.CreateDisplacements( GetDispPower() ); } );
+	connect( button( pButtons, 0, 2, tr( "Destroy" ), QStringLiteral( "mapDispDestroy" ), tr( "The selected faces' displacements taken off: plain faces again" ) ), &QPushButton::clicked, this, [ this ] { m_Editor.DestroyDisplacements(); } );
+	connect( button( pButtons, 1, 2, tr( "Invert Alpha" ), QStringLiteral( "mapDispInvertAlpha" ), tr( "The two textures of a blended material swapped over the selected displacements" ) ), &QPushButton::clicked, this, [ this ] { m_Editor.InvertDisplacementAlpha(); } );
+	connect( button( pButtons, 2, 0, tr( "Subdivide" ), QStringLiteral( "mapDispSubdivide" ), tr( "The selected displacements smoothed together as one surface" ) ), &QPushButton::clicked, this, [ this ] { m_Editor.SubdivideDisplacements(); } );
+	connect( button( pButtons, 2, 1, tr( "Noise" ), QStringLiteral( "mapDispNoise" ), tr( "Every point moved along its face's normal by a random amount between Min and Max" ) ), &QPushButton::clicked, this, [ this ] { m_Editor.NoiseDisplacements( m_pNoiseMin->value(), m_pNoiseMax->value() ); } );
+	connect( button( pButtons, 2, 2, tr( "Sew" ), QStringLiteral( "mapDispSew" ), tr( "The selected displacements' edges put together where their faces meet (and onto plain faces among them)" ) ), &QPushButton::clicked, this, [ this ] { m_Editor.SewDisplacements(); } );
 	pLayout->addLayout( pButtons );
 
-	auto *pForm = new QGridLayout;
-	m_pPower = new QSpinBox;
-	m_pPower->setObjectName( QStringLiteral( "mapDispPower" ) );
-	m_pPower->setRange( 2, 4 );
-	m_pPower->setValue( 3 );
-	m_pPower->setToolTip( tr( "2: a 5 by 5 grid, 3: 9 by 9, 4: 17 by 17 (heavy, and prone to physics trouble)" ) );
-	m_pElevation = new QDoubleSpinBox;
-	m_pElevation->setObjectName( QStringLiteral( "mapDispElevation" ) );
-	m_pElevation->setRange( -100000, 100000 );
-	m_pElevation->setDecimals( 2 );
-	m_pElevation->setToolTip( tr( "How far the whole surface stands off its face, along the normal" ) );
-	auto *pApply = new QPushButton( tr( "Apply" ) );
-	pApply->setObjectName( QStringLiteral( "mapDispApply" ) );
-	pApply->setToolTip( tr( "The power and elevation onto the selected displacements (another power resamples the surface)" ) );
-	connect( pApply, &QPushButton::clicked, this, [ this ] { m_Editor.SetDisplacementAttributes( GetDispPower(), m_pElevation->value() ); } );
-	pForm->addWidget( new QLabel( tr( "Power" ) ), 0, 0 );
-	pForm->addWidget( m_pPower, 0, 1 );
-	pForm->addWidget( new QLabel( tr( "Elevation" ) ), 0, 2 );
-	pForm->addWidget( m_pElevation, 0, 3 );
-	pForm->addWidget( pApply, 0, 4 );
-	m_pNoiseMin = new QDoubleSpinBox;
-	m_pNoiseMin->setObjectName( QStringLiteral( "mapDispNoiseMin" ) );
-	m_pNoiseMin->setRange( -10000, 10000 );
-	m_pNoiseMin->setValue( -4.0 );
-	m_pNoiseMax = new QDoubleSpinBox;
-	m_pNoiseMax->setObjectName( QStringLiteral( "mapDispNoiseMax" ) );
-	m_pNoiseMax->setRange( -10000, 10000 );
-	m_pNoiseMax->setValue( 4.0 );
-	pForm->addWidget( new QLabel( tr( "Noise" ) ), 1, 0 );
-	pForm->addWidget( m_pNoiseMin, 1, 1 );
-	pForm->addWidget( new QLabel( tr( "to" ) ), 1, 2 );
-	pForm->addWidget( m_pNoiseMax, 1, 3 );
-	pLayout->addLayout( pForm );
-
-	auto *pPaint = new QGridLayout;
-	m_pPaintMode = new QComboBox;
-	m_pPaintMode->setObjectName( QStringLiteral( "mapDispPaintMode" ) );
-	m_pPaintMode->addItem( tr( "Select faces" ), static_cast<int>( DispPaintMode_t::DISP_PAINT_NONE ) );
-	m_pPaintMode->addItem( tr( "Paint geometry" ), static_cast<int>( DispPaintMode_t::DISP_PAINT_GEOMETRY ) );
-	m_pPaintMode->addItem( tr( "Paint alpha" ), static_cast<int>( DispPaintMode_t::DISP_PAINT_ALPHA ) );
-	m_pPaintMode->setToolTip( tr( "What a click in a 3D view does: the left button raises (or adds alpha), the right lowers" ) );
+	// The paint panel Hammer opens for Paint Geometry and Paint Alpha.
+	auto *pPaintBox = new QGroupBox( tr( "Paint" ) );
+	auto *pPaint = new QGridLayout( pPaintBox );
 	m_pEffect = new QComboBox;
 	m_pEffect->setObjectName( QStringLiteral( "mapDispEffect" ) );
 	m_pEffect->addItem( tr( "Raise/Lower" ), static_cast<int>( xv::map::PaintEffect_t::PAINT_EFFECT_RAISE_LOWER ) );
@@ -266,10 +251,11 @@ void CMapFaceEdit::BuildDisplacementTab( QWidget *pPage )
 	m_pEffect->addItem( tr( "Smooth" ), static_cast<int>( xv::map::PaintEffect_t::PAINT_EFFECT_SMOOTH ) );
 	m_pAxis = new QComboBox;
 	m_pAxis->setObjectName( QStringLiteral( "mapDispAxis" ) );
-	m_pAxis->addItem( tr( "Face normal" ), -1 );
+	m_pAxis->addItem( tr( "Face Normal" ), -1 );
 	m_pAxis->addItem( QStringLiteral( "X" ), 0 );
 	m_pAxis->addItem( QStringLiteral( "Y" ), 1 );
 	m_pAxis->addItem( QStringLiteral( "Z" ), 2 );
+	m_pAxis->setToolTip( tr( "Face Normal: each displacement's own, or the face Alt+right-clicked in a 3D view" ) );
 	// The panel is narrow: the boxes may shrink below their longest entry.
 	for ( QComboBox *pBox : { m_pEffect, m_pAxis } )
 	{
@@ -280,23 +266,133 @@ void CMapFaceEdit::BuildDisplacementTab( QWidget *pPage )
 	m_pRadius->setObjectName( QStringLiteral( "mapDispRadius" ) );
 	m_pRadius->setRange( 1, 8192 );
 	m_pRadius->setValue( 64.0 );
-	m_pRadius->setToolTip( tr( "The brush's reach, in units ([ and ] in a 3D view)" ) );
+	m_pRadius->setToolTip( tr( "The painting sphere's radius, in units ([ and ], or Alt+drag, in a 3D view)" ) );
 	m_pAmount = new QDoubleSpinBox;
 	m_pAmount->setObjectName( QStringLiteral( "mapDispAmount" ) );
 	m_pAmount->setRange( -10000, 10000 );
 	m_pAmount->setValue( 8.0 );
-	m_pAmount->setToolTip( tr( "How far a stroke moves points (Raise/Lower), the height it puts them at (Raise To), or how much it smooths (0 to 1); alpha in 0 to 255" ) );
-	pPaint->addWidget( new QLabel( tr( "Mode" ) ), 0, 0 );
-	pPaint->addWidget( m_pPaintMode, 0, 1, 1, 3 );
-	pPaint->addWidget( new QLabel( tr( "Effect" ) ), 1, 0 );
-	pPaint->addWidget( m_pEffect, 1, 1 );
-	pPaint->addWidget( new QLabel( tr( "Axis" ) ), 1, 2 );
-	pPaint->addWidget( m_pAxis, 1, 3 );
-	pPaint->addWidget( new QLabel( tr( "Radius" ) ), 2, 0 );
-	pPaint->addWidget( m_pRadius, 2, 1 );
-	pPaint->addWidget( new QLabel( tr( "Distance" ) ), 2, 2 );
-	pPaint->addWidget( m_pAmount, 2, 3 );
-	pLayout->addLayout( pPaint );
+	m_pAmount->setToolTip( tr( "Raise/Lower: how far a stroke moves points; Raise To: the height it puts them at, off the base face; Smooth: how much (0 to 1)" ) );
+	m_pAlphaValue = new QDoubleSpinBox;
+	m_pAlphaValue->setObjectName( QStringLiteral( "mapDispAlphaValue" ) );
+	m_pAlphaValue->setRange( 0, 255 );
+	m_pAlphaValue->setValue( 25.0 );
+	m_pAlphaValue->setToolTip( tr( "Raise/Lower: how much alpha a stroke adds or takes; Raise To: the alpha it sets (0 to 255)" ) );
+	m_pAmountLabel = new QLabel( tr( "Distance" ) );
+	m_pSoftEdge = new QCheckBox( tr( "Soft edge" ) );
+	m_pSoftEdge->setObjectName( QStringLiteral( "mapDispSoftEdge" ) );
+	m_pSoftEdge->setChecked( true );
+	m_pSoftEdge->setToolTip( tr( "Points near the sphere's centre move most, those near its edge least; off (Hard-Edge), all alike" ) );
+	m_pAutosew = new QCheckBox( tr( "Autosew" ) );
+	m_pAutosew->setObjectName( QStringLiteral( "mapDispAutosew" ) );
+	m_pAutosew->setToolTip( tr( "Sew the painted displacements after every stroke" ) );
+	pPaint->addWidget( new QLabel( tr( "Effect" ) ), 0, 0 );
+	pPaint->addWidget( m_pEffect, 0, 1 );
+	pPaint->addWidget( new QLabel( tr( "Axis" ) ), 0, 2 );
+	pPaint->addWidget( m_pAxis, 0, 3 );
+	pPaint->addWidget( new QLabel( tr( "Radius" ) ), 1, 0 );
+	pPaint->addWidget( m_pRadius, 1, 1 );
+	pPaint->addWidget( m_pAmountLabel, 1, 2 );
+	pPaint->addWidget( m_pAmount, 1, 3 );
+	pPaint->addWidget( m_pAlphaValue, 1, 3 );
+	pPaint->addWidget( m_pSoftEdge, 2, 0, 1, 2 );
+	pPaint->addWidget( m_pAutosew, 2, 2, 1, 2 );
+	pLayout->addWidget( pPaintBox );
+	auto showPaint = [ this, pPaintBox ] {
+		const DispPaintMode_t nMode = GetDispPaintMode();
+		pPaintBox->setEnabled( nMode != DispPaintMode_t::DISP_PAINT_NONE );
+		const bool bAlpha = nMode == DispPaintMode_t::DISP_PAINT_ALPHA;
+		m_pAmount->setVisible( !bAlpha );
+		m_pAlphaValue->setVisible( bAlpha );
+		m_pAmountLabel->setText( bAlpha ? tr( "Value" ) : tr( "Distance" ) );
+		m_pAxis->setEnabled( !bAlpha );
+		m_pAutosew->setEnabled( !bAlpha );
+		emit PaintModeChanged();
+	};
+	connect( m_pPaintModes, &QButtonGroup::idToggled, this, [ showPaint ]( int, bool bOn ) {
+		if ( bOn )
+		{
+			showPaint();
+		}
+	} );
+	showPaint();
+
+	auto *pNoise = new QHBoxLayout;
+	m_pNoiseMin = new QDoubleSpinBox;
+	m_pNoiseMin->setObjectName( QStringLiteral( "mapDispNoiseMin" ) );
+	m_pNoiseMin->setRange( -10000, 10000 );
+	m_pNoiseMin->setValue( -4.0 );
+	m_pNoiseMax = new QDoubleSpinBox;
+	m_pNoiseMax->setObjectName( QStringLiteral( "mapDispNoiseMax" ) );
+	m_pNoiseMax->setRange( -10000, 10000 );
+	m_pNoiseMax->setValue( 4.0 );
+	pNoise->addWidget( new QLabel( tr( "Noise min" ) ) );
+	pNoise->addWidget( m_pNoiseMin, 1 );
+	pNoise->addWidget( new QLabel( tr( "max" ) ) );
+	pNoise->addWidget( m_pNoiseMax, 1 );
+	pLayout->addLayout( pNoise );
+
+	// Attributes, applied together.
+	auto *pAttributesBox = new QGroupBox( tr( "Attributes" ) );
+	auto *pAttributes = new QGridLayout( pAttributesBox );
+	m_pPower = new QSpinBox;
+	m_pPower->setObjectName( QStringLiteral( "mapDispPower" ) );
+	m_pPower->setRange( 2, 4 );
+	m_pPower->setValue( 3 );
+	m_pPower->setToolTip( tr( "2: a 5 by 5 grid, 3: 9 by 9, 4: 17 by 17 (heavy, and prone to physics trouble)" ) );
+	m_pElevation = new QDoubleSpinBox;
+	m_pElevation->setObjectName( QStringLiteral( "mapDispElevation" ) );
+	m_pElevation->setRange( -100000, 100000 );
+	m_pElevation->setDecimals( 2 );
+	m_pElevation->setToolTip( tr( "How far the whole surface stands off its face, along the normal" ) );
+	m_pScale = new QDoubleSpinBox;
+	m_pScale->setObjectName( QStringLiteral( "mapDispScale" ) );
+	m_pScale->setRange( -100, 100 );
+	m_pScale->setDecimals( 3 );
+	m_pScale->setValue( 1.0 );
+	m_pScale->setToolTip( tr( "The surface's height off its face times this, once, on Apply" ) );
+	m_pNoPhysics = new QCheckBox( tr( "No Physics Collision" ) );
+	m_pNoPhysics->setObjectName( QStringLiteral( "mapDispNoPhysics" ) );
+	m_pNoHull = new QCheckBox( tr( "No Hull Collision" ) );
+	m_pNoHull->setObjectName( QStringLiteral( "mapDispNoHull" ) );
+	m_pNoRay = new QCheckBox( tr( "No Ray Collision" ) );
+	m_pNoRay->setObjectName( QStringLiteral( "mapDispNoRay" ) );
+	auto *pApply = new QPushButton( tr( "Apply" ) );
+	pApply->setObjectName( QStringLiteral( "mapDispApply" ) );
+	pApply->setToolTip( tr( "The power, elevation, scale and collision onto the selected displacements (another power resamples the surface)" ) );
+	connect( pApply, &QPushButton::clicked, this, [ this ] {
+		const int nFlags = ( m_pNoPhysics->isChecked() ? xv::map::DISP_FLAG_NO_PHYSICS : 0 ) | ( m_pNoHull->isChecked() ? xv::map::DISP_FLAG_NO_HULL : 0 ) | ( m_pNoRay->isChecked() ? xv::map::DISP_FLAG_NO_RAY : 0 );
+		m_Editor.SetDisplacementAttributes( GetDispPower(), m_pElevation->value(), m_pScale->value(), nFlags );
+		m_pScale->setValue( 1.0 );
+	} );
+	pAttributes->addWidget( new QLabel( tr( "Power" ) ), 0, 0 );
+	pAttributes->addWidget( m_pPower, 0, 1 );
+	pAttributes->addWidget( new QLabel( tr( "Elev" ) ), 0, 2 );
+	pAttributes->addWidget( m_pElevation, 0, 3 );
+	pAttributes->addWidget( new QLabel( tr( "Scale" ) ), 1, 0 );
+	pAttributes->addWidget( m_pScale, 1, 1 );
+	pAttributes->addWidget( pApply, 1, 3 );
+	pAttributes->addWidget( m_pNoPhysics, 2, 0, 1, 4 );
+	pAttributes->addWidget( m_pNoHull, 3, 0, 1, 4 );
+	pAttributes->addWidget( m_pNoRay, 4, 0, 1, 4 );
+	pLayout->addWidget( pAttributesBox );
+
+	// Masks: how selected displacements show in the 3D views.
+	auto *pMasks = new QHBoxLayout;
+	m_pGridMask = new QCheckBox( tr( "Grid" ) );
+	m_pGridMask->setObjectName( QStringLiteral( "mapDispMaskGrid" ) );
+	m_pGridMask->setToolTip( tr( "Hide the selected displacements' wireframe grid" ) );
+	m_pSelectMask = new QCheckBox( tr( "Select" ) );
+	m_pSelectMask->setObjectName( QStringLiteral( "mapDispMaskSelect" ) );
+	m_pSelectMask->setToolTip( tr( "Hide the red shading of the selected displacements" ) );
+	pMasks->addWidget( new QLabel( tr( "Masks" ) ) );
+	pMasks->addWidget( m_pGridMask );
+	pMasks->addWidget( m_pSelectMask );
+	pMasks->addStretch( 1 );
+	pLayout->addLayout( pMasks );
+	for ( QCheckBox *pBox : { m_pGridMask, m_pSelectMask } )
+	{
+		connect( pBox, &QCheckBox::toggled, this, &CMapFaceEdit::PaintModeChanged );
+	}
 	pLayout->addStretch( 1 );
 }
 
@@ -305,7 +401,7 @@ void CMapFaceEdit::BuildDisplacementTab( QWidget *pPage )
 //-----------------------------------------------------------------------------
 DispPaintMode_t CMapFaceEdit::GetDispPaintMode() const
 {
-	return static_cast<DispPaintMode_t>( m_pPaintMode->currentData().toInt() );
+	return static_cast<DispPaintMode_t>( std::max( 0, m_pPaintModes->checkedId() ) );
 }
 
 //-----------------------------------------------------------------------------
@@ -313,7 +409,7 @@ DispPaintMode_t CMapFaceEdit::GetDispPaintMode() const
 //-----------------------------------------------------------------------------
 void CMapFaceEdit::SetDispPaintMode( DispPaintMode_t nMode )
 {
-	m_pPaintMode->setCurrentIndex( m_pPaintMode->findData( static_cast<int>( nMode ) ) );
+	m_pPaintModes->button( static_cast<int>( nMode ) )->setChecked( true );
 }
 
 //-----------------------------------------------------------------------------
@@ -323,12 +419,17 @@ xv::map::DispBrush_t CMapFaceEdit::GetBrush() const
 {
 	xv::map::DispBrush_t brush;
 	brush.m_flRadius = m_pRadius->value();
-	brush.m_flAmount = m_pAmount->value();
+	brush.m_flAmount = GetDispPaintMode() == DispPaintMode_t::DISP_PAINT_ALPHA ? m_pAlphaValue->value() : m_pAmount->value();
 	brush.m_nEffect = static_cast<xv::map::PaintEffect_t>( m_pEffect->currentData().toInt() );
+	brush.m_bSoftEdge = m_pSoftEdge->isChecked();
 	brush.m_Axis = {};
 	if ( const int nAxis = m_pAxis->currentData().toInt(); nAxis >= 0 )
 	{
 		brush.m_Axis[ static_cast<std::size_t>( nAxis ) ] = 1.0;
+	}
+	else if ( m_PaintNormal )
+	{
+		brush.m_Axis = *m_PaintNormal;
 	}
 	return brush;
 }
@@ -338,7 +439,41 @@ xv::map::DispBrush_t CMapFaceEdit::GetBrush() const
 //-----------------------------------------------------------------------------
 bool CMapFaceEdit::IsBrushAlongFaceNormal() const
 {
-	return m_pAxis->currentData().toInt() < 0;
+	return m_pAxis->currentData().toInt() < 0 && !m_PaintNormal;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Alt+right-click's face: Face Normal then means its normal for every displacement.
+//-----------------------------------------------------------------------------
+void CMapFaceEdit::SetPaintNormal( const xv::map::Point_t &normal )
+{
+	m_PaintNormal = normal;
+	m_pAxis->setCurrentIndex( m_pAxis->findData( -1 ) );
+	m_pAxis->setItemText( 0, tr( "Face Normal (picked)" ) );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+bool CMapFaceEdit::IsAutosew() const
+{
+	return m_pAutosew->isChecked();
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+bool CMapFaceEdit::IsGridMasked() const
+{
+	return m_pGridMask->isChecked();
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+bool CMapFaceEdit::IsSelectMasked() const
+{
+	return m_pSelectMask->isChecked();
 }
 
 //-----------------------------------------------------------------------------
@@ -431,7 +566,7 @@ void CMapFaceEdit::Refresh()
 	m_pAlignWorld->setChecked( bWorld.value_or( false ) );
 	m_pAlignFace->setChecked( bWorld && !*bWorld );
 	// The Displacement tab shows the selected displacements' power and elevation when they agree.
-	std::optional<int> nPower;
+	std::optional<int> nPower, nFlags;
 	std::optional<double> flElevation;
 	bFirst = true;
 	for ( const xv::map::FaceRef_t &face : pScene ? xv::map::DisplacementFaces( *pScene, faces ) : std::vector<xv::map::FaceRef_t>{} )
@@ -439,8 +574,12 @@ void CMapFaceEdit::Refresh()
 		const xv::map::DispInfo_t &disp = *pScene->m_Map.m_Solids[ face.m_nSolid ].m_Sides[ face.m_nSide ].m_pDisp;
 		common( nPower, disp.m_nPower );
 		common( flElevation, disp.m_flElevation );
+		common( nFlags, disp.m_nFlags );
 		bFirst = false;
 	}
+	m_pNoPhysics->setChecked( nFlags && ( *nFlags & xv::map::DISP_FLAG_NO_PHYSICS ) );
+	m_pNoHull->setChecked( nFlags && ( *nFlags & xv::map::DISP_FLAG_NO_HULL ) );
+	m_pNoRay->setChecked( nFlags && ( *nFlags & xv::map::DISP_FLAG_NO_RAY ) );
 	if ( nPower )
 	{
 		m_pPower->setValue( *nPower );
