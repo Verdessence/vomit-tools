@@ -2,6 +2,103 @@
 	<!--suppress HtmlDEprecatedAttribute -->
 	<img align="center" style="object-fit: cover;" src=https://github.com/Verdessence/vomit-tools/blob/961476cd725300c52ca3caca093a632cb9d49d6d/src/assets/logo_wide.png alt="Vomit Tools" />
 </div>
+All in one IDE editor for Source Engine games, built in Qt.
+
+> [!WARNING]
+> This is a fully vibe coded project, using Claude and ChatGPT. Though some decisions in development are due to my experience in Source mapping, and almost every decision by the LLM are carefully observed and tested.
+## Preamble
+This program was tailored to the creator's environment (Hyprland on Arch Linux w/ Kvantum), and thus most design decisions are aligned to said environment, including but not limited to:
+- Limited extra windows (hyprland unfocus config)
+- Compatibility with Kvantum (there was like multiple bugs relating to blur)
+
+This does not mean the program only works in said environment, but I cannot guarantee 100% compatibility with your system, especially with Windows users.
+## Features
+### Soundscape Editor
+> [!NOTE]
+> hi i need an image/video/jxl for preview (We do not say gif in this household.)
+
+Soundscape/Soundscript editor with sound preview,  easily configurable like keyvalues
+- Easier interface with descriptions and simplified text
+- Soundscape checks via lint for easier troubleshooting
+- Preview sound states dependent on which play button is played
+- Generate or list manifests
+### Skybox Editor
+> [!NOTE]
+> hi i need an image/video/jxl for preview (We do not say gif in this household.)
+
+Skybox Editor with skybox preview, guides, w/ smart selection
+<!-- import hdri or smsht -->
+- View the skybox as is in a 3d space
+- Linter for troubleshooting
+- (WIP) VMT previews for more complex 2d skyboxes
+- Test Patterns so you can easily make your own in another program <!-- let me export this also cuh -->
+
+### VTFEdit
+> [!NOTE]
+> hi i need an image/video/jxl for preview (We do not say gif in this household.)
+
+normally i'd call this VomiTFEdit but we're dragging with this one<br>
+Brought VTFEdit to this household to fit the IDE concept
+- Features from [MareTF](https://github.com/craftablescience/MareTF) and [VTFEdit++](https://github.com/ficool2/VTFLib)
+	- sorry guys
+- CLI
+- Ability to preview materials from the associated VMT
+
+### Detail.vbsp Editor
+> [!NOTE]
+> hi i need an image/video/jxl for preview (We do not say gif in this household.)
+
+Easily edit a `detail.vbsp` file for your mods or for your maps, with 3D preview and easier sprite bound creation
+
+### Particle Editor
+> [!NOTE]
+> hi i need an image/video/jxl for preview (We do not say gif in this household.)
+
+Create your own particles.... What else is there to say? Goodbye running `-tools`? probably
+- Everything the particle editor got except for anything outside of SDK and Counter-Strike Source
+- Insert models for reference and bone attachments
+- Move Control Points in 3D via Gizmos
+- Easily search for particles inside `.pcf`s
+- Generate manifests
+
+### Model Editor
+> [!NOTE]
+> hi i need an image/video/jxl for preview (We do not say gif in this household.)
+
+There's so much shit going on in there I don't even know what's in there
+- Export a Model to VMF, decomposing the mesh into brushes via convex decomposition @ CoACD
+- CLI
+
+## Credits/Licenses
+- [craftablescience](https://github.com/craftablescience): MareTF, VPKEdit inspirations
+- [ficool2](https://github.com/ficool2): VTFEdit++, Hammer++ inspirations
+- anyone else i used their codes for
+<!-- - [Eltra](https://github.com/Eltrasnag): Vomit Tools Icon and Text -->
+
+## Building
+### Linux
+```sh
+cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo
+cmake --build build
+./build/src/app/vomit-tools
+```
+### Windows (MSVC)
+
+With Visual Studio 2022 and Qt for `msvc2022_64`:
+
+```bat
+cmake -S . -B build -DCMAKE_PREFIX_PATH=C:\Qt\6.8.3\msvc2022_64
+cmake --build build --config Release
+cmake --install build --config Release --prefix dist
+```
+
+`dist` is then self-contained: `cmake --install` runs `windeployqt`.
+
+### Windows, cross-compiled from Linux
+
+Use [llvm-mingw](https://github.com/mstorsjo/llvm-mingw) with Qt's `llvm_mingw` Windows build and a
+Linux Qt of the same version for the host tools. Instructions are in
+[cmake/toolchains/llvm-mingw-x86_64.cmake](cmake/toolchains/llvm-mingw-x86_64.cmake).
 <!--
 # vomit-tools
 
