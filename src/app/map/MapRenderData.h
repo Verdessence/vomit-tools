@@ -12,6 +12,7 @@
 #include <cstdint>
 #include <memory>
 #include <utility>
+#include <unordered_set>
 #include <vector>
 
 #include <QColor>
@@ -111,6 +112,7 @@ private:
 	const CMapResources *m_pResources = nullptr;
 	std::shared_ptr<const xv::map::MeshParts_t> m_pEntityBaseParts;
 	std::shared_ptr<const xv::map::MeshParts_t> m_pEntityAllParts;
+	std::unordered_set<std::uint32_t> m_PendingProjections;
 	std::shared_ptr<const std::vector<xv::map::RasterMaterial_t>> m_pReceivedMaterials;
 	std::uint64_t m_nPropsRevision = 0, m_nPropMaterialsRevision = 0;
 	xv::map::Point_t m_PreviewRight{ 1, 0, 0 }, m_PreviewUp{ 0, 0, 1 };

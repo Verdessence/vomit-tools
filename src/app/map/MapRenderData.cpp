@@ -346,7 +346,10 @@ void CMapRenderData::UpdateEntityPreview( xv::map::Point_t right, xv::map::Point
 	auto pMesh = std::make_shared<xv::map::CMapMesh>( m_pResources && pScene ? m_pResources->BuildEntityPreview( *pScene, m_Document.GetPreviewObjects(), right, up, m_Document.GetEntityPreviewBase() ) : xv::map::CMapMesh{} );
 	for ( const auto nObject : m_Document.GetPreviewObjects() )
 	{
-		if ( !pScene || pScene->IsDeleted( nObject ) || std::ranges::any_of( pMesh->m_Vertices, [ & ]( const auto &vertex ) { return vertex.m_nObject == nObject; } ) )
+		if ( !pScene || pScene->IsDeleted( nObject ) || std::ranges::binary_search( m_PropObjects, nObject ) || std::ranges::binary_search( m_SpriteObjects, nObject ) )
+			continue;
+		const auto &visual = pScene->m_Entities[ pScene->GetIndex( nObject ) ];
+		if ( !visual.m_bOverlay && !visual.m_bDecal && std::ranges::any_of( pMesh->m_Vertices, [ & ]( const auto &vertex ) { return vertex.m_nObject == nObject; } ) )
 			continue;
 		const auto nFirst = static_cast<std::uint32_t>( pMesh->m_Indices.size() );
 		AddBox( *pMesh, pScene->GetEntityBox( pScene->GetIndex( nObject ) ), nObject );
@@ -453,11 +456,12 @@ void CMapRenderData::BuildEntityBoxes()
 	for ( std::size_t e = 0; pScene && e < pScene->m_Entities.size(); e++ )
 	{
 		const std::uint32_t nObject = pScene->EntityObject( e );
-		if ( !pScene->m_Entities[ e ].m_bPoint || pScene->m_Map.m_Entities[ e ].m_bDeleted || projected[ nObject ] ||
+		if ( !pScene->m_Entities[ e ].m_bPoint || pScene->m_Map.m_Entities[ e ].m_bDeleted ||
 			std::ranges::binary_search( instances, nObject ) || std::ranges::binary_search( m_PropObjects, nObject ) || std::ranges::binary_search( m_SpriteObjects, nObject ) )
 			continue;
 		if ( m_pEntityAllParts && m_pEntityAllParts->contains( nObject ) &&
 			!m_pEntityAllParts->at( nObject )->m_Batches.empty() && m_pEntityAllParts->at( nObject )->m_Batches.front().m_nMaterial == GetEntityMaterial() &&
+			pending.contains( nObject ) == m_PendingProjections.contains( nObject ) &&
 			!( bSolidChanged && pending.contains( nObject ) ) && std::ranges::find( pScene->m_Changed, nObject ) == pScene->m_Changed.end() )
 			( *pParts )[ nObject ] = m_pEntityAllParts->at( nObject );
 		else
@@ -465,8 +469,7 @@ void CMapRenderData::BuildEntityBoxes()
 			auto pPart = std::make_shared<xv::map::CMapMesh>();
 			if ( const auto found = pending.find( nObject ); found != pending.end() && !found->second.m_Indices.empty() )
 				*pPart = found->second;
-			else
-				AddBox( *pPart, pScene->GetEntityBox( e ), nObject );
+			AddBox( *pPart, pScene->GetEntityBox( e ), nObject );
 			pPart->m_Batches = { { GetEntityMaterial(), ~0u, 0, static_cast<std::uint32_t>( pPart->m_Indices.size() ) } };
 			( *pParts )[ nObject ] = std::move( pPart );
 		}
@@ -501,6 +504,9 @@ void CMapRenderData::BuildEntityBoxes()
 	if ( changed != m_Frame.m_EntityOverrides )
 		m_nStateFor = ~0ull;
 	m_Frame.m_EntityOverrides = std::move( changed );
+	m_PendingProjections.clear();
+	for ( const auto &[ nObject, mesh ] : pending )
+		m_PendingProjections.insert( nObject );
 	m_pEntityAllParts = pParts;
 	m_Frame.m_pEntityParts = std::move( pOverrides );
 }

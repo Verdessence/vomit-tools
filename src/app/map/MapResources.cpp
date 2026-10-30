@@ -720,7 +720,7 @@ void CMapResources::Refresh( std::shared_ptr<const xv::map::CScene> pScene, std:
 		if ( nObject >= pScene->GetObjectCount() || pScene->IsSolidObject( nObject ) )
 			return false;
 		const auto &visual = pScene->m_Entities[ pScene->GetIndex( nObject ) ];
-		return !visual.m_bOverlay && !visual.m_bDecal;
+		return ( !visual.m_bOverlay && !visual.m_bDecal ) || !visual.m_szModel.empty() || !visual.m_szSprite.empty();
 	} );
 	m_bRefreshing = true;
 	const int nGeneration = m_nGeneration;

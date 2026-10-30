@@ -16,7 +16,7 @@
 - Fixed: newly placed overlays and decals load their textures; moving, editing, deleting and
   undoing them updates their projected picture. Projections follow edited receiving faces, and
   new ones show a flat selection-coloured surface while their texture loads. Overlay-only edits
-  keep the existing props and sprites.
+  keep unchanged props and sprites.
 - **Map editor:** open Hammer maps (`.vmf`) in a tab laid out as Hammer++'s: a 3D view and the
   Top, Front and Side views in four panes, its keys, colours, grid and camera (fly with WASD, look
   with Z or the mouse), from Hammer++'s own settings.
@@ -34,6 +34,9 @@
   them, X hides it, J puts it on the entity's own axes, X/Y/Z during a drag pick the axis. Its
   size, line thickness and opacity are in Preferences → Maps, as the 2D handles' size, colour
   and reach are.
+- Fixed: overlays and decals retain their entity model, sprite or box beside the projected
+  texture, including while dragged and after undo. The flat loading placeholder is removed
+  when the textured projection arrives.
 - **Object Properties edits:** a key's value typed or picked (choices as their names, with
   SmartEdit), the class retyped, flags ticked, outputs added, changed and deleted (the class's
   outputs and the target's inputs offered; a target nothing answers to in red), comments, and
