@@ -85,8 +85,34 @@ Preview and edit strippers easily
 ## Credits/Licenses
 - [craftablescience](https://github.com/craftablescience): MareTF, VPKEdit inspirations
 - [ficool2](https://github.com/ficool2): VTFEdit++, Hammer++ inspirations
-- anyone else i used their codes for
+- [Valve Developer Community](https://developer.valvesoftware.com) and the [Source SDK 2013](https://github.com/ValveSoftware/source-sdk-2013): format facts and behaviour
 
+vomit-tools is GPL-3.0-or-later; see [LICENSE](LICENSE). It's built with:
+
+| Library | What for | License |
+|---|---|---|
+| [Qt 6](https://www.qt.io) | the app | LGPL-3.0-only |
+| [sourcepp](https://github.com/craftablescience/sourcepp) (vpkpp, kvpp) | VPKs and other archives | MIT |
+| [BufferStream](https://github.com/craftablescience/BufferStream), [half](https://half.sourceforge.net), [hat-trie](https://github.com/Tessil/hat-trie), [miniz](https://github.com/richgel999/miniz) | sourcepp's support code | MIT |
+| [libtomcrypt](https://github.com/libtom/libtomcrypt), [libtommath](https://github.com/libtom/libtommath) | sourcepp's support code | Unlicense |
+| [minizip-ng](https://github.com/zlib-ng/minizip-ng), [zlib-ng](https://github.com/zlib-ng/zlib-ng) | zip archives (BSP pakfiles) | Zlib |
+| [Zstandard](https://github.com/facebook/zstd) | compression | BSD-3-Clause |
+| [bzip2](https://sourceware.org/git/bzip2.git) | compression | bzip2-1.0.6 |
+| [liblzma](https://github.com/tukaani-project/xz) (XZ Utils) | compression | 0BSD |
+| PPMd (from [7-Zip](https://github.com/ip7z/7zip)) | compression | Public domain |
+| [miniaudio](https://github.com/mackron/miniaudio) | sound playback | Unlicense OR MIT-0 |
+| [stb](https://github.com/nothings/stb) | reading, writing, resizing and DXT-compressing images | MIT OR Unlicense |
+| [CoACD](https://github.com/SarahWeiii/CoACD) | model to VMF: convex decomposition | MIT |
+| [CDT](https://github.com/artem-ogre/CDT) | CoACD's triangulation | MPL-2.0 |
+| [spdlog](https://github.com/gabime/spdlog) (with its bundled fmt) | CoACD's logging | MIT |
+| [V-HACD](https://github.com/kmammou/v-hacd) | model to VMF: voxel decomposition | BSD-3-Clause |
+| [wayland-protocols](https://gitlab.freedesktop.org/wayland/wayland-protocols) | the map view's mouselook on Wayland | MIT |
+
+CoACD also carries nanoflann (BSD-2-Clause), Bullet's convex hull (Zlib), QuickHull (public
+domain) and Sobol sequence routines (LGPL-3.0-only); CDT carries William C. Lenthe's robust
+predicates (BSD-3-Clause). Each build writes every notice, with the exact commits it fetched, to
+`THIRD-PARTY-NOTICES.txt`. Releases ship it beside `LICENSE`, and the app shows both under
+Help > About > Licenses. License texts not found in the fetched sources are in [LICENSES](LICENSES).
 ## Building
 ### Linux
 ```sh
@@ -111,6 +137,7 @@ cmake --install build --config Release --prefix dist
 Use [llvm-mingw](https://github.com/mstorsjo/llvm-mingw) with Qt's `llvm_mingw` Windows build and a
 Linux Qt of the same version for the host tools. Instructions are in
 [cmake/toolchains/llvm-mingw-x86_64.cmake](cmake/toolchains/llvm-mingw-x86_64.cmake).
+
 <!--
 # vomit-tools
 
