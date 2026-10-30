@@ -1,6 +1,6 @@
 <div>
 	<!--suppress HtmlDEprecatedAttribute -->
-	<img align="center" src=https://github.com/Verdessence/vomit-tools/blob/961476cd725300c52ca3caca093a632cb9d49d6d/src/assets/logo_wide.png alt="Vomit Tools" />
+	<img align="center" style="object-fit: cover;" src=https://github.com/Verdessence/vomit-tools/blob/961476cd725300c52ca3caca093a632cb9d49d6d/src/assets/logo_wide.png alt="Vomit Tools" />
 </div>
 <!--
 # vomit-tools
