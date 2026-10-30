@@ -69,11 +69,23 @@ There's so much shit going on in there I don't even know what's in there
 - Export a Model to VMF, decomposing the mesh into brushes via convex decomposition @ CoACD
 - CLI
 
+### BSP/VPK Viewer
+> [!NOTE]
+> hi i need an image/video/jxl for preview (We do not say gif in this household.)
+
+what else is there to note of lol
+- If available, preview stripper additions and modifications
+
+### Stripper Viewer
+> [!NOTE]
+> hi i need an image/video/jxl for preview (We do not say gif in this household.)
+
+Preview and edit strippers easily
+
 ## Credits/Licenses
 - [craftablescience](https://github.com/craftablescience): MareTF, VPKEdit inspirations
 - [ficool2](https://github.com/ficool2): VTFEdit++, Hammer++ inspirations
 - anyone else i used their codes for
-<!-- - [Eltra](https://github.com/Eltrasnag): Vomit Tools Icon and Text -->
 
 ## Building
 ### Linux
