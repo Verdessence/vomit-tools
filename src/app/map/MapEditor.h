@@ -325,6 +325,8 @@ private:
 	MapTool_t m_nTool = MapTool_t::MAP_TOOL_SELECT;
 	MapEditMode_t m_nEditMode = MapEditMode_t::MAP_EDIT_MODE_RESIZE;
 	bool m_bGizmo = true;
+	QActionGroup *m_pGizmoModes = nullptr;
+	MapGizmoMode_t m_nGizmoChosen = MapGizmoMode_t::MAP_GIZMO_MODE_TRANSLATE;
 	MapGizmoMode_t m_nGizmoMode = MapGizmoMode_t::MAP_GIZMO_MODE_TRANSLATE;
 	bool m_bGizmoLocal = false;
 	std::optional<xv::map::Point_t> m_Pivot;        // where it was dragged to

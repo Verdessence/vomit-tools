@@ -118,6 +118,7 @@ enum class MapAction_t
 	MAP_ACTION_STATISTICS,           // O
 	MAP_ACTION_GIZMO_TRANSLATE,      // G (Hammer++'s gizmo)
 	MAP_ACTION_GIZMO_ROTATE,         // R
+	MAP_ACTION_GIZMO_ALL,            // T
 	MAP_ACTION_GIZMO_SCALE,          // E
 	MAP_ACTION_GIZMO_ORIENTATION,    // J: the world's axes or the entity's own
 };

@@ -231,6 +231,7 @@ CMapEditor::CMapEditor( const QString &szPath, bool bFromGame, QWidget *pParent 
 	// Reading textures and models frees as much as it keeps.
 	connect( m_pResources, &CMapResources::Finished, this, [] { QTimer::singleShot( 0, QCoreApplication::instance(), [] { xv::ReleaseFreedMemory(); } ); } );
 	TakePreferences();
+	m_nGizmoChosen = m_nGizmoMode = CPreferences::Instance().GetMapPreferences().m_bGizmoAll ? MapGizmoMode_t::MAP_GIZMO_MODE_ALL : MapGizmoMode_t::MAP_GIZMO_MODE_TRANSLATE;
 	connect( &CPreferences::Instance(), &CPreferences::MapPreferencesChanged, this, &CMapEditor::PreferencesChanged );
 
 	auto *pLayout = new QVBoxLayout( this );
@@ -793,6 +794,22 @@ void CMapEditor::BuildToolBars( QVBoxLayout *pLayout )
 		connect( pAction, &QAction::triggered, this, [ this, nAction ] { RunAction( nAction, m_pActiveView ); } );
 		return pAction;
 	};
+	m_pGizmoModes = new QActionGroup( this );
+	for ( const auto &[ szName, nMode ] : std::array<std::pair<QString, MapGizmoMode_t>, 5>{ { { tr( "Move" ), MapGizmoMode_t::MAP_GIZMO_MODE_TRANSLATE },
+			  { tr( "Rotate" ), MapGizmoMode_t::MAP_GIZMO_MODE_ROTATE },
+			  { tr( "Scale" ), MapGizmoMode_t::MAP_GIZMO_MODE_SCALE },
+			  { tr( "Shear" ), MapGizmoMode_t::MAP_GIZMO_MODE_SHEAR },
+			  { tr( "All" ), MapGizmoMode_t::MAP_GIZMO_MODE_ALL } } } )
+	{
+		auto *pAction = pBar->addAction( szName );
+		pAction->setObjectName( QStringLiteral( "mapGizmoMode%1" ).arg( static_cast<int>( nMode ) ) );
+		pAction->setCheckable( true );
+		pAction->setData( static_cast<int>( nMode ) );
+		pAction->setChecked( nMode == m_nGizmoMode );
+		m_pGizmoModes->addAction( pAction );
+		connect( pAction, &QAction::triggered, this, [ this, nMode ] { SetGizmoMode( nMode ); } );
+	}
+	pBar->addSeparator();
 	command( tr( "Smaller Grid" ), MapAction_t::MAP_ACTION_GRID_SMALLER );
 	command( tr( "Bigger Grid" ), MapAction_t::MAP_ACTION_GRID_LARGER );
 	// Toggles keep their buttons in step with the settings, however they are changed.
@@ -1790,6 +1807,7 @@ bool CMapEditor::RunAction( MapAction_t nAction, CMapView *pFrom )
 		case MapAction_t::MAP_ACTION_TOOL_CAMERA:
 			SetTool( MapTool_t::MAP_TOOL_CAMERA );
 			return true;
+		case MapAction_t::MAP_ACTION_GIZMO_ALL: SetGizmoMode( MapGizmoMode_t::MAP_GIZMO_MODE_ALL ); return true;
 		case MapAction_t::MAP_ACTION_GIZMO_TRANSLATE: SetGizmoMode( MapGizmoMode_t::MAP_GIZMO_MODE_TRANSLATE ); return true;
 		case MapAction_t::MAP_ACTION_GIZMO_ROTATE: SetGizmoMode( MapGizmoMode_t::MAP_GIZMO_MODE_ROTATE ); return true;
 		case MapAction_t::MAP_ACTION_GIZMO_SCALE: SetGizmoMode( MapGizmoMode_t::MAP_GIZMO_MODE_SCALE ); return true;
@@ -1967,7 +1985,10 @@ void CMapEditor::SetGizmoShown( bool bShown )
 //-----------------------------------------------------------------------------
 void CMapEditor::SetGizmoMode( MapGizmoMode_t nMode )
 {
-	m_nGizmoMode = nMode;
+	m_nGizmoChosen = m_nGizmoMode = nMode;
+	if ( m_pGizmoModes )
+		for ( auto *pAction : m_pGizmoModes->actions() )
+			pAction->setChecked( pAction->data().toInt() == static_cast<int>( nMode ) );
 	RepaintTools();
 }
 
@@ -1990,6 +2011,15 @@ void CMapEditor::SetEditMode( MapEditMode_t nMode )
 		return;
 	}
 	m_nEditMode = nMode;
+	if ( CPreferences::Instance().GetMapPreferences().m_bGizmoFollowsHandles )
+	{
+		m_nGizmoMode = nMode == MapEditMode_t::MAP_EDIT_MODE_ROTATE ? MapGizmoMode_t::MAP_GIZMO_MODE_ROTATE : nMode == MapEditMode_t::MAP_EDIT_MODE_SHEAR ? MapGizmoMode_t::MAP_GIZMO_MODE_SHEAR
+																																						  : m_nGizmoChosen;
+		if ( m_pGizmoModes )
+			for ( auto *pAction : m_pGizmoModes->actions() )
+				pAction->setChecked( pAction->data().toInt() == static_cast<int>( m_nGizmoMode ) );
+		RepaintTools();
+	}
 	for ( CMapView *pView : GetViews() )
 	{
 		pView->update();

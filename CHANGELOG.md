@@ -29,11 +29,15 @@
   textures stretch with resized faces rather than keep their size.
 - Fixed: Show All in the Filter Control crashed after the map had been edited (the automatic
   visgroups' lists belonged to the scene before the edit).
-- **A gizmo in the 3D views** (Hammer++'s): arrows, rings or scale axes at the selection, dragged
-  along an axis to move, turn or stretch it; G, R and E pick what it does, right-click goes round
-  them, X hides it, J puts it on the entity's own axes, X/Y/Z during a drag pick the axis. Its
-  size, line thickness and opacity are in Preferences → Maps, as the 2D handles' size, colour
-  and reach are.
+- **A gizmo in the 3D views:** solid move cones, rotation rings, scale cubes and shear
+  handles. All (T, or the toolbar) combines move, rotate and scale with plane squares and a
+  free-move circle. It can follow the 2D resize/rotate/shear mode; Preferences → Maps chooses
+  this and whether new maps start with Move or All. X hides it; J uses an entity's own axes.
+- **G, R and E in 3D** start a mouse-following move, rotate or scale. X/Y/Z cycles world-axis,
+  local-axis and free movement; Shift plus an axis constrains its other two axes. Type units,
+  degrees or a scale factor for an exact transform. Ctrl or Alt frees snapping, and holding
+  Shift gives finer mouse movement. Enter or a left click commits one undo step; Escape or a
+  right click cancels. WASD still flies during the transform.
 - Fixed: overlays and decals retain their entity model, sprite or box beside the projected
   texture, including while dragged and after undo. The flat loading placeholder is removed
   when the textured projection arrives.

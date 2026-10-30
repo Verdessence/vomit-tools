@@ -123,6 +123,7 @@ const Binding_t BINDINGS[] = {
 	{ MapAction_t::MAP_ACTION_STATISTICS, Qt::Key_O, Qt::NoModifier, ONLY_3D },
 	{ MapAction_t::MAP_ACTION_GIZMO_TRANSLATE, Qt::Key_G, Qt::NoModifier, ONLY_3D },
 	{ MapAction_t::MAP_ACTION_GIZMO_ROTATE, Qt::Key_R, Qt::NoModifier, ONLY_3D },
+	{ MapAction_t::MAP_ACTION_GIZMO_ALL, Qt::Key_T, Qt::NoModifier, ONLY_3D },
 	{ MapAction_t::MAP_ACTION_GIZMO_SCALE, Qt::Key_E, Qt::NoModifier, ONLY_3D },
 	{ MapAction_t::MAP_ACTION_GIZMO_ORIENTATION, Qt::Key_J, Qt::NoModifier, ONLY_3D },
 };

@@ -53,6 +53,8 @@ void ForEachMapPreference( Preferences_t &map, Visit_t &&pfnVisit )
 	pfnVisit( "maps/gizmoPixels", map.m_flGizmoPixels );
 	pfnVisit( "maps/gizmoThickness", map.m_flGizmoThickness );
 	pfnVisit( "maps/gizmoAlpha", map.m_nGizmoAlpha );
+	pfnVisit( "maps/gizmoFollowsHandles", map.m_bGizmoFollowsHandles );
+	pfnVisit( "maps/gizmoAll", map.m_bGizmoAll );
 	pfnVisit( "maps/arrowsNudge", map.m_bArrowsNudge );
 	pfnVisit( "maps/textureLock", map.m_bTextureLock );
 	pfnVisit( "maps/scaleLock", map.m_bScaleLock );

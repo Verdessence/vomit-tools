@@ -667,6 +667,14 @@ void CMapView3D::Look( QPointF delta )
 void CMapView3D::mousePressEvent( QMouseEvent *pEvent )
 {
 	setFocus( Qt::MouseFocusReason );
+	if ( m_ModalTransform && ( pEvent->button() == Qt::LeftButton || pEvent->button() == Qt::RightButton ) )
+	{
+		m_ModalTransform->MovePointer( pEvent->position(), pEvent->modifiers().testFlag( Qt::ShiftModifier ) );
+		PreviewModalTransform( pEvent->modifiers() );
+		EndModalTransform( pEvent->button() == Qt::LeftButton );
+		m_bConsumeModalRelease = true;
+		return;
+	}
 	m_Dragging = pEvent->buttons();
 	m_LastMouse = pEvent->position().toPoint();
 	m_PressAt = m_LastMouse;
@@ -883,6 +891,7 @@ std::optional<CMapGizmo> CMapView3D::GetGizmo() const
 	}
 	CMapGizmo gizmo;
 	gizmo.Place( m_Editor.GetPivot().value_or( bounds.GetCenter() ), axes );
+	gizmo.SetBounds( bounds );
 	gizmo.SetMode( m_Editor.GetGizmoMode() );
 	return gizmo;
 }
@@ -896,6 +905,74 @@ xv::map::CViewCamera CMapView3D::GetSizedCamera() const
 	camera.m_nWidth = std::max( 1, width() );
 	camera.m_nHeight = std::max( 1, height() );
 	return camera;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Start a keyboard transform from the current selection and pointer.
+//-----------------------------------------------------------------------------
+void CMapView3D::BeginModalTransform( MapGizmoMode_t nMode )
+{
+	if ( m_ModalTransform )
+		EndModalTransform( false );
+	m_Editor.SetGizmoMode( nMode );
+	if ( m_nGizmoDrag >= 0 || m_pOverlayScene || m_pPaintScene || m_Editor.GetTool() != MapTool_t::MAP_TOOL_SELECT )
+		return;
+	const auto &document = GetDocument();
+	if ( !document.GetScene() || document.GetSelection().empty() || document.GetSelectionBounds().IsEmpty() )
+		return;
+	std::array<xv::map::Point_t, 3> axes{ { { 1, 0, 0 }, { 0, 1, 0 }, { 0, 0, 1 } } };
+	if ( document.GetSelection().size() == 1 && !document.GetScene()->IsSolidObject( document.GetSelection().front() ) )
+	{
+		const auto &visual = document.GetScene()->m_Entities[ document.GetScene()->GetIndex( document.GetSelection().front() ) ];
+		const auto rotation = xv::map::Transform_t::FromAngles( {}, visual.m_Angles );
+		for ( auto &axis : axes )
+			axis = rotation.Rotate( axis );
+	}
+	if ( m_bMouselook )
+		SetMouselook( false );
+	m_pGizmoScene = document.GetSharedScene();
+	m_GizmoSelection = document.GetSelection();
+	m_ModalTransform.emplace( nMode, m_Editor.GetPivot().value_or( document.GetSelectionBounds().GetCenter() ), axes, GetSizedCamera(), m_LastMouse );
+	m_ModalResult = {};
+	PreviewModalTransform( QApplication::keyboardModifiers() );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Preview against the original scene without adding undo commands.
+//-----------------------------------------------------------------------------
+void CMapView3D::PreviewModalTransform( Qt::KeyboardModifiers modifiers )
+{
+	if ( !m_ModalTransform || !m_pGizmoScene )
+		return;
+	const auto &settings = m_Editor.GetSettings();
+	const bool bFree = modifiers.testFlag( Qt::ControlModifier ) || modifiers.testFlag( Qt::AltModifier );
+	m_ModalResult = m_ModalTransform->Evaluate( GetSizedCamera(), bFree || !settings.m_bSnapToGrid ? 0.0 : settings.m_nGridSize, bFree ? 0.0 : CPreferences::Instance().GetMapPreferences().m_flRotationSnap );
+	if ( m_ModalResult.IsIdentity() )
+		GetDocument().EndPreview();
+	else
+		GetDocument().Preview( xv::map::TransformObjects( *m_pGizmoScene, m_GizmoSelection, m_ModalResult, settings.m_bTextureLock, settings.m_bScaleLock ) );
+	emit m_Editor.StatusMessage( m_ModalTransform->GetDescription() );
+	RedrawLabels();
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Restore the preview base, then commit exactly one transform if confirmed.
+//-----------------------------------------------------------------------------
+void CMapView3D::EndModalTransform( bool bCommit )
+{
+	if ( !m_ModalTransform )
+		return;
+	const auto nMode = m_ModalTransform->GetMode();
+	const auto transform = m_ModalResult;
+	m_ModalTransform.reset();
+	GetDocument().EndPreview();
+	m_pGizmoScene.reset();
+	m_GizmoSelection.clear();
+	if ( bCommit )
+		m_Editor.TransformSelection( transform, nMode == MapGizmoMode_t::MAP_GIZMO_MODE_TRANSLATE ? tr( "Move" ) : nMode == MapGizmoMode_t::MAP_GIZMO_MODE_ROTATE ? tr( "Rotate" )
+																																								  : tr( "Scale" ) );
+	emit m_Editor.StatusMessage( QString{} );
+	RedrawLabels();
 }
 
 //-----------------------------------------------------------------------------
@@ -931,7 +1008,7 @@ void CMapView3D::EndGizmo( bool bCommit, QPointF at, Qt::KeyboardModifiers modif
 	const double flGrid = bFree || !settings.m_bSnapToGrid ? 0.0 : static_cast<double>( settings.m_nGridSize );
 	const double flStep = bFree ? 0.0 : CPreferences::Instance().GetMapPreferences().m_flRotationSnap;
 	const xv::map::Transform_t transform = m_DragGizmo ? m_DragGizmo->Drag( GetSizedCamera(), m_nGizmoDrag, m_GizmoFrom, at, flGrid, flStep ) : xv::map::Transform_t{};
-	const MapGizmoMode_t nMode = m_DragGizmo ? m_DragGizmo->GetMode() : MapGizmoMode_t::MAP_GIZMO_MODE_TRANSLATE;
+	const MapGizmoMode_t nMode = m_DragGizmo ? m_DragGizmo->GetPartMode( m_nGizmoDrag ) : MapGizmoMode_t::MAP_GIZMO_MODE_TRANSLATE;
 	if ( m_pGizmoScene )
 	{
 		GetDocument().EndPreview();
@@ -943,6 +1020,7 @@ void CMapView3D::EndGizmo( bool bCommit, QPointF at, Qt::KeyboardModifiers modif
 	if ( bCommit )
 	{
 		m_Editor.TransformSelection( transform, nMode == MapGizmoMode_t::MAP_GIZMO_MODE_TRANSLATE ? tr( "Move" ) : nMode == MapGizmoMode_t::MAP_GIZMO_MODE_ROTATE ? tr( "Rotate" )
+				: nMode == MapGizmoMode_t::MAP_GIZMO_MODE_SHEAR                                                                                                   ? tr( "Shear" )
 																																								  : tr( "Scale" ) );
 	}
 	RedrawLabels();
@@ -954,6 +1032,13 @@ void CMapView3D::EndGizmo( bool bCommit, QPointF at, Qt::KeyboardModifiers modif
 //-----------------------------------------------------------------------------
 void CMapView3D::mouseMoveEvent( QMouseEvent *pEvent )
 {
+	if ( m_ModalTransform )
+	{
+		m_LastMouse = pEvent->position().toPoint();
+		m_ModalTransform->MovePointer( pEvent->position(), pEvent->modifiers().testFlag( Qt::ShiftModifier ) );
+		PreviewModalTransform( pEvent->modifiers() );
+		return;
+	}
 	if ( m_pOverlayScene )
 	{
 		PreviewOverlayDrag( pEvent->position() );
@@ -1062,6 +1147,12 @@ void CMapView3D::mouseMoveEvent( QMouseEvent *pEvent )
 //-----------------------------------------------------------------------------
 void CMapView3D::mouseReleaseEvent( QMouseEvent *pEvent )
 {
+	if ( m_bConsumeModalRelease )
+	{
+		m_bConsumeModalRelease = false;
+		m_Dragging = pEvent->buttons();
+		return;
+	}
 	const bool bWasLeft = ( m_Dragging & Qt::LeftButton ) != 0;
 	m_Dragging = pEvent->buttons();
 	if ( m_pOverlayScene && pEvent->button() == Qt::LeftButton )
@@ -1534,7 +1625,7 @@ void CMapView3D::PaintTools( QPainter &painter )
 	const bool bBrush = HasPaintBrushRing();
 	const bool bOverlay = m_Editor.GetTool() == MapTool_t::MAP_TOOL_OVERLAY && !GetDocument().GetSelection().empty();
 	const bool bWalkable = m_Editor.GetSettings().m_bWalkable && GetDocument().GetScene();
-	if ( !box && !marker && !gizmo && faces.empty() && !pointfile && !bBrush && !bWalkable && !bOverlay )
+	if ( !box && !marker && !gizmo && faces.empty() && !pointfile && !bBrush && !bWalkable && !bOverlay && !m_ModalTransform )
 	{
 		return;
 	}
@@ -1784,6 +1875,18 @@ void CMapView3D::PaintTools( QPainter &painter )
 			painter.drawLines( lines.data(), static_cast<int>( lines.size() ) );
 		}
 	}
+	if ( m_ModalTransform )
+	{
+		for ( const auto &lock : m_ModalTransform->GetLockLines( m_Camera.m_flFar ) )
+		{
+			lines.clear();
+			line( lock.m_From, lock.m_To );
+			painter.setPen( QPen{ lock.m_nPart == 0 ? mapstyle::AXIS_X : lock.m_nPart == 1 ? mapstyle::AXIS_Y
+																						   : mapstyle::AXIS_Z,
+				1.5 } );
+			painter.drawLines( lines.data(), static_cast<int>( lines.size() ) );
+		}
+	}
 	if ( gizmo )
 	{
 		// Each axis in its colour, the one under the mouse (or being dragged) in the selection's
@@ -1792,25 +1895,63 @@ void CMapView3D::PaintTools( QPainter &painter )
 		const MapPreferences_t &look = CPreferences::Instance().GetMapPreferences();
 		const double flThick = look.m_flGizmoThickness;
 		const int nAlpha = std::clamp( look.m_nGizmoAlpha, 0, 255 );
-		for ( int nAxis = 0; nAxis < 3; nAxis++ )
+		const auto gizmoLines = gizmo->GetLines( camera, look.m_flGizmoPixels );
+		for ( int nAxis = 0; nAxis < ( gizmo->GetMode() == MapGizmoMode_t::MAP_GIZMO_MODE_ALL ? 13 : 3 ); nAxis++ )
 		{
 			lines.clear();
-			for ( const MapGizmoLine_t &axisLine : gizmo->GetLines( camera, look.m_flGizmoPixels ) )
+			for ( const MapGizmoLine_t &axisLine : gizmoLines )
 			{
-				if ( axisLine.m_nAxis == nAxis )
+				if ( axisLine.m_nPart == nAxis )
 				{
 					line( axisLine.m_From, axisLine.m_To );
 				}
 			}
-			QColor color = nAxis == nLit ? look.m_Colors.m_SelectionEdge3D : nAxis == 0 ? mapstyle::AXIS_X
-				: nAxis == 1                                                            ? mapstyle::AXIS_Y
-																						: mapstyle::AXIS_Z;
+			const int nColorAxis = gizmo->GetPartAxis( nAxis );
+			QColor color = nAxis == nLit || nColorAxis < 0 ? look.m_Colors.m_SelectionEdge3D : nColorAxis == 0 ? mapstyle::AXIS_X
+				: nColorAxis == 1                                                                              ? mapstyle::AXIS_Y
+																											   : mapstyle::AXIS_Z;
 			color.setAlpha( nAlpha );
 			painter.setPen( QPen{ QColor{ 0, 0, 0, 160 * nAlpha / 255 }, ( nAxis == nLit ? 7.0 : 6.0 ) * flThick, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin } );
 			painter.drawLines( lines.data(), static_cast<int>( lines.size() ) );
 			painter.setPen( QPen{ color, ( nAxis == nLit ? 4.5 : 3.5 ) * flThick, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin } );
 			painter.drawLines( lines.data(), static_cast<int>( lines.size() ) );
 		}
+		struct GizmoFace_t
+		{
+			QPolygonF m_Polygon;
+			QColor m_Color;
+			double m_flDepth;
+		};
+		std::vector<GizmoFace_t> faces;
+		for ( const auto &triangle : gizmo->GetTriangles( camera, look.m_flGizmoPixels ) )
+		{
+			const auto projected = camera.ProjectPolygon( triangle.m_Points );
+			if ( projected.size() < 3 )
+				continue;
+			GizmoFace_t face;
+			face.m_flDepth = 0.0;
+			for ( const auto &point : projected )
+			{
+				face.m_Polygon << QPointF{ point[ 0 ], point[ 1 ] };
+				face.m_flDepth += point[ 2 ];
+			}
+			face.m_flDepth /= projected.size();
+			const int nColorAxis = gizmo->GetPartAxis( triangle.m_nPart );
+			face.m_Color = triangle.m_nPart == nLit || nColorAxis < 0 ? look.m_Colors.m_SelectionEdge3D : nColorAxis == 0 ? mapstyle::AXIS_X
+				: nColorAxis == 1                                                                                         ? mapstyle::AXIS_Y
+																														  : mapstyle::AXIS_Z;
+			const double flLight = 0.5 + 0.5 * std::abs( xv::map::Dot( triangle.m_Normal, camera.GetForward() ) );
+			face.m_Color.setRgbF( face.m_Color.redF() * flLight, face.m_Color.greenF() * flLight, face.m_Color.blueF() * flLight, nAlpha / 255.0 );
+			faces.push_back( std::move( face ) );
+		}
+		std::ranges::sort( faces, []( const GizmoFace_t &a, const GizmoFace_t &b ) { return a.m_flDepth > b.m_flDepth; } );
+		painter.setPen( Qt::NoPen );
+		for ( const auto &face : faces )
+		{
+			painter.setBrush( face.m_Color );
+			painter.drawPolygon( face.m_Polygon );
+		}
+		painter.setBrush( Qt::NoBrush );
 	}
 	painter.setRenderHint( QPainter::Antialiasing, false );
 }
@@ -1858,6 +1999,48 @@ void CMapView3D::wheelEvent( QWheelEvent *pEvent )
 //-----------------------------------------------------------------------------
 void CMapView3D::keyPressEvent( QKeyEvent *pEvent )
 {
+	if ( m_ModalTransform )
+	{
+		const int nKey = pEvent->key();
+		if ( nKey == Qt::Key_Escape || nKey == Qt::Key_Return || nKey == Qt::Key_Enter )
+		{
+			PreviewModalTransform( pEvent->modifiers() );
+			EndModalTransform( nKey != Qt::Key_Escape );
+			return;
+		}
+		if ( nKey == Qt::Key_X || nKey == Qt::Key_Y || nKey == Qt::Key_Z )
+		{
+			if ( !pEvent->isAutoRepeat() )
+				m_ModalTransform->LockAxis( nKey == Qt::Key_X ? 0 : nKey == Qt::Key_Y ? 1
+																					  : 2,
+					pEvent->modifiers().testFlag( Qt::ShiftModifier ) );
+			PreviewModalTransform( pEvent->modifiers() );
+			return;
+		}
+		if ( nKey == Qt::Key_Backspace )
+		{
+			m_ModalTransform->Backspace();
+			PreviewModalTransform( pEvent->modifiers() );
+			return;
+		}
+		if ( !pEvent->text().isEmpty() && m_ModalTransform->Type( pEvent->text().front() ) )
+		{
+			PreviewModalTransform( pEvent->modifiers() );
+			return;
+		}
+		if ( nKey == Qt::Key_Control || nKey == Qt::Key_Alt || nKey == Qt::Key_Shift )
+		{
+			PreviewModalTransform( pEvent->modifiers() );
+			return;
+		}
+	}
+	if ( pEvent->modifiers() == Qt::NoModifier && ( pEvent->key() == Qt::Key_G || pEvent->key() == Qt::Key_R || pEvent->key() == Qt::Key_E ) )
+	{
+		if ( !pEvent->isAutoRepeat() )
+			BeginModalTransform( pEvent->key() == Qt::Key_G ? MapGizmoMode_t::MAP_GIZMO_MODE_TRANSLATE : pEvent->key() == Qt::Key_R ? MapGizmoMode_t::MAP_GIZMO_MODE_ROTATE
+																																	: MapGizmoMode_t::MAP_GIZMO_MODE_SCALE );
+		return;
+	}
 	if ( pEvent->key() == Qt::Key_Escape && m_pOverlayScene )
 	{
 		EndOverlayDrag( false );
@@ -1887,12 +2070,15 @@ void CMapView3D::keyPressEvent( QKeyEvent *pEvent )
 	// While an axis is dragged, X, Y and Z pick the axis instead (Hammer++'s axis locks).
 	if ( m_nGizmoDrag >= 0 && pEvent->modifiers() == Qt::NoModifier && ( pEvent->key() == Qt::Key_X || pEvent->key() == Qt::Key_Y || pEvent->key() == Qt::Key_Z ) )
 	{
+		const int nKind = m_DragGizmo && m_DragGizmo->GetMode() == MapGizmoMode_t::MAP_GIZMO_MODE_ALL && m_nGizmoDrag < 9 ? m_nGizmoDrag / 3 : 0;
 		m_nGizmoDrag = pEvent->key() == Qt::Key_X ? 0 : pEvent->key() == Qt::Key_Y ? 1
 																				   : 2;
+		m_nGizmoDrag += nKind * 3;
 		PreviewGizmo( mapFromGlobal( QCursor::pos() ), QApplication::keyboardModifiers() );
 		return;
 	}
-	if ( const auto nAction = MapActionFor( *pEvent, MapKeyContext_t::MAP_KEY_CONTEXT_3D ); nAction && IsHeldMapAction( *nAction ) )
+	QKeyEvent flightEvent( pEvent->type(), pEvent->key(), m_ModalTransform ? Qt::NoModifier : pEvent->modifiers() );
+	if ( const auto nAction = MapActionFor( flightEvent, MapKeyContext_t::MAP_KEY_CONTEXT_3D ); nAction && IsHeldMapAction( *nAction ) )
 	{
 		if ( !pEvent->isAutoRepeat() && std::ranges::find( m_Held, *nAction ) == m_Held.end() )
 		{
@@ -1916,6 +2102,8 @@ void CMapView3D::keyPressEvent( QKeyEvent *pEvent )
 		}
 		return;
 	}
+	if ( m_ModalTransform && MapActionFor( *pEvent, MapKeyContext_t::MAP_KEY_CONTEXT_3D ) )
+		EndModalTransform( false );
 	CMapView::keyPressEvent( pEvent );
 }
 
@@ -1924,6 +2112,11 @@ void CMapView3D::keyPressEvent( QKeyEvent *pEvent )
 //-----------------------------------------------------------------------------
 void CMapView3D::keyReleaseEvent( QKeyEvent *pEvent )
 {
+	if ( m_ModalTransform && ( pEvent->key() == Qt::Key_Control || pEvent->key() == Qt::Key_Alt || pEvent->key() == Qt::Key_Shift ) )
+	{
+		PreviewModalTransform( pEvent->modifiers() );
+		return;
+	}
 	if ( pEvent->isAutoRepeat() )
 	{
 		return;
@@ -1933,7 +2126,8 @@ void CMapView3D::keyReleaseEvent( QKeyEvent *pEvent )
 		m_bSpaceHeld = false;
 		return;
 	}
-	if ( const auto nAction = MapActionFor( *pEvent, MapKeyContext_t::MAP_KEY_CONTEXT_3D ); nAction && IsHeldMapAction( *nAction ) )
+	QKeyEvent flightEvent( pEvent->type(), pEvent->key(), Qt::NoModifier );
+	if ( const auto nAction = MapActionFor( flightEvent, MapKeyContext_t::MAP_KEY_CONTEXT_3D ); nAction && IsHeldMapAction( *nAction ) )
 	{
 		std::erase( m_Held, *nAction );
 		if ( m_Held.empty() )
@@ -1951,6 +2145,8 @@ void CMapView3D::keyReleaseEvent( QKeyEvent *pEvent )
 //-----------------------------------------------------------------------------
 void CMapView3D::focusOutEvent( QFocusEvent *pEvent )
 {
+	if ( m_ModalTransform )
+		EndModalTransform( false );
 	m_Held.clear();
 	m_pTick->stop();
 	m_flSpeed = 0.0;
@@ -2002,6 +2198,8 @@ void CMapView3D::Fly( double flSeconds )
 	{
 		m_Camera.m_Eye = xv::map::Add( m_Camera.m_Eye, xv::map::Scale( xv::map::Normalized( vecMove ), m_flSpeed * flSeconds ) );
 		Changed();
+		if ( m_ModalTransform )
+			PreviewModalTransform( QApplication::keyboardModifiers() );
 	}
 }
 

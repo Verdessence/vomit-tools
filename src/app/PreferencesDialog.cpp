@@ -479,6 +479,8 @@ QWidget *CPreferencesDialog::BuildMapsPage()
 		pForm->addRow( tr( "Gizmo's line thickness (times)" ), spin( QStringLiteral( "preferencesMapGizmoThickness" ), current.m_flGizmoThickness, 0.25, 4, 0.25, 2, []( MapPreferences_t &p, double fl ) { p.m_flGizmoThickness = fl; } ) );
 		pForm->addRow( tr( "Gizmo's opacity" ), whole( QStringLiteral( "preferencesMapGizmoAlpha" ), current.m_nGizmoAlpha, 32, 255, QString{}, []( MapPreferences_t &p, int n ) { p.m_nGizmoAlpha = n; } ) );
 		pLayout->addLayout( pForm );
+		pLayout->addWidget( check( QStringLiteral( "preferencesMapGizmoFollowsHandles" ), tr( "3D gizmo follows the 2D handle mode" ), current.m_bGizmoFollowsHandles, []( MapPreferences_t &p, bool b ) { p.m_bGizmoFollowsHandles = b; } ) );
+		pForm->addRow( tr( "Default 3D gizmo" ), choice( QStringLiteral( "preferencesMapGizmoDefault" ), { { tr( "Move" ), 0 }, { tr( "All" ), 1 } }, current.m_bGizmoAll ? 1 : 0, []( MapPreferences_t &p, int n ) { p.m_bGizmoAll = n != 0; } ) );
 		pLayout->addWidget( check( QStringLiteral( "preferencesMapSkybox3D" ), tr( "Draw the 3D skybox" ), current.m_bSkybox3D, []( MapPreferences_t &p, bool b ) { p.m_bSkybox3D = b; } ) );
 		pLayout->addWidget( check( QStringLiteral( "preferencesMapSprites" ), tr( "Draw sprites (else entities' boxes)" ), current.m_bSprites, []( MapPreferences_t &p, bool b ) { p.m_bSprites = b; } ) );
 		pLayout->addWidget( check( QStringLiteral( "preferencesMapWireframeModels" ), tr( "Draw models' edges in the wireframe view" ), current.m_bWireframeModels, []( MapPreferences_t &p, bool b ) { p.m_bWireframeModels = b; } ) );

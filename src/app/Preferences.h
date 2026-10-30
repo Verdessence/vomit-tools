@@ -115,6 +115,8 @@ struct MapPreferences_t
 	double m_flGizmoPixels = mapstyle::GIZMO_PIXELS; // the gizmo's axes, on screen
 	double m_flGizmoThickness = mapstyle::GIZMO_THICKNESS;
 	int m_nGizmoAlpha = mapstyle::GIZMO_ALPHA;
+	bool m_bGizmoFollowsHandles = true;
+	bool m_bGizmoAll = false;
 
 	// Editing.
 	bool m_bArrowsNudge = true;      // arrow keys move the selection (Hammer++'s Nudge)

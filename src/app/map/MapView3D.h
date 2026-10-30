@@ -24,6 +24,7 @@
 #include "PointerLock.h"
 #include "map/Faces.h"
 #include "map/MapGizmo.h"
+#include "map/MapModalTransform.h"
 #include "map/MapRenderData.h"
 #include "map/MapRenderer.h"
 #include "map/MapView.h"
@@ -137,6 +138,12 @@ private:
 	xv::map::Point_t m_OverlayFrom{};
 	std::uint32_t m_nOverlayEntity = 0;
 	int m_nOverlayCorner = -1;
+	void BeginModalTransform( MapGizmoMode_t nMode );
+	void PreviewModalTransform( Qt::KeyboardModifiers modifiers );
+	void EndModalTransform( bool bCommit );
+	std::optional<CMapModalTransform> m_ModalTransform;
+	xv::map::Transform_t m_ModalResult;
+	bool m_bConsumeModalRelease = false;
 	void PreviewGizmo( QPointF at, Qt::KeyboardModifiers modifiers );
 	void EndGizmo( bool bCommit, QPointF at, Qt::KeyboardModifiers modifiers );
 	// The Displacement tab's brush: whether a press paints, a stroke's sample at a point

@@ -24,14 +24,24 @@ enum class MapGizmoMode_t
 	MAP_GIZMO_MODE_TRANSLATE, // G
 	MAP_GIZMO_MODE_ROTATE,    // R
 	MAP_GIZMO_MODE_SCALE,     // E
+	MAP_GIZMO_MODE_SHEAR,
+	MAP_GIZMO_MODE_ALL,       // T
 };
 
-// A line of the gizmo's picture, in map units, on one of its axes (0, 1, 2).
+// Part identifiers are axes in a single mode. All uses move 0..2, turn 3..5,
+// scale 6..8, plane move 9..11, and camera-plane move 12.
 struct MapGizmoLine_t
 {
 	xv::map::Point_t m_From;
 	xv::map::Point_t m_To;
-	int m_nAxis = 0;
+	int m_nPart = 0;
+};
+
+struct MapGizmoTriangle_t
+{
+	std::array<xv::map::Point_t, 3> m_Points;
+	xv::map::Point_t m_Normal;
+	int m_nPart = 0;
 };
 
 class CMapGizmo
@@ -43,10 +53,15 @@ public:
 	[[nodiscard]] MapGizmoMode_t GetMode() const { return m_nMode; }
 	[[nodiscard]] const xv::map::Point_t &GetPivot() const { return m_Pivot; }
 
+	void SetBounds( const xv::map::Box_t &bounds ) { m_Bounds = bounds; }
+	[[nodiscard]] MapGizmoMode_t GetPartMode( int nPart ) const;
+	[[nodiscard]] int GetPartAxis( int nPart ) const;
+
 	// How long an axis is in map units, so that it is flPixels long on screen where it stands.
 	[[nodiscard]] double GetLength( const xv::map::CViewCamera &camera, double flPixels ) const;
 	// What to draw: arrows to translate, rings to rotate, axes with a cube at the tip to scale.
 	[[nodiscard]] std::vector<MapGizmoLine_t> GetLines( const xv::map::CViewCamera &camera, double flPixels ) const;
+	[[nodiscard]] std::vector<MapGizmoTriangle_t> GetTriangles( const xv::map::CViewCamera &camera, double flPixels ) const;
 	// The axis whose picture is within flSlack pixels of at, or -1.
 	[[nodiscard]] int HitAt( const xv::map::CViewCamera &camera, double flPixels, QPointF at, double flSlack ) const;
 	// What dragging axis nAxis from pixel from to pixel to does: a move along it (in steps of
@@ -60,6 +75,7 @@ private:
 	[[nodiscard]] std::optional<double> AlongAxis( const xv::map::CViewCamera &camera, int nAxis, QPointF at ) const;
 	[[nodiscard]] std::optional<xv::map::Point_t> OnPlane( const xv::map::CViewCamera &camera, int nAxis, QPointF at ) const;
 
+	xv::map::Box_t m_Bounds;
 	xv::map::Point_t m_Pivot{};
 	std::array<xv::map::Point_t, 3> m_Axes{ { { 1, 0, 0 }, { 0, 1, 0 }, { 0, 0, 1 } } };
 	MapGizmoMode_t m_nMode = MapGizmoMode_t::MAP_GIZMO_MODE_TRANSLATE;
