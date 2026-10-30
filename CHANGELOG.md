@@ -41,6 +41,8 @@
 - Fixed: overlays and decals retain their entity model, sprite or box beside the projected
   texture, including while dragged and after undo. The flat loading placeholder is removed
   when the textured projection arrives.
+- Fixed: moving, turning or scaling brushes with the gizmo, G/R/E or the 2D handles redrew the
+  2D views and refreshed every panel on each mouse move; the drag now previews only what moves.
 - **Object Properties edits:** a key's value typed or picked (choices as their names, with
   SmartEdit), the class retyped, flags ticked, outputs added, changed and deleted (the class's
   outputs and the target's inputs offered; a target nothing answers to in red), comments, and

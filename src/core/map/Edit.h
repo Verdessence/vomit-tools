@@ -58,8 +58,9 @@ inline constexpr std::uint32_t NEW_MATERIAL = ~0u;
 
 // The scene after edit, sharing what it didn't touch with scene. Its revision is one more, and
 // m_Changed lists the objects the edit changed or added. bDisplacementPreview is only for
-// geometry/alpha painting of existing displacements on the stroke's base snapshot;
-// it grows bounds conservatively and leaves automatic groups unchanged until commit.
+// previews that reshape existing solids on a gesture's base snapshot (displacement painting,
+// transform drags): each solid gets a mesh of its own, bounds grow conservatively and automatic
+// groups stay unchanged until commit.
 [[nodiscard]] std::shared_ptr<CScene> ApplyEdit( const CScene &scene, const MapEdit_t &edit, bool bDisplacementPreview = false, bool bEntityPreview = false );
 // The edit that puts back what edit changes (for undo): the objects as they are in scene, and
 // those it adds, deleted.

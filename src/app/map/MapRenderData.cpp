@@ -346,9 +346,12 @@ void CMapRenderData::UpdateEntityPreview( xv::map::Point_t right, xv::map::Point
 	auto pMesh = std::make_shared<xv::map::CMapMesh>( m_pResources && pScene ? m_pResources->BuildEntityPreview( *pScene, m_Document.GetPreviewObjects(), right, up, m_Document.GetEntityPreviewBase() ) : xv::map::CMapMesh{} );
 	for ( const auto nObject : m_Document.GetPreviewObjects() )
 	{
-		if ( !pScene || pScene->IsDeleted( nObject ) || std::ranges::binary_search( m_PropObjects, nObject ) || std::ranges::binary_search( m_SpriteObjects, nObject ) )
+		// Solids in the preview draw from their own meshes in the scene.
+		if ( !pScene || pScene->IsSolidObject( nObject ) || pScene->IsDeleted( nObject ) || std::ranges::binary_search( m_PropObjects, nObject ) || std::ranges::binary_search( m_SpriteObjects, nObject ) )
 			continue;
 		const auto &visual = pScene->m_Entities[ pScene->GetIndex( nObject ) ];
+		if ( !visual.m_bPoint )
+			continue;
 		if ( !visual.m_bOverlay && !visual.m_bDecal && std::ranges::any_of( pMesh->m_Vertices, [ & ]( const auto &vertex ) { return vertex.m_nObject == nObject; } ) )
 			continue;
 		const auto nFirst = static_cast<std::uint32_t>( pMesh->m_Indices.size() );

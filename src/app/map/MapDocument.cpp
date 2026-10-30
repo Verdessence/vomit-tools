@@ -247,18 +247,29 @@ void CMapDocument::Preview( const xv::map::MapEdit_t &edit, bool bDisplacements 
 	}
 	else if ( !m_pPreviewBase )
 		m_pPreviewBase = m_pScene;
-	const bool bExistingEntities = !bDisplacements && edit.m_Solids.empty() && !edit.m_Entities.empty() &&
-		std::ranges::all_of( edit.m_Entities, [ & ]( const auto &entry ) { return entry.first < m_pPreviewBase->m_Entities.size(); } );
+	// Moving, turning or scaling what is already there (a drag, the gizmo, G/R/E) changes no
+	// owners, materials or groups, so it previews like a stroke: each solid in a mesh of its own,
+	// the rest of the map left as drawn. The commit after it is an ordinary edit.
+	const auto &base = *m_pPreviewBase;
+	const bool bExistingSolids = std::ranges::all_of( edit.m_Solids, [ & ]( const auto &entry ) {
+		if ( entry.first >= base.m_Map.m_Solids.size() || base.m_Map.m_Solids[ entry.first ].m_bDeleted || entry.second.m_bDeleted || entry.second.m_nEntity != base.m_Map.m_Solids[ entry.first ].m_nEntity )
+			return false;
+		return std::ranges::none_of( entry.second.m_Sides, []( const xv::map::Side_t &side ) { return side.m_nMaterial == xv::map::NEW_MATERIAL; } );
+	} );
+	const bool bExistingObjects = !bDisplacements && ( !edit.m_Solids.empty() || !edit.m_Entities.empty() ) && bExistingSolids && !edit.m_World && edit.m_Groups.empty() && edit.m_RemovedGroups.empty() && !edit.m_Cordons &&
+		std::ranges::all_of( edit.m_Entities, [ & ]( const auto &entry ) { return entry.first < base.m_Entities.size() && !entry.second.m_bDeleted; } );
 	// A copy preview introduces object IDs and placements. Keep the ordinary edit path for the
 	// rest of that gesture so dropping Shift also removes its temporary resources.
-	if ( !bDisplacements && !edit.IsCameraEdit() && !bExistingEntities )
+	if ( !bDisplacements && !edit.IsCameraEdit() && !bExistingObjects )
 		m_bEntityPreviewDisabled = true;
-	const bool bEntityPreview = bExistingEntities && !m_bEntityPreviewDisabled;
+	const bool bEntityPreview = bExistingObjects && !m_bEntityPreviewDisabled;
 	std::vector<std::uint32_t> objects;
 	if ( bEntityPreview )
 	{
 		for ( const auto &[ nEntity, entity ] : edit.m_Entities )
-			objects.push_back( m_pPreviewBase->EntityObject( nEntity ) );
+			objects.push_back( base.EntityObject( nEntity ) );
+		for ( const auto &[ nSolid, solid ] : edit.m_Solids )
+			objects.push_back( base.SolidObject( nSolid ) );
 		SortUnique( objects );
 	}
 	if ( bEntityPreview != m_bEntityPreview || ( bEntityPreview && objects != m_PreviewObjects ) )
@@ -278,7 +289,7 @@ void CMapDocument::Preview( const xv::map::MapEdit_t &edit, bool bDisplacements 
 	timer.start();
 	if ( m_bEntityPreview )
 	{
-		m_pScene = xv::map::ApplyEdit( *m_pPreviewBase, edit, false, true );
+		m_pScene = xv::map::ApplyEdit( *m_pPreviewBase, edit, !edit.m_Solids.empty(), true );
 		m_flPreviewMs = timer.nsecsElapsed() / 1e6;
 		timer.restart();
 		emit ScenePreviewed( m_pScene->m_Changed );
