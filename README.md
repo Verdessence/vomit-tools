@@ -1,3 +1,8 @@
+<div>
+	<!--suppress HtmlDEprecatedAttribute -->
+	<img align="center" src=https://github.com/Verdessence/vomit-tools/blob/961476cd725300c52ca3caca093a632cb9d49d6d/src/assets/logo_wide.png alt="Vomit Tools" />
+</div>
+<!--
 # vomit-tools
 
 Soundscape, skybox, particle, texture and material editors for Source engine games, as one Qt 6
@@ -395,3 +400,5 @@ libtomcrypt, libtommath (Unlicense), minizip-ng, zlib-ng (Zlib), Zstandard (BSD-
 liblzma (0BSD) and 7-Zip's PPMd (public domain). Each build writes their notices, with the exact
 commits it fetched, to `THIRD-PARTY-NOTICES.txt`; releases ship it beside `LICENSE`, and the app
 shows both under Help > About > Licenses. Qt's LGPL text is in [LICENSES](LICENSES).
+
+-->
