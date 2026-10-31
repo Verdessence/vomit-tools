@@ -58,6 +58,12 @@ MaterialInfo_t DescribeMaterial( const material::CMaterial &material )
 	// Water and other shaders without a texture of their own show their tool texture.
 	info.m_szTexture = !szBase.empty() && material::TextureKind( szBase ) == material::TextureKind_t::TEXTURE_KIND_FILE ? szBase : szTool;
 	info.m_szTexture2 = material.Value( "$basetexture2" );
+	info.m_bSelfIllum = material.Flag( "$selfillum" );
+	if ( info.m_bSelfIllum )
+	{
+		const auto tint = material.Color( "$selfillumtint" );
+		info.m_vecSelfIllumTint = tint;
+	}
 	info.m_bBlend = !info.m_szTexture2.empty() && ( info.m_szShader == "worldvertextransition" || info.m_szShader == "lightmapped_4wayblend" );
 	info.m_bTranslucent = material.Flag( "$translucent" );
 	info.m_bAdditive = material.Flag( "$additive" );

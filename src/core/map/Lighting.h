@@ -105,6 +105,10 @@ struct LightingOptions_t
 	int m_nBounceSamples = 32;    // rays gathering bounced light per sample
 	int m_nBounceSpacing = 4;     // and bounced light every this many
 	std::size_t m_nMaxLuxels = std::size_t{ 4 } << 20; // more than this: every other luxel, and so on
+	// Only what lies within m_flRadius of m_Centre is lit (Hammer++'s Bake in Radius); the rest
+	// still casts shadows and is left unlit. 0: everything.
+	Point_t m_Centre{};
+	double m_flRadius = 0.0;
 	// Called now and then from the baking thread: how far along (0-100) and at what.
 	std::function<void( int nPercent, std::string_view szStage )> m_pfnProgress;
 	const std::atomic<bool> *m_pCancel = nullptr; // set from another thread to stop early

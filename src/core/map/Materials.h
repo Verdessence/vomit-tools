@@ -61,6 +61,8 @@ struct MaterialInfo_t
 	CVec3 m_vecColor{ 1, 1, 1 };
 	bool m_bNoCull = false;
 	float m_flDecalScale = 1.0f;
+	bool m_bSelfIllum = false;         // $selfillum: glows by its base texture's alpha
+	CVec3 m_vecSelfIllumTint{ 1, 1, 1 };
 
 	[[nodiscard]] bool IsTool() const { return ( m_nCompile & MATERIAL_COMPILE_TOOLS ) != 0; }
 	[[nodiscard]] bool IsSky() const { return ( m_nCompile & ( MATERIAL_COMPILE_SKY | MATERIAL_COMPILE_2DSKY ) ) != 0; }

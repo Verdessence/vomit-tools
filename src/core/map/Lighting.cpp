@@ -16,6 +16,7 @@
 #include <cctype>
 #include <optional>
 #include <string>
+#include <unordered_map>
 #include <utility>
 
 #include "map/Entities.h"
@@ -216,7 +217,8 @@ struct BvhNode_t
 	std::array<float, 3> m_Mins{};
 	std::uint32_t m_nFirst = 0; // the left child (the right follows it), or the first triangle
 	std::array<float, 3> m_Maxs{};
-	std::uint32_t m_nCount = 0; // triangles in a leaf; 0 for a branch
+	std::uint16_t m_nCount = 0; // triangles in a leaf; 0 for a branch
+	std::uint16_t m_nAxis = 0;  // a branch's: the axis its children were split along
 };
 
 struct TraceHit_t
@@ -246,7 +248,8 @@ Ray_t MakeRay( Point_t origin, Point_t dir, double flMax )
 	{
 		ray.m_Origin[ i ] = static_cast<float>( origin[ i ] );
 		ray.m_Dir[ i ] = static_cast<float>( dir[ i ] );
-		ray.m_InvDir[ i ] = ray.m_Dir[ i ] != 0.0f ? 1.0f / ray.m_Dir[ i ] : std::numeric_limits<float>::infinity();
+		// Huge rather than infinite along an axis it doesn't move on, so slab tests stay finite.
+		ray.m_InvDir[ i ] = std::abs( ray.m_Dir[ i ] ) > 1.0e-20f ? 1.0f / ray.m_Dir[ i ] : std::copysign( 1.0e30f, ray.m_Dir[ i ] );
 	}
 	ray.m_flMax = static_cast<float>( flMax );
 	return ray;
@@ -277,7 +280,55 @@ private:
 //-----------------------------------------------------------------------------
 void CTracer::Build( std::vector<TraceTriangle_t> triangles )
 {
-	m_Triangles = std::move( triangles );
+	// Long triangles (a map's big floors and walls) overlap every box near them, so no split
+	// separates them: halved along their longest edge until none is longer than this.
+	constexpr float LONGEST = 256.0f;
+	m_Triangles.clear();
+	m_Triangles.reserve( triangles.size() );
+	while ( !triangles.empty() )
+	{
+		const TraceTriangle_t t = triangles.back();
+		triangles.pop_back();
+		std::array<std::array<float, 3>, 3> p{ t.m_V0, t.m_V0, t.m_V0 };
+		for ( std::size_t k = 0; k < 3; k++ )
+		{
+			p[ 1 ][ k ] += t.m_E1[ k ];
+			p[ 2 ][ k ] += t.m_E2[ k ];
+		}
+		auto length = [ & ]( std::size_t a, std::size_t b ) {
+			const float x = p[ b ][ 0 ] - p[ a ][ 0 ], y = p[ b ][ 1 ] - p[ a ][ 1 ], z = p[ b ][ 2 ] - p[ a ][ 2 ];
+			return x * x + y * y + z * z;
+		};
+		const std::array<float, 3> edges{ length( 0, 1 ), length( 1, 2 ), length( 2, 0 ) };
+		const std::size_t e = static_cast<std::size_t>( std::max_element( edges.begin(), edges.end() ) - edges.begin() );
+		if ( edges[ e ] <= LONGEST * LONGEST || m_Triangles.size() + triangles.size() > 64u << 20 )
+		{
+			m_Triangles.push_back( t );
+			continue;
+		}
+		// Corners a, b (the long edge) and c, in the triangle's winding; m halfway along a-b.
+		const std::size_t a = e, b = ( e + 1 ) % 3, c = ( e + 2 ) % 3;
+		std::array<float, 3> m{};
+		for ( std::size_t k = 0; k < 3; k++ )
+		{
+			m[ k ] = ( p[ a ][ k ] + p[ b ][ k ] ) * 0.5f;
+		}
+		const std::array<float, 2> luxel{ ( t.m_Luxels[ a ][ 0 ] + t.m_Luxels[ b ][ 0 ] ) * 0.5f, ( t.m_Luxels[ a ][ 1 ] + t.m_Luxels[ b ][ 1 ] ) * 0.5f };
+		auto make = [ & ]( const std::array<float, 3> &q0, const std::array<float, 2> &l0, const std::array<float, 3> &q1, const std::array<float, 2> &l1, const std::array<float, 3> &q2, const std::array<float, 2> &l2 ) {
+			TraceTriangle_t half;
+			half.m_nFace = t.m_nFace;
+			half.m_V0 = q0;
+			for ( std::size_t k = 0; k < 3; k++ )
+			{
+				half.m_E1[ k ] = q1[ k ] - q0[ k ];
+				half.m_E2[ k ] = q2[ k ] - q0[ k ];
+			}
+			half.m_Luxels = { l0, l1, l2 };
+			return half;
+		};
+		triangles.push_back( make( p[ a ], t.m_Luxels[ a ], m, luxel, p[ c ], t.m_Luxels[ c ] ) );
+		triangles.push_back( make( m, luxel, p[ b ], t.m_Luxels[ b ], p[ c ], t.m_Luxels[ c ] ) );
+	}
 	m_Nodes.clear();
 	if ( m_Triangles.empty() )
 	{
@@ -418,15 +469,21 @@ void CTracer::Build( std::vector<TraceTriangle_t> triangles )
 				std::nth_element( order.begin() + pending.m_nBegin, order.begin() + nMid, order.begin() + pending.m_nEnd, [ & ]( std::uint32_t a, std::uint32_t b ) { return centres[ a ][ nAxis ] < centres[ b ][ nAxis ]; } );
 			}
 		}
-		if ( nHere <= LEAF || flExtent <= 0.0f )
+		if ( nHere > LEAF && flExtent <= 0.0f && nHere > 1024 )
+		{
+			// Very many with one centre: halved as they come, to keep leaves small.
+			nMid = pending.m_nBegin + nHere / 2;
+		}
+		else if ( nHere <= LEAF || flExtent <= 0.0f )
 		{
 			node.m_nFirst = pending.m_nBegin;
-			node.m_nCount = nHere;
+			node.m_nCount = static_cast<std::uint16_t>( nHere );
 			continue;
 		}
 		const auto nLeft = static_cast<std::uint32_t>( m_Nodes.size() );
 		m_Nodes[ pending.m_nNode ].m_nFirst = nLeft;
 		m_Nodes[ pending.m_nNode ].m_nCount = 0;
+		m_Nodes[ pending.m_nNode ].m_nAxis = static_cast<std::uint16_t>( nAxis );
 		m_Nodes.emplace_back();
 		m_Nodes.emplace_back();
 		stack.push_back( { nLeft, pending.m_nBegin, nMid } );
@@ -450,25 +507,12 @@ bool CTracer::HitsBox( const BvhNode_t &node, const Ray_t &ray, float flMax )
 	float flFar = flMax;
 	for ( std::size_t k = 0; k < 3; k++ )
 	{
-		float t0 = ( node.m_Mins[ k ] - ray.m_Origin[ k ] ) * ray.m_InvDir[ k ];
-		float t1 = ( node.m_Maxs[ k ] - ray.m_Origin[ k ] ) * ray.m_InvDir[ k ];
-		if ( std::isnan( t0 ) || std::isnan( t1 ) )
-		{
-			// Parallel to this slab and on its edge: inside it.
-			continue;
-		}
-		if ( t0 > t1 )
-		{
-			std::swap( t0, t1 );
-		}
-		flNear = std::max( flNear, t0 );
-		flFar = std::min( flFar, t1 );
-		if ( flNear > flFar )
-		{
-			return false;
-		}
+		const float t0 = ( node.m_Mins[ k ] - ray.m_Origin[ k ] ) * ray.m_InvDir[ k ];
+		const float t1 = ( node.m_Maxs[ k ] - ray.m_Origin[ k ] ) * ray.m_InvDir[ k ];
+		flNear = std::max( flNear, std::min( t0, t1 ) );
+		flFar = std::min( flFar, std::max( t0, t1 ) );
 	}
-	return true;
+	return flNear <= flFar;
 }
 
 //-----------------------------------------------------------------------------
@@ -522,7 +566,7 @@ bool CTracer::IsBlocked( const Ray_t &ray ) const
 	{
 		return false;
 	}
-	std::array<std::uint32_t, 64> stack{};
+	std::array<std::uint32_t, 256> stack{};
 	std::size_t nTop = 0;
 	stack[ nTop++ ] = 0;
 	TraceHit_t hit;
@@ -548,8 +592,12 @@ bool CTracer::IsBlocked( const Ray_t &ray ) const
 		{
 			return false;
 		}
-		stack[ nTop++ ] = node.m_nFirst;
-		stack[ nTop++ ] = node.m_nFirst + 1;
+		// The child the ray reaches first, first: a blocker near the start is found sooner.
+		const BvhNode_t &left = m_Nodes[ node.m_nFirst ];
+		const std::size_t nAxis = node.m_nAxis;
+		const bool bLeftFirst = ray.m_Dir[ nAxis ] >= 0.0f ? left.m_Mins[ nAxis ] <= m_Nodes[ node.m_nFirst + 1 ].m_Mins[ nAxis ] : left.m_Maxs[ nAxis ] >= m_Nodes[ node.m_nFirst + 1 ].m_Maxs[ nAxis ];
+		stack[ nTop++ ] = bLeftFirst ? node.m_nFirst + 1 : node.m_nFirst;
+		stack[ nTop++ ] = bLeftFirst ? node.m_nFirst : node.m_nFirst + 1;
 	}
 	return false;
 }
@@ -563,7 +611,7 @@ std::optional<TraceHit_t> CTracer::Nearest( const Ray_t &ray ) const
 	{
 		return std::nullopt;
 	}
-	std::array<std::uint32_t, 64> stack{};
+	std::array<std::uint32_t, 256> stack{};
 	std::size_t nTop = 0;
 	stack[ nTop++ ] = 0;
 	TraceHit_t best;
@@ -1194,6 +1242,24 @@ bool PackAtlas( std::vector<BakeFace_t> &faces, int nStep, int nWidth, int nMaxH
 }
 
 //-----------------------------------------------------------------------------
+// Purpose: Whether a box is where the bake lights (all of the map, or within its radius).
+//-----------------------------------------------------------------------------
+bool InRadius( const LightingOptions_t &options, const Box_t &bounds )
+{
+	if ( options.m_flRadius <= 0.0 )
+	{
+		return true;
+	}
+	double flOutside = 0.0;
+	for ( std::size_t k = 0; k < 3; k++ )
+	{
+		const double flGap = std::max( { bounds.m_Mins[ k ] - options.m_Centre[ k ], 0.0, options.m_Centre[ k ] - bounds.m_Maxs[ k ] } );
+		flOutside += flGap * flGap;
+	}
+	return flOutside <= options.m_flRadius * options.m_flRadius;
+}
+
+//-----------------------------------------------------------------------------
 // Purpose: The point and spot lights that may reach a box.
 //-----------------------------------------------------------------------------
 std::vector<std::uint32_t> LightsReaching( const Bake_t &bake, const Box_t &bounds )
@@ -1244,25 +1310,105 @@ Rgb_t LightPoint( const Bake_t &bake, const std::vector<Rgb_t> &total, std::span
 std::vector<LightVertex_t> LightPropVertices( const Bake_t &bake, const std::vector<Rgb_t> &total, const CMapMesh &mesh )
 {
 	std::vector<LightVertex_t> out( mesh.m_Vertices.size(), LIGHT_VERTEX_NONE );
-	const std::vector<Point_t> skyDirs = CosineDirections( 24 );
-	const std::vector<Point_t> bounceDirs = CosineDirections( 16 );
-	// Lights by the solid's part of the mesh would be finer; a mesh's box is enough for props.
-	Box_t bounds;
-	for ( const MeshVertex_t &vertex : mesh.m_Vertices )
+	const std::vector<Point_t> skyDirs = CosineDirections( 16 );
+	const std::vector<Point_t> bounceDirs = CosineDirections( 12 );
+	// Vertices close together and facing about the same way share a sample: direct light (its
+	// shadows sharp) every 8 units, the sky's and bounced light (soft) every 32. Models repeat
+	// vertices along their seams and pack many into a few units, and light hardly changes there.
+	struct Clusters_t
 	{
-		bounds.Add( ToPoint( vertex.m_vecPosition ) );
+		double m_flCell = 8.0;
+		std::unordered_map<std::uint64_t, std::uint32_t> m_Index;
+		std::vector<Point_t> m_Positions;
+		std::vector<Point_t> m_Normals;
+		std::vector<std::uint32_t> m_Counts;
+		std::vector<std::uint32_t> m_OfVertex;
+	};
+	std::array<Clusters_t, 2> clusters;
+	clusters[ 1 ].m_flCell = 32.0;
+	Box_t bounds;
+	for ( Clusters_t &set : clusters )
+	{
+		set.m_OfVertex.resize( mesh.m_Vertices.size() );
+	}
+	for ( std::size_t v = 0; v < mesh.m_Vertices.size(); v++ )
+	{
+		const MeshVertex_t &vertex = mesh.m_Vertices[ v ];
+		const Point_t position = ToPoint( vertex.m_vecPosition );
+		Point_t normal = ToPoint( vertex.m_vecNormal );
+		normal = Length( normal ) > 1.0e-6 ? Normalized( normal ) : Point_t{ 0, 0, 1 };
+		bounds.Add( position );
+		for ( Clusters_t &set : clusters )
+		{
+			std::uint64_t nKey = 0;
+			for ( std::size_t k = 0; k < 3; k++ )
+			{
+				nKey = nKey * 0x10000u + ( static_cast<std::uint64_t>( static_cast<std::int64_t>( std::floor( position[ k ] / set.m_flCell ) ) ) & 0xffffu );
+			}
+			for ( std::size_t k = 0; k < 3; k++ )
+			{
+				// The normal in one of 5 steps a component: about 30 degrees apart.
+				nKey = nKey * 5u + static_cast<std::uint64_t>( std::lround( ( normal[ k ] + 1.0 ) * 2.0 ) );
+			}
+			const auto [ it, bNew ] = set.m_Index.try_emplace( nKey, static_cast<std::uint32_t>( set.m_Positions.size() ) );
+			if ( bNew )
+			{
+				set.m_Positions.push_back( {} );
+				set.m_Normals.push_back( {} );
+				set.m_Counts.push_back( 0 );
+			}
+			const std::uint32_t nCluster = it->second;
+			set.m_Positions[ nCluster ] = Add( set.m_Positions[ nCluster ], position );
+			set.m_Normals[ nCluster ] = Add( set.m_Normals[ nCluster ], normal );
+			set.m_Counts[ nCluster ]++;
+			set.m_OfVertex[ v ] = nCluster;
+		}
 	}
 	const std::vector<std::uint32_t> lights = LightsReaching( bake, bounds );
-	ParallelFor( mesh.m_Vertices.size(), 256, [ & ]( std::size_t nBegin, std::size_t nEnd ) {
-		for ( std::size_t v = nBegin; v < nEnd && !bake.IsCancelled(); v++ )
+	auto sampleOf = []( const Clusters_t &set, std::size_t c ) {
+		const Point_t normal = set.m_Normals[ c ];
+		return LuxelSample_t{ Scale( set.m_Positions[ c ], 1.0 / set.m_Counts[ c ] ), Length( normal ) > 1.0e-6 ? Normalized( normal ) : Point_t{ 0, 0, 1 } };
+	};
+	auto outside = [ & ]( const Clusters_t &set, std::size_t c ) {
+		Box_t at;
+		at.Add( Scale( set.m_Positions[ c ], 1.0 / set.m_Counts[ c ] ) );
+		return !InRadius( *bake.m_pOptions, at );
+	};
+	std::vector<Rgb_t> direct( clusters[ 0 ].m_Positions.size() );
+	ParallelFor( direct.size(), 64, [ & ]( std::size_t nBegin, std::size_t nEnd ) {
+		for ( std::size_t c = nBegin; c < nEnd && !bake.IsCancelled(); c++ )
 		{
-			const MeshVertex_t &vertex = mesh.m_Vertices[ v ];
-			const Point_t normal = ToPoint( vertex.m_vecNormal );
-			const LuxelSample_t sample{ ToPoint( vertex.m_vecPosition ), Length( normal ) > 1.0e-6 ? Normalized( normal ) : Point_t{ 0, 0, 1 } };
-			const Rgb_t light = LightPoint( bake, total, lights, sample, static_cast<std::uint32_t>( v ) * 2654435761u, skyDirs, bounceDirs );
-			out[ v ] = { light[ 0 ] / 255.0f, light[ 1 ] / 255.0f, light[ 2 ] / 255.0f, LIGHT_KIND_VERTEX };
+			if ( !outside( clusters[ 0 ], c ) )
+			{
+				direct[ c ] = DirectLight( bake, lights, sampleOf( clusters[ 0 ], c ), static_cast<std::uint32_t>( c ) * 2654435761u );
+			}
 		}
 	} );
+	std::vector<Rgb_t> soft( clusters[ 1 ].m_Positions.size() );
+	ParallelFor( soft.size(), 16, [ & ]( std::size_t nBegin, std::size_t nEnd ) {
+		for ( std::size_t c = nBegin; c < nEnd && !bake.IsCancelled(); c++ )
+		{
+			if ( outside( clusters[ 1 ], c ) )
+			{
+				continue;
+			}
+			const LuxelSample_t sample = sampleOf( clusters[ 1 ], c );
+			const std::uint32_t nSeed = static_cast<std::uint32_t>( c ) * 2654435761u;
+			const Rgb_t sky = SkyAmbient( bake, sample, nSeed, skyDirs );
+			const Rgb_t bounced = GatherBounce( bake, total, sample, nSeed ^ 0x51ed270bu, bounceDirs );
+			soft[ c ] = { sky[ 0 ] + bounced[ 0 ], sky[ 1 ] + bounced[ 1 ], sky[ 2 ] + bounced[ 2 ] };
+		}
+	} );
+	for ( std::size_t v = 0; v < out.size(); v++ )
+	{
+		if ( outside( clusters[ 0 ], clusters[ 0 ].m_OfVertex[ v ] ) )
+		{
+			continue;
+		}
+		const Rgb_t &a = direct[ clusters[ 0 ].m_OfVertex[ v ] ];
+		const Rgb_t &b = soft[ clusters[ 1 ].m_OfVertex[ v ] ];
+		out[ v ] = { ( a[ 0 ] + b[ 0 ] ) / 255.0f, ( a[ 1 ] + b[ 1 ] ) / 255.0f, ( a[ 2 ] + b[ 2 ] ) / 255.0f, LIGHT_KIND_VERTEX };
+	}
 	return out;
 }
 
@@ -1889,6 +2035,11 @@ std::shared_ptr<const CLighting> BakeLighting( const CScene &scene, std::span<co
 		known[ i ] = i < materials.size() && materials[ i ].m_bKnown ? materials[ i ] : GuessLightMaterial( scene.m_Materials[ i ] );
 	}
 	CollectFaces( scene, live, known, bake );
+	for ( BakeFace_t &face : bake.m_Faces )
+	{
+		// Outside the radius: no luxels, but still in the way of light.
+		face.m_bLit = face.m_bLit && InRadius( options, face.m_Bounds );
+	}
 	bake.m_Unlit.resize( known.size() );
 	for ( std::size_t i = 0; i < known.size(); i++ )
 	{

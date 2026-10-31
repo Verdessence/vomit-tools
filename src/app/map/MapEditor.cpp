@@ -3764,7 +3764,7 @@ void CMapEditor::WantLighting()
 	const MapFrame_t shared = m_pRenderData->GetShared();
 	const std::array<const void *, 5> extras = bFinished ? std::array<const void *, 5>{ shared.m_pPropMesh.get(), shared.m_pPropParts.get(), shared.m_pOverlayMesh.get(), shared.m_pOverlayParts.get(), m_pResources->GetSprites().get() } : std::array<const void *, 5>{};
 	const MapPreferences_t &preferences = CPreferences::Instance().GetMapPreferences();
-	const std::array<int, 4> wanted{ preferences.m_nLightBounces, preferences.m_nLightLuxels, preferences.m_bLightHdr ? 1 : 0, preferences.m_bLightPropShadows ? 1 : 0 };
+	const std::array<int, 7> wanted{ preferences.m_nLightBounces, preferences.m_nLightLuxels, preferences.m_bLightHdr ? 1 : 0, preferences.m_bLightPropShadows ? 1 : 0, preferences.m_bLightInRadius ? 1 : 0, static_cast<int>( preferences.m_flLightRadius ), preferences.m_nLightSkySamples };
 	const bool bFirst = !m_pLightingScene;
 	if ( !bFirst && !preferences.m_bLightAutoBake )
 	{
@@ -3778,7 +3778,7 @@ void CMapEditor::WantLighting()
 	m_pLightingMaterials = pMaterials;
 	m_LightingPreferences = wanted;
 	m_LightingExtras = extras;
-	m_pLightingTimer->start( bFirst ? 0 : 250 );
+	m_pLightingTimer->start( bFirst ? 0 : std::max( 0, preferences.m_nLightDelay ) );
 }
 
 //-----------------------------------------------------------------------------
@@ -3830,6 +3830,12 @@ void CMapEditor::StartLighting()
 	options.m_bHdr = preferences.m_bLightHdr;
 	options.m_nBounces = std::max( 0, preferences.m_nLightBounces );
 	options.m_nMaxLuxels = static_cast<std::size_t>( std::max( 1, preferences.m_nLightLuxels ) ) << 20;
+	options.m_nSkySamples = std::max( 1, preferences.m_nLightSkySamples );
+	if ( const std::optional<xv::map::CViewCamera> camera = GetCamera(); camera && preferences.m_bLightInRadius )
+	{
+		options.m_Centre = camera->m_Eye;
+		options.m_flRadius = std::max( 1.0, preferences.m_flLightRadius );
+	}
 	xv::map::LightingExtras_t extras;
 	extras.m_bPropShadows = preferences.m_bLightPropShadows;
 	auto add = []( std::vector<std::shared_ptr<const xv::map::CMapMesh>> &out, const std::shared_ptr<const xv::map::CMapMesh> &pMesh, const std::shared_ptr<const xv::map::MeshParts_t> &pParts ) {

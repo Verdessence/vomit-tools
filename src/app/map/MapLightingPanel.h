@@ -56,6 +56,10 @@ private:
 	QCheckBox *m_pHdr = nullptr;
 	QCheckBox *m_pPropShadows = nullptr;
 	QCheckBox *m_pAutoBake = nullptr;
+	QCheckBox *m_pInRadius = nullptr;
+	QDoubleSpinBox *m_pRadius = nullptr;
+	QSpinBox *m_pDelay = nullptr;
+	QSpinBox *m_pSkySamples = nullptr;
 	QLabel *m_pStatus = nullptr;
 	QTableWidget *m_pTable = nullptr;
 	std::vector<Row_t> m_Rows;

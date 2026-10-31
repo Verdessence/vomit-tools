@@ -283,6 +283,8 @@ float LightFactor( float flLight, float flScale )
 std::optional<std::array<float, 4>> ShadeFragment( const ShadeMaterial_t &material, const ShadeInput_t &input, const ShadeOptions_t &options )
 {
 	std::array<float, 4> color{ input.m_vecObjectColor.m_flX, input.m_vecObjectColor.m_flY, input.m_vecObjectColor.m_flZ, 1.0f };
+	float flGlow = 0.0f;           // $selfillum's mask: the base texture's alpha
+	std::array<float, 3> albedo{}; // the texture's colour, before light
 	const bool bTextured = options.m_nMode != RasterMode_t::RASTER_MODE_FLAT && options.m_nMode != RasterMode_t::RASTER_MODE_WIREFRAME;
 	if ( bTextured && material.m_bSky && options.m_pSky )
 	{
@@ -330,6 +332,8 @@ std::optional<std::array<float, 4>> ShadeFragment( const ShadeMaterial_t &materi
 			color[ 1 ] *= input.m_vecObjectColor.m_flY;
 			color[ 2 ] *= input.m_vecObjectColor.m_flZ;
 		}
+		flGlow = material.m_bSelfIllum ? color[ 3 ] : 0.0f;
+		albedo = { color[ 0 ], color[ 1 ], color[ 2 ] };
 		color[ 3 ] = material.m_bTranslucent || material.m_bAdditive ? color[ 3 ] * material.m_flAlpha : material.m_flAlpha;
 		if ( options.m_nMode == RasterMode_t::RASTER_MODE_LIGHTMAP_GRID && !material.m_bUnlit )
 		{
@@ -360,9 +364,12 @@ std::optional<std::array<float, 4>> ShadeFragment( const ShadeMaterial_t &materi
 		}
 		if ( bLit )
 		{
+			const std::array<float, 3> tint{ material.m_vecSelfIllumTint.m_flX, material.m_vecSelfIllumTint.m_flY, material.m_vecSelfIllumTint.m_flZ };
 			for ( std::size_t i = 0; i < 3; i++ )
 			{
 				color[ i ] *= LightFactor( light[ i ], options.m_flLightScale );
+				// Self-illuminated: toward the texture times the tint, by the mask, as the game.
+				color[ i ] += ( albedo[ i ] * tint[ i ] - color[ i ] ) * flGlow;
 			}
 		}
 		else if ( flKind < 0.5f || !options.m_pLighting )

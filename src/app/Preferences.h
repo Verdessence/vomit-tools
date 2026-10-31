@@ -114,6 +114,10 @@ struct MapPreferences_t
 	bool m_bLightHdr = false;          // the lights' HDR values (_lightHDR), as an HDR compile reads them
 	bool m_bLightPropShadows = true;   // prop_static's models cast shadows, as vrad's do
 	bool m_bLightAutoBake = true;      // the preview bakes again by itself after edits (else on Bake Lighting, as Hammer++)
+	bool m_bLightInRadius = false;     // bake only around the 3D camera (Hammer++'s Bake in Radius)
+	double m_flLightRadius = 1024.0;   // and how far
+	int m_nLightDelay = 250;           // milliseconds after an edit before baking (Hammer++'s update delay)
+	int m_nLightSkySamples = 48;       // rays to the sky a sample, for its ambient (Hammer++'s visibility samples)
 	bool m_bSkybox3D = true;
 	bool m_bSprites = true;          // iconsprites and env_sprites drawn as such (else as boxes)
 	bool m_bWireframeModels = true;  // props' edges in the wireframe view

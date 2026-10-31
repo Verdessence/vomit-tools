@@ -34,6 +34,7 @@ layout(std140, binding = 1) uniform Material {
 	vec4 size;    // the base texture's size, then base2's, in texels
 	vec4 kind;    // 1: the object's colour (entity boxes), has a base texture, has base2
 	vec4 extra;   // 1: a sky face, showing the map's sky; times the object's colour; unlit
+	vec4 selfIllum; // $selfillumtint, and 1 when it glows by its base texture's alpha
 } material;
 
 layout(binding = 2) uniform sampler2D base;
@@ -135,6 +136,8 @@ void main() {
 	vec2 down = dFdy(v_texel);
 	float mode = material.kind.x > 0.5 ? MODE_FLAT : frame.mode.x;
 	vec4 color = vec4(v_state.rgb, 1.0);
+	float glow = 0.0;    // $selfillum's mask: the base texture's alpha
+	vec3 albedo = vec3(0.0); // the texture's colour, before light
 	vec3 n = normalize(v_normal);
 	bool textured = mode != MODE_FLAT && mode != MODE_WIREFRAME;
 	if (textured && material.extra.x > 0.5 && sky.translate[0].w > 0.5) {
@@ -162,6 +165,8 @@ void main() {
 		if (material.extra.y > 0.5) {
 			color.rgb *= v_state.rgb;
 		}
+		glow = material.selfIllum.w > 0.5 ? color.a : 0.0;
+		albedo = color.rgb;
 		color.a = material.options.y > 0.5 ? color.a * material.color.a : material.color.a;
 		if (mode == MODE_LIGHTMAP_GRID && material.extra.z < 0.5) {
 			ivec2 square = ivec2(floor(v_luxel));
@@ -184,6 +189,8 @@ void main() {
 		if (lit) {
 			// xv::map::LightFactor: Source's overbright of 2, in gamma 2.2.
 			color.rgb *= 2.0 * pow(max(light * frame.lighting.z * 0.5, vec3(0.0)), vec3(1.0 / 2.2));
+			// Self-illuminated: toward the texture times the tint, by the mask, as the game.
+			color.rgb = mix(color.rgb, albedo * material.selfIllum.rgb, glow);
 		} else if (kind < 0.5 || frame.lighting.w < 0.5) {
 			// Not baked (yet): the shaded look. Fullbright faces (tool textures) stay as they are.
 			color.rgb *= faceShade(n);

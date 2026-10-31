@@ -45,6 +45,7 @@ struct MaterialUniforms_t
 	float m_Size[ 4 ];
 	float m_Kind[ 4 ];
 	float m_Extra[ 4 ];
+	float m_SelfIllum[ 4 ];
 };
 
 // map.frag's sky block, as sky.frag's.
@@ -87,6 +88,10 @@ MaterialUniforms_t MaterialUniforms( const xv::map::RasterMaterial_t *pMaterial,
 	u.m_Extra[ 0 ] = shade.m_bSky ? 1.0f : 0.0f;
 	u.m_Extra[ 1 ] = shade.m_bTinted ? 1.0f : 0.0f;
 	u.m_Extra[ 2 ] = shade.m_bUnlit ? 1.0f : 0.0f;
+	u.m_SelfIllum[ 0 ] = shade.m_vecSelfIllumTint.m_flX;
+	u.m_SelfIllum[ 1 ] = shade.m_vecSelfIllumTint.m_flY;
+	u.m_SelfIllum[ 2 ] = shade.m_vecSelfIllumTint.m_flZ;
+	u.m_SelfIllum[ 3 ] = shade.m_bSelfIllum ? 1.0f : 0.0f;
 	return u;
 }
 

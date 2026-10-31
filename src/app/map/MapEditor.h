@@ -337,7 +337,7 @@ private:
 	// are), and the preferences that change a bake.
 	std::shared_ptr<const xv::map::CScene> m_pLightingScene;
 	const void *m_pLightingMaterials = nullptr;
-	std::array<int, 4> m_LightingPreferences{};
+	std::array<int, 7> m_LightingPreferences{};
 	std::array<const void *, 5> m_LightingExtras{}; // the props, overlays and sprites, whole and in parts
 	QString m_szPath;
 	bool m_bFromGame = false;

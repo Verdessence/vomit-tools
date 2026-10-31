@@ -52,6 +52,10 @@ void ForEachMapPreference( Preferences_t &map, Visit_t &&pfnVisit )
 	pfnVisit( "maps/lightHdr", map.m_bLightHdr );
 	pfnVisit( "maps/lightPropShadows", map.m_bLightPropShadows );
 	pfnVisit( "maps/lightAutoBake", map.m_bLightAutoBake );
+	pfnVisit( "maps/lightInRadius", map.m_bLightInRadius );
+	pfnVisit( "maps/lightRadius", map.m_flLightRadius );
+	pfnVisit( "maps/lightDelay", map.m_nLightDelay );
+	pfnVisit( "maps/lightSkySamples", map.m_nLightSkySamples );
 	pfnVisit( "maps/skybox3D", map.m_bSkybox3D );
 	pfnVisit( "maps/sprites", map.m_bSprites );
 	pfnVisit( "maps/wireframeModels", map.m_bWireframeModels );

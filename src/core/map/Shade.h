@@ -84,6 +84,8 @@ struct ShadeMaterial_t
 	float m_flAlphaReference = 0.7f;
 	float m_flAlpha = 1.0f;
 	CVec3 m_vecColor{ 1, 1, 1 };
+	bool m_bSelfIllum = false;                 // glows where its base texture's alpha says, in the lighting preview
+	CVec3 m_vecSelfIllumTint{ 1, 1, 1 };
 	int m_nWidth = 128;                        // what texels divide by when there's no texture
 	int m_nHeight = 128;
 	friend bool operator==( const ShadeMaterial_t &, const ShadeMaterial_t & ) = default;

@@ -13,6 +13,7 @@
 #include <QColorDialog>
 #include <QDoubleSpinBox>
 #include <QFormLayout>
+#include <QHBoxLayout>
 #include <QHeaderView>
 #include <QLabel>
 #include <QPushButton>
@@ -127,7 +128,32 @@ CMapLightingPanel::CMapLightingPanel( CMapEditor &editor, QWidget *pParent )
 	m_pLuxels->setSuffix( tr( " million luxels" ) );
 	m_pLuxels->setToolTip( tr( "More than this, and every other luxel is lit (and so on), for speed" ) );
 	pForm->addRow( tr( "At most" ), m_pLuxels );
+	m_pSkySamples = new QSpinBox;
+	m_pSkySamples->setObjectName( QStringLiteral( "mapLightingSkySamples" ) );
+	m_pSkySamples->setRange( 4, 512 );
+	m_pSkySamples->setToolTip( tr( "Rays toward the sky from each sample, for the sky's ambient light: more is smoother and slower" ) );
+	pForm->addRow( tr( "Sky samples" ), m_pSkySamples );
+	m_pDelay = new QSpinBox;
+	m_pDelay->setObjectName( QStringLiteral( "mapLightingDelay" ) );
+	m_pDelay->setRange( 0, 10000 );
+	m_pDelay->setSingleStep( 50 );
+	m_pDelay->setSuffix( tr( " ms" ) );
+	m_pDelay->setToolTip( tr( "How long after an edit the preview waits before baking again" ) );
+	pForm->addRow( tr( "Wait after an edit" ), m_pDelay );
+	auto *pRadiusRow = new QHBoxLayout;
+	m_pInRadius = new QCheckBox( tr( "Only around the camera, within" ) );
+	m_pInRadius->setObjectName( QStringLiteral( "mapLightingInRadius" ) );
+	m_pInRadius->setToolTip( tr( "Bake only what is this near the 3D camera (everything still casts shadows): much faster on big maps" ) );
+	m_pRadius = new QDoubleSpinBox;
+	m_pRadius->setObjectName( QStringLiteral( "mapLightingRadius" ) );
+	m_pRadius->setRange( 64, 32768 );
+	m_pRadius->setSingleStep( 256 );
+	m_pRadius->setDecimals( 0 );
+	m_pRadius->setSuffix( tr( " units" ) );
+	pRadiusRow->addWidget( m_pInRadius );
+	pRadiusRow->addWidget( m_pRadius, 1 );
 	pLayout->addLayout( pForm );
+	pLayout->addLayout( pRadiusRow );
 	m_pHdr = new QCheckBox( tr( "The lights' HDR values" ) );
 	m_pHdr->setObjectName( QStringLiteral( "mapLightingHdr" ) );
 	pLayout->addWidget( m_pHdr );
@@ -175,12 +201,13 @@ CMapLightingPanel::CMapLightingPanel( CMapEditor &editor, QWidget *pParent )
 	pLayout->addWidget( m_pTable, 1 );
 
 	LoadPreferences();
-	for ( QSpinBox *pSpin : { m_pBounces, m_pLuxels } )
+	for ( QSpinBox *pSpin : { m_pBounces, m_pLuxels, m_pDelay, m_pSkySamples } )
 	{
 		connect( pSpin, &QSpinBox::valueChanged, this, &CMapLightingPanel::StorePreferences );
 	}
 	connect( m_pBrightness, &QDoubleSpinBox::valueChanged, this, &CMapLightingPanel::StorePreferences );
-	for ( QCheckBox *pCheck : { m_pHdr, m_pPropShadows, m_pAutoBake } )
+	connect( m_pRadius, &QDoubleSpinBox::valueChanged, this, &CMapLightingPanel::StorePreferences );
+	for ( QCheckBox *pCheck : { m_pHdr, m_pPropShadows, m_pAutoBake, m_pInRadius } )
 	{
 		connect( pCheck, &QCheckBox::toggled, this, &CMapLightingPanel::StorePreferences );
 	}
@@ -200,6 +227,11 @@ void CMapLightingPanel::LoadPreferences()
 {
 	const MapPreferences_t &preferences = CPreferences::Instance().GetMapPreferences();
 	const QSignalBlocker blockBrightness( m_pBrightness ), blockBounces( m_pBounces ), blockLuxels( m_pLuxels ), blockHdr( m_pHdr ), blockShadows( m_pPropShadows ), blockAuto( m_pAutoBake );
+	const QSignalBlocker blockInRadius( m_pInRadius ), blockRadius( m_pRadius ), blockDelay( m_pDelay ), blockSky( m_pSkySamples );
+	m_pInRadius->setChecked( preferences.m_bLightInRadius );
+	m_pRadius->setValue( preferences.m_flLightRadius );
+	m_pDelay->setValue( preferences.m_nLightDelay );
+	m_pSkySamples->setValue( preferences.m_nLightSkySamples );
 	m_pBrightness->setValue( preferences.m_flLightBrightness );
 	m_pBounces->setValue( preferences.m_nLightBounces );
 	m_pLuxels->setValue( preferences.m_nLightLuxels );
@@ -220,6 +252,10 @@ void CMapLightingPanel::StorePreferences()
 	preferences.m_bLightHdr = m_pHdr->isChecked();
 	preferences.m_bLightPropShadows = m_pPropShadows->isChecked();
 	preferences.m_bLightAutoBake = m_pAutoBake->isChecked();
+	preferences.m_bLightInRadius = m_pInRadius->isChecked();
+	preferences.m_flLightRadius = m_pRadius->value();
+	preferences.m_nLightDelay = m_pDelay->value();
+	preferences.m_nLightSkySamples = m_pSkySamples->value();
 	CPreferences::Instance().SetMapPreferences( preferences );
 }
 

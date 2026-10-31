@@ -895,6 +895,8 @@ void CMapResources::Take( std::vector<Loaded_t> batch )
 		shade.m_flAlphaReference = info.m_flAlphaReference;
 		shade.m_flAlpha = info.m_flAlpha;
 		shade.m_vecColor = info.m_vecColor;
+		shade.m_bSelfIllum = info.m_bSelfIllum;
+		shade.m_vecSelfIllumTint = info.m_vecSelfIllumTint;
 		material.m_bNoCull = info.m_bNoCull;
 		shade.m_bSky = info.IsSky();
 		shade.m_bTinted = loaded.m_bSprite;
