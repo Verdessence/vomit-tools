@@ -111,7 +111,9 @@ struct MapPreferences_t
 	double m_flLightBrightness = 1.0;  // the lighting preview: light times this before it is shown
 	int m_nLightBounces = 3;           // passes of light bounced between faces
 	int m_nLightLuxels = 4;            // millions of luxels at most, else every other one (and so on)
-	bool m_bLightHdr = false;          // the lights' HDR values (_lightHDR), as an HDR compile reads them
+	bool m_bLightHdr = true;           // as the game with HDR: the lights' HDR values, no overbright, auto exposure
+	bool m_bLightFog = true;           // env_fog_controller's fog, as the game draws it
+	bool m_bLightOnly = false;         // the light alone, textures a plain grey (mat_fullbright 2)
 	bool m_bLightPropShadows = true;   // prop_static's models cast shadows, as vrad's do
 	bool m_bLightAutoBake = true;      // the preview bakes again by itself after edits (else on Bake Lighting, as Hammer++)
 	bool m_bLightInRadius = false;     // bake only around the 3D camera (Hammer++'s Bake in Radius)

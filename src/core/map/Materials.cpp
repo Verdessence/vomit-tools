@@ -20,7 +20,7 @@ namespace xv::map
 //-----------------------------------------------------------------------------
 MaterialInfo_t DescribeMaterial( const material::CMaterial &material )
 {
-	static constexpr std::array<std::pair<std::string_view, MaterialCompile_t>, 21> COMPILE_KEYS = { {
+	static constexpr std::array<std::pair<std::string_view, MaterialCompile_t>, 22> COMPILE_KEYS = { {
 		{ "%compilenodraw", MATERIAL_COMPILE_NODRAW },
 		{ "%compileclip", MATERIAL_COMPILE_CLIP },
 		{ "%compileplayerclip", MATERIAL_COMPILE_PLAYERCLIP },
@@ -42,6 +42,7 @@ MaterialInfo_t DescribeMaterial( const material::CMaterial &material )
 		{ "%compiledetail", MATERIAL_COMPILE_DETAIL },
 		{ "%compilenonsolid", MATERIAL_COMPILE_NONSOLID },
 		{ "%compileblocklight", MATERIAL_COMPILE_BLOCKLIGHT },
+		{ "%compilenolight", MATERIAL_COMPILE_NOLIGHT },
 	} };
 	MaterialInfo_t info;
 	info.m_bFound = true;
@@ -58,6 +59,10 @@ MaterialInfo_t DescribeMaterial( const material::CMaterial &material )
 	// Water and other shaders without a texture of their own show their tool texture.
 	info.m_szTexture = !szBase.empty() && material::TextureKind( szBase ) == material::TextureKind_t::TEXTURE_KIND_FILE ? szBase : szTool;
 	info.m_szTexture2 = material.Value( "$basetexture2" );
+	if ( !material.Value( "$reflectivity" ).empty() )
+	{
+		info.m_Reflectivity = material.Color( "$reflectivity" );
+	}
 	info.m_bSelfIllum = material.Flag( "$selfillum" );
 	if ( info.m_bSelfIllum )
 	{

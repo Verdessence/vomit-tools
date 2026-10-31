@@ -52,6 +52,7 @@ struct MapFrame_t
 	std::shared_ptr<const xv::sky::CCube> m_pSky;
 	std::shared_ptr<const xv::map::CLighting> m_pLighting;  // lighting preview views only
 	std::shared_ptr<const MapMeshLights_t> m_pMeshLights;
+	std::shared_ptr<const xv::map::Fog_t> m_pFog;           // the map's, in the lighting preview
 	std::shared_ptr<const std::vector<std::uint8_t>> m_pFlags;
 	std::shared_ptr<const std::vector<std::array<std::uint8_t, 3>>> m_pFlatColors;
 	std::shared_ptr<const std::vector<std::array<std::uint8_t, 3>>> m_pLineColors;
@@ -148,7 +149,10 @@ private:
 	std::vector<std::uint32_t> m_SpriteObjects; // sorted
 	std::shared_ptr<const xv::map::CLighting> m_pLighting;
 	std::shared_ptr<const MapMeshLights_t> m_pMeshLights;
-	std::vector<std::shared_ptr<const xv::map::CMapMesh>> m_MeshLightsKeep; // the meshes m_pMeshLights names, held so their addresses stay theirs
+	std::vector<std::shared_ptr<const xv::map::CMapMesh>> m_MeshLightsKeep;
+	std::shared_ptr<const xv::map::Fog_t> m_pFog;
+	const xv::map::CScene *m_pFogFor = nullptr;
+	std::uint64_t m_nFogRevision = 0; // the meshes m_pMeshLights names, held so their addresses stay theirs
 	xv::map::Point_t m_SpritesRight{};          // the camera the sprite mesh faces
 	xv::map::Point_t m_SpritesUp{};
 };

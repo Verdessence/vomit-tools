@@ -7,6 +7,7 @@
 #include "MapLighting.h"
 
 #include <QElapsedTimer>
+#include <QFile>
 #include <QMetaObject>
 
 #include "util/Memory.h"
@@ -47,13 +48,22 @@ void CMapLighting::Bake( std::shared_ptr<const xv::map::CScene> pScene, std::sha
 	const int nGeneration = ++m_nGeneration;
 	{
 		std::lock_guard lock( m_Mutex );
-		m_Pending = Request_t{ std::move( pScene ), std::move( pMaterials ), options, std::move( extras ), nGeneration };
+		m_Pending = Request_t{ std::move( pScene ), std::move( pMaterials ), options, std::move( extras ), nGeneration, m_Game, m_Map };
 	}
 	m_bCancel = true;
 	m_Wake.notify_all();
 	m_bBaking = true;
 	m_nPercent = 0;
 	m_szStage = tr( "Waiting" );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+void CMapLighting::SetRadSources( std::optional<xv::vfs::CGameInfo> game, std::filesystem::path map )
+{
+	m_Game = std::move( game );
+	m_Map = std::move( map );
 }
 
 //-----------------------------------------------------------------------------
@@ -95,6 +105,37 @@ void CMapLighting::Run()
 		}
 		const int nGeneration = request.m_nGeneration;
 		xv::map::LightingOptions_t options = request.m_Options;
+		// The RAD files: the game's lights.rad (as the game's own search paths find it, its VPKs
+		// included), then the map's <map>.rad, whose rules win.
+		const std::filesystem::path gameDir = request.m_Game ? request.m_Game->m_File : std::filesystem::path{};
+		if ( !m_bRadRead || gameDir != m_RadGame || request.m_Map != m_RadMap )
+		{
+			m_Rad = {};
+			if ( request.m_Game )
+			{
+				xv::vfs::CFileSystem files;
+				files.Mount( *request.m_Game );
+				if ( const auto text = files.Read( "lights.rad" ) )
+				{
+					xv::map::ParseRadFile( std::string_view( reinterpret_cast<const char *>( text->data() ), text->size() ), m_Rad );
+				}
+			}
+			if ( !request.m_Map.empty() )
+			{
+				std::filesystem::path own = request.m_Map;
+				own.replace_extension( ".rad" );
+				QFile file( QString::fromStdString( own.string() ) );
+				if ( file.open( QIODevice::ReadOnly ) )
+				{
+					const QByteArray text = file.readAll();
+					xv::map::ParseRadFile( std::string_view( text.constData(), static_cast<std::size_t>( text.size() ) ), m_Rad );
+				}
+			}
+			m_RadGame = gameDir;
+			m_RadMap = request.m_Map;
+			m_bRadRead = true;
+		}
+		options.m_Rad = m_Rad;
 		options.m_pCancel = &m_bCancel;
 		std::atomic<int> nLastPercent{ -1 };
 		options.m_pfnProgress = [ this, nGeneration, &nLastPercent ]( int nPercent, std::string_view szStage ) {

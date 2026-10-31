@@ -17,6 +17,8 @@
 #include <map>
 #include <memory>
 #include <optional>
+#include <set>
+#include <string>
 #include <span>
 #include <string_view>
 #include <vector>
@@ -37,6 +39,7 @@ enum class LightType_t
 	LIGHT_TYPE_SPOT,        // light_spot
 	LIGHT_TYPE_SUN,         // light_environment's direct light, through the sky faces
 	LIGHT_TYPE_SKY_AMBIENT, // light_environment's ambient, from every sky face in view
+	LIGHT_TYPE_SURFACE,     // a texture light's piece of a face (lights.rad): out of the face only
 };
 
 // A light as vrad works with it. Intensities are linear, in vrad's units (255 lights a face
@@ -61,6 +64,10 @@ struct Light_t
 	double m_flSunSpread = 0.0;      // the sun's size: the sine of SunSpreadAngle
 	double m_flReach = 1.0e22;       // past here it adds nothing worth drawing
 	std::uint32_t m_nEntity = 0;
+	// Named or styled (vrad puts its light on a page of its own): it doesn't bounce, and props'
+	// light is baked with it off.
+	bool m_bNamed = false;
+	std::uint32_t m_nFace = ~0u;     // a surface light's face in the bake, which it doesn't light
 };
 
 // The lights of the map's entities that vrad bakes: light, light_spot (and light_glspot) and the
@@ -79,6 +86,43 @@ struct Light_t
 // the spot's cone and the angle it lands at.
 [[nodiscard]] CVec3 PointLightAt( const Light_t &light, Point_t point, Point_t normal );
 
+// A texture light, from a RAD file (lights.rad, <map>.rad): what a face with this material gives
+// off, as a "_light" value (LDR and, when given, HDR).
+struct TexLight_t
+{
+	CVec3 m_vecLdr;
+	std::optional<CVec3> m_Hdr;
+};
+
+// The RAD file rules the bake uses: texture lights and the materials that cast no shadow
+// ("noshadow"), by material name in lower case. Later files' rules replace earlier ones.
+struct RadRules_t
+{
+	std::map<std::string, TexLight_t, std::less<>> m_TexLights;
+	std::set<std::string, std::less<>> m_NoShadow;
+};
+
+// Reads a RAD file's rules into rules: "material r g b brightness [hdr r g b brightness]",
+// "noshadow material", "ldr:" and "hdr:" prefixes (a line with both is ignored), and VRAD++'s
+// "//" comments.
+void ParseRadFile( std::string_view szText, RadRules_t &rules );
+
+// env_fog_controller's fog as the game draws it.
+struct Fog_t
+{
+	CVec3 m_vecColor{ 1, 1, 1 };   // 0-1, as written (gamma)
+	CVec3 m_vecColor2{ 1, 1, 1 };  // blended to by the view's direction (fogblend)
+	Point_t m_Direction{ 1, 0, 0 };
+	bool m_bBlend = false;
+	double m_flStart = 0.0;
+	double m_flEnd = 1.0;
+	double m_flMaxDensity = 1.0;
+	bool m_bRadial = false;        // by the distance from the eye, else along the view
+};
+
+// The first env_fog_controller that starts with fog on.
+[[nodiscard]] std::optional<Fog_t> ReadFog( const CMap &map );
+
 // What lighting needs of a material.
 struct LightMaterial_t
 {
@@ -87,9 +131,10 @@ struct LightMaterial_t
 	bool m_bSky = false;    // the sun and the sky's ambient come through it
 	CVec3 m_vecReflectivity{ 0.5f, 0.5f, 0.5f }; // how much light it bounces (the VTF's)
 	bool m_bKnown = false;  // from the material's VMT, not guessed from its name
+	std::array<int, 2> m_TextureSize{ 0, 0 }; // the base texture's, for texture lights' brightness
 };
 
-[[nodiscard]] LightMaterial_t DescribeLightMaterial( const MaterialInfo_t &info, std::array<float, 3> reflectivity );
+[[nodiscard]] LightMaterial_t DescribeLightMaterial( const MaterialInfo_t &info, std::array<float, 3> reflectivity, std::array<int, 2> textureSize = {} );
 // For a material not read (yet, or without a game): from its name, Valve's tool textures known.
 [[nodiscard]] LightMaterial_t GuessLightMaterial( std::string_view szName );
 
@@ -112,6 +157,7 @@ struct LightingOptions_t
 	// Called now and then from the baking thread: how far along (0-100) and at what.
 	std::function<void( int nPercent, std::string_view szStage )> m_pfnProgress;
 	const std::atomic<bool> *m_pCancel = nullptr; // set from another thread to stop early
+	RadRules_t m_Rad;             // texture lights and noshadow materials
 	// Called from the baking thread with the direct light alone, before the bounces, to show
 	// something sooner.
 	std::function<void( std::shared_ptr<const CLighting> )> m_pfnPartial;
@@ -168,6 +214,7 @@ public:
 	std::map<std::uint32_t, std::array<float, 3>> m_Points; // the extras' points, by object
 	std::size_t m_nLights = 0;
 	std::uint64_t m_nRevision = 0;           // the scene's, when it was baked
+	float m_flMeanLight = 0.0f;              // the luxels' mean brightness (linear, 1 fully lit), for HDR's auto exposure
 
 	// The light a texel holds, linear (1: fully lit), RGB.
 	[[nodiscard]] std::array<float, 3> GetTexel( int x, int y ) const;

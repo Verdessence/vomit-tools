@@ -919,7 +919,7 @@ void CMapResources::Take( std::vector<Loaded_t> batch )
 		{
 			m_LightCurrent.resize( loaded.m_nMaterial + 1 );
 		}
-		m_LightCurrent[ loaded.m_nMaterial ] = xv::map::DescribeLightMaterial( info, loaded.m_pBase ? loaded.m_pBase->m_Reflectivity : std::array<float, 3>{} );
+		m_LightCurrent[ loaded.m_nMaterial ] = xv::map::DescribeLightMaterial( info, loaded.m_pBase ? loaded.m_pBase->m_Reflectivity : std::array<float, 3>{}, loaded.m_pBase ? std::array<int, 2>{ loaded.m_pBase->m_nWidth, loaded.m_pBase->m_nHeight } : std::array<int, 2>{} );
 		if ( loaded.m_pBase )
 		{
 			m_Keep.push_back( loaded.m_pBase );

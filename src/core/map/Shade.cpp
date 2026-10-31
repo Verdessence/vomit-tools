@@ -272,9 +272,21 @@ float FaceShade( CVec3 vecNormal, CVec3 vecShade )
 //-----------------------------------------------------------------------------
 // Purpose:
 //-----------------------------------------------------------------------------
-float LightFactor( float flLight, float flScale )
+float LightFactor( float flLight, float flScale, bool bHdr )
 {
+	if ( bHdr )
+	{
+		return std::pow( std::max( flLight * flScale, 0.0f ), 1.0f / 2.2f );
+	}
 	return 2.0f * std::pow( std::max( flLight * flScale * 0.5f, 0.0f ), 1.0f / 2.2f );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: A middle grey (0.18) for the mean, within the limits.
+//-----------------------------------------------------------------------------
+float AutoExposure( float flMeanLight, float flMin, float flMax )
+{
+	return flMeanLight > 0.0f ? std::clamp( 0.18f / flMeanLight, flMin, flMax ) : flMax;
 }
 
 //-----------------------------------------------------------------------------
@@ -332,6 +344,11 @@ std::optional<std::array<float, 4>> ShadeFragment( const ShadeMaterial_t &materi
 			color[ 1 ] *= input.m_vecObjectColor.m_flY;
 			color[ 2 ] *= input.m_vecObjectColor.m_flZ;
 		}
+		if ( options.m_nMode == RasterMode_t::RASTER_MODE_LIGHTING && options.m_bLightOnly && !material.m_bUnlit )
+		{
+			// mat_fullbright 2: every texture a colourless monotone, to see the light alone.
+			color[ 0 ] = color[ 1 ] = color[ 2 ] = 0.5f;
+		}
 		flGlow = material.m_bSelfIllum ? color[ 3 ] : 0.0f;
 		albedo = { color[ 0 ], color[ 1 ], color[ 2 ] };
 		color[ 3 ] = material.m_bTranslucent || material.m_bAdditive ? color[ 3 ] * material.m_flAlpha : material.m_flAlpha;
@@ -367,7 +384,7 @@ std::optional<std::array<float, 4>> ShadeFragment( const ShadeMaterial_t &materi
 			const std::array<float, 3> tint{ material.m_vecSelfIllumTint.m_flX, material.m_vecSelfIllumTint.m_flY, material.m_vecSelfIllumTint.m_flZ };
 			for ( std::size_t i = 0; i < 3; i++ )
 			{
-				color[ i ] *= LightFactor( light[ i ], options.m_flLightScale );
+				color[ i ] *= LightFactor( light[ i ], options.m_flLightScale, options.m_bLightHdr );
 				// Self-illuminated: toward the texture times the tint, by the mask, as the game.
 				color[ i ] += ( albedo[ i ] * tint[ i ] - color[ i ] ) * flGlow;
 			}
@@ -380,6 +397,25 @@ std::optional<std::array<float, 4>> ShadeFragment( const ShadeMaterial_t &materi
 			color[ 1 ] *= flShade;
 			color[ 2 ] *= flShade;
 		}
+	}
+	if ( options.m_nMode == RasterMode_t::RASTER_MODE_LIGHTING && options.m_pFog && !( material.m_bSky && options.m_pSky ) )
+	{
+		// env_fog_controller's fog: toward its colour from fogstart to fogend, at most
+		// fogmaxdensity; with fogblend, between its two colours by the way the view looks.
+		const Fog_t &fog = *options.m_pFog;
+		const CVec3 vecDir = input.m_vecDirection;
+		const float flDistance = fog.m_bRadial ? Length( vecDir ) : Dot( vecDir, options.m_vecViewForward );
+		const float flSpan = static_cast<float>( std::max( fog.m_flEnd - fog.m_flStart, 1.0e-3 ) );
+		const float flAmount = std::clamp( ( flDistance - static_cast<float>( fog.m_flStart ) ) / flSpan, 0.0f, 1.0f ) * static_cast<float>( fog.m_flMaxDensity );
+		CVec3 vecFog = fog.m_vecColor;
+		if ( fog.m_bBlend && Length( vecDir ) > 1.0e-6f )
+		{
+			const float t = 0.5f * ( 1.0f + Dot( vecDir * ( 1.0f / Length( vecDir ) ), ToVec3( fog.m_Direction ) ) );
+			vecFog = fog.m_vecColor2 + ( fog.m_vecColor - fog.m_vecColor2 ) * t;
+		}
+		color[ 0 ] += ( vecFog.m_flX - color[ 0 ] ) * flAmount;
+		color[ 1 ] += ( vecFog.m_flY - color[ 1 ] ) * flAmount;
+		color[ 2 ] += ( vecFog.m_flZ - color[ 2 ] ) * flAmount;
 	}
 	if ( ( options.m_nMode == RasterMode_t::RASTER_MODE_FLAT || options.m_nMode == RasterMode_t::RASTER_MODE_TEXTURED_SHADED ) && !material.m_bUnlit )
 	{

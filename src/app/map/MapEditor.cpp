@@ -882,6 +882,7 @@ void CMapEditor::Loaded()
 	m_Settings.m_bSnapToGrid = scene.m_Map.m_ViewSettings.m_bSnapToGrid;
 	m_pLoading->hide();
 	m_pLighting->Clear();
+	m_pLighting->SetRadSources( m_pDocument->GetGame(), m_szPath.toStdString() );
 	m_pLightingTimer->stop();
 	m_pLightingScene.reset();
 	m_pRenderData->SetLighting( nullptr );
@@ -3685,6 +3686,7 @@ void CMapEditor::StopWork()
 void CMapEditor::GameChanged( const xv::vfs::CGameInfo *pGame )
 {
 	m_pDocument->SetGame( pGame ? std::optional<xv::vfs::CGameInfo>{ *pGame } : std::nullopt );
+	m_pLighting->SetRadSources( m_pDocument->GetGame(), m_szPath.toStdString() );
 	if ( m_pDocument->IsLoaded() )
 	{
 		StartResources();

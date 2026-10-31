@@ -484,7 +484,7 @@ QWidget *CPreferencesDialog::BuildMapsPage()
 		pLayout->addLayout( pForm );
 		pLayout->addWidget( check( QStringLiteral( "preferencesMapGizmoFollowsHandles" ), tr( "3D gizmo follows the 2D handle mode" ), current.m_bGizmoFollowsHandles, []( MapPreferences_t &p, bool b ) { p.m_bGizmoFollowsHandles = b; } ) );
 		pForm->addRow( tr( "Default 3D gizmo" ), choice( QStringLiteral( "preferencesMapGizmoDefault" ), { { tr( "Move" ), 0 }, { tr( "All" ), 1 } }, current.m_bGizmoAll ? 1 : 0, []( MapPreferences_t &p, int n ) { p.m_bGizmoAll = n != 0; } ) );
-		pLayout->addWidget( check( QStringLiteral( "preferencesMapLightHdr" ), tr( "Lighting preview uses the lights' HDR values" ), current.m_bLightHdr, []( MapPreferences_t &p, bool b ) { p.m_bLightHdr = b; } ) );
+		pLayout->addWidget( check( QStringLiteral( "preferencesMapLightHdr" ), tr( "Lighting preview as the game with HDR (auto exposure, the lights' HDR values)" ), current.m_bLightHdr, []( MapPreferences_t &p, bool b ) { p.m_bLightHdr = b; } ) );
 		pLayout->addWidget( check( QStringLiteral( "preferencesMapSkybox3D" ), tr( "Draw the 3D skybox" ), current.m_bSkybox3D, []( MapPreferences_t &p, bool b ) { p.m_bSkybox3D = b; } ) );
 		pLayout->addWidget( check( QStringLiteral( "preferencesMapSprites" ), tr( "Draw sprites (else entities' boxes)" ), current.m_bSprites, []( MapPreferences_t &p, bool b ) { p.m_bSprites = b; } ) );
 		pLayout->addWidget( check( QStringLiteral( "preferencesMapWireframeModels" ), tr( "Draw models' edges in the wireframe view" ), current.m_bWireframeModels, []( MapPreferences_t &p, bool b ) { p.m_bWireframeModels = b; } ) );

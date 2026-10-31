@@ -9,6 +9,7 @@
 
 #include <atomic>
 #include <condition_variable>
+#include <filesystem>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -20,6 +21,7 @@
 
 #include "map/Lighting.h"
 #include "map/Scene.h"
+#include "vfs/Vfs.h"
 
 class CMapLighting : public QObject
 {
@@ -33,6 +35,9 @@ public:
 	// request comes first), once with the direct light alone while the bake goes on (IsBaking
 	// still true) and once when it is done.
 	void Bake( std::shared_ptr<const xv::map::CScene> pScene, std::shared_ptr<const std::vector<xv::map::LightMaterial_t>> pMaterials, const xv::map::LightingOptions_t &options, xv::map::LightingExtras_t extras = {} );
+	// Where texture lights come from: the game's lights.rad and the map's own <map>.rad beside it
+	// (the RAD file article); read on the baking thread when they change.
+	void SetRadSources( std::optional<xv::vfs::CGameInfo> game, std::filesystem::path map );
 	// Drops the bake under way and the last result (another map).
 	void Clear();
 
@@ -55,6 +60,8 @@ private:
 		xv::map::LightingOptions_t m_Options;
 		xv::map::LightingExtras_t m_Extras;
 		int m_nGeneration = 0;
+		std::optional<xv::vfs::CGameInfo> m_Game;
+		std::filesystem::path m_Map;
 	};
 	void Run();
 
@@ -65,6 +72,13 @@ private:
 	bool m_bQuit = false;               // under m_Mutex
 	std::atomic<bool> m_bCancel{ false };
 	std::atomic<int> m_nGeneration{ 0 };
+	std::optional<xv::vfs::CGameInfo> m_Game; // the main thread's, handed to each request
+	std::filesystem::path m_Map;
+	// The worker's: the rules read, and from what.
+	xv::map::RadRules_t m_Rad;
+	std::filesystem::path m_RadGame;
+	std::filesystem::path m_RadMap;
+	bool m_bRadRead = false;
 
 	// The main thread's.
 	std::shared_ptr<const xv::map::CLighting> m_pLighting;

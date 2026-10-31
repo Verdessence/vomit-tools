@@ -9,6 +9,7 @@
 #pragma once
 
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <string_view>
 
@@ -40,6 +41,7 @@ enum MaterialCompile_t : std::uint32_t
 	MATERIAL_COMPILE_DETAIL = 1u << 16,
 	MATERIAL_COMPILE_NONSOLID = 1u << 17,
 	MATERIAL_COMPILE_BLOCKLIGHT = 1u << 18,
+	MATERIAL_COMPILE_NOLIGHT = 1u << 19, // no lightmap: drawn as it is
 };
 
 // Tool materials: what Hammer++'s "toggle tool textures" hides.
@@ -61,6 +63,7 @@ struct MaterialInfo_t
 	CVec3 m_vecColor{ 1, 1, 1 };
 	bool m_bNoCull = false;
 	float m_flDecalScale = 1.0f;
+	std::optional<CVec3> m_Reflectivity; // $reflectivity: what it bounces, over its texture's
 	bool m_bSelfIllum = false;         // $selfillum: glows by its base texture's alpha
 	CVec3 m_vecSelfIllumTint{ 1, 1, 1 };
 

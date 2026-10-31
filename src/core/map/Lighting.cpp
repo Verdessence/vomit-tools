@@ -699,6 +699,8 @@ struct BakeFace_t
 	int m_nY = 0;
 	std::vector<LuxelSample_t> m_Samples;    // m_nWidth by m_nHeight
 	std::vector<std::uint32_t> m_Lights;     // the point and spot lights that may reach it
+	float m_flMinLight = 0.0f;               // its entity's _minlight, in vrad's units
+	std::array<double, 2> m_TexelsPerUnit{ 4.0, 4.0 }; // the texture's, for a texture light's brightness
 };
 
 //-----------------------------------------------------------------------------
@@ -937,18 +939,29 @@ struct Bake_t
 // Purpose: The light that reaches one luxel straight from the lights: each point and spot
 //          light that isn't blocked, and the sun where the sky is in its direction.
 //-----------------------------------------------------------------------------
-Rgb_t DirectLight( const Bake_t &bake, std::span<const std::uint32_t> lights, const LuxelSample_t &sample, std::uint32_t nSeed )
+Rgb_t DirectLight( const Bake_t &bake, std::span<const std::uint32_t> lights, const LuxelSample_t &sample, std::uint32_t nSeed, Rgb_t *pBounces = nullptr, bool bNamed = true )
 {
 	Rgb_t total{};
+	Rgb_t bounces{};
 	const Point_t from = Add( sample.m_Position, Scale( sample.m_Normal, RAY_OFFSET ) );
-	const auto add = [ &total ]( CVec3 vec, double flScale ) {
-		total[ 0 ] += static_cast<float>( vec.m_flX * flScale );
-		total[ 1 ] += static_cast<float>( vec.m_flY * flScale );
-		total[ 2 ] += static_cast<float>( vec.m_flZ * flScale );
+	const Light_t *pCurrent = nullptr;
+	const auto add = [ &total, &bounces, &pCurrent ]( CVec3 vec, double flScale ) {
+		const std::array<float, 3> value{ static_cast<float>( vec.m_flX * flScale ), static_cast<float>( vec.m_flY * flScale ), static_cast<float>( vec.m_flZ * flScale ) };
+		for ( std::size_t k = 0; k < 3; k++ )
+		{
+			total[ k ] += value[ k ];
+			// Named lights' light doesn't bounce (vrad gives it a page of its own).
+			bounces[ k ] += pCurrent->m_bNamed ? 0.0f : value[ k ];
+		}
 	};
 	for ( const std::uint32_t nLight : lights )
 	{
 		const Light_t &light = bake.m_Lights[ nLight ];
+		pCurrent = &light;
+		if ( light.m_bNamed && !bNamed )
+		{
+			continue;
+		}
 		const CVec3 vecLight = PointLightAt( light, sample.m_Position, sample.m_Normal );
 		if ( Brightest( vecLight ) < LIGHT_THRESHOLD )
 		{
@@ -965,7 +978,8 @@ Rgb_t DirectLight( const Bake_t &bake, std::span<const std::uint32_t> lights, co
 	const double flTurn = static_cast<double>( Hash( nSeed ) ) / 4294967296.0 * 2.0 * std::numbers::pi;
 	for ( const Light_t &light : bake.m_Lights )
 	{
-		if ( light.m_nType == LightType_t::LIGHT_TYPE_SUN )
+		pCurrent = &light;
+		if ( light.m_nType == LightType_t::LIGHT_TYPE_SUN && ( bNamed || !light.m_bNamed ) )
 		{
 			const Point_t toSun = Scale( light.m_Direction, -1.0 );
 			const double flDot = Dot( toSun, sample.m_Normal );
@@ -994,6 +1008,10 @@ Rgb_t DirectLight( const Bake_t &bake, std::span<const std::uint32_t> lights, co
 			}
 			add( light.m_vecIntensity, flDot * nSeen / SUN_SPREAD_SAMPLES );
 		}
+	}
+	if ( pBounces )
+	{
+		*pBounces = bounces;
 	}
 	return total;
 }
@@ -1149,17 +1167,28 @@ void CollectFaces( const CScene &scene, const CMapMesh &live, std::span<const Li
 			face.m_bSky = material.m_bSky;
 			face.m_vecReflectivity = material.m_vecReflectivity;
 			bool bCasts = true;
+			// _minlight: the world's for its solids and those vbsp folds into it, else the entity's.
+			const Entity_t *pMinLightFrom = &scene.m_Map.m_World;
 			if ( !bInstance && meshFace.m_nSolid < scene.m_Map.m_Solids.size() )
 			{
-				const int nEntity = std::as_const( scene.m_Map.m_Solids )[ meshFace.m_nSolid ].m_nEntity;
+				const Solid_t &solid = std::as_const( scene.m_Map.m_Solids )[ meshFace.m_nSolid ];
+				const int nEntity = solid.m_nEntity;
 				if ( nEntity >= 0 && static_cast<std::size_t>( nEntity ) < scene.m_Map.m_Entities.size() )
 				{
 					const Entity_t &entity = std::as_const( scene.m_Map.m_Entities )[ static_cast<std::size_t>( nEntity ) ];
 					// vbsp folds these into the world, so they block light in the game.
 					const std::string_view szClass = entity.GetClassname();
-					bCasts = szClass.starts_with( "func_detail" ) || szClass == "func_group" || szClass == "func_nobevel" || KeyNumber( entity, "vrad_brush_cast_shadows" ) != 0.0;
+					const bool bFolded = szClass.starts_with( "func_detail" ) || szClass == "func_group" || szClass == "func_nobevel";
+					bCasts = bFolded || KeyNumber( entity, "vrad_brush_cast_shadows" ) != 0.0;
+					pMinLightFrom = bFolded ? &scene.m_Map.m_World : &entity;
+				}
+				if ( meshFace.m_nSide < solid.m_Sides.size() )
+				{
+					const Side_t &side = solid.m_Sides[ meshFace.m_nSide ];
+					face.m_TexelsPerUnit = { 1.0 / std::max( std::abs( side.m_UAxis.m_flScale ), 1.0e-6 ), 1.0 / std::max( std::abs( side.m_VAxis.m_flScale ), 1.0e-6 ) };
 				}
 			}
+			face.m_flMinLight = static_cast<float>( std::max( 0.0, KeyNumber( *pMinLightFrom, "_minlight" ) ) * 128.0 );
 			face.m_bBlocks = material.m_bBlocks && bCasts;
 			face.m_Triangles = std::move( triangles[ f ] );
 			for ( std::uint32_t v = 0; v < meshFace.m_nVertexCount; v++ )
@@ -1268,7 +1297,7 @@ std::vector<std::uint32_t> LightsReaching( const Bake_t &bake, const Box_t &boun
 	for ( std::uint32_t l = 0; l < bake.m_Lights.size(); l++ )
 	{
 		const Light_t &light = bake.m_Lights[ l ];
-		if ( light.m_nType != LightType_t::LIGHT_TYPE_POINT && light.m_nType != LightType_t::LIGHT_TYPE_SPOT )
+		if ( light.m_nType != LightType_t::LIGHT_TYPE_POINT && light.m_nType != LightType_t::LIGHT_TYPE_SPOT && light.m_nType != LightType_t::LIGHT_TYPE_SURFACE )
 		{
 			continue;
 		}
@@ -1380,7 +1409,8 @@ std::vector<LightVertex_t> LightPropVertices( const Bake_t &bake, const std::vec
 		{
 			if ( !outside( clusters[ 0 ], c ) )
 			{
-				direct[ c ] = DirectLight( bake, lights, sampleOf( clusters[ 0 ], c ), static_cast<std::uint32_t>( c ) * 2654435761u );
+				// vrad bakes props' light with named and styled lights off.
+				direct[ c ] = DirectLight( bake, lights, sampleOf( clusters[ 0 ], c ), static_cast<std::uint32_t>( c ) * 2654435761u, nullptr, false );
 			}
 		}
 	} );
@@ -1489,6 +1519,97 @@ std::vector<LightVertex_t> LightOverlayVertices( const Bake_t &bake, const CTrac
 }
 
 //-----------------------------------------------------------------------------
+// Purpose: Texture lights (RAD files): each face with such a material gives off light from
+//          pieces of it about four luxels across, each as bright as vrad makes a patch: the
+//          value times its area and the texture's texels per unit each way, over the
+//          texture's size, times 100 squared. Out of the face only, and not onto it.
+//-----------------------------------------------------------------------------
+void AddTextureLights( const CScene &scene, std::span<const LightMaterial_t> materials, std::span<const std::string> names, const LightingOptions_t &options, Bake_t &bake )
+{
+	if ( options.m_Rad.m_TexLights.empty() )
+	{
+		return;
+	}
+	for ( std::size_t f = 0; f < bake.m_Faces.size(); f++ )
+	{
+		const BakeFace_t &face = bake.m_Faces[ f ];
+		if ( face.m_nMaterial >= names.size() )
+		{
+			continue;
+		}
+		const auto rule = options.m_Rad.m_TexLights.find( names[ face.m_nMaterial ] );
+		if ( rule == options.m_Rad.m_TexLights.end() )
+		{
+			continue;
+		}
+		const CVec3 vecValue = options.m_bHdr && rule->second.m_Hdr ? *rule->second.m_Hdr : rule->second.m_vecLdr;
+		const std::array<int, 2> size = materials[ face.m_nMaterial ].m_TextureSize;
+		// A texture not read yet: Source's usual 512 square, so the light is about right.
+		const double flTexels = static_cast<double>( size[ 0 ] > 0 ? size[ 0 ] : 512 ) * static_cast<double>( size[ 1 ] > 0 ? size[ 1 ] : 512 );
+		const double flPerArea = face.m_TexelsPerUnit[ 0 ] * face.m_TexelsPerUnit[ 1 ] / flTexels * 10000.0;
+		const MeshFace_t &meshFace = face.m_pMesh->m_Faces[ face.m_nFace ];
+		const Side_t *pSide = !face.m_bInstance && meshFace.m_nSolid < scene.m_Map.m_Solids.size() ? &std::as_const( scene.m_Map.m_Solids )[ meshFace.m_nSolid ].m_Sides[ meshFace.m_nSide ] : nullptr;
+		const double flPiece = 4.0 * ( pSide ? std::max( pSide->m_nLightmapScale, 1 ) : 16 );
+		// Each triangle halved along its longest edge until its pieces are about that big.
+		std::vector<std::array<Point_t, 3>> todo;
+		for ( const std::uint32_t t : face.m_Triangles )
+		{
+			std::array<Point_t, 3> corners;
+			for ( std::size_t k = 0; k < 3; k++ )
+			{
+				corners[ k ] = ToPoint( face.m_pMesh->m_Vertices[ face.m_pMesh->m_Indices[ t * 3 + k ] ].m_vecPosition );
+			}
+			todo.push_back( corners );
+		}
+		while ( !todo.empty() && bake.m_Lights.size() < 65536 )
+		{
+			const std::array<Point_t, 3> tri = todo.back();
+			todo.pop_back();
+			const Point_t cross = Cross( Subtract( tri[ 1 ], tri[ 0 ] ), Subtract( tri[ 2 ], tri[ 0 ] ) );
+			const double flArea = Length( cross ) * 0.5;
+			if ( flArea < 1.0e-6 )
+			{
+				continue;
+			}
+			if ( flArea > flPiece * flPiece )
+			{
+				std::size_t e = 0;
+				double flLongest = 0.0;
+				for ( std::size_t k = 0; k < 3; k++ )
+				{
+					const double flLength = Length( Subtract( tri[ ( k + 1 ) % 3 ], tri[ k ] ) );
+					if ( flLength > flLongest )
+					{
+						flLongest = flLength;
+						e = k;
+					}
+				}
+				const Point_t mid = Scale( Add( tri[ e ], tri[ ( e + 1 ) % 3 ] ), 0.5 );
+				todo.push_back( { tri[ e ], mid, tri[ ( e + 2 ) % 3 ] } );
+				todo.push_back( { mid, tri[ ( e + 1 ) % 3 ], tri[ ( e + 2 ) % 3 ] } );
+				continue;
+			}
+			// Faces are wound clockwise seen from outside: (b - a) x (c - a) points in.
+			const Point_t normal = Scale( Normalized( cross ), -1.0 );
+			Light_t light;
+			light.m_nType = LightType_t::LIGHT_TYPE_SURFACE;
+			light.m_Origin = Add( Scale( Add( Add( tri[ 0 ], tri[ 1 ] ), tri[ 2 ] ), 1.0 / 3.0 ), Scale( normal, RAY_OFFSET ) );
+			light.m_Direction = normal;
+			light.m_vecIntensity = vecValue * static_cast<float>( flArea * flPerArea );
+			light.m_flConstant = 0.0;
+			light.m_flLinear = 0.0;
+			light.m_flQuadratic = 1.0;
+			light.m_nFace = static_cast<std::uint32_t>( f );
+			light.m_flReach = LightReach( light );
+			if ( light.m_flReach > 0.0 )
+			{
+				bake.m_Lights.push_back( light );
+			}
+		}
+	}
+}
+
+//-----------------------------------------------------------------------------
 // Purpose: The atlas from the light gathered (bounced may be empty), with where each face is.
 //-----------------------------------------------------------------------------
 std::shared_ptr<CLighting> MakeResult( const CScene &scene, const Bake_t &bake, const std::vector<Rgb_t> &direct, const std::vector<Rgb_t> &bounced )
@@ -1502,13 +1623,45 @@ std::shared_ptr<CLighting> MakeResult( const CScene &scene, const Bake_t &bake, 
 	pLighting->m_pInstanceMesh = scene.m_pInstanceMesh;
 	pLighting->m_InstanceFaces.assign( scene.GetInstanceMesh().m_Faces.size(), LightmapRect_t{} );
 	pLighting->m_Unlit = bake.m_Unlit;
+	std::vector<Rgb_t> final( direct.size() );
+	for ( std::size_t n = 0; n < direct.size(); n++ )
+	{
+		for ( std::size_t k = 0; k < 3; k++ )
+		{
+			final[ n ][ k ] = direct[ n ][ k ] + ( bounced.empty() ? 0.0f : bounced[ n ][ k ] );
+		}
+	}
+	// _minlight: no luxel of its faces darker than that, channel by channel; and the mean, for
+	// HDR's auto exposure.
+	double flSum = 0.0;
+	std::size_t nCounted = 0;
+	for ( const BakeFace_t &face : bake.m_Faces )
+	{
+		if ( !face.m_bLit || face.m_nWidth == 0 )
+		{
+			continue;
+		}
+		for ( int j = 0; j < face.m_nHeight; j++ )
+		{
+			for ( int i = 0; i < face.m_nWidth; i++ )
+			{
+				Rgb_t &texel = final[ bake.TexelIndex( face, i, j ) ];
+				for ( float &flChannel : texel )
+				{
+					flChannel = std::max( flChannel, face.m_flMinLight );
+				}
+				flSum += ( 0.3 * texel[ 0 ] + 0.59 * texel[ 1 ] + 0.11 * texel[ 2 ] ) / 255.0;
+				nCounted++;
+			}
+		}
+	}
+	pLighting->m_flMeanLight = nCounted > 0 ? static_cast<float>( flSum / static_cast<double>( nCounted ) ) : 0.0f;
 	pLighting->m_Texels.assign( direct.size() * 4, 0 );
 	for ( std::size_t n = 0; n < direct.size(); n++ )
 	{
 		for ( std::size_t k = 0; k < 3; k++ )
 		{
-			const float flBounced = bounced.empty() ? 0.0f : bounced[ n ][ k ];
-			pLighting->m_Texels[ n * 4 + k ] = FloatToHalf( ( direct[ n ][ k ] + flBounced ) / 255.0f );
+			pLighting->m_Texels[ n * 4 + k ] = FloatToHalf( final[ n ][ k ] / 255.0f );
 		}
 		pLighting->m_Texels[ n * 4 + 3 ] = FloatToHalf( 1.0f );
 	}
@@ -1675,6 +1828,16 @@ CVec3 PointLightAt( const Light_t &light, Point_t point, Point_t normal )
 		return {};
 	}
 	double flFalloff = LightFalloff( light, flDistance );
+	if ( light.m_nType == LightType_t::LIGHT_TYPE_SURFACE )
+	{
+		// Only out of the face it is on, by the angle it leaves at.
+		const double flOut = -Dot( toLight, light.m_Direction );
+		if ( flOut <= 0.0 )
+		{
+			return {};
+		}
+		flFalloff *= flOut;
+	}
 	if ( light.m_nType == LightType_t::LIGHT_TYPE_SPOT )
 	{
 		const double flAlong = -Dot( toLight, light.m_Direction );
@@ -1727,6 +1890,8 @@ std::vector<Light_t> ReadLights( const CMap &map, bool bHdr )
 		}
 		Light_t light;
 		light.m_nEntity = static_cast<std::uint32_t>( e );
+		// Setting a style counts as naming it (the Naming Lights article).
+		light.m_bNamed = !entity.GetValue( "targetname" ).empty() || KeyNumber( entity, "style" ) != 0.0;
 		light.m_Origin = ParseTriple( entity.GetValue( "origin" ) ).value_or( Point_t{} );
 		bool bFound = false;
 		light.m_vecIntensity = LightIntensity( entity, bHdr, "_light", "_lightHDR", "_lightscaleHDR", bFound );
@@ -1817,17 +1982,23 @@ std::vector<Light_t> ReadLights( const CMap &map, bool bHdr )
 // Purpose: Tool textures and the sky get no lightmap, nor do unlit shaders and water. What
 //          stops light is what vrad counts as opaque: solid, and not see-through.
 //-----------------------------------------------------------------------------
-LightMaterial_t DescribeLightMaterial( const MaterialInfo_t &info, std::array<float, 3> reflectivity )
+LightMaterial_t DescribeLightMaterial( const MaterialInfo_t &info, std::array<float, 3> reflectivity, std::array<int, 2> textureSize )
 {
 	LightMaterial_t material;
 	material.m_bSky = info.IsSky();
 	const std::string_view szShader = info.m_szShader;
 	const bool bUnlit = szShader == "unlitgeneric" || szShader == "unlittwotexture" || szShader == "water" || szShader == "sprite" || szShader == "modulate";
 	const bool bWater = ( info.m_nCompile & MATERIAL_COMPILE_WATER ) != 0;
-	material.m_bLit = !info.IsTool() && !material.m_bSky && !bUnlit && !bWater;
+	material.m_bLit = !info.IsTool() && !material.m_bSky && !bUnlit && !bWater && ( info.m_nCompile & MATERIAL_COMPILE_NOLIGHT ) == 0;
+	material.m_TextureSize = textureSize;
 	constexpr std::uint32_t PASSES = MATERIAL_COMPILE_CLIP | MATERIAL_COMPILE_PLAYERCLIP | MATERIAL_COMPILE_NPCCLIP | MATERIAL_COMPILE_TRIGGER | MATERIAL_COMPILE_HINT | MATERIAL_COMPILE_SKIP | MATERIAL_COMPILE_AREAPORTAL | MATERIAL_COMPILE_ORIGIN | MATERIAL_COMPILE_INVISIBLE | MATERIAL_COMPILE_OCCLUDER | MATERIAL_COMPILE_FOG | MATERIAL_COMPILE_LADDER | MATERIAL_COMPILE_WATER | MATERIAL_COMPILE_NONSOLID;
 	material.m_bBlocks = material.m_bSky || ( ( info.m_nCompile & PASSES ) == 0 && !info.m_bTranslucent && !info.m_bAdditive );
-	if ( reflectivity[ 0 ] > 0.0f || reflectivity[ 1 ] > 0.0f || reflectivity[ 2 ] > 0.0f )
+	if ( info.m_Reflectivity )
+	{
+		// The VMT's $reflectivity overrides the VTF's.
+		material.m_vecReflectivity = *info.m_Reflectivity;
+	}
+	else if ( reflectivity[ 0 ] > 0.0f || reflectivity[ 1 ] > 0.0f || reflectivity[ 2 ] > 0.0f )
 	{
 		material.m_vecReflectivity = { reflectivity[ 0 ], reflectivity[ 1 ], reflectivity[ 2 ] };
 	}
@@ -2030,11 +2201,19 @@ std::shared_ptr<const CLighting> BakeLighting( const CScene &scene, std::span<co
 		return nullptr;
 	}
 	std::vector<LightMaterial_t> known( scene.m_Materials.size() );
+	std::vector<std::string> names( scene.m_Materials.size() );
 	for ( std::size_t i = 0; i < known.size(); i++ )
 	{
 		known[ i ] = i < materials.size() && materials[ i ].m_bKnown ? materials[ i ] : GuessLightMaterial( scene.m_Materials[ i ] );
+		names[ i ] = scene.m_Materials[ i ];
+		std::ranges::transform( names[ i ], names[ i ].begin(), []( unsigned char ch ) { return static_cast<char>( ch == '\\' ? '/' : std::tolower( ch ) ); } );
+		if ( options.m_Rad.m_NoShadow.contains( names[ i ] ) )
+		{
+			known[ i ].m_bBlocks = false;
+		}
 	}
 	CollectFaces( scene, live, known, bake );
+	AddTextureLights( scene, known, names, options, bake );
 	for ( BakeFace_t &face : bake.m_Faces )
 	{
 		// Outside the radius: no luxels, but still in the way of light.
@@ -2102,7 +2281,7 @@ std::shared_ptr<const CLighting> BakeLighting( const CScene &scene, std::span<co
 			for ( std::uint32_t l = 0; l < bake.m_Lights.size(); l++ )
 			{
 				const Light_t &light = bake.m_Lights[ l ];
-				if ( light.m_nType != LightType_t::LIGHT_TYPE_POINT && light.m_nType != LightType_t::LIGHT_TYPE_SPOT )
+				if ( ( light.m_nType != LightType_t::LIGHT_TYPE_POINT && light.m_nType != LightType_t::LIGHT_TYPE_SPOT && light.m_nType != LightType_t::LIGHT_TYPE_SURFACE ) || light.m_nFace == f )
 				{
 					continue;
 				}
@@ -2201,6 +2380,7 @@ std::shared_ptr<const CLighting> BakeLighting( const CScene &scene, std::span<co
 
 	const std::size_t nTexels = static_cast<std::size_t>( nWidth ) * static_cast<std::size_t>( nHeight );
 	std::vector<Rgb_t> direct( nTexels, Rgb_t{} );
+	std::vector<Rgb_t> source( nTexels, Rgb_t{} ); // what bounces: all but named lights' light
 	std::atomic<std::size_t> nDone{ 0 };
 	const std::size_t nFaces = bake.m_Faces.size();
 	bake.Progress( 10, "Direct light" );
@@ -2217,7 +2397,7 @@ std::shared_ptr<const CLighting> BakeLighting( const CScene &scene, std::span<co
 				for ( int i = 0; i < face.m_nWidth; i++ )
 				{
 					const std::size_t nTexel = bake.TexelIndex( face, i, j );
-					direct[ nTexel ] = DirectLight( bake, face.m_Lights, face.m_Samples[ static_cast<std::size_t>( j * face.m_nWidth + i ) ], static_cast<std::uint32_t>( nTexel ) );
+					direct[ nTexel ] = DirectLight( bake, face.m_Lights, face.m_Samples[ static_cast<std::size_t>( j * face.m_nWidth + i ) ], static_cast<std::uint32_t>( nTexel ), &source[ nTexel ] );
 				}
 			}
 		}
@@ -2231,7 +2411,19 @@ std::shared_ptr<const CLighting> BakeLighting( const CScene &scene, std::span<co
 	// The sky's ambient is soft: gathered on a sparser grid.
 	bake.Progress( 50, "Sky light" );
 	const std::vector<Point_t> skyDirs = CosineDirections( std::max( options.m_nSkySamples, 1 ) );
-	GatherSparse( bake, std::max( 1, options.m_nSkySpacing ), direct, [ & ]( const LuxelSample_t &sample, std::uint32_t nSeed ) { return SkyAmbient( bake, sample, nSeed, skyDirs ); } );
+	std::vector<Rgb_t> sky( nTexels, Rgb_t{} );
+	GatherSparse( bake, std::max( 1, options.m_nSkySpacing ), sky, [ & ]( const LuxelSample_t &sample, std::uint32_t nSeed ) { return SkyAmbient( bake, sample, nSeed, skyDirs ); } );
+	const auto ambient = std::ranges::find( bake.m_Lights, LightType_t::LIGHT_TYPE_SKY_AMBIENT, &Light_t::m_nType );
+	const bool bSkyBounces = ambient != bake.m_Lights.end() && !ambient->m_bNamed;
+	for ( std::size_t n = 0; n < nTexels; n++ )
+	{
+		for ( std::size_t k = 0; k < 3; k++ )
+		{
+			direct[ n ][ k ] += sky[ n ][ k ];
+			source[ n ][ k ] += bSkyBounces ? sky[ n ][ k ] : 0.0f;
+		}
+	}
+	sky = {};
 	if ( bake.IsCancelled() )
 	{
 		return nullptr;
@@ -2244,7 +2436,7 @@ std::shared_ptr<const CLighting> BakeLighting( const CScene &scene, std::span<co
 	// Bounces: each pass gathers what the last one left on the faces.
 	std::vector<Rgb_t> bounced( nTexels, Rgb_t{} );
 	const std::vector<Point_t> bounceDirs = CosineDirections( std::max( options.m_nBounceSamples, 1 ) );
-	std::vector<Rgb_t> last = direct;
+	std::vector<Rgb_t> last = std::move( source );
 	std::array<double, 3> lastTotal{};
 	std::array<double, 3> ratio{};
 	for ( int nBounce = 0; nBounce < options.m_nBounces; nBounce++ )
@@ -2375,6 +2567,149 @@ std::shared_ptr<const CLighting> BakeLighting( const CScene &scene, std::span<co
 	}
 	bake.Progress( 100, "Done" );
 	return pLighting;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+void ParseRadFile( std::string_view szText, RadRules_t &rules )
+{
+	std::size_t nAt = 0;
+	while ( nAt < szText.size() )
+	{
+		std::size_t nEnd = szText.find( '\n', nAt );
+		if ( nEnd == std::string_view::npos )
+		{
+			nEnd = szText.size();
+		}
+		std::string_view szLine = szText.substr( nAt, nEnd - nAt );
+		nAt = nEnd + 1;
+		if ( const std::size_t nComment = szLine.find( "//" ); nComment != std::string_view::npos )
+		{
+			szLine = szLine.substr( 0, nComment );
+		}
+		std::vector<std::string_view> words;
+		std::size_t i = 0;
+		while ( i < szLine.size() )
+		{
+			while ( i < szLine.size() && std::isspace( static_cast<unsigned char>( szLine[ i ] ) ) )
+			{
+				i++;
+			}
+			std::size_t j = i;
+			while ( j < szLine.size() && !std::isspace( static_cast<unsigned char>( szLine[ j ] ) ) )
+			{
+				j++;
+			}
+			if ( j > i )
+			{
+				words.push_back( szLine.substr( i, j - i ) );
+			}
+			i = j;
+		}
+		if ( words.empty() )
+		{
+			continue;
+		}
+		// "hdr:ldr:" lines are always ignored; "ldr:" and "hdr:" lines are this preview's when
+		// it is that kind; both kinds are read, the HDR value kept beside the LDR one.
+		std::string_view szFirst = words[ 0 ];
+		bool bHdrOnly = false;
+		if ( szFirst.starts_with( "hdr:ldr:" ) )
+		{
+			continue;
+		}
+		if ( szFirst.starts_with( "ldr:" ) )
+		{
+			szFirst.remove_prefix( 4 );
+		}
+		else if ( szFirst.starts_with( "hdr:" ) )
+		{
+			szFirst.remove_prefix( 4 );
+			bHdrOnly = true;
+		}
+		if ( szFirst.empty() && words.size() > 1 )
+		{
+			words.erase( words.begin() );
+			szFirst = words[ 0 ];
+		}
+		words[ 0 ] = szFirst;
+		auto lower = []( std::string_view sz ) {
+			std::string szOut( sz );
+			std::ranges::transform( szOut, szOut.begin(), []( unsigned char ch ) { return static_cast<char>( ch == '\\' ? '/' : std::tolower( ch ) ); } );
+			// "Materials that aren't in a folder must have a slash before their name."
+			while ( szOut.starts_with( '/' ) )
+			{
+				szOut.erase( 0, 1 );
+			}
+			return szOut;
+		};
+		if ( words[ 0 ] == "noshadow" && words.size() > 1 )
+		{
+			rules.m_NoShadow.insert( lower( words[ 1 ] ) );
+			continue;
+		}
+		if ( words[ 0 ] == "forcetextureshadow" || words.size() < 2 )
+		{
+			continue;
+		}
+		auto value = [ & ]( std::size_t nFirst, std::size_t nCount ) -> std::optional<CVec3> {
+			std::string szValue;
+			for ( std::size_t k = nFirst; k < nFirst + nCount && k < words.size(); k++ )
+			{
+				szValue += std::string( words[ k ] ) + " ";
+			}
+			return ParseLightValue( szValue );
+		};
+		const std::size_t nNumbers = words.size() - 1;
+		const std::size_t nLdr = nNumbers >= 4 ? 4 : nNumbers;
+		const std::optional<CVec3> ldr = value( 1, nLdr );
+		if ( !ldr )
+		{
+			continue;
+		}
+		TexLight_t &light = rules.m_TexLights[ lower( words[ 0 ] ) ];
+		if ( bHdrOnly )
+		{
+			light.m_Hdr = ldr;
+			continue;
+		}
+		light.m_vecLdr = *ldr;
+		if ( nNumbers >= 8 )
+		{
+			light.m_Hdr = value( 5, 4 );
+		}
+	}
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+std::optional<Fog_t> ReadFog( const CMap &map )
+{
+	for ( const Entity_t &entity : std::as_const( map.m_Entities ) )
+	{
+		if ( entity.m_bDeleted || entity.GetClassname() != "env_fog_controller" || KeyNumber( entity, "fogenable" ) == 0.0 )
+		{
+			continue;
+		}
+		Fog_t fog;
+		const auto color = []( std::string_view szValue ) {
+			const auto rgb = ParseTriple( szValue ).value_or( std::array<double, 3>{ 255, 255, 255 } );
+			return CVec3{ static_cast<float>( rgb[ 0 ] / 255.0 ), static_cast<float>( rgb[ 1 ] / 255.0 ), static_cast<float>( rgb[ 2 ] / 255.0 ) };
+		};
+		fog.m_vecColor = color( entity.GetValue( "fogcolor" ) );
+		fog.m_vecColor2 = entity.HasKey( "fogcolor2" ) ? color( entity.GetValue( "fogcolor2" ) ) : fog.m_vecColor;
+		fog.m_bBlend = KeyNumber( entity, "fogblend" ) != 0.0;
+		fog.m_Direction = ParseTriple( entity.GetValue( "fogdir" ) ).value_or( Point_t{ 1, 0, 0 } );
+		fog.m_Direction = Length( fog.m_Direction ) > 1.0e-9 ? Normalized( fog.m_Direction ) : Point_t{ 1, 0, 0 };
+		fog.m_flStart = KeyNumber( entity, "fogstart" );
+		fog.m_flEnd = KeyNumber( entity, "fogend", 1.0 );
+		fog.m_flMaxDensity = entity.HasKey( "fogmaxdensity" ) ? KeyNumber( entity, "fogmaxdensity" ) : 1.0;
+		fog.m_bRadial = KeyNumber( entity, "fogradial" ) != 0.0;
+		return fog;
+	}
+	return std::nullopt;
 }
 
 } // namespace xv::map

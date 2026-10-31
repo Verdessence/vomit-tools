@@ -15,6 +15,7 @@
 #include <QMatrix4x4>
 #include <rhi/qrhi.h>
 
+#include "map/Lighting.h"
 #include "map/MapConstants.h"
 #include "texture/Vtf.h"
 
@@ -36,6 +37,11 @@ struct FrameUniforms_t
 	float m_Invalid[ 4 ];
 	float m_EyeLow[ 4 ];
 	float m_Lighting[ 4 ];
+	float m_FogColor[ 4 ];
+	float m_FogColor2[ 4 ];
+	float m_FogDirection[ 4 ];
+	float m_FogRange[ 4 ];
+	float m_ViewForward[ 4 ];
 };
 
 struct MaterialUniforms_t
@@ -775,9 +781,36 @@ void CMapRenderer::Render( QRhiCommandBuffer *pCommands, QRhiRenderTarget *pTarg
 		{
 			uniforms.m_Lighting[ 0 ] = static_cast<float>( m_pLightmapFor->m_nWidth );
 			uniforms.m_Lighting[ 1 ] = static_cast<float>( m_pLightmapFor->m_nHeight );
-			uniforms.m_Lighting[ 3 ] = 1.0f;
+		}
+		if ( frame.m_pLighting )
+		{
+			// Vertex-lit props need no atlas; which look decides the curve.
+			uniforms.m_Lighting[ 3 ] = shade.m_bLightHdr ? 2.0f : 1.0f;
 		}
 		uniforms.m_Lighting[ 2 ] = shade.m_flLightScale;
+		if ( const xv::map::Fog_t *pFog = shade.m_pFog )
+		{
+			uniforms.m_FogColor[ 0 ] = pFog->m_vecColor.m_flX;
+			uniforms.m_FogColor[ 1 ] = pFog->m_vecColor.m_flY;
+			uniforms.m_FogColor[ 2 ] = pFog->m_vecColor.m_flZ;
+			uniforms.m_FogColor[ 3 ] = static_cast<float>( pFog->m_flMaxDensity );
+			uniforms.m_FogColor2[ 0 ] = pFog->m_vecColor2.m_flX;
+			uniforms.m_FogColor2[ 1 ] = pFog->m_vecColor2.m_flY;
+			uniforms.m_FogColor2[ 2 ] = pFog->m_vecColor2.m_flZ;
+			uniforms.m_FogColor2[ 3 ] = pFog->m_bBlend ? 1.0f : 0.0f;
+			for ( std::size_t i = 0; i < 3; i++ )
+			{
+				uniforms.m_FogDirection[ i ] = static_cast<float>( pFog->m_Direction[ i ] );
+			}
+			uniforms.m_FogDirection[ 3 ] = pFog->m_bRadial ? 1.0f : 0.0f;
+			uniforms.m_FogRange[ 0 ] = static_cast<float>( pFog->m_flStart );
+			uniforms.m_FogRange[ 1 ] = static_cast<float>( pFog->m_flEnd );
+			uniforms.m_FogRange[ 2 ] = 1.0f;
+		}
+		uniforms.m_FogRange[ 3 ] = shade.m_bLightOnly ? 1.0f : 0.0f;
+		uniforms.m_ViewForward[ 0 ] = shade.m_vecViewForward.m_flX;
+		uniforms.m_ViewForward[ 1 ] = shade.m_vecViewForward.m_flY;
+		uniforms.m_ViewForward[ 2 ] = shade.m_vecViewForward.m_flZ;
 		return uniforms;
 	};
 	// Slot 1 and 3 are 0 and 2 for meshes as read.

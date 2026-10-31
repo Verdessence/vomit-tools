@@ -32,6 +32,7 @@ enum class RasterMode_t
 };
 
 class CLighting;
+struct Fog_t;
 
 // A texture as both renderers get it: its mipmaps, largest first, and the full size the map's
 // texture coordinates are measured against (the VTF's own, before any was dropped).
@@ -122,13 +123,21 @@ struct ShadeOptions_t
 	float m_flLuxelShade = 0.75f;              // the lightmap grid's darker squares
 	const sky::CCube *m_pSky = nullptr;        // Hammer++'s 2D skybox on sky faces; null: none
 	const CLighting *m_pLighting = nullptr;    // the lighting preview's atlas; null: not baked yet
-	float m_flLightScale = 1.0f;               // the lighting preview's brightness
+	float m_flLightScale = 1.0f;               // the lighting preview's brightness (times HDR's exposure)
+	bool m_bLightHdr = false;                  // shown as the game with HDR: no overbright
+	const Fog_t *m_pFog = nullptr;             // the map's fog, in the lighting preview; null: none
+	bool m_bLightOnly = false;                 // the lighting preview's light alone (mat_fullbright 2): textures a plain grey
+	CVec3 m_vecViewForward{ 1, 0, 0 };         // for fog measured along the view
 };
 
 // What the lighting preview multiplies a texture by for a light (linear, 1 fully lit), as Source
 // shows a lightmap without HDR: stored at half (its overbright of 2) in gamma 2.2, doubled when
 // drawn. A face lit fully comes out about 1.46 times its texture.
-[[nodiscard]] float LightFactor( float flLight, float flScale );
+[[nodiscard]] float LightFactor( float flLight, float flScale, bool bHdr = false );
+// With HDR the game draws a lightmap without the overbright, scaled by its auto exposure, which
+// keeps the picture's brightness between its limits (env_tonemap_controller's defaults: 0.5 and
+// 2). Here the bake's mean brightness stands for the picture's.
+[[nodiscard]] float AutoExposure( float flMeanLight, float flMin = 0.5f, float flMax = 2.0f );
 
 // Bilinear between texels, trilinear between mips (or the nearest mip without bMipBlend); u and v
 // in texture widths (wrapping). DXT mips are read as they are when there are no decoded ones.

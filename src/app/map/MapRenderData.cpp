@@ -818,14 +818,40 @@ MapFrame_t CMapRenderData::Snapshot( const xv::map::CViewCamera &camera, const x
 	frame.m_Options = options;
 	frame.m_Options.m_bToolTextures = settings.m_bToolTextures;
 	frame.m_Options.m_Shade.m_pSky = frame.m_pSky.get();
-	if ( options.m_Shade.m_nMode == xv::map::RasterMode_t::RASTER_MODE_LIGHTING && m_pLighting && pScene )
+	const MapPreferences_t &preferences = CPreferences::Instance().GetMapPreferences();
+	frame.m_Options.m_Shade.m_flLightScale = static_cast<float>( preferences.m_flLightBrightness );
+	frame.m_Options.m_Shade.m_bLightHdr = preferences.m_bLightHdr;
+	frame.m_Options.m_Shade.m_bLightOnly = preferences.m_bLightOnly;
+	if ( options.m_Shade.m_nMode == xv::map::RasterMode_t::RASTER_MODE_LIGHTING && pScene )
 	{
-		UpdateMeshLights();
-		frame.m_pLighting = m_pLighting;
-		frame.m_pMeshLights = m_pMeshLights;
-		frame.m_Options.m_Shade.m_pLighting = m_pLighting.get();
+		if ( m_pLighting )
+		{
+			UpdateMeshLights();
+			frame.m_pLighting = m_pLighting;
+			frame.m_pMeshLights = m_pMeshLights;
+			frame.m_Options.m_Shade.m_pLighting = m_pLighting.get();
+			if ( preferences.m_bLightHdr )
+			{
+				frame.m_Options.m_Shade.m_flLightScale *= xv::map::AutoExposure( m_pLighting->m_flMeanLight );
+			}
+		}
+		// The fog as the game draws it (Preferences: on unless turned off).
+		// (A scene's address can be another's later: its revision tells them apart.)
+		if ( pScene != m_pFogFor || pScene->m_nRevision != m_nFogRevision )
+		{
+			m_pFogFor = pScene;
+			m_nFogRevision = pScene->m_nRevision;
+			const auto fog = xv::map::ReadFog( pScene->m_Map );
+			m_pFog = fog ? std::make_shared<const xv::map::Fog_t>( *fog ) : nullptr;
+		}
+		if ( preferences.m_bLightFog )
+		{
+			frame.m_pFog = m_pFog;
+			frame.m_Options.m_Shade.m_pFog = m_pFog.get();
+		}
+		const xv::map::Point_t forward = camera.GetForward();
+		frame.m_Options.m_Shade.m_vecViewForward = xv::map::ToVec3( forward );
 	}
-	frame.m_Options.m_Shade.m_flLightScale = static_cast<float>( CPreferences::Instance().GetMapPreferences().m_flLightBrightness );
 	// Hammer++ draws the 3D skybox by default; Alt+V turns it off.
 	frame.m_Options.m_SkyboxCamera.reset();
 	if ( settings.m_bSkybox3D && pScene && pScene->m_Skybox3D )

@@ -32,7 +32,12 @@ layout(std140, binding = 0) uniform Frame {
 	vec4 pass;          // x 1: the 3D skybox, drawn from its own camera first; y 1: a mesh as read
 	vec4 invalid;       // rgb, and how much of it broken solids' faces take
 	vec4 eyeLow;        // what float precision leaves of the eye after eye
-	vec4 lighting;      // the lighting preview's atlas width and height, its brightness, 1 when there is one
+	vec4 lighting;      // the lighting preview's atlas width and height, brightness (times exposure), 1 (LDR) or 2 (HDR) when there is one
+	vec4 fogColor;      // the lighting preview's fog: rgb, and the most it covers
+	vec4 fogColor2;     // rgb, and 1 to blend to it by the view's direction
+	vec4 fogDirection;  // xyz, and 1 when measured from the eye (else along the view)
+	vec4 fogRange;      // start, end, 1 when there is fog; w 1: the light alone (mat_fullbright 2)
+	vec4 viewForward;   // xyz
 } frame;
 
 layout(binding = 4) uniform sampler2D stateTexture;

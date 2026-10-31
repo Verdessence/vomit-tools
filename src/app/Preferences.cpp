@@ -50,6 +50,8 @@ void ForEachMapPreference( Preferences_t &map, Visit_t &&pfnVisit )
 	pfnVisit( "maps/lightBounces", map.m_nLightBounces );
 	pfnVisit( "maps/lightLuxels", map.m_nLightLuxels );
 	pfnVisit( "maps/lightHdr", map.m_bLightHdr );
+	pfnVisit( "maps/lightFog", map.m_bLightFog );
+	pfnVisit( "maps/lightOnly", map.m_bLightOnly );
 	pfnVisit( "maps/lightPropShadows", map.m_bLightPropShadows );
 	pfnVisit( "maps/lightAutoBake", map.m_bLightAutoBake );
 	pfnVisit( "maps/lightInRadius", map.m_bLightInRadius );

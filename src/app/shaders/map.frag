@@ -25,7 +25,12 @@ layout(std140, binding = 0) uniform Frame {
 	vec4 pass;          // x 1: the 3D skybox, drawn from its own camera first; y 1: a mesh as read
 	vec4 invalid;       // rgb, and how much of it broken solids' faces take
 	vec4 eyeLow;        // what float precision leaves of the eye after eye
-	vec4 lighting;      // the lighting preview's atlas width and height, its brightness, 1 when there is one
+	vec4 lighting;      // the lighting preview's atlas width and height, brightness (times exposure), 1 (LDR) or 2 (HDR) when there is one
+	vec4 fogColor;      // the lighting preview's fog: rgb, and the most it covers
+	vec4 fogColor2;     // rgb, and 1 to blend to it by the view's direction
+	vec4 fogDirection;  // xyz, and 1 when measured from the eye (else along the view)
+	vec4 fogRange;      // start, end, 1 when there is fog; w 1: the light alone (mat_fullbright 2)
+	vec4 viewForward;   // xyz
 } frame;
 
 layout(std140, binding = 1) uniform Material {
@@ -165,6 +170,10 @@ void main() {
 		if (material.extra.y > 0.5) {
 			color.rgb *= v_state.rgb;
 		}
+		if (mode == MODE_LIGHTING && frame.fogRange.w > 0.5 && material.extra.z < 0.5) {
+			// mat_fullbright 2, as xv::map::ShadeFragment: a colourless monotone.
+			color.rgb = vec3(0.5);
+		}
 		glow = material.selfIllum.w > 0.5 ? color.a : 0.0;
 		albedo = color.rgb;
 		color.a = material.options.y > 0.5 ? color.a * material.color.a : material.color.a;
@@ -179,7 +188,7 @@ void main() {
 	if (mode == MODE_LIGHTING && (material.extra.z < 0.5 || vertexLit) && !(material.extra.x > 0.5 && sky.translate[0].w > 0.5)) {
 		vec3 light = vec3(0.0);
 		bool lit = false;
-		if (kind > 0.5 && kind < 1.5 && frame.lighting.w > 0.5) {
+		if (kind > 0.5 && kind < 1.5 && frame.lighting.w > 0.5 && frame.lighting.x > 0.0) {
 			light = texture(lightmap, v_light.xy / frame.lighting.xy).rgb;
 			lit = true;
 		} else if (vertexLit) {
@@ -187,14 +196,30 @@ void main() {
 			lit = true;
 		}
 		if (lit) {
-			// xv::map::LightFactor: Source's overbright of 2, in gamma 2.2.
-			color.rgb *= 2.0 * pow(max(light * frame.lighting.z * 0.5, vec3(0.0)), vec3(1.0 / 2.2));
+			// xv::map::LightFactor: Source's overbright of 2, in gamma 2.2; with HDR, none.
+			if (frame.lighting.w > 1.5) {
+				color.rgb *= pow(max(light * frame.lighting.z, vec3(0.0)), vec3(1.0 / 2.2));
+			} else {
+				color.rgb *= 2.0 * pow(max(light * frame.lighting.z * 0.5, vec3(0.0)), vec3(1.0 / 2.2));
+			}
 			// Self-illuminated: toward the texture times the tint, by the mask, as the game.
 			color.rgb = mix(color.rgb, albedo * material.selfIllum.rgb, glow);
-		} else if (kind < 0.5 || frame.lighting.w < 0.5) {
+		} else if (kind < 0.5 || frame.lighting.w < 0.5 || (kind < 1.5 && frame.lighting.x <= 0.0)) {
 			// Not baked (yet): the shaded look. Fullbright faces (tool textures) stay as they are.
 			color.rgb *= faceShade(n);
 		}
+	}
+	if (mode == MODE_LIGHTING && frame.fogRange.z > 0.5 && !(material.extra.x > 0.5 && sky.translate[0].w > 0.5)) {
+		// env_fog_controller's fog, as xv::map::ShadeFragment adds it.
+		vec3 dir = v_world - frame.eye.xyz - frame.eyeLow.xyz;
+		float distance = frame.fogDirection.w > 0.5 ? length(dir) : dot(dir, frame.viewForward.xyz);
+		float amount = clamp((distance - frame.fogRange.x) / max(frame.fogRange.y - frame.fogRange.x, 1e-3), 0.0, 1.0) * frame.fogColor.w;
+		vec3 fogColour = frame.fogColor.rgb;
+		if (frame.fogColor2.w > 0.5 && length(dir) > 1e-6) {
+			float t = 0.5 * (1.0 + dot(normalize(dir), frame.fogDirection.xyz));
+			fogColour = mix(frame.fogColor2.rgb, frame.fogColor.rgb, t);
+		}
+		color.rgb = mix(color.rgb, fogColour, amount);
 	}
 	if ((mode == MODE_FLAT || mode == MODE_TEXTURED_SHADED) && material.extra.z < 0.5) {
 		color.rgb *= faceShade(n);
