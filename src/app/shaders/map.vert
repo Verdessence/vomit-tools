@@ -10,6 +10,7 @@ layout(location = 2) in vec2 texel;
 layout(location = 3) in vec2 luxel;
 layout(location = 4) in float blend;
 layout(location = 5) in uint object;
+layout(location = 6) in vec4 light; // how the lighting preview lights it: xv::map::LightVertex_t
 
 layout(location = 0) out vec2 v_texel;
 layout(location = 1) out vec2 v_luxel;
@@ -17,6 +18,7 @@ layout(location = 2) out float v_blend;
 layout(location = 3) out vec3 v_normal;
 layout(location = 4) flat out vec4 v_state; // flat colour, and the flags in alpha
 layout(location = 5) out vec3 v_world;
+layout(location = 6) out vec4 v_light;
 
 layout(std140, binding = 0) uniform Frame {
 	mat4 viewProjection; // looking from the origin: positions go in relative to the eye
@@ -30,6 +32,7 @@ layout(std140, binding = 0) uniform Frame {
 	vec4 pass;          // x 1: the 3D skybox, drawn from its own camera first; y 1: a mesh as read
 	vec4 invalid;       // rgb, and how much of it broken solids' faces take
 	vec4 eyeLow;        // what float precision leaves of the eye after eye
+	vec4 lighting;      // the lighting preview's atlas width and height, its brightness, 1 when there is one
 } frame;
 
 layout(binding = 4) uniform sampler2D stateTexture;
@@ -52,6 +55,7 @@ void main() {
 	v_blend = blend;
 	v_normal = normal;
 	v_world = position;
+	v_light = light;
 	// Not shown (or, while the 3D skybox is drawn, not in its room): outside every clip plane, so
 	// the triangle is dropped.
 	// A mesh as read (pass.y) leaves out the old shapes of objects edits have changed.

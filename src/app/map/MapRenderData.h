@@ -12,11 +12,13 @@
 #include <cstdint>
 #include <memory>
 #include <utility>
+#include <unordered_map>
 #include <unordered_set>
 #include <vector>
 
 #include <QColor>
 
+#include "map/Lighting.h"
 #include "map/MapView.h"
 #include "map/Raster.h"
 #include "map/Scene.h"
@@ -24,6 +26,9 @@
 
 class CMapDocument;
 class CMapResources;
+
+// Per mesh, where each vertex's light is in the lighting preview's atlas.
+using MapMeshLights_t = std::unordered_map<const xv::map::CMapMesh *, std::shared_ptr<const std::vector<xv::map::LightVertex_t>>>;
 
 // One picture's worth of everything; copies are cheap and share the data.
 struct MapFrame_t
@@ -45,6 +50,8 @@ struct MapFrame_t
 	std::shared_ptr<const std::vector<xv::map::RasterMaterial_t>> m_pMaterials;
 	std::shared_ptr<const void> m_pTextures; // keeps the materials' textures alive
 	std::shared_ptr<const xv::sky::CCube> m_pSky;
+	std::shared_ptr<const xv::map::CLighting> m_pLighting;  // lighting preview views only
+	std::shared_ptr<const MapMeshLights_t> m_pMeshLights;
 	std::shared_ptr<const std::vector<std::uint8_t>> m_pFlags;
 	std::shared_ptr<const std::vector<std::array<std::uint8_t, 3>>> m_pFlatColors;
 	std::shared_ptr<const std::vector<std::array<std::uint8_t, 3>>> m_pLineColors;
@@ -91,6 +98,9 @@ public:
 	void CompactEntityBoxes();
 	// The map's sky, drawn on its sky faces.
 	void SetSky( std::shared_ptr<const xv::sky::CCube> pSky );
+	// The lighting preview's last bake, which lighting preview frames draw with.
+	void SetLighting( std::shared_ptr<const xv::map::CLighting> pLighting );
+	[[nodiscard]] const std::shared_ptr<const xv::map::CLighting> &GetLighting() const { return m_pLighting; }
 	// The props placed in the world, and the entities they draw: those show no box.
 	void SetProps( std::shared_ptr<const xv::map::CMapMesh> pProps, std::vector<std::uint32_t> objects, std::shared_ptr<const xv::map::MeshParts_t> pParts = {} );
 	// The overlays and decals laid on the faces.
@@ -107,6 +117,10 @@ private:
 	void UpdateEntityPreview( xv::map::Point_t right, xv::map::Point_t up );
 	void UpdateFlatColors();
 	void ApplySprites();
+	// Each lit mesh of the scene's vertices placed in the lighting's atlas, made for meshes that
+	// are new since the last frame and dropped for those gone.
+	void UpdateMeshLights();
+	[[nodiscard]] std::vector<xv::map::LightVertex_t> SpriteLights( const xv::map::CMapMesh &mesh ) const;
 
 	const CMapDocument &m_Document;
 	const CMapResources *m_pResources = nullptr;
@@ -132,6 +146,9 @@ private:
 	std::shared_ptr<const std::vector<xv::map::SpritePlacement_t>> m_pSprites; // those drawn
 	bool m_bSpritesShown = true;
 	std::vector<std::uint32_t> m_SpriteObjects; // sorted
+	std::shared_ptr<const xv::map::CLighting> m_pLighting;
+	std::shared_ptr<const MapMeshLights_t> m_pMeshLights;
+	std::vector<std::shared_ptr<const xv::map::CMapMesh>> m_MeshLightsKeep; // the meshes m_pMeshLights names, held so their addresses stay theirs
 	xv::map::Point_t m_SpritesRight{};          // the camera the sprite mesh faces
 	xv::map::Point_t m_SpritesUp{};
 };

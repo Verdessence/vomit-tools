@@ -9,6 +9,7 @@ layout(location = 2) in float v_blend;
 layout(location = 3) in vec3 v_normal;
 layout(location = 4) flat in vec4 v_state;
 layout(location = 5) in vec3 v_world;
+layout(location = 6) in vec4 v_light;
 
 layout(location = 0) out vec4 fragColor;
 
@@ -24,6 +25,7 @@ layout(std140, binding = 0) uniform Frame {
 	vec4 pass;          // x 1: the 3D skybox, drawn from its own camera first; y 1: a mesh as read
 	vec4 invalid;       // rgb, and how much of it broken solids' faces take
 	vec4 eyeLow;        // what float precision leaves of the eye after eye
+	vec4 lighting;      // the lighting preview's atlas width and height, its brightness, 1 when there is one
 } frame;
 
 layout(std140, binding = 1) uniform Material {
@@ -51,11 +53,13 @@ layout(binding = 9) uniform sampler2D skyFace2;
 layout(binding = 10) uniform sampler2D skyFace3;
 layout(binding = 11) uniform sampler2D skyFace4;
 layout(binding = 12) uniform sampler2D skyFace5;
+layout(binding = 13) uniform sampler2D lightmap; // the lighting preview's atlas: linear light, 1 fully lit
 
 const float MODE_WIREFRAME = 0.0;
 const float MODE_FLAT = 1.0;
 const float MODE_TEXTURED_SHADED = 3.0;
 const float MODE_LIGHTMAP_GRID = 4.0;
+const float MODE_LIGHTING = 5.0;
 
 // The face a direction hits: rt bk lf ft up dn as 0-5, as sky::Project picks it.
 int skyFaceOf(vec3 d, out float major) {
@@ -162,6 +166,27 @@ void main() {
 		if (mode == MODE_LIGHTMAP_GRID && material.extra.z < 0.5) {
 			ivec2 square = ivec2(floor(v_luxel));
 			color.rgb *= ((square.x + square.y) & 1) != 0 ? frame.mode.z : 1.0;
+		}
+	}
+	// The kinds of xv::map::LightVertex_t: none, the atlas, the vertex's own, fullbright.
+	float kind = v_light.w;
+	bool vertexLit = kind > 1.5 && kind < 2.5;
+	if (mode == MODE_LIGHTING && (material.extra.z < 0.5 || vertexLit) && !(material.extra.x > 0.5 && sky.translate[0].w > 0.5)) {
+		vec3 light = vec3(0.0);
+		bool lit = false;
+		if (kind > 0.5 && kind < 1.5 && frame.lighting.w > 0.5) {
+			light = texture(lightmap, v_light.xy / frame.lighting.xy).rgb;
+			lit = true;
+		} else if (vertexLit) {
+			light = v_light.rgb;
+			lit = true;
+		}
+		if (lit) {
+			// xv::map::LightFactor: Source's overbright of 2, in gamma 2.2.
+			color.rgb *= 2.0 * pow(max(light * frame.lighting.z * 0.5, vec3(0.0)), vec3(1.0 / 2.2));
+		} else if (kind < 0.5 || frame.lighting.w < 0.5) {
+			// Not baked (yet): the shaded look. Fullbright faces (tool textures) stay as they are.
+			color.rgb *= faceShade(n);
 		}
 	}
 	if ((mode == MODE_FLAT || mode == MODE_TEXTURED_SHADED) && material.extra.z < 0.5) {

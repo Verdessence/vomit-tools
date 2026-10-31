@@ -20,6 +20,7 @@ layout(std140, binding = 0) uniform Frame {
 	vec4 pass;          // x 1: the 3D skybox, drawn from its own camera first; y 1: a mesh as read
 	vec4 invalid;       // rgb, and how much of it broken solids' faces take
 	vec4 eyeLow;        // what float precision leaves of the eye after eye
+	vec4 lighting;      // the lighting preview's atlas width and height, its brightness, 1 when there is one
 } frame;
 
 layout(std140, binding = 1) uniform Material {

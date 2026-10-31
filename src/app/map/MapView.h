@@ -27,6 +27,7 @@ enum class MapViewType_t
 	MAP_VIEW_TYPE_TOP,   // 2D x/y
 	MAP_VIEW_TYPE_FRONT, // 2D y/z
 	MAP_VIEW_TYPE_SIDE,  // 2D x/z
+	MAP_VIEW_TYPE_3D_LIGHTING, // textured, lit by the lighting preview
 };
 
 [[nodiscard]] inline bool Is2DView( MapViewType_t nType )

@@ -63,6 +63,7 @@ QString CMapPane::TypeName( MapViewType_t nType )
 		case MapViewType_t::MAP_VIEW_TYPE_3D_TEXTURED: return tr( "3D Textured" );
 		case MapViewType_t::MAP_VIEW_TYPE_3D_TEXTURED_SHADED: return tr( "3D Textured Shaded" );
 		case MapViewType_t::MAP_VIEW_TYPE_3D_LIGHTMAP_GRID: return tr( "3D Lightmap Grid" );
+		case MapViewType_t::MAP_VIEW_TYPE_3D_LIGHTING: return tr( "3D Lighting Preview" );
 		case MapViewType_t::MAP_VIEW_TYPE_TOP: return tr( "Top (x/y)" );
 		case MapViewType_t::MAP_VIEW_TYPE_FRONT: return tr( "Front (y/z)" );
 		case MapViewType_t::MAP_VIEW_TYPE_SIDE: return tr( "Side (x/z)" );
@@ -115,7 +116,7 @@ void CMapPane::UpdateCaption()
 void CMapPane::ShowMenu()
 {
 	QMenu menu( this );
-	for ( const MapViewType_t nType : { MapViewType_t::MAP_VIEW_TYPE_3D_WIREFRAME, MapViewType_t::MAP_VIEW_TYPE_3D_FLAT, MapViewType_t::MAP_VIEW_TYPE_3D_TEXTURED, MapViewType_t::MAP_VIEW_TYPE_3D_TEXTURED_SHADED, MapViewType_t::MAP_VIEW_TYPE_3D_LIGHTMAP_GRID, MapViewType_t::MAP_VIEW_TYPE_TOP, MapViewType_t::MAP_VIEW_TYPE_FRONT, MapViewType_t::MAP_VIEW_TYPE_SIDE } )
+	for ( const MapViewType_t nType : { MapViewType_t::MAP_VIEW_TYPE_3D_WIREFRAME, MapViewType_t::MAP_VIEW_TYPE_3D_FLAT, MapViewType_t::MAP_VIEW_TYPE_3D_TEXTURED, MapViewType_t::MAP_VIEW_TYPE_3D_TEXTURED_SHADED, MapViewType_t::MAP_VIEW_TYPE_3D_LIGHTMAP_GRID, MapViewType_t::MAP_VIEW_TYPE_3D_LIGHTING, MapViewType_t::MAP_VIEW_TYPE_TOP, MapViewType_t::MAP_VIEW_TYPE_FRONT, MapViewType_t::MAP_VIEW_TYPE_SIDE } )
 	{
 		if ( nType == MapViewType_t::MAP_VIEW_TYPE_TOP )
 		{

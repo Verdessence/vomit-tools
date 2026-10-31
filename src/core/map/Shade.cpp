@@ -10,6 +10,8 @@
 #include <cmath>
 #include <cstdint>
 
+#include "map/Lighting.h"
+
 namespace xv::map
 {
 
@@ -270,6 +272,14 @@ float FaceShade( CVec3 vecNormal, CVec3 vecShade )
 //-----------------------------------------------------------------------------
 // Purpose:
 //-----------------------------------------------------------------------------
+float LightFactor( float flLight, float flScale )
+{
+	return 2.0f * std::pow( std::max( flLight * flScale * 0.5f, 0.0f ), 1.0f / 2.2f );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
 std::optional<std::array<float, 4>> ShadeFragment( const ShadeMaterial_t &material, const ShadeInput_t &input, const ShadeOptions_t &options )
 {
 	std::array<float, 4> color{ input.m_vecObjectColor.m_flX, input.m_vecObjectColor.m_flY, input.m_vecObjectColor.m_flZ, 1.0f };
@@ -327,6 +337,38 @@ std::optional<std::array<float, 4>> ShadeFragment( const ShadeMaterial_t &materi
 			const int nU = static_cast<int>( std::floor( input.m_Luxel[ 0 ] ) );
 			const int nV = static_cast<int>( std::floor( input.m_Luxel[ 1 ] ) );
 			const float flShade = ( ( nU + nV ) & 1 ) != 0 ? options.m_flLuxelShade : 1.0f;
+			color[ 0 ] *= flShade;
+			color[ 1 ] *= flShade;
+			color[ 2 ] *= flShade;
+		}
+	}
+	const float flKind = input.m_Light[ 3 ];
+	const bool bVertexLit = flKind > 1.5f && flKind < 2.5f;
+	if ( options.m_nMode == RasterMode_t::RASTER_MODE_LIGHTING && ( !material.m_bUnlit || bVertexLit ) && !( material.m_bSky && options.m_pSky ) )
+	{
+		std::array<float, 3> light{};
+		bool bLit = false;
+		if ( flKind > 0.5f && flKind < 1.5f && options.m_pLighting )
+		{
+			light = options.m_pLighting->Sample( input.m_Light[ 0 ], input.m_Light[ 1 ] );
+			bLit = true;
+		}
+		else if ( bVertexLit )
+		{
+			light = { input.m_Light[ 0 ], input.m_Light[ 1 ], input.m_Light[ 2 ] };
+			bLit = true;
+		}
+		if ( bLit )
+		{
+			for ( std::size_t i = 0; i < 3; i++ )
+			{
+				color[ i ] *= LightFactor( light[ i ], options.m_flLightScale );
+			}
+		}
+		else if ( flKind < 0.5f || !options.m_pLighting )
+		{
+			// Not baked (yet): the shaded look. Fullbright faces (tool textures) stay as they are.
+			const float flShade = FaceShade( input.m_vecNormal, options.m_vecFaceShade );
 			color[ 0 ] *= flShade;
 			color[ 1 ] *= flShade;
 			color[ 2 ] *= flShade;

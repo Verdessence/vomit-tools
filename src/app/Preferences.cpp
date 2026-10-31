@@ -46,6 +46,12 @@ void ForEachMapPreference( Preferences_t &map, Visit_t &&pfnVisit )
 	pfnVisit( "maps/invalidTint", map.m_flInvalidTint );
 	pfnVisit( "maps/instanceTint", map.m_flInstanceTint );
 	pfnVisit( "maps/lightmapGridShade", map.m_flLightmapGridShade );
+	pfnVisit( "maps/lightBrightness", map.m_flLightBrightness );
+	pfnVisit( "maps/lightBounces", map.m_nLightBounces );
+	pfnVisit( "maps/lightLuxels", map.m_nLightLuxels );
+	pfnVisit( "maps/lightHdr", map.m_bLightHdr );
+	pfnVisit( "maps/lightPropShadows", map.m_bLightPropShadows );
+	pfnVisit( "maps/lightAutoBake", map.m_bLightAutoBake );
 	pfnVisit( "maps/skybox3D", map.m_bSkybox3D );
 	pfnVisit( "maps/sprites", map.m_bSprites );
 	pfnVisit( "maps/wireframeModels", map.m_bWireframeModels );

@@ -68,6 +68,9 @@ struct RasterScene_t
 	std::span<const std::array<std::uint8_t, 3>> m_ObjectColors; // flat colours, by object
 	std::span<const std::array<std::uint8_t, 3>> m_LineColors;   // wireframe colours, by object
 	std::span<const RasterLine_t> m_Lines;
+	// By mesh (as m_Meshes), per vertex: how the lighting preview lights it (map/Lighting.h's
+	// LightVertex_t); a mesh with none, or past the end, gets the shaded look.
+	std::vector<std::span<const std::array<float, 4>>> m_MeshLights;
 };
 
 struct RasterOptions_t

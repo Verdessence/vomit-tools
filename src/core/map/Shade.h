@@ -28,7 +28,10 @@ enum class RasterMode_t
 	RASTER_MODE_TEXTURED,
 	RASTER_MODE_TEXTURED_SHADED,
 	RASTER_MODE_LIGHTMAP_GRID,
+	RASTER_MODE_LIGHTING,       // textured, lit by the lighting preview (map/Lighting.h)
 };
+
+class CLighting;
 
 // A texture as both renderers get it: its mipmaps, largest first, and the full size the map's
 // texture coordinates are measured against (the VTF's own, before any was dropped).
@@ -51,6 +54,7 @@ struct RasterTexture_t
 	int m_nHeight = 0;
 	bool m_bClampS = false;
 	bool m_bClampT = false;
+	std::array<float, 3> m_Reflectivity{};       // the VTF's, for the light faces bounce
 
 	// The largest mip kept, from whichever set there is.
 	[[nodiscard]] int GetTopWidth() const { return !m_Mips.empty() ? m_Mips.front().m_nWidth : !m_Compressed.empty() ? m_Compressed.front().m_nWidth
@@ -98,6 +102,7 @@ struct ShadeInput_t
 	bool m_bSelected = false;
 	bool m_bInstance = false;                  // a func_instance's: tinted
 	bool m_bInvalid = false;                   // a broken solid's: tinted
+	std::array<float, 4> m_Light{};            // how the lighting preview lights it (map/Lighting.h's LightVertex_t)
 };
 
 struct ShadeOptions_t
@@ -114,7 +119,14 @@ struct ShadeOptions_t
 	CVec3 m_vecFaceShade{ 0.65f, 0.8f, 1.0f }; // brightness of faces facing along x, y and z
 	float m_flLuxelShade = 0.75f;              // the lightmap grid's darker squares
 	const sky::CCube *m_pSky = nullptr;        // Hammer++'s 2D skybox on sky faces; null: none
+	const CLighting *m_pLighting = nullptr;    // the lighting preview's atlas; null: not baked yet
+	float m_flLightScale = 1.0f;               // the lighting preview's brightness
 };
+
+// What the lighting preview multiplies a texture by for a light (linear, 1 fully lit), as Source
+// shows a lightmap without HDR: stored at half (its overbright of 2) in gamma 2.2, doubled when
+// drawn. A face lit fully comes out about 1.46 times its texture.
+[[nodiscard]] float LightFactor( float flLight, float flScale );
 
 // Bilinear between texels, trilinear between mips (or the nearest mip without bMipBlend); u and v
 // in texture widths (wrapping). DXT mips are read as they are when there are no decoded ones.

@@ -84,6 +84,7 @@ std::shared_ptr<xv::map::RasterTexture_t> ReadMapTexture( std::span<const std::b
 	pTexture->m_nHeight = file->m_Info.m_nHeight;
 	pTexture->m_bClampS = ( file->m_Info.m_nFlags & xv::texture::vtf_flag::CLAMPS ) != 0;
 	pTexture->m_bClampT = ( file->m_Info.m_nFlags & xv::texture::vtf_flag::CLAMPT ) != 0;
+	pTexture->m_Reflectivity = file->m_Info.m_vecReflectivity;
 	// The first mip that fits, then every smaller one the file has.
 	int nFirst = 0;
 	while ( nFirst + 1 < file->m_Info.m_nMipCount && std::max( file->m_Info.m_nWidth >> nFirst, file->m_Info.m_nHeight >> nFirst ) > nMaxSize )
@@ -170,6 +171,7 @@ void CMapResources::Start( std::shared_ptr<const xv::map::CScene> pScene, std::o
 	const std::size_t nMaterials = pScene ? pScene->m_Materials.size() : 0;
 	m_nEntityMaterial = static_cast<std::uint32_t>( nMaterials ) + MAP_MATERIAL_RESERVE;
 	m_Current.assign( m_nEntityMaterial + 1, {} ); // the map's, the places kept for new ones, the entity boxes'
+	m_LightCurrent.clear();
 	m_Keep.clear();
 	m_Placing = {};
 	m_pRefreshNext.reset();
@@ -191,6 +193,7 @@ void CMapResources::Start( std::shared_ptr<const xv::map::CScene> pScene, std::o
 	m_bFinished = !game || !pScene;
 	m_pMaterials = std::make_shared<const std::vector<xv::map::RasterMaterial_t>>( m_Current );
 	m_pTextures = std::make_shared<const std::vector<std::shared_ptr<xv::map::RasterTexture_t>>>( m_Keep );
+	m_pLightMaterials = std::make_shared<const std::vector<xv::map::LightMaterial_t>>( m_LightCurrent );
 	emit Arrived();
 	if ( m_bFinished )
 	{
@@ -910,6 +913,11 @@ void CMapResources::Take( std::vector<Loaded_t> batch )
 		}
 		material.m_bTool = loaded.m_bTool;
 		m_Current[ loaded.m_nMaterial ] = material;
+		if ( loaded.m_nMaterial >= m_LightCurrent.size() )
+		{
+			m_LightCurrent.resize( loaded.m_nMaterial + 1 );
+		}
+		m_LightCurrent[ loaded.m_nMaterial ] = xv::map::DescribeLightMaterial( info, loaded.m_pBase ? loaded.m_pBase->m_Reflectivity : std::array<float, 3>{} );
 		if ( loaded.m_pBase )
 		{
 			m_Keep.push_back( loaded.m_pBase );
@@ -922,5 +930,6 @@ void CMapResources::Take( std::vector<Loaded_t> batch )
 	}
 	m_pMaterials = std::make_shared<const std::vector<xv::map::RasterMaterial_t>>( m_Current );
 	m_pTextures = std::make_shared<const std::vector<std::shared_ptr<xv::map::RasterTexture_t>>>( m_Keep );
+	m_pLightMaterials = std::make_shared<const std::vector<xv::map::LightMaterial_t>>( m_LightCurrent );
 	emit Arrived();
 }

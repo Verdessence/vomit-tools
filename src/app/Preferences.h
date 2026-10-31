@@ -108,6 +108,12 @@ struct MapPreferences_t
 	double m_flInvalidTint = mapstyle::INVALID_TINT;     // and broken solids' toward the invalid one
 	double m_flInstanceTint = mapstyle::INSTANCE_TINT_AMOUNT;
 	double m_flLightmapGridShade = mapstyle::LIGHTMAP_GRID_SHADE; // 1: no checkerboard
+	double m_flLightBrightness = 1.0;  // the lighting preview: light times this before it is shown
+	int m_nLightBounces = 3;           // passes of light bounced between faces
+	int m_nLightLuxels = 4;            // millions of luxels at most, else every other one (and so on)
+	bool m_bLightHdr = false;          // the lights' HDR values (_lightHDR), as an HDR compile reads them
+	bool m_bLightPropShadows = true;   // prop_static's models cast shadows, as vrad's do
+	bool m_bLightAutoBake = true;      // the preview bakes again by itself after edits (else on Bake Lighting, as Hammer++)
 	bool m_bSkybox3D = true;
 	bool m_bSprites = true;          // iconsprites and env_sprites drawn as such (else as boxes)
 	bool m_bWireframeModels = true;  // props' edges in the wireframe view

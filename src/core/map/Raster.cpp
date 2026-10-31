@@ -27,6 +27,7 @@ struct ClipVertex_t
 	float m_flBlend = 0.0f;
 	CVec3 m_vecNormal;
 	CVec3 m_vecWorld;
+	std::array<float, 4> m_Light{};
 };
 
 // A corner on screen: pixels, depth 0-1, and its values divided by w for perspective.
@@ -36,7 +37,7 @@ struct ScreenVertex_t
 	double m_flY = 0.0;
 	double m_flZ = 0.0;
 	double m_flInvW = 0.0;
-	std::array<double, 11> m_Over{}; // texel u, v, luxel u, v, blend, normal x, y, z, world x, y, z; each over w
+	std::array<double, 15> m_Over{}; // texel u, v, luxel u, v, blend, normal x, y, z, world x, y, z, light 0-3; each over w
 };
 
 // A triangle to draw: which mesh and which of its triangles, and how far away it is.
@@ -76,6 +77,10 @@ ClipVertex_t Lerp( const ClipVertex_t &a, const ClipVertex_t &b, double t )
 	{
 		v.m_Texel[ i ] = a.m_Texel[ i ] + ( b.m_Texel[ i ] - a.m_Texel[ i ] ) * ft;
 		v.m_Luxel[ i ] = a.m_Luxel[ i ] + ( b.m_Luxel[ i ] - a.m_Luxel[ i ] ) * ft;
+	}
+	for ( std::size_t i = 0; i < 4; i++ )
+	{
+		v.m_Light[ i ] = a.m_Light[ i ] + ( b.m_Light[ i ] - a.m_Light[ i ] ) * ft;
 	}
 	v.m_flBlend = a.m_flBlend + ( b.m_flBlend - a.m_flBlend ) * ft;
 	v.m_vecNormal = a.m_vecNormal + ( b.m_vecNormal - a.m_vecNormal ) * ft;
@@ -118,7 +123,7 @@ ScreenVertex_t ToScreen( const ClipVertex_t &v, int nWidth, int nHeight )
 	s.m_flY = ( 1.0 - v.m_Clip[ 1 ] * flInvW ) * 0.5 * nHeight;
 	s.m_flZ = v.m_Clip[ 2 ] * flInvW * 0.5 + 0.5;
 	s.m_flInvW = flInvW;
-	const std::array<double, 11> values{ v.m_Texel[ 0 ], v.m_Texel[ 1 ], v.m_Luxel[ 0 ], v.m_Luxel[ 1 ], v.m_flBlend, v.m_vecNormal.m_flX, v.m_vecNormal.m_flY, v.m_vecNormal.m_flZ, v.m_vecWorld.m_flX, v.m_vecWorld.m_flY, v.m_vecWorld.m_flZ };
+	const std::array<double, 15> values{ v.m_Texel[ 0 ], v.m_Texel[ 1 ], v.m_Luxel[ 0 ], v.m_Luxel[ 1 ], v.m_flBlend, v.m_vecNormal.m_flX, v.m_vecNormal.m_flY, v.m_vecNormal.m_flZ, v.m_vecWorld.m_flX, v.m_vecWorld.m_flY, v.m_vecWorld.m_flZ, v.m_Light[ 0 ], v.m_Light[ 1 ], v.m_Light[ 2 ], v.m_Light[ 3 ] };
 	for ( std::size_t i = 0; i < values.size(); i++ )
 	{
 		s.m_Over[ i ] = values[ i ] * flInvW;
@@ -198,10 +203,13 @@ private:
 bool CRasterizer::Corners( const TriangleRef_t &ref, std::array<ClipVertex_t, 3> &corners ) const
 {
 	const CMapMesh &mesh = *m_Scene.m_Meshes[ ref.m_nMesh ];
+	const std::span<const std::array<float, 4>> lights = ref.m_nMesh < m_Scene.m_MeshLights.size() ? m_Scene.m_MeshLights[ ref.m_nMesh ] : std::span<const std::array<float, 4>>{};
 	std::array<Point_t, 3> world;
 	for ( std::size_t k = 0; k < 3; k++ )
 	{
-		const MeshVertex_t &vertex = mesh.m_Vertices[ mesh.m_Indices[ ref.m_nTriangle * 3 + k ] ];
+		const std::uint32_t nVertex = mesh.m_Indices[ ref.m_nTriangle * 3 + k ];
+		const MeshVertex_t &vertex = mesh.m_Vertices[ nVertex ];
+		corners[ k ].m_Light = nVertex < lights.size() ? lights[ nVertex ] : std::array<float, 4>{};
 		world[ k ] = ToPoint( vertex.m_vecPosition );
 		corners[ k ].m_Clip = Transform( m_Matrix, vertex.m_vecPosition );
 		corners[ k ].m_Texel = vertex.m_Texel;
@@ -458,7 +466,7 @@ void CRasterizer::FillTriangle( const ScreenVertex_t &a, const ScreenVertex_t &b
 				continue;
 			}
 			const double flInvW = l0 * a.m_flInvW + l1 * b.m_flInvW + l2 * c.m_flInvW;
-			std::array<double, 11> values{};
+			std::array<double, 15> values{};
 			for ( std::size_t i = 0; i < values.size(); i++ )
 			{
 				values[ i ] = ( l0 * a.m_Over[ i ] + l1 * b.m_Over[ i ] + l2 * c.m_Over[ i ] ) / flInvW;
@@ -476,6 +484,7 @@ void CRasterizer::FillTriangle( const ScreenVertex_t &a, const ScreenVertex_t &b
 			}
 			input.m_Luxel = { static_cast<float>( values[ 2 ] ), static_cast<float>( values[ 3 ] ) };
 			input.m_flBlend = static_cast<float>( values[ 4 ] );
+			input.m_Light = { static_cast<float>( values[ 11 ] ), static_cast<float>( values[ 12 ] ), static_cast<float>( values[ 13 ] ), static_cast<float>( values[ 14 ] ) };
 			input.m_vecNormal = Normalized( CVec3{ static_cast<float>( values[ 5 ] ), static_cast<float>( values[ 6 ] ), static_cast<float>( values[ 7 ] ) } );
 			input.m_vecDirection = CVec3{ static_cast<float>( values[ 8 ] - m_Camera.m_Eye[ 0 ] ), static_cast<float>( values[ 9 ] - m_Camera.m_Eye[ 1 ] ), static_cast<float>( values[ 10 ] - m_Camera.m_Eye[ 2 ] ) };
 			const std::optional<std::array<float, 4>> color = ShadeFragment( material, input, shade );

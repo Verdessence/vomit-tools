@@ -697,6 +697,12 @@ void CMainWindow::BuildMenus( QAction *pSearchPathsToggle )
 			pMap->ShowMapProperties();
 		}
 	} );
+	m_pMapMenu->addAction( tr( "&Lighting…" ), this, [ this ] {
+		if ( CMapEditor *pMap = GetCurrentMap() )
+		{
+			pMap->ShowLighting();
+		}
+	} );
 	m_pMapMenu->addAction( tr( "&Go to Brush…" ), this, [ this ] {
 		if ( CMapEditor *pMap = GetCurrentMap() )
 		{

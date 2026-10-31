@@ -276,6 +276,7 @@ xv::map::RasterMode_t CMapView3D::GetMode() const
 		case MapViewType_t::MAP_VIEW_TYPE_3D_FLAT: return xv::map::RasterMode_t::RASTER_MODE_FLAT;
 		case MapViewType_t::MAP_VIEW_TYPE_3D_TEXTURED_SHADED: return xv::map::RasterMode_t::RASTER_MODE_TEXTURED_SHADED;
 		case MapViewType_t::MAP_VIEW_TYPE_3D_LIGHTMAP_GRID: return xv::map::RasterMode_t::RASTER_MODE_LIGHTMAP_GRID;
+		case MapViewType_t::MAP_VIEW_TYPE_3D_LIGHTING: return xv::map::RasterMode_t::RASTER_MODE_LIGHTING;
 		default: return xv::map::RasterMode_t::RASTER_MODE_TEXTURED;
 	}
 }
@@ -364,6 +365,10 @@ MapFrame_t CMapView3D::MakeFrame( QSize size )
 	options.m_Shade.m_bMipBlend = preferences.m_nTextureFilter != MapTextureFilter_t::MAP_TEXTURE_FILTER_BILINEAR;
 	options.m_Shade.m_nAnisotropy = MapAnisotropy( preferences.m_nTextureFilter );
 	options.m_InvalidEdge = bytes( colors.m_Invalid );
+	if ( options.m_Shade.m_nMode == xv::map::RasterMode_t::RASTER_MODE_LIGHTING )
+	{
+		m_Editor.WantLighting();
+	}
 	MapFrame_t frame = m_Editor.GetRenderData().Snapshot( camera, options, m_Editor.GetSettings() );
 	frame.m_bModelEdges = preferences.m_bWireframeModels;
 	return frame;

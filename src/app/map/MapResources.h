@@ -18,6 +18,7 @@
 
 #include <QObject>
 
+#include "map/Lighting.h"
 #include "map/Materials.h"
 #include "map/Overlay.h"
 #include "map/Props.h"
@@ -61,6 +62,8 @@ public:
 	// textures alive; both replaced as more arrive.
 	[[nodiscard]] std::shared_ptr<const std::vector<xv::map::RasterMaterial_t>> GetMaterials() const { return m_pMaterials; }
 	[[nodiscard]] std::shared_ptr<const void> GetTextures() const { return m_pTextures; }
+	// What the lighting preview needs of the materials read so far, by the same places.
+	[[nodiscard]] std::shared_ptr<const std::vector<xv::map::LightMaterial_t>> GetLightMaterials() const { return m_pLightMaterials; }
 	[[nodiscard]] std::shared_ptr<const xv::sky::CCube> GetSky() const { return m_pSky; }
 	// The props placed in the world, once their models and materials are read, and the
 	// entities they draw (which then show no box).
@@ -146,6 +149,8 @@ private:
 	std::vector<std::shared_ptr<xv::map::RasterTexture_t>> m_Keep;
 	std::shared_ptr<const std::vector<xv::map::RasterMaterial_t>> m_pMaterials;
 	std::shared_ptr<const void> m_pTextures;
+	std::vector<xv::map::LightMaterial_t> m_LightCurrent;
+	std::shared_ptr<const std::vector<xv::map::LightMaterial_t>> m_pLightMaterials;
 	std::shared_ptr<const xv::sky::CCube> m_pSky;
 	std::shared_ptr<const xv::map::CMapMesh> m_pProps;
 	std::vector<std::uint32_t> m_PropObjects;

@@ -36,8 +36,10 @@ class CMapFaceEdit;
 class CMapFilterControl;
 class CMapPane;
 class CMapProperties;
+class CMapLighting;
 class CMapResources;
 class CMapQuadSplitter;
+class QTimer;
 class QAction;
 class QActionGroup;
 class QComboBox;
@@ -79,6 +81,11 @@ public:
 	[[nodiscard]] CMapView *GetActiveView() const { return m_pActiveView; }
 	[[nodiscard]] CMapRenderData &GetRenderData() { return *m_pRenderData; }
 	[[nodiscard]] CMapResources &GetResources() { return *m_pResources; }
+	[[nodiscard]] CMapLighting &GetLighting() { return *m_pLighting; }
+	// A view shows the lighting preview: the map is baked (again, if it changed since), soon.
+	void WantLighting();
+	// Bakes now, whatever changed (Hammer++'s Bake Lighting).
+	void BakeLightingNow();
 	[[nodiscard]] CMapFilterControl &GetFilterControl() { return *m_pFilter; }
 	[[nodiscard]] CMapProperties &GetProperties() { return *m_pProperties; }
 	// Where the 3D camera is, for the 2D views to draw it (the first 3D pane's).
@@ -138,6 +145,8 @@ public:
 	// What new blocks' faces get, and the class the entity tool places.
 	// Map > Map Properties: the world's keys (the sky) in a window of their own.
 	void ShowMapProperties();
+	// Map > Lighting: the lighting preview's window.
+	void ShowLighting();
 	// Map > Run Map (F9): Hammer's compile window, one per map.
 	void RunMap();
 	// Map > Load Pointfile / Unload / Go to Leak: a leak's line (the .lin beside the map).
@@ -296,6 +305,8 @@ private:
 	void UpdateStatus();
 	void UpdateGameStatus();
 	void ResourcesArrived();
+	void StartLighting();
+	void LightingBaked();
 	// An edit made a new scene: the views follow, and materials it brought in are read.
 	void SceneEdited( const std::vector<std::uint32_t> &changed );
 	void GoToBrush();
@@ -319,6 +330,15 @@ private:
 	CMapDocument *m_pDocument = nullptr;
 	std::unique_ptr<CMapRenderData> m_pRenderData;
 	CMapResources *m_pResources = nullptr;
+	CMapLighting *m_pLighting = nullptr;
+	QTimer *m_pLightingTimer = nullptr;
+	QDialog *m_pLightingWindow = nullptr;
+	// What the last bake asked for was made from: the scene, the materials read (once they all
+	// are), and the preferences that change a bake.
+	std::shared_ptr<const xv::map::CScene> m_pLightingScene;
+	const void *m_pLightingMaterials = nullptr;
+	std::array<int, 4> m_LightingPreferences{};
+	std::array<const void *, 5> m_LightingExtras{}; // the props, overlays and sprites, whole and in parts
 	QString m_szPath;
 	bool m_bFromGame = false;
 	MapViewSettings_t m_Settings;

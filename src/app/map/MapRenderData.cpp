@@ -136,6 +136,17 @@ xv::map::RasterScene_t MapFrame_t::MakeScene() const
 		scene.m_LineColors = *m_pLineColors;
 	}
 	scene.m_Lines = m_Lines;
+	if ( m_pMeshLights )
+	{
+		scene.m_MeshLights.resize( scene.m_Meshes.size() );
+		for ( std::size_t i = 0; i < scene.m_Meshes.size(); i++ )
+		{
+			if ( const auto it = m_pMeshLights->find( scene.m_Meshes[ i ] ); it != m_pMeshLights->end() && it->second )
+			{
+				scene.m_MeshLights[ i ] = *it->second;
+			}
+		}
+	}
 	return scene;
 }
 
@@ -807,6 +818,14 @@ MapFrame_t CMapRenderData::Snapshot( const xv::map::CViewCamera &camera, const x
 	frame.m_Options = options;
 	frame.m_Options.m_bToolTextures = settings.m_bToolTextures;
 	frame.m_Options.m_Shade.m_pSky = frame.m_pSky.get();
+	if ( options.m_Shade.m_nMode == xv::map::RasterMode_t::RASTER_MODE_LIGHTING && m_pLighting && pScene )
+	{
+		UpdateMeshLights();
+		frame.m_pLighting = m_pLighting;
+		frame.m_pMeshLights = m_pMeshLights;
+		frame.m_Options.m_Shade.m_pLighting = m_pLighting.get();
+	}
+	frame.m_Options.m_Shade.m_flLightScale = static_cast<float>( CPreferences::Instance().GetMapPreferences().m_flLightBrightness );
 	// Hammer++ draws the 3D skybox by default; Alt+V turns it off.
 	frame.m_Options.m_SkyboxCamera.reset();
 	if ( settings.m_bSkybox3D && pScene && pScene->m_Skybox3D )
@@ -816,4 +835,98 @@ MapFrame_t CMapRenderData::Snapshot( const xv::map::CViewCamera &camera, const x
 	}
 	frame.m_nGeneration = m_nGeneration;
 	return frame;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+void CMapRenderData::SetLighting( std::shared_ptr<const xv::map::CLighting> pLighting )
+{
+	if ( pLighting == m_pLighting )
+	{
+		return;
+	}
+	m_pLighting = std::move( pLighting );
+	m_pMeshLights.reset();
+	m_MeshLightsKeep.clear();
+	m_nGeneration++;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: The scene's faces' meshes: as read, the instances', the edits' and painted solids'.
+//-----------------------------------------------------------------------------
+void CMapRenderData::UpdateMeshLights()
+{
+	const std::shared_ptr<const xv::map::CScene> pScene = m_Document.GetSharedScene();
+	std::vector<std::shared_ptr<const xv::map::CMapMesh>> lit{ pScene->m_pMesh, pScene->m_pInstanceMesh, pScene->m_pEditMesh };
+	for ( const auto &[ nSolid, pMesh ] : pScene->m_SolidMeshes )
+	{
+		lit.push_back( pMesh );
+	}
+	// The props and overlays, whole and in parts (whichever the frame draws), then the sprites.
+	auto add = [ &lit ]( const std::shared_ptr<const xv::map::CMapMesh> &pMesh, const std::shared_ptr<const xv::map::MeshParts_t> &pParts ) {
+		lit.push_back( pMesh );
+		if ( pParts )
+		{
+			for ( const auto &[ nObject, pPart ] : *pParts )
+			{
+				lit.push_back( pPart );
+			}
+		}
+	};
+	add( m_Frame.m_pPropMesh, m_Frame.m_pPropParts );
+	add( m_Frame.m_pOverlayMesh, m_Frame.m_pOverlayParts );
+	const std::size_t nSprites = lit.size();
+	add( m_Frame.m_pSpriteMesh, m_Frame.m_pSpriteParts );
+	if ( m_pMeshLights && lit == m_MeshLightsKeep )
+	{
+		return;
+	}
+	auto pLights = std::make_shared<MapMeshLights_t>();
+	for ( std::size_t i = 0; i < lit.size(); i++ )
+	{
+		const std::shared_ptr<const xv::map::CMapMesh> &pMesh = lit[ i ];
+		if ( !pMesh )
+		{
+			continue;
+		}
+		if ( m_pMeshLights )
+		{
+			if ( const auto it = m_pMeshLights->find( pMesh.get() ); it != m_pMeshLights->end() && std::ranges::find( m_MeshLightsKeep, pMesh ) != m_MeshLightsKeep.end() )
+			{
+				( *pLights )[ pMesh.get() ] = it->second;
+				continue;
+			}
+		}
+		( *pLights )[ pMesh.get() ] = std::make_shared<const std::vector<xv::map::LightVertex_t>>( i >= nSprites ? SpriteLights( *pMesh ) : m_pLighting->MeshVertices( *pScene, *pMesh ) );
+	}
+	m_pMeshLights = std::move( pLights );
+	m_MeshLightsKeep = std::move( lit );
+	m_nGeneration++;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Sprites face the camera, so their meshes change as it turns: each takes its entity's
+//          light from the bake. Those added (glows) stay as they are, as the game draws them.
+//-----------------------------------------------------------------------------
+std::vector<xv::map::LightVertex_t> CMapRenderData::SpriteLights( const xv::map::CMapMesh &mesh ) const
+{
+	std::vector<xv::map::LightVertex_t> out( mesh.m_Vertices.size(), xv::map::LightVertex_t{ 0.0f, 0.0f, 0.0f, xv::map::LIGHT_KIND_FULLBRIGHT } );
+	for ( const xv::map::MeshBatch_t &batch : mesh.m_Batches )
+	{
+		const bool bAdded = m_Frame.m_pMaterials && batch.m_nMaterial < m_Frame.m_pMaterials->size() && ( *m_Frame.m_pMaterials )[ batch.m_nMaterial ].m_Shade.m_bAdditive;
+		if ( bAdded )
+		{
+			continue;
+		}
+		for ( std::uint32_t n = batch.m_nFirstIndex; n < batch.m_nFirstIndex + batch.m_nIndexCount; n++ )
+		{
+			const std::uint32_t nVertex = mesh.m_Indices[ n ];
+			if ( const auto it = m_pLighting->m_Points.find( mesh.m_Vertices[ nVertex ].m_nObject ); it != m_pLighting->m_Points.end() )
+			{
+				out[ nVertex ] = { it->second[ 0 ], it->second[ 1 ], it->second[ 2 ], xv::map::LIGHT_KIND_VERTEX };
+			}
+		}
+	}
+	return out;
 }

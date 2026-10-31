@@ -36,6 +36,8 @@ add_library(vomit_tools_core STATIC
         map/Geometry.h
         map/Io.cpp
         map/Io.h
+        map/Lighting.cpp
+        map/Lighting.h
         map/Map.h
         map/Materials.cpp
         map/Materials.h

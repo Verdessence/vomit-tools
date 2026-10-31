@@ -35,6 +35,7 @@ struct FrameUniforms_t
 	float m_Pass[ 4 ];
 	float m_Invalid[ 4 ];
 	float m_EyeLow[ 4 ];
+	float m_Lighting[ 4 ];
 };
 
 struct MaterialUniforms_t
@@ -56,6 +57,7 @@ struct SkyUniforms_t
 };
 
 static_assert( sizeof( xv::map::MeshVertex_t ) == 48, "map.vert reads the vertex layout as it is" );
+static_assert( sizeof( xv::map::LightVertex_t ) == 16, "map.vert reads the light as it is" );
 
 //-----------------------------------------------------------------------------
 // Purpose: A material's uniforms, as map.frag reads them (and mapline.vert, for the edges: only
@@ -136,6 +138,9 @@ void CMapRenderer::Release()
 		pFace.reset();
 	}
 	m_pSkyFor = nullptr;
+	m_pLightmap.reset();
+	m_pLightmapFor.reset();
+	m_pLightSampler.reset();
 	for ( auto &pSampler : m_TopSamplers )
 	{
 		pSampler.reset();
@@ -190,6 +195,9 @@ void CMapRenderer::Initialize( QRhi *pRhi, QRhiRenderTarget * )
 		}
 		m_pNearest.reset( m_pRhi->newSampler( QRhiSampler::Nearest, QRhiSampler::Nearest, QRhiSampler::None, QRhiSampler::ClampToEdge, QRhiSampler::ClampToEdge ) );
 		m_pNearest->create();
+		// The lighting atlas, as CLighting::Sample reads it: linear, clamped, no mips.
+		m_pLightSampler.reset( m_pRhi->newSampler( QRhiSampler::Linear, QRhiSampler::Linear, QRhiSampler::None, QRhiSampler::ClampToEdge, QRhiSampler::ClampToEdge ) );
+		m_pLightSampler->create();
 	}
 	// Pipelines follow the target's pass and sample count.
 	m_pOpaque.reset();
@@ -237,6 +245,65 @@ void CMapRenderer::UploadMeshes( const MapFrame_t &frame, QRhiResourceUpdateBatc
 		upload( mesh.m_pIndices, QRhiBuffer::IndexBuffer, pMesh->m_Indices.data(), pMesh->m_Indices.size() * sizeof( std::uint32_t ) );
 		upload( mesh.m_pLines, QRhiBuffer::IndexBuffer, pMesh->m_Lines.data(), pMesh->m_Lines.size() * sizeof( std::uint32_t ) );
 	}
+	// Where each vertex's light is: the frame's, or none (kept from before when the frame has
+	// no lighting, so a view switching modes doesn't upload them again).
+	for ( std::size_t i = 0; i < meshes.size(); i++ )
+	{
+		Mesh_t &mesh = m_Meshes[ i ];
+		const xv::map::CMapMesh *pMesh = meshes[ i ];
+		std::shared_ptr<const std::vector<xv::map::LightVertex_t>> pLights;
+		if ( frame.m_pMeshLights )
+		{
+			if ( const auto it = frame.m_pMeshLights->find( pMesh ); it != frame.m_pMeshLights->end() && it->second && it->second->size() == pMesh->m_Vertices.size() )
+			{
+				pLights = it->second;
+			}
+		}
+		if ( pMesh->m_Vertices.empty() || ( mesh.m_bLightUp && ( pLights == mesh.m_pLightFor || ( !pLights && !frame.m_pMeshLights ) ) ) )
+		{
+			continue;
+		}
+		const std::size_t nBytes = pMesh->m_Vertices.size() * sizeof( xv::map::LightVertex_t );
+		mesh.m_pLight.reset( m_pRhi->newBuffer( QRhiBuffer::Immutable, QRhiBuffer::VertexBuffer, static_cast<quint32>( nBytes ) ) );
+		mesh.m_pLight->create();
+		if ( pLights )
+		{
+			pUpdates->uploadStaticBuffer( mesh.m_pLight.get(), pLights->data() );
+		}
+		else
+		{
+			const std::vector<xv::map::LightVertex_t> none( pMesh->m_Vertices.size(), xv::map::LIGHT_VERTEX_NONE );
+			pUpdates->uploadStaticBuffer( mesh.m_pLight.get(), none.data() );
+		}
+		mesh.m_pLightFor = std::move( pLights );
+		mesh.m_bLightUp = true;
+	}
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Half floats as the bake stores them; a card without them, or too small for the
+//          atlas, draws the shaded look instead.
+//-----------------------------------------------------------------------------
+bool CMapRenderer::UploadLighting( const MapFrame_t &frame, QRhiResourceUpdateBatch *pUpdates )
+{
+	if ( !frame.m_pLighting || frame.m_pLighting == m_pLightmapFor )
+	{
+		return false;
+	}
+	m_pLightmapFor = frame.m_pLighting;
+	m_pLightmap.reset();
+	const xv::map::CLighting &lighting = *m_pLightmapFor;
+	const int nMax = m_pRhi->resourceLimit( QRhi::TextureSizeMax );
+	if ( lighting.m_nWidth <= 0 || lighting.m_nHeight <= 0 || lighting.m_nWidth > nMax || lighting.m_nHeight > nMax || !m_pRhi->isTextureFormatSupported( QRhiTexture::RGBA16F ) )
+	{
+		return true;
+	}
+	m_pLightmap.reset( m_pRhi->newTexture( QRhiTexture::RGBA16F, { lighting.m_nWidth, lighting.m_nHeight } ) );
+	m_pLightmap->create();
+	QRhiTextureSubresourceUploadDescription description( lighting.m_Texels.data(), static_cast<quint32>( lighting.m_Texels.size() * sizeof( std::uint16_t ) ) );
+	description.setSourceSize( { lighting.m_nWidth, lighting.m_nHeight } );
+	pUpdates->uploadTexture( m_pLightmap.get(), QRhiTextureUploadDescription( QRhiTextureUploadEntry( 0, 0, description ) ) );
+	return true;
 }
 
 //-----------------------------------------------------------------------------
@@ -391,6 +458,7 @@ void CMapRenderer::MakeBindings( Material_t &material, QRhiTexture *pBase, QRhiT
 		QRhiShaderResourceBinding::sampledTexture( 10, QRhiShaderResourceBinding::FragmentStage, SkyFace( 3 ), SkySampler( 3 ) ),
 		QRhiShaderResourceBinding::sampledTexture( 11, QRhiShaderResourceBinding::FragmentStage, SkyFace( 4 ), SkySampler( 4 ) ),
 		QRhiShaderResourceBinding::sampledTexture( 12, QRhiShaderResourceBinding::FragmentStage, SkyFace( 5 ), SkySampler( 5 ) ),
+		QRhiShaderResourceBinding::sampledTexture( 13, QRhiShaderResourceBinding::FragmentStage, m_pLightmap ? m_pLightmap.get() : m_pWhite.get(), m_pLightSampler.get() ),
 	} );
 	material.m_pBindings->create();
 }
@@ -482,9 +550,11 @@ void CMapRenderer::UploadMaterials( const MapFrame_t &frame, QRhiResourceUpdateB
 		}
 		pUpdates->updateDynamicBuffer( material.m_pUniforms.get(), 0, sizeof values, &values );
 	};
-	if ( UploadSky( frame, pUpdates ) )
+	const bool bSkyChanged = UploadSky( frame, pUpdates );
+	const bool bLightingChanged = UploadLighting( frame, pUpdates );
+	if ( bSkyChanged || bLightingChanged )
 	{
-		// Everything binds the sky's faces.
+		// Everything binds the sky's faces and the lighting atlas.
 		m_LinesAll.m_pBindings.reset();
 		m_LinesSelected.m_pBindings.reset();
 		m_ModelLinesAll.m_pBindings.reset();
@@ -542,16 +612,23 @@ void CMapRenderer::UploadMaterials( const MapFrame_t &frame, QRhiResourceUpdateB
 //-----------------------------------------------------------------------------
 void CMapRenderer::MakePipelines( QRhiRenderTarget *pTarget )
 {
-	QRhiVertexInputLayout layout;
-	layout.setBindings( { QRhiVertexInputBinding( sizeof( xv::map::MeshVertex_t ) ) } );
-	layout.setAttributes( {
+	const std::initializer_list<QRhiVertexInputAttribute> attributes{
 		QRhiVertexInputAttribute( 0, 0, QRhiVertexInputAttribute::Float3, 0 ),
 		QRhiVertexInputAttribute( 0, 1, QRhiVertexInputAttribute::Float3, 12 ),
 		QRhiVertexInputAttribute( 0, 2, QRhiVertexInputAttribute::Float2, 24 ),
 		QRhiVertexInputAttribute( 0, 3, QRhiVertexInputAttribute::Float2, 32 ),
 		QRhiVertexInputAttribute( 0, 4, QRhiVertexInputAttribute::Float, 40 ),
 		QRhiVertexInputAttribute( 0, 5, QRhiVertexInputAttribute::UInt, 44 ),
-	} );
+	};
+	// Edges read the mesh's vertices alone; faces also where their light is (a buffer of its own).
+	QRhiVertexInputLayout lineLayout;
+	lineLayout.setBindings( { QRhiVertexInputBinding( sizeof( xv::map::MeshVertex_t ) ) } );
+	lineLayout.setAttributes( attributes );
+	QRhiVertexInputLayout layout;
+	layout.setBindings( { QRhiVertexInputBinding( sizeof( xv::map::MeshVertex_t ) ), QRhiVertexInputBinding( sizeof( xv::map::LightVertex_t ) ) } );
+	std::vector<QRhiVertexInputAttribute> faceAttributes( attributes );
+	faceAttributes.emplace_back( 1, 6, QRhiVertexInputAttribute::Float4, 0 );
+	layout.setAttributes( faceAttributes.begin(), faceAttributes.end() );
 	const QShader faceVertex = LoadShader( QStringLiteral( ":/shaders/map.vert.qsb" ) );
 	const QShader faceFragment = LoadShader( QStringLiteral( ":/shaders/map.frag.qsb" ) );
 	auto make = [ & ]( int nBlend, bool bLines ) {
@@ -593,7 +670,7 @@ void CMapRenderer::MakePipelines( QRhiRenderTarget *pTarget )
 			blend.dstAlpha = QRhiGraphicsPipeline::OneMinusSrcAlpha;
 			pPipeline->setTargetBlends( { blend } );
 		}
-		pPipeline->setVertexInputLayout( layout );
+		pPipeline->setVertexInputLayout( bLines ? lineLayout : layout );
 		pPipeline->setSampleCount( pTarget->sampleCount() );
 		pPipeline->setShaderResourceBindings( m_LinesAll.m_pBindings.get() );
 		pPipeline->setRenderPassDescriptor( pTarget->renderPassDescriptor() );
@@ -689,6 +766,13 @@ void CMapRenderer::Render( QRhiCommandBuffer *pCommands, QRhiRenderTarget *pTarg
 		uniforms.m_Invalid[ 1 ] = shade.m_vecInvalid.m_flY;
 		uniforms.m_Invalid[ 2 ] = shade.m_vecInvalid.m_flZ;
 		uniforms.m_Invalid[ 3 ] = shade.m_flInvalidTint;
+		if ( frame.m_pLighting && frame.m_pLighting == m_pLightmapFor && m_pLightmap )
+		{
+			uniforms.m_Lighting[ 0 ] = static_cast<float>( m_pLightmapFor->m_nWidth );
+			uniforms.m_Lighting[ 1 ] = static_cast<float>( m_pLightmapFor->m_nHeight );
+			uniforms.m_Lighting[ 3 ] = 1.0f;
+		}
+		uniforms.m_Lighting[ 2 ] = shade.m_flLightScale;
 		return uniforms;
 	};
 	// Slot 1 and 3 are 0 and 2 for meshes as read.
@@ -758,8 +842,8 @@ void CMapRenderer::Render( QRhiCommandBuffer *pCommands, QRhiRenderTarget *pTarg
 		}
 		QRhiShaderResourceBindings *pBindings = batch.m_nMaterial < m_Materials.size() ? m_Materials[ batch.m_nMaterial ].m_pBindings.get() : m_LinesAll.m_pBindings.get();
 		bind( pBindings, meshPass( nMesh ) );
-		const QRhiCommandBuffer::VertexInput input( m_Meshes[ nMesh ].m_pVertices.get(), 0 );
-		pCommands->setVertexInput( 0, 1, &input, m_Meshes[ nMesh ].m_pIndices.get(), 0, QRhiCommandBuffer::IndexUInt32 );
+		const QRhiCommandBuffer::VertexInput inputs[] = { { m_Meshes[ nMesh ].m_pVertices.get(), 0 }, { m_Meshes[ nMesh ].m_pLight.get(), 0 } };
+		pCommands->setVertexInput( 0, 2, inputs, m_Meshes[ nMesh ].m_pIndices.get(), 0, QRhiCommandBuffer::IndexUInt32 );
 		pCommands->drawIndexed( batch.m_nIndexCount, 1, batch.m_nFirstIndex );
 		m_nDrawCalls++;
 		m_Stats.m_nTriangles += static_cast<int>( batch.m_nIndexCount / 3 );
@@ -770,7 +854,7 @@ void CMapRenderer::Render( QRhiCommandBuffer *pCommands, QRhiRenderTarget *pTarg
 		for ( std::size_t nMesh = 0; nMesh < scene.m_Meshes.size(); nMesh++ )
 		{
 			const xv::map::CMapMesh &mesh = *scene.m_Meshes[ nMesh ];
-			if ( !m_Meshes[ nMesh ].m_pVertices || !m_Meshes[ nMesh ].m_pIndices )
+			if ( !m_Meshes[ nMesh ].m_pVertices || !m_Meshes[ nMesh ].m_pIndices || !m_Meshes[ nMesh ].m_pLight )
 			{
 				continue;
 			}

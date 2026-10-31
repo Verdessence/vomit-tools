@@ -70,6 +70,9 @@ private:
 		std::unique_ptr<QRhiBuffer> m_pVertices;
 		std::unique_ptr<QRhiBuffer> m_pIndices;
 		std::unique_ptr<QRhiBuffer> m_pLines;
+		std::unique_ptr<QRhiBuffer> m_pLight; // per vertex, where its light is in the lighting atlas
+		std::shared_ptr<const std::vector<xv::map::LightVertex_t>> m_pLightFor; // null: none (every vertex unlit)
+		bool m_bLightUp = false;
 	};
 	struct Material_t
 	{
@@ -89,6 +92,9 @@ private:
 	void MakeBindings( Material_t &material, QRhiTexture *pBase, QRhiTexture *pBase2, const xv::map::RasterTexture_t *pBaseTexture, const xv::map::RasterTexture_t *pBase2Texture );
 	void MakePipelines( QRhiRenderTarget *pTarget );
 	bool UploadSky( const MapFrame_t &frame, QRhiResourceUpdateBatch *pUpdates );
+	// The lighting preview's atlas, when another bake arrives. Returns whether it changed (the
+	// materials' bindings then need making again).
+	bool UploadLighting( const MapFrame_t &frame, QRhiResourceUpdateBatch *pUpdates );
 	[[nodiscard]] QRhiTexture *SkyFace( std::size_t nFace ) const;
 	[[nodiscard]] QRhiSampler *SkySampler( std::size_t nFace ) const;
 
@@ -108,6 +114,9 @@ private:
 	std::unique_ptr<QRhiBuffer> m_pSkyUniforms;
 	std::array<std::unique_ptr<QRhiTexture>, 6> m_SkyFaces;
 	const xv::sky::CCube *m_pSkyFor = nullptr;
+	std::unique_ptr<QRhiTexture> m_pLightmap;
+	std::shared_ptr<const xv::map::CLighting> m_pLightmapFor; // held, so its address stays its own
+	std::unique_ptr<QRhiSampler> m_pLightSampler;
 	std::array<std::unique_ptr<QRhiSampler>, 4> m_Samplers; // repeat or clamp in s and t
 	std::array<std::unique_ptr<QRhiSampler>, 4> m_TopSamplers; // the same, top level only: OpenGL reads a texture without mips as black through a mip filter
 	std::array<std::unique_ptr<QRhiSampler>, 4> m_NearestMipSamplers; // the same, from the nearest mip (bilinear filtering)

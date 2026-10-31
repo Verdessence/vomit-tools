@@ -68,6 +68,8 @@
 #include "map/MaterialBrowser.h"
 #include "map/MapPanes.h"
 #include "map/MapProperties.h"
+#include "map/MapLighting.h"
+#include "map/MapLightingPanel.h"
 #include "map/MapResources.h"
 #include "map/MapView2D.h"
 #include "map/MapView3D.h"
@@ -228,6 +230,23 @@ CMapEditor::CMapEditor( const QString &szPath, bool bFromGame, QWidget *pParent 
 	connect( m_pResources, &CMapResources::Arrived, this, &CMapEditor::ResourcesArrived );
 	connect( m_pResources, &CMapResources::Finished, this, [ this ] { m_pRenderData->CompactEntityBoxes(); } );
 	connect( m_pResources, &CMapResources::Finished, this, &CMapEditor::UpdateGameStatus );
+	m_pLighting = new CMapLighting( this );
+	m_pLightingTimer = new QTimer( this );
+	m_pLightingTimer->setSingleShot( true );
+	connect( m_pLightingTimer, &QTimer::timeout, this, &CMapEditor::StartLighting );
+	connect( m_pLighting, &CMapLighting::Progress, this, &CMapEditor::UpdateGameStatus );
+	connect( m_pLighting, &CMapLighting::Baked, this, &CMapEditor::LightingBaked );
+	// Bakes made before every material was read guessed what reflects and blocks: lighting
+	// preview views draw again, which asks for a bake with them all.
+	connect( m_pResources, &CMapResources::Finished, this, [ this ] {
+		for ( CMapView *pView : GetViews() )
+		{
+			if ( auto *p3D = qobject_cast<CMapView3D *>( pView ); p3D && p3D->GetType() == MapViewType_t::MAP_VIEW_TYPE_3D_LIGHTING )
+			{
+				p3D->Redraw();
+			}
+		}
+	} );
 	// Reading textures and models frees as much as it keeps.
 	connect( m_pResources, &CMapResources::Finished, this, [] { QTimer::singleShot( 0, QCoreApplication::instance(), [] { xv::ReleaseFreedMemory(); } ); } );
 	TakePreferences();
@@ -862,6 +881,10 @@ void CMapEditor::Loaded()
 	m_Settings.m_bShowGrid = scene.m_Map.m_ViewSettings.m_bShowGrid;
 	m_Settings.m_bSnapToGrid = scene.m_Map.m_ViewSettings.m_bSnapToGrid;
 	m_pLoading->hide();
+	m_pLighting->Clear();
+	m_pLightingTimer->stop();
+	m_pLightingScene.reset();
+	m_pRenderData->SetLighting( nullptr );
 	for ( CMapView *pView : GetViews() )
 	{
 		if ( auto *p2D = qobject_cast<CMapView2D *>( pView ) )
@@ -3715,8 +3738,145 @@ void CMapEditor::UpdateGameStatus()
 		// The others show as boxes.
 		szText += tr( "; %1 of %2 models read" ).arg( m_pResources->GetModelsLoaded() ).arg( m_pResources->GetModelsTotal() );
 	}
+	if ( m_pLighting->IsBaking() )
+	{
+		szText += tr( "; lighting %1% (%2)" ).arg( m_pLighting->GetPercent() ).arg( m_pLighting->GetStage().toLower() );
+	}
 	m_pStatusGame->setText( szText );
 	m_pStatusGame->setToolTip( szText );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Bakes again only when what a bake is made from changed: the scene (an edit), the
+//          materials once they have all been read, or the lighting preferences. Edits wait a
+//          moment, so a drag bakes once when it stops.
+//-----------------------------------------------------------------------------
+void CMapEditor::WantLighting()
+{
+	if ( !m_pDocument->IsLoaded() )
+	{
+		return;
+	}
+	std::shared_ptr<const xv::map::CScene> pScene = m_pDocument->GetSharedScene();
+	// Materials, props and overlays arrive in batches: they count once they all have.
+	const bool bFinished = m_pResources->IsFinished();
+	const void *pMaterials = bFinished ? m_pResources->GetLightMaterials().get() : nullptr;
+	const MapFrame_t shared = m_pRenderData->GetShared();
+	const std::array<const void *, 5> extras = bFinished ? std::array<const void *, 5>{ shared.m_pPropMesh.get(), shared.m_pPropParts.get(), shared.m_pOverlayMesh.get(), shared.m_pOverlayParts.get(), m_pResources->GetSprites().get() } : std::array<const void *, 5>{};
+	const MapPreferences_t &preferences = CPreferences::Instance().GetMapPreferences();
+	const std::array<int, 4> wanted{ preferences.m_nLightBounces, preferences.m_nLightLuxels, preferences.m_bLightHdr ? 1 : 0, preferences.m_bLightPropShadows ? 1 : 0 };
+	const bool bFirst = !m_pLightingScene;
+	if ( !bFirst && !preferences.m_bLightAutoBake )
+	{
+		return;
+	}
+	if ( pScene == m_pLightingScene && pMaterials == m_pLightingMaterials && wanted == m_LightingPreferences && extras == m_LightingExtras )
+	{
+		return;
+	}
+	m_pLightingScene = std::move( pScene );
+	m_pLightingMaterials = pMaterials;
+	m_LightingPreferences = wanted;
+	m_LightingExtras = extras;
+	m_pLightingTimer->start( bFirst ? 0 : 250 );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+void CMapEditor::BakeLightingNow()
+{
+	if ( !m_pDocument->IsLoaded() )
+	{
+		return;
+	}
+	m_pLightingScene = m_pDocument->GetSharedScene();
+	m_pLightingTimer->start( 0 );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Made the first time, then shown again where it was left.
+//-----------------------------------------------------------------------------
+void CMapEditor::ShowLighting()
+{
+	if ( !m_pLightingWindow )
+	{
+		m_pLightingWindow = new QDialog( this, Qt::Tool );
+		m_pLightingWindow->setObjectName( QStringLiteral( "mapLightingWindow" ) );
+		m_pLightingWindow->setWindowTitle( tr( "Lighting" ) );
+		m_pLightingWindow->setModal( false );
+		auto *pLayout = new QVBoxLayout( m_pLightingWindow );
+		pLayout->setContentsMargins( 0, 0, 0, 0 );
+		pLayout->addWidget( new CMapLightingPanel( *this ) );
+		m_pLightingWindow->resize( 640, 520 );
+	}
+	m_pLightingWindow->show();
+	m_pLightingWindow->raise();
+	m_pLightingWindow->activateWindow();
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: The extras are what the views draw: props and overlays in parts when they are drawn
+//          in parts, and each sprite's entity at its origin.
+//-----------------------------------------------------------------------------
+void CMapEditor::StartLighting()
+{
+	if ( !m_pLightingScene )
+	{
+		return;
+	}
+	const MapPreferences_t &preferences = CPreferences::Instance().GetMapPreferences();
+	xv::map::LightingOptions_t options;
+	options.m_bHdr = preferences.m_bLightHdr;
+	options.m_nBounces = std::max( 0, preferences.m_nLightBounces );
+	options.m_nMaxLuxels = static_cast<std::size_t>( std::max( 1, preferences.m_nLightLuxels ) ) << 20;
+	xv::map::LightingExtras_t extras;
+	extras.m_bPropShadows = preferences.m_bLightPropShadows;
+	auto add = []( std::vector<std::shared_ptr<const xv::map::CMapMesh>> &out, const std::shared_ptr<const xv::map::CMapMesh> &pMesh, const std::shared_ptr<const xv::map::MeshParts_t> &pParts ) {
+		if ( pParts )
+		{
+			for ( const auto &[ nObject, pPart ] : *pParts )
+			{
+				out.push_back( pPart );
+			}
+		}
+		else if ( pMesh )
+		{
+			out.push_back( pMesh );
+		}
+	};
+	const MapFrame_t shared = m_pRenderData->GetShared();
+	add( extras.m_Props, shared.m_pPropMesh, shared.m_pPropParts );
+	add( extras.m_Overlays, shared.m_pOverlayMesh, shared.m_pOverlayParts );
+	if ( const auto pSprites = m_pResources->GetSprites() )
+	{
+		for ( const xv::map::SpritePlacement_t &sprite : *pSprites )
+		{
+			extras.m_Points.emplace_back( sprite.m_nObject, sprite.m_Origin );
+		}
+	}
+	m_pLighting->Bake( m_pLightingScene, m_pResources->GetLightMaterials(), options, std::move( extras ) );
+	UpdateGameStatus();
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: A bake finished: the lighting preview views draw with it.
+//-----------------------------------------------------------------------------
+void CMapEditor::LightingBaked()
+{
+	m_pRenderData->SetLighting( m_pLighting->GetLighting() );
+	for ( CMapView *pView : GetViews() )
+	{
+		if ( auto *p3D = qobject_cast<CMapView3D *>( pView ) )
+		{
+			p3D->Redraw();
+		}
+	}
+	UpdateGameStatus();
+	if ( const auto &pLighting = m_pLighting->GetLighting(); pLighting && !m_pLighting->IsBaking() )
+	{
+		qDebug( "Lighting preview: %zu lights, %d by %d luxels (every %d), in %.0f ms", pLighting->m_nLights, pLighting->m_nWidth, pLighting->m_nHeight, pLighting->m_nStep, m_pLighting->GetBakeMs() );
+	}
 }
 
 //-----------------------------------------------------------------------------
