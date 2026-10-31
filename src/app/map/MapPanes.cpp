@@ -21,7 +21,8 @@ namespace
 {
 
 constexpr int BAR_WIDTH = 4;
-constexpr double SMALLEST_SPLIT = 0.05;
+// A bar dragged this close to the edge goes all the way, so one pane (or two) fills the area.
+constexpr int SNAP_PIXELS = 12;
 
 } // namespace
 
@@ -215,8 +216,9 @@ void CMapQuadSplitter::Lay()
 	};
 	for ( std::size_t i = 0; i < 4; i++ )
 	{
+		// A bar at the edge leaves the panes beyond it no room: they are hidden until it moves.
 		m_Panes[ i ]->setGeometry( areas[ i ] );
-		m_Panes[ i ]->setVisible( true );
+		m_Panes[ i ]->setVisible( areas[ i ].width() > 0 && areas[ i ].height() > 0 );
 	}
 	update();
 }
@@ -275,13 +277,24 @@ void CMapQuadSplitter::mouseMoveEvent( QMouseEvent *pEvent )
 															   : Qt::ArrowCursor );
 		return;
 	}
+	auto split = []( int nAt, int nSpan ) {
+		if ( nAt < SNAP_PIXELS )
+		{
+			return 0.0;
+		}
+		if ( nAt > nSpan - SNAP_PIXELS )
+		{
+			return 1.0;
+		}
+		return std::clamp( static_cast<double>( nAt ) / std::max( 1, nSpan ), 0.0, 1.0 );
+	};
 	if ( m_nDragging & 1 )
 	{
-		m_flX = std::clamp( static_cast<double>( at.x() ) / std::max( 1, width() - BAR_WIDTH ), SMALLEST_SPLIT, 1.0 - SMALLEST_SPLIT );
+		m_flX = split( at.x(), width() - BAR_WIDTH );
 	}
 	if ( m_nDragging & 2 )
 	{
-		m_flY = std::clamp( static_cast<double>( at.y() ) / std::max( 1, height() - BAR_WIDTH ), SMALLEST_SPLIT, 1.0 - SMALLEST_SPLIT );
+		m_flY = split( at.y(), height() - BAR_WIDTH );
 	}
 	Lay();
 }
