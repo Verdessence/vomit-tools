@@ -5,14 +5,16 @@
 //          header that folds it and drags it to another place in the column, and a strip of
 //          tabs down the side shows or hides each one (several at once, unlike Blender's
 //          tabs). A panel can belong to a mode, as Blender's tool settings do: while its mode is
-//          off, neither it nor its tab is there (SetAvailable), and its tab sits after the tabs
-//          that are always there, under a line. The column scrolls when its panels are taller than it; a panel that stretches
+//          off, neither it nor its tab is there (SetAvailable). The tabs are in three groups, each
+//          on a rounded ground of its own: those pinned at the top (SetPinned), the rest, then the
+//          modes' (whose group runs down the strip). The column scrolls when its panels are taller than it; a panel that stretches
 //          takes the height left over when they aren't. Which panels show, which are folded and
 //          their order are kept as one value (GetState, SetState).
 //
 //===========================================================================//
 #pragma once
 
+#include <array>
 #include <vector>
 
 #include <QIcon>
@@ -72,6 +74,8 @@ public:
 	CPanel *AddPanel( const QString &szId, const QString &szTitle, const QIcon &icon, QWidget *pContent, bool bStretch = false );
 	// Hidden until asked for (a command reveals it), also for a saved state from before it existed.
 	void SetHiddenByDefault( const QString &szId );
+	// Its tab in the group at the strip's top, apart from the rest.
+	void SetPinned( const QString &szId );
 	[[nodiscard]] CPanel *GetPanel( const QString &szId ) const;
 	[[nodiscard]] QToolButton *GetTab( const QString &szId ) const;
 	[[nodiscard]] std::vector<CPanel *> GetPanels() const; // in the column's order
@@ -122,6 +126,7 @@ private:
 		bool m_bAvailable = true;
 		bool m_bMode = false; // comes and goes with a mode (SetAvailable has been called)
 		bool m_bHiddenByDefault = false;
+		bool m_bPinned = false;
 	};
 
 	// The layouts' order and stretch from m_Entries.
@@ -132,7 +137,8 @@ private:
 	std::vector<Entry_t> m_Entries; // in the column's order
 	QWidget *m_pStrip = nullptr;
 	QVBoxLayout *m_pTabs = nullptr;
-	QWidget *m_pModeLine = nullptr; // between the tabs always there and the modes' tabs
+	// The tab groups: pinned, the rest, the modes'.
+	std::array<QWidget *, 3> m_TabGroups{};
 	bool m_bOnePanel = false;
 	QStringList m_StackedShown;     // with one panel at a time: the panels the stacked layout shows
 	QString m_szBeforeMode;         // the panel a mode's panel took over from

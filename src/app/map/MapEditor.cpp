@@ -421,6 +421,7 @@ CMapEditor::CMapEditor( const QString &szPath, bool bFromGame, QWidget *pParent 
 	m_pWorldProperties->SetWorld( true );
 	m_pPanels->AddPanel( QStringLiteral( "mapProperties" ), tr( "Map Properties" ), MakeIcon( MapIcon_t::MAP_ICON_PROPERTIES, panelIconColor ), m_pWorldProperties );
 	m_pPanels->SetHiddenByDefault( QStringLiteral( "mapProperties" ) );
+	m_pPanels->SetPinned( QStringLiteral( "mapProperties" ) ); // its tab apart, at the top
 	// The world's sheet follows edits only while it shows.
 	connect( m_pDocument, &CMapDocument::SceneEdited, m_pWorldProperties, [ this ] {
 		if ( m_pWorldProperties->isVisible() )

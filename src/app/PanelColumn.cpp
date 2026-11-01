@@ -16,6 +16,7 @@
 #include <QHBoxLayout>
 #include <QFrame>
 #include <QLabel>
+#include <QPainter>
 #include <QMimeData>
 #include <QMouseEvent>
 #include <QScrollArea>
@@ -32,6 +33,33 @@ constexpr char PANEL_MIME[] = "application/x-vomit-tools-panel";
 // How near the column's top or bottom a drag scrolls it, and by how much a move.
 constexpr int DRAG_SCROLL_EDGE = 32;
 constexpr int DRAG_SCROLL_STEP = 16;
+
+} // namespace
+
+namespace
+{
+// A group of tabs on a rounded ground of its own, a shade lighter than the strip.
+class CTabGroup : public QWidget
+{
+public:
+	CTabGroup()
+	{
+		setAttribute( Qt::WA_StyledBackground, false );
+	}
+
+protected:
+	//-----------------------------------------------------------------------------
+	// Purpose:
+	//-----------------------------------------------------------------------------
+	void paintEvent( QPaintEvent * ) override
+	{
+		QPainter painter( this );
+		painter.setRenderHint( QPainter::Antialiasing, true );
+		painter.setPen( Qt::NoPen );
+		painter.setBrush( palette().color( QPalette::Window ).lighter( 118 ) );
+		painter.drawRoundedRect( QRectF( rect() ).adjusted( 0.5, 0.5, -0.5, -0.5 ), 5, 5 );
+	}
+};
 
 } // namespace
 
@@ -190,13 +218,18 @@ CPanelColumn::CPanelColumn( QWidget *pParent )
 	palette.setColor( QPalette::Window, palette.color( QPalette::Window ).darker( 112 ) );
 	pStrip->setPalette( palette );
 	m_pTabs = new QVBoxLayout( pStrip );
-	m_pTabs->setContentsMargins( 2, 4, 2, 4 );
-	m_pTabs->setSpacing( 2 );
-	m_pTabs->addStretch( 1 );
-	m_pModeLine = new QFrame;
-	m_pModeLine->setObjectName( QStringLiteral( "panelModeLine" ) );
-	static_cast<QFrame *>( m_pModeLine )->setFrameShape( QFrame::HLine );
-	static_cast<QFrame *>( m_pModeLine )->setFrameShadow( QFrame::Sunken );
+	m_pTabs->setContentsMargins( 3, 4, 3, 4 );
+	m_pTabs->setSpacing( 4 );
+	for ( std::size_t n = 0; n < m_TabGroups.size(); n++ )
+	{
+		auto *pGroup = m_TabGroups[ n ] = new CTabGroup;
+		pGroup->setObjectName( QStringLiteral( "panelTabGroup%1" ).arg( n ) );
+		auto *pGroupLayout = new QVBoxLayout( pGroup );
+		pGroupLayout->setContentsMargins( 2, 3, 2, 3 );
+		pGroupLayout->setSpacing( 2 );
+		// The modes' group runs down the rest of the strip.
+		m_pTabs->addWidget( pGroup, n + 1 == m_TabGroups.size() ? 1 : 0 );
+	}
 	pLayout->addWidget( pStrip );
 
 	m_pScroll = new QScrollArea;
@@ -278,6 +311,18 @@ void CPanelColumn::SetHiddenByDefault( const QString &szId )
 		return;
 	it->m_bHiddenByDefault = true;
 	SetShown( szId, false );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+void CPanelColumn::SetPinned( const QString &szId )
+{
+	const auto it = std::ranges::find_if( m_Entries, [ & ]( const Entry_t &entry ) { return entry.m_pPanel->GetId() == szId; } );
+	if ( it == m_Entries.end() )
+		return;
+	it->m_bPinned = true;
+	Relayout();
 }
 
 //-----------------------------------------------------------------------------
@@ -674,9 +719,12 @@ void CPanelColumn::Relayout()
 	{
 		delete pItem;
 	}
-	while ( QLayoutItem *pItem = m_pTabs->takeAt( 0 ) )
+	for ( QWidget *pGroup : m_TabGroups )
 	{
-		delete pItem;
+		while ( QLayoutItem *pItem = pGroup->layout()->takeAt( 0 ) )
+		{
+			delete pItem;
+		}
 	}
 	bool bStretching = false;
 	for ( const Entry_t &entry : m_Entries )
@@ -692,20 +740,16 @@ void CPanelColumn::Relayout()
 	{
 		m_pPanels->addStretch( 1 );
 	}
-	// The tabs always there first; the modes' right after them, under a line while one is there.
-	bool bModeTab = false;
+	// Each tab in its group; a group with no tab there is away, but the modes' (the strip's foot).
+	std::array<bool, 3> used{};
 	for ( const Entry_t &entry : m_Entries )
 	{
-		if ( !entry.m_bMode )
-			m_pTabs->addWidget( entry.m_pTab );
-		bModeTab = bModeTab || ( entry.m_bMode && entry.m_bAvailable );
+		const std::size_t nGroup = entry.m_bPinned ? 0 : entry.m_bMode ? 2
+																	   : 1;
+		static_cast<QVBoxLayout *>( m_TabGroups[ nGroup ]->layout() )->addWidget( entry.m_pTab );
+		used[ nGroup ] = used[ nGroup ] || entry.m_bAvailable;
 	}
-	m_pTabs->addWidget( m_pModeLine );
-	m_pModeLine->setVisible( bModeTab );
-	for ( const Entry_t &entry : m_Entries )
-	{
-		if ( entry.m_bMode )
-			m_pTabs->addWidget( entry.m_pTab );
-	}
-	m_pTabs->addStretch( 1 );
+	static_cast<QVBoxLayout *>( m_TabGroups[ 2 ]->layout() )->addStretch( 1 );
+	m_TabGroups[ 0 ]->setVisible( used[ 0 ] );
+	m_TabGroups[ 1 ]->setVisible( used[ 1 ] );
 }

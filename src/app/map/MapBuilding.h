@@ -24,7 +24,8 @@ class QPushButton;
 class QSpinBox;
 class QStackedWidget;
 
-// The brushes' outlines from above (x, y) and from the front (x, z), side by side.
+// The brushes' outlines from above (x, y) and from the front (x, z), one over the other, to fit
+// the side's width.
 class CBuildingPreview : public QWidget
 {
 	Q_OBJECT
@@ -57,8 +58,13 @@ signals:
 	// Create was pressed, with numbers that make brushes.
 	void CreateRequested();
 
+protected:
+	void showEvent( QShowEvent *pEvent ) override;
+
 private:
 	void Update();
+
+	static constexpr int NUMBER_WIDTH = 64; // each number box's least width
 
 	QComboBox *m_pKind = nullptr;
 	QStackedWidget *m_pPages = nullptr;

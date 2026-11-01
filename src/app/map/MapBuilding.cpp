@@ -9,12 +9,15 @@
 #include <QCheckBox>
 #include <QComboBox>
 #include <QDoubleSpinBox>
+#include <QEvent>
+#include <QTimer>
 #include <QFormLayout>
 #include <QGridLayout>
 #include <QLabel>
 #include <QPainter>
 #include <QPushButton>
 #include <QSpinBox>
+#include <QAbstractSpinBox>
 #include <QStackedWidget>
 #include <QVBoxLayout>
 
@@ -25,7 +28,7 @@ CBuildingPreview::CBuildingPreview( QWidget *pParent )
 	: QWidget( pParent )
 {
 	setObjectName( QStringLiteral( "mapBuildingPreview" ) );
-	setMinimumSize( 220, 120 );
+	setMinimumSize( 200, 280 );
 }
 
 //-----------------------------------------------------------------------------
@@ -39,13 +42,12 @@ void CBuildingPreview::SetShapes( std::vector<xv::map::SolidGeometry_t> shapes, 
 }
 
 //-----------------------------------------------------------------------------
-// Purpose: Each half fits the box and what reaches out of it (an arch's add height), at one
-//          scale for both, so the two views line up along x.
+// Purpose: Each view in a frame of its own, the top one over the front one; both fit the box and
+//          what reaches out of it (an arch's add height) at one scale, so they line up along x.
 //-----------------------------------------------------------------------------
 void CBuildingPreview::paintEvent( QPaintEvent * )
 {
 	QPainter painter( this );
-	painter.fillRect( rect(), palette().base() );
 	xv::map::Box_t bounds = m_Box;
 	for ( const auto &shape : m_Shapes )
 	{
@@ -55,7 +57,15 @@ void CBuildingPreview::paintEvent( QPaintEvent * )
 	if ( bounds.IsEmpty() )
 		return;
 	const xv::map::Point_t size = bounds.GetSize();
-	const QRectF halves[] = { QRectF( rect() ).adjusted( 8, 20, -width() / 2.0 - 4, -8 ), QRectF( rect() ).adjusted( width() / 2.0 + 4, 20, -8, -8 ) };
+	const double flGap = 6.0;
+	const QRectF frames[] = { QRectF( 0, 0, width(), ( height() - flGap ) / 2.0 ), QRectF( 0, ( height() + flGap ) / 2.0, width(), ( height() - flGap ) / 2.0 ) };
+	for ( const QRectF &frame : frames )
+	{
+		painter.fillRect( frame, palette().base() );
+		painter.setPen( palette().mid().color() );
+		painter.drawRect( frame.adjusted( 0, 0, -1, -1 ) );
+	}
+	const QRectF halves[] = { frames[ 0 ].adjusted( 8, 22, -8, -8 ), frames[ 1 ].adjusted( 8, 22, -8, -8 ) };
 	const double flScale = std::min( { halves[ 0 ].width() / std::max( size[ 0 ], 1.0 ), halves[ 0 ].height() / std::max( size[ 1 ], 1.0 ), halves[ 1 ].height() / std::max( size[ 2 ], 1.0 ) } );
 	const char *pszTitles[] = { QT_TR_NOOP( "Top" ), QT_TR_NOOP( "Front" ) };
 	painter.setRenderHint( QPainter::Antialiasing, true );
@@ -64,7 +74,7 @@ void CBuildingPreview::paintEvent( QPaintEvent * )
 		const QRectF &half = halves[ nView ];
 		const std::size_t nUp = nView == 0 ? 1 : 2;
 		painter.setPen( palette().text().color() );
-		painter.drawText( QPointF{ half.left(), half.top() - 6 }, tr( pszTitles[ nView ] ) );
+		painter.drawText( QPointF{ frames[ nView ].left() + 6, frames[ nView ].top() + 15 }, tr( pszTitles[ nView ] ) );
 		auto map = [ & ]( const xv::map::Point_t &p ) {
 			const double flX = half.center().x() + ( p[ 0 ] - ( bounds.m_Mins[ 0 ] + bounds.m_Maxs[ 0 ] ) / 2.0 ) * flScale;
 			const double flY = half.center().y() - ( p[ nUp ] - ( bounds.m_Mins[ nUp ] + bounds.m_Maxs[ nUp ] ) / 2.0 ) * flScale;
@@ -114,8 +124,11 @@ CMapBuildingPanel::CMapBuildingPanel( QWidget *pParent )
 	pTop->addRow( tr( "Template" ), m_pKind );
 
 	// The box, as the block tool left it (or the selection's), editable.
-	auto *pBox = new QGridLayout;
+	auto *pBoxHost = new QWidget;
+	auto *pBox = new QGridLayout( pBoxHost );
 	const char *pszAxes[] = { "x", "y", "z" };
+	pBox->setContentsMargins( 0, 0, 0, 0 );
+	pBox->addWidget( new QLabel( tr( "Box" ) ), 0, 0 );
 	pBox->addWidget( new QLabel( tr( "From" ) ), 1, 0 );
 	pBox->addWidget( new QLabel( tr( "To" ) ), 2, 0 );
 	for ( int a = 0; a < 3; a++ )
@@ -126,13 +139,14 @@ CMapBuildingPanel::CMapBuildingPanel( QWidget *pParent )
 			auto *pSpin = new QDoubleSpinBox;
 			pSpin->setObjectName( QStringLiteral( "mapBuilding%1%2" ).arg( nRow ? QStringLiteral( "Max" ) : QStringLiteral( "Min" ) ).arg( QLatin1String( pszAxes[ a ] ) ) );
 			pSpin->setRange( -65536, 65536 );
-			pSpin->setDecimals( 2 );
+			pSpin->setDecimals( 0 ); // the box is on the grid: whole units
 			pSpin->setValue( nRow ? box.m_Maxs[ a ] : box.m_Mins[ a ] );
 			pBox->addWidget( pSpin, nRow + 1, a + 1 );
 			( nRow ? m_Maxs : m_Mins )[ a ] = pSpin;
 		}
 	}
-	pTop->addRow( tr( "Box" ), pBox );
+	// The whole row, its own labels beside it: the side is narrow.
+	pTop->addRow( pBoxHost );
 
 	auto spin = [ this ]( const char *pszName, int nMin, int nMax, int nValue ) {
 		auto *pSpin = new QSpinBox;
@@ -261,12 +275,28 @@ CMapBuildingPanel::CMapBuildingPanel( QWidget *pParent )
 	m_pOk = new QPushButton( tr( "Create" ) );
 	m_pOk->setObjectName( QStringLiteral( "mapBuildingCreate" ) );
 	m_pOk->setToolTip( tr( "Add the brushes, as one group" ) );
-	pLayout->addWidget( m_pOk, 0, Qt::AlignRight );
+	pLayout->addWidget( m_pOk, 0, Qt::AlignHCenter );
 	connect( m_pOk, &QPushButton::clicked, this, &CMapBuildingPanel::CreateRequested );
-	connect( m_pKind, &QComboBox::currentIndexChanged, this, [ this ]( int n ) {
+	// The pages as tall as the one shown, not the tallest: the preview follows right below.
+	auto fitPage = [ this ]( int n ) {
+		for ( int i = 0; i < m_pPages->count(); i++ )
+			m_pPages->widget( i )->setSizePolicy( QSizePolicy::Preferred, i == n ? QSizePolicy::Preferred : QSizePolicy::Ignored );
 		m_pPages->setCurrentIndex( n );
+		m_pPages->adjustSize();
+	};
+	connect( m_pKind, &QComboBox::currentIndexChanged, this, [ this, fitPage ]( int n ) {
+		fitPage( n );
 		Update();
 	} );
+	fitPage( 0 );
+	// The number boxes would size themselves for their whole range; a map's numbers are shorter,
+	// and the panel has to fit the side's width. Some styles (Kvantum) set a box's minimum when
+	// they polish it, after this: it is set again once the panel shows (showEvent).
+	for ( QAbstractSpinBox *pSpin : findChildren<QAbstractSpinBox *>() )
+	{
+		pSpin->setMinimumWidth( NUMBER_WIDTH );
+		pSpin->setSizePolicy( QSizePolicy::Ignored, QSizePolicy::Fixed );
+	}
 	for ( auto *pSpin : m_Mins )
 		connect( pSpin, &QDoubleSpinBox::valueChanged, this, &CMapBuildingPanel::Update );
 	for ( auto *pSpin : m_Maxs )
@@ -294,6 +324,19 @@ xv::map::Box_t CMapBuildingPanel::GetBox() const
 		box.m_Maxs[ a ] = std::max( m_Mins[ a ]->value(), m_Maxs[ a ]->value() );
 	}
 	return box;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+void CMapBuildingPanel::showEvent( QShowEvent *pEvent )
+{
+	QWidget::showEvent( pEvent );
+	// The style polishes the boxes as they first show, after this event: once it has.
+	QTimer::singleShot( 0, this, [ this ] {
+		for ( QAbstractSpinBox *pSpin : findChildren<QAbstractSpinBox *>() )
+			pSpin->setMinimumWidth( NUMBER_WIDTH );
+	} );
 }
 
 //-----------------------------------------------------------------------------
