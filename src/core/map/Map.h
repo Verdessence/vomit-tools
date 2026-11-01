@@ -164,6 +164,9 @@ struct Visgroup_t
 	Color_t m_Color;
 	int m_nParent = -1;                // index into CMap::m_Visgroups
 	Span_t m_Span;
+
+	// The same group (its text's place aside).
+	[[nodiscard]] bool IsSame( const Visgroup_t &other ) const { return m_szName == other.m_szName && m_nId == other.m_nId && m_Color == other.m_Color && m_nParent == other.m_nParent; }
 };
 
 struct Group_t
@@ -250,6 +253,9 @@ public:
 	VersionInfo_t m_VersionInfo;
 	ViewSettings_t m_ViewSettings;
 	std::vector<Visgroup_t> m_Visgroups;
+	std::vector<Visgroup_t> m_ReadVisgroups; // as read: an edit that puts them back changes nothing
+	std::vector<Span_t> m_VisgroupSpans;     // the "visgroups" blocks as read
+	bool m_bVisgroupsChanged = false;        // the writer puts a fresh "visgroups" block in their place
 	Entity_t m_World;
 	CSharedVector<Entity_t> m_Entities;
 	CSharedVector<Solid_t> m_Solids;   // the world's and the entities' alike

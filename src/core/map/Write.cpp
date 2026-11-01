@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <charconv>
 #include <cmath>
+#include <functional>
 #include <optional>
 #include <system_error>
 #include <vector>
@@ -1031,6 +1032,56 @@ std::string CWriter::Run()
 			for ( std::size_t i = 0; i < m_Map.m_CordonSpans.size(); i++ )
 			{
 				const Span_t span = m_Map.m_CordonSpans[ i ];
+				const std::size_t nStart = LineStart( span.m_nOffset );
+				const std::size_t nEnd = LineEnd( span.m_nOffset + span.m_nLength );
+				Replace( nStart, nEnd - nStart, i == 0 ? szBlock : std::string{} );
+			}
+		}
+	}
+
+	// Changed visgroups: a fresh "visgroups" block where the first one read was (the others
+	// removed), else where Hammer puts it, before the view settings and the world.
+	if ( m_Map.m_bVisgroupsChanged )
+	{
+		const std::string nl{ m_szNewline };
+		std::string szBlock = "visgroups" + nl + "{" + nl;
+		const std::function<void( int, const std::string & )> children = [ & ]( int nParent, const std::string &szIndent ) {
+			for ( std::size_t i = 0; i < m_Map.m_Visgroups.size(); i++ )
+			{
+				const Visgroup_t &group = m_Map.m_Visgroups[ i ];
+				if ( group.m_nParent != nParent )
+					continue;
+				const std::string szIn = szIndent + '\t';
+				szBlock += szIndent + "visgroup" + nl + szIndent + "{" + nl;
+				szBlock += szIn + Pair( "name", group.m_szName ) + nl;
+				szBlock += szIn + Pair( "visgroupid", std::to_string( group.m_nId ) ) + nl;
+				szBlock += szIn + Pair( "color", FormatColor( group.m_Color ) ) + nl;
+				children( static_cast<int>( i ), szIn );
+				szBlock += szIndent + "}" + nl;
+			}
+		};
+		children( -1, "\t" );
+		szBlock += "}" + nl;
+		if ( m_Map.m_VisgroupSpans.empty() )
+		{
+			std::size_t nAt = 0;
+			for ( const Span_t &span : m_Map.m_TopBlocks )
+			{
+				const std::string_view szName = m_szText.substr( span.m_nOffset, std::min<std::size_t>( span.m_nLength, 16 ) );
+				if ( szName.starts_with( "viewsettings" ) || szName.starts_with( "world" ) || szName.starts_with( "entity" ) )
+				{
+					nAt = LineStart( span.m_nOffset );
+					break;
+				}
+				nAt = LineEnd( span.m_nOffset + span.m_nLength );
+			}
+			Replace( nAt, 0, szBlock );
+		}
+		else
+		{
+			for ( std::size_t i = 0; i < m_Map.m_VisgroupSpans.size(); i++ )
+			{
+				const Span_t span = m_Map.m_VisgroupSpans[ i ];
 				const std::size_t nStart = LineStart( span.m_nOffset );
 				const std::size_t nEnd = LineEnd( span.m_nOffset + span.m_nLength );
 				Replace( nStart, nEnd - nStart, i == 0 ? szBlock : std::string{} );

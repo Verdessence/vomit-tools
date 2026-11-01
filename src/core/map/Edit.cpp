@@ -155,6 +155,12 @@ std::shared_ptr<CScene> ApplyEdit( const CScene &scene, const MapEdit_t &edit, b
 		map.m_bCordonsActive = edit.m_Cordons->second;
 		map.m_bCordonsChanged = true;
 	}
+	if ( edit.m_Visgroups )
+	{
+		map.m_Visgroups = *edit.m_Visgroups;
+		// Put back as read (an undo): the block as it was.
+		map.m_bVisgroupsChanged = !std::ranges::equal( map.m_Visgroups, map.m_ReadVisgroups, []( const Visgroup_t &a, const Visgroup_t &b ) { return a.IsSame( b ); } );
+	}
 	// Entities first: new solids may belong to new entities.
 	bool bSkybox = false;
 	bool bInstances = false;
@@ -347,6 +353,10 @@ MapEdit_t InverseOf( const CScene &scene, const MapEdit_t &edit )
 	if ( edit.m_Cordons )
 	{
 		inverse.m_Cordons = std::make_pair( map.m_Cordons, map.m_bCordonsActive );
+	}
+	if ( edit.m_Visgroups )
+	{
+		inverse.m_Visgroups = map.m_Visgroups;
 	}
 	for ( const Group_t &group : edit.m_Groups )
 	{

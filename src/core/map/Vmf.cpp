@@ -1013,6 +1013,7 @@ void CReader::Read()
 		else if ( Is( szName, "visgroups" ) )
 		{
 			nEnd = ReadVisgroups( nOpen, 1, -1 );
+			m_Map.m_VisgroupSpans.push_back( SpanOf( key.m_nOffset, nEnd ) );
 		}
 		else if ( Is( szName, "viewsettings" ) )
 		{
@@ -1070,6 +1071,7 @@ void CReader::Read()
 		m_Map.m_TopBlocks.push_back( SpanOf( key.m_nOffset, nEnd ) );
 	}
 
+	m_Map.m_ReadVisgroups = m_Map.m_Visgroups;
 	if ( !m_Map.m_Diagnostics.empty() )
 	{
 		const kv1::CLineTable lines{ m_Map.GetText() };

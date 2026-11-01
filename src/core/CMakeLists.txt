@@ -79,6 +79,8 @@ add_library(vomit_tools_core STATIC
         map/Shade.h
         map/Skybox3D.cpp
         map/Skybox3D.h
+        map/Stripper.cpp
+        map/Stripper.h
         map/Sprinkle.cpp
         map/Sprinkle.h
         map/Sprites.cpp

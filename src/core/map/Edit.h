@@ -49,9 +49,12 @@ struct MapEdit_t
 	// The cordons as they are to be, and whether the cordon is on.
 	std::optional<std::pair<std::vector<Cordon_t>, bool>> m_Cordons;
 	std::optional<std::pair<std::vector<Camera_t>, int>> m_Cameras;
+	// The map's visgroups as they are to be (m_nParent indexes this list); objects join them
+	// through their editor notes.
+	std::optional<std::vector<Visgroup_t>> m_Visgroups;
 
-	[[nodiscard]] bool IsEmpty() const { return m_Solids.empty() && m_Entities.empty() && !m_World && m_Groups.empty() && m_RemovedGroups.empty() && !m_Cordons && !m_Cameras; }
-	[[nodiscard]] bool IsCameraEdit() const { return m_Cameras && m_Solids.empty() && m_Entities.empty() && m_SolidTransforms.empty() && !m_World && m_Groups.empty() && m_RemovedGroups.empty() && !m_Cordons; }
+	[[nodiscard]] bool IsEmpty() const { return m_Solids.empty() && m_Entities.empty() && !m_World && m_Groups.empty() && m_RemovedGroups.empty() && !m_Cordons && !m_Cameras && !m_Visgroups; }
+	[[nodiscard]] bool IsCameraEdit() const { return m_Cameras && m_Solids.empty() && m_Entities.empty() && m_SolidTransforms.empty() && !m_World && m_Groups.empty() && m_RemovedGroups.empty() && !m_Cordons && !m_Visgroups; }
 };
 
 inline constexpr std::uint32_t NEW_MATERIAL = ~0u;
