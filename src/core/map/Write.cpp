@@ -14,6 +14,7 @@
 #include <vector>
 
 #include "kv1/Lexer.h"
+#include "util/Numbers.h"
 #include "map/VmfValues.h"
 
 namespace xv::map
@@ -178,7 +179,9 @@ private:
 	void InsertLines( std::size_t nAt, std::string_view szIndent, std::string_view szBlock );
 
 	[[nodiscard]] std::string Side( const Side_t &side, std::string_view szIndent ) const;
-	[[nodiscard]] std::string Disp( const DispInfo_t &disp, std::string_view szIndent ) const;
+	// pOriginal: the block as read, whose other keys and blocks (CS:GO's multiblend rows, say) are
+	// kept when the power is the same.
+	[[nodiscard]] std::string Disp( const DispInfo_t &disp, std::string_view szIndent, const Node_t *pOriginal = nullptr ) const;
 	[[nodiscard]] std::string PlusVertices( const std::vector<Point_t> &points, std::string_view szIndent ) const;
 	// With the keys this doesn't know copied from the block as read (Hammer's logicalpos).
 	[[nodiscard]] std::string Editor( const EditorInfo_t &editor, std::string_view szIndent, const Node_t *pOriginal ) const;
@@ -320,7 +323,7 @@ std::string CWriter::PlusVertices( const std::vector<Point_t> &points, std::stri
 //-----------------------------------------------------------------------------
 // Purpose: Its keys, then its grids a row each, as Hammer writes them.
 //-----------------------------------------------------------------------------
-std::string CWriter::Disp( const DispInfo_t &disp, std::string_view szIndent ) const
+std::string CWriter::Disp( const DispInfo_t &disp, std::string_view szIndent, const Node_t *pOriginal ) const
 {
 	const std::string szIn = std::string{ szIndent } + '\t';
 	const std::string_view nl = m_szNewline;
@@ -374,6 +377,22 @@ std::string CWriter::Disp( const DispInfo_t &disp, std::string_view szIndent ) c
 			szRow += ( k ? " " : "" ) + std::to_string( disp.m_AllowedVerts[ k ] );
 		}
 		sz += szIn + "allowed_verts" + std::string{ nl } + szIn + '{' + std::string{ nl } + szIn + '\t' + Pair( "10", szRow ) + std::string{ nl } + szIn + '}' + std::string{ nl };
+	}
+	// What later branches add (CS:GO's multiblend, alphablend and multiblend_color_N, one entry a
+	// vertex) is kept as it was while the grid keeps its size; at another power it no longer fits.
+	if ( pOriginal )
+	{
+		constexpr std::string_view KNOWN[] = { "power", "startposition", "flags", "elevation", "subdiv", "normals", "distances", "offsets", "offset_normals", "alphas", "triangle_tags", "allowed_verts" };
+		const Node_t *pPower = nullptr;
+		for ( const Node_t &child : pOriginal->m_Children )
+			pPower = !child.m_bBlock && Is( child.m_szName, "power" ) ? &child : pPower;
+		const bool bSameSize = pPower && ParseNumber<int>( pPower->m_szValue ) == disp.m_nPower;
+		for ( const Node_t &child : pOriginal->m_Children )
+		{
+			if ( std::ranges::any_of( KNOWN, [ & ]( std::string_view szKnown ) { return Is( child.m_szName, szKnown ); } ) || ( child.m_bBlock && !bSameSize ) )
+				continue;
+			sz += szIn + std::string{ m_szText.substr( child.m_nAt, child.m_nEnd - child.m_nAt ) } + std::string{ nl };
+		}
 	}
 	return sz + std::string{ szIndent } + '}';
 }
@@ -805,7 +824,7 @@ void CWriter::PatchDisp( const DispInfo_t &disp, const Node_t &node )
 	}
 	if ( bRows )
 	{
-		Replace( node.m_nAt, node.m_nEnd - node.m_nAt, Disp( disp, LineIndent( node.m_nAt ) ) );
+		Replace( node.m_nAt, node.m_nEnd - node.m_nAt, Disp( disp, LineIndent( node.m_nAt ), &node ) );
 	}
 }
 
