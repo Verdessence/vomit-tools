@@ -166,6 +166,23 @@
 - Closing a map gives its memory back: a 50 MB map left about half of what it took with the app,
   and now leaves little beyond what the graphics driver keeps. Building it allocates a fortieth as
   often and is a quarter faster.
+- **Sprinkle tool** (Shift+F, Hammer++'s): paint entities from the sprinkle definitions (the
+  game's `scripts/hammer/sprinkle`, Hammer++'s `scripts/sprinkle`) onto the surfaces under a
+  brush in the 3D view, one a grid cell, with random yaw and the Additive, Subtractive, Replace
+  and Overwrite modes. Ctrl takes away, the right button or `[` `]` sizes the brush, and a stroke
+  is one undo step.
+- **Building generator** (Tools): stairs, spiral stairs, Hammer's arch, a room with doorways, a
+  wall with rows of windows or a railing, filling the block tool's box, with a preview; added as
+  one group.
+- **Helpers:** a selected entity shows its FGD helpers in the 2D and 3D views: lines to the
+  entities it targets, a spot light's cones, boxes, arrows, a projected texture's frustum, the
+  faces a cubemap lists, and its radii (a sound's reach, a light's falloff) in 3D too.
+- **Set Up Hammer** (Tools): writes the open game's entry into Hammer++'s (or Hammer's) game
+  configuration (its game data, compilers and folders), keeping the rest of the file.
+- **Manifests:** a `.vmm` opens as one map of its submaps, each an instance; Collapse All makes
+  them one map to save as a VMF.
+- CS:GO's displacement blend rows (`multiblend` and the like) are kept when a displacement is
+  edited.
 
 ### Also
 - The File menu is shorter: **New** holds everything that makes something (maps, particles,
