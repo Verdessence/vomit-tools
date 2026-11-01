@@ -419,8 +419,18 @@ QIcon MakeMapIcon( MapIcon_t nIcon, const QColor &color )
 			break;
 		}
 		case MapIcon_t::MAP_ICON_PARTICLES:
+		case MapIcon_t::MAP_ICON_PARTICLES_SELECTED:
 		{
-			// Sparks thrown up from a point, smaller as they go.
+			// Sparks thrown up from a point, smaller as they go; for the selected ones alone, inside
+			// a dashed selection box, fewer of them.
+			const bool bSelected = nIcon == MapIcon_t::MAP_ICON_PARTICLES_SELECTED;
+			if ( bSelected )
+			{
+				QPen dashed = painter.pen();
+				dashed.setStyle( Qt::DashLine );
+				painter.setPen( dashed );
+				painter.drawRect( QRectF{ 2, 2, 28, 28 } );
+			}
 			painter.setPen( Qt::NoPen );
 			painter.setBrush( color );
 			painter.drawEllipse( QPointF{ 16, 27 }, 2.5, 2.5 );
@@ -429,7 +439,8 @@ QIcon MakeMapIcon( MapIcon_t nIcon, const QColor &color )
 				double x, y, r;
 			} sparks[] = { { 9, 19, 2.6 }, { 16, 17, 2.8 }, { 23, 19, 2.6 }, { 6, 11, 2.0 }, { 13, 9, 2.1 }, { 20, 8, 2.1 }, { 27, 11, 2.0 }, { 10, 3.5, 1.4 }, { 17, 2.5, 1.4 }, { 24, 4, 1.4 } };
 			for ( const auto &spark : sparks )
-				painter.drawEllipse( QPointF{ spark.x, spark.y }, spark.r, spark.r );
+				if ( !bSelected || spark.r > 2.5 || spark.y > 6 )
+					painter.drawEllipse( QPointF{ spark.x, spark.y }, spark.r, spark.r );
 			break;
 		}
 		case MapIcon_t::MAP_ICON_STRIPPER:

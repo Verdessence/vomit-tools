@@ -278,7 +278,7 @@ const xv::particles::Sprite_t *CMapParticles::SpriteFor( const xv::particles::CL
 //-----------------------------------------------------------------------------
 // Purpose:
 //-----------------------------------------------------------------------------
-std::shared_ptr<const xv::map::CMapMesh> CMapParticles::BuildMesh( xv::map::Point_t eye, xv::map::Point_t right, xv::map::Point_t up, std::uint32_t nFirstMaterial ) const
+std::shared_ptr<const xv::map::CMapMesh> CMapParticles::BuildMesh( xv::map::Point_t eye, xv::map::Point_t right, xv::map::Point_t up, std::uint32_t nFirstMaterial, const std::vector<std::uint32_t> *pOnly ) const
 {
 	if ( m_Playing.empty() )
 	{
@@ -288,6 +288,9 @@ std::shared_ptr<const xv::map::CMapMesh> CMapParticles::BuildMesh( xv::map::Poin
 	std::vector<xv::map::ParticleSprite_t> sprites;
 	for ( const Playing_t &system : m_Playing )
 	{
+		// The others play on unseen, so they are warm when shown again.
+		if ( pOnly && !std::ranges::binary_search( *pOnly, system.m_nObject ) )
+			continue;
 		const xv::particles::CLibrary *pLibrary = system.m_pLibrary.get();
 		const auto quads = xv::particles::WorldLayout( *system.m_pSimulation, xv::map::ToVec3( eye ), xv::map::ToVec3( right ), xv::map::ToVec3( up ), [ pSelf, pLibrary ]( std::size_t nDefinition ) { return pSelf->SpriteFor( *pLibrary, nDefinition ); } );
 		for ( const xv::particles::WorldQuad_t &quad : quads )

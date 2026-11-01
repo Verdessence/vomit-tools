@@ -52,8 +52,9 @@ public:
 	// Their materials, one per system's definition drawn, and what keeps their textures alive.
 	[[nodiscard]] const std::shared_ptr<const std::vector<xv::map::RasterMaterial_t>> &GetMaterials() const { return m_pMaterials; }
 	// The particles seen from an eye (right and up of unit length), their materials numbered from
-	// nFirstMaterial on. Null when there are none.
-	[[nodiscard]] std::shared_ptr<const xv::map::CMapMesh> BuildMesh( xv::map::Point_t eye, xv::map::Point_t right, xv::map::Point_t up, std::uint32_t nFirstMaterial ) const;
+	// nFirstMaterial on; with pOnly (sorted object numbers), only those systems'. Null when there
+	// are none.
+	[[nodiscard]] std::shared_ptr<const xv::map::CMapMesh> BuildMesh( xv::map::Point_t eye, xv::map::Point_t right, xv::map::Point_t up, std::uint32_t nFirstMaterial, const std::vector<std::uint32_t> *pOnly = nullptr ) const;
 
 signals:
 	void Ready();

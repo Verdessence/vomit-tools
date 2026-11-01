@@ -929,6 +929,7 @@ void CMapEditor::BuildToolBars()
 	toggle( MapIcon_t::MAP_ICON_SKYBOX, tr( "3D Skybox" ), MapAction_t::MAP_ACTION_TOGGLE_SKYBOX_3D, "mapToggleSkybox3D", m_Settings.m_bSkybox3D );
 	toggle( MapIcon_t::MAP_ICON_WALKABLE, tr( "Walkable" ), MapAction_t::MAP_ACTION_TOGGLE_WALKABLE, "mapToggleWalkable", m_Settings.m_bWalkable );
 	toggle( MapIcon_t::MAP_ICON_PARTICLES, tr( "Particles" ), MapAction_t::MAP_ACTION_TOGGLE_PARTICLES, "mapToggleParticles", m_Settings.m_bParticles );
+	toggle( MapIcon_t::MAP_ICON_PARTICLES_SELECTED, tr( "Selected Particles Only" ), MapAction_t::MAP_ACTION_TOGGLE_PARTICLES_SELECTED, "mapToggleParticlesSelected", m_Settings.m_bParticlesSelected );
 
 	bar( "mapObjectBar", tr( "Objects" ) );
 	command( MapIcon_t::MAP_ICON_CARVE, tr( "Carve" ), MapAction_t::MAP_ACTION_CARVE, "mapCarve" );
@@ -2187,6 +2188,7 @@ bool CMapEditor::RunAction( MapAction_t nAction, CMapView *pFrom )
 		case MapAction_t::MAP_ACTION_TOGGLE_SKYBOX_3D: return toggle( m_Settings.m_bSkybox3D );
 		case MapAction_t::MAP_ACTION_TOGGLE_WALKABLE: return toggle( m_Settings.m_bWalkable );
 		case MapAction_t::MAP_ACTION_TOGGLE_PARTICLES: return toggle( m_Settings.m_bParticles );
+		case MapAction_t::MAP_ACTION_TOGGLE_PARTICLES_SELECTED: return toggle( m_Settings.m_bParticlesSelected );
 		case MapAction_t::MAP_ACTION_GO_TO_BRUSH:
 			GoToBrush();
 			return true;
