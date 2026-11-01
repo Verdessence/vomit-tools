@@ -133,9 +133,14 @@ private:
 	friend class CFgdParser;
 
 	void AddDiagnostic( std::string szFile, std::size_t nLine, bool bError, std::string szMessage );
-	FgdClass_t Resolve( const std::string &szKey, int nDepth ) const;
+	// A class as named in a base(...) list (bBase: @BaseClasses first) or by a classname.
+	[[nodiscard]] const FgdClass_t *Lookup( const std::string &szKey, bool bBase ) const;
+	FgdClass_t Resolve( const FgdClass_t &own, int nDepth ) const;
 
-	std::map<std::string, FgdClass_t> m_Classes;  // by lower-case name, as written
+	// By lower-case name, as written. Base classes are kept apart: base.fgd has both an
+	// @BaseClass Light and an entity class light, and Hammer tells them apart.
+	std::map<std::string, FgdClass_t> m_Classes;
+	std::map<std::string, FgdClass_t> m_BaseClasses;
 	std::vector<FgdClass_t> m_Extensions;
 	std::map<std::string, FgdClass_t> m_Resolved; // by lower-case name, bases folded in
 	std::vector<FgdDiagnostic_t> m_Diagnostics;

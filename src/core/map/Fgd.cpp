@@ -583,7 +583,8 @@ void CFgdParser::ParseClass( FgdClassKind_t nKind, const FgdToken_t &start )
 	else
 	{
 		const std::string szKey = Lower( fgdClass.m_szName );
-		m_Fgd.m_Classes.insert_or_assign( szKey, std::move( fgdClass ) );
+		auto &classes = nKind == FgdClassKind_t::FGD_CLASS_KIND_BASE ? m_Fgd.m_BaseClasses : m_Fgd.m_Classes;
+		classes.insert_or_assign( szKey, std::move( fgdClass ) );
 	}
 }
 
@@ -800,17 +801,27 @@ bool CFgd::AddFile( const std::filesystem::path &path )
 }
 
 //-----------------------------------------------------------------------------
+// Purpose: Names in a base(...) list find @BaseClasses first, classnames the entity classes; each
+//          falls back on the other (some FGDs use entity classes as bases).
+//-----------------------------------------------------------------------------
+const FgdClass_t *CFgd::Lookup( const std::string &szKey, bool bBase ) const
+{
+	const auto &first = bBase ? m_BaseClasses : m_Classes;
+	const auto &second = bBase ? m_Classes : m_BaseClasses;
+	if ( const auto it = first.find( szKey ); it != first.end() )
+	{
+		return &it->second;
+	}
+	const auto it = second.find( szKey );
+	return it != second.end() ? &it->second : nullptr;
+}
+
+//-----------------------------------------------------------------------------
 // Purpose: A class with its bases' keys, I/O and helpers folded in, its own coming last and
 //          replacing theirs by name.
 //-----------------------------------------------------------------------------
-FgdClass_t CFgd::Resolve( const std::string &szKey, int nDepth ) const
+FgdClass_t CFgd::Resolve( const FgdClass_t &own, int nDepth ) const
 {
-	const auto it = m_Classes.find( szKey );
-	if ( it == m_Classes.end() )
-	{
-		return {};
-	}
-	const FgdClass_t &own = it->second;
 	if ( nDepth > MAX_BASE_DEPTH )
 	{
 		return own;
@@ -847,12 +858,12 @@ FgdClass_t CFgd::Resolve( const std::string &szKey, int nDepth ) const
 	};
 	for ( const std::string &szBase : own.m_Bases )
 	{
-		const std::string szBaseKey = Lower( szBase );
-		if ( szBaseKey == szKey || !m_Classes.contains( szBaseKey ) )
+		const FgdClass_t *pBase = Lookup( Lower( szBase ), true );
+		if ( !pBase || pBase == &own )
 		{
 			continue;
 		}
-		const FgdClass_t base = Resolve( szBaseKey, nDepth + 1 );
+		const FgdClass_t base = Resolve( *pBase, nDepth + 1 );
 		mergeKeys( resolved.m_Keys, base.m_Keys );
 		mergeIo( resolved.m_Inputs, base.m_Inputs );
 		mergeIo( resolved.m_Outputs, base.m_Outputs );
@@ -880,10 +891,14 @@ void CFgd::Finish()
 	// same name, and a helper already there exactly as written isn't added twice.
 	for ( const FgdClass_t &extension : m_Extensions )
 	{
-		const auto it = m_Classes.find( Lower( extension.m_szName ) );
+		auto it = m_Classes.find( Lower( extension.m_szName ) );
 		if ( it == m_Classes.end() )
 		{
-			continue;
+			it = m_BaseClasses.find( Lower( extension.m_szName ) );
+			if ( it == m_BaseClasses.end() )
+			{
+				continue;
+			}
 		}
 		FgdClass_t &target = it->second;
 		std::set<std::string> names;
@@ -909,16 +924,20 @@ void CFgd::Finish()
 	m_Extensions.clear();
 
 	m_Resolved.clear();
-	for ( const auto &[ szKey, fgdClass ] : m_Classes )
+	// Entity classes first; a base class only where no entity class has its name.
+	for ( const auto *pClasses : { &m_Classes, &m_BaseClasses } )
 	{
-		for ( const std::string &szBase : fgdClass.m_Bases )
+		for ( const auto &[ szKey, fgdClass ] : *pClasses )
 		{
-			if ( !m_Classes.contains( Lower( szBase ) ) )
+			for ( const std::string &szBase : fgdClass.m_Bases )
 			{
-				AddDiagnostic( fgdClass.m_szFile, fgdClass.m_nLine, false, fgdClass.m_szName + "'s base " + szBase + " isn't defined" );
+				if ( !Lookup( Lower( szBase ), true ) )
+				{
+					AddDiagnostic( fgdClass.m_szFile, fgdClass.m_nLine, false, fgdClass.m_szName + "'s base " + szBase + " isn't defined" );
+				}
 			}
+			m_Resolved.emplace( szKey, Resolve( fgdClass, 0 ) );
 		}
-		m_Resolved.emplace( szKey, Resolve( szKey, 0 ) );
 	}
 }
 
