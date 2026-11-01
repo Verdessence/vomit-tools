@@ -3906,27 +3906,32 @@ void CMapEditor::ResourcesArrived()
 //-----------------------------------------------------------------------------
 void CMapEditor::UpdateGameStatus()
 {
+	// Only what is missing or under way; where the game data came from is in the tooltip.
 	const QString szFgd = m_pDocument->GetFgdSource();
-	QString szText = szFgd.isEmpty() ? tr( "No game data: entities show as boxes" ) : tr( "Entities from %1" ).arg( szFgd );
+	QStringList parts;
+	if ( szFgd.isEmpty() )
+	{
+		parts << tr( "No game data: entities show as boxes" );
+	}
 	if ( !m_pDocument->GetGame() )
 	{
-		szText += tr( "; open the game to see textures" );
+		parts << tr( "open the game to see textures" );
 	}
 	else if ( !m_pResources->IsFinished() )
 	{
-		szText += tr( "; textures %1 of %2" ).arg( m_pResources->GetLoaded() ).arg( m_pResources->GetTotal() );
+		parts << tr( "textures %1 of %2" ).arg( m_pResources->GetLoaded() ).arg( m_pResources->GetTotal() );
 	}
 	else if ( m_pResources->GetModelsLoaded() < m_pResources->GetModelsTotal() )
 	{
 		// The others show as boxes.
-		szText += tr( "; %1 of %2 models read" ).arg( m_pResources->GetModelsLoaded() ).arg( m_pResources->GetModelsTotal() );
+		parts << tr( "%1 of %2 models read" ).arg( m_pResources->GetModelsLoaded() ).arg( m_pResources->GetModelsTotal() );
 	}
 	if ( m_pLighting->IsBaking() )
 	{
-		szText += tr( "; lighting %1% (%2)" ).arg( m_pLighting->GetPercent() ).arg( m_pLighting->GetStage().toLower() );
+		parts << tr( "lighting %1% (%2)" ).arg( m_pLighting->GetPercent() ).arg( m_pLighting->GetStage().toLower() );
 	}
-	m_pStatusGame->setText( szText );
-	m_pStatusGame->setToolTip( szText );
+	m_pStatusGame->setText( parts.join( QStringLiteral( "; " ) ) );
+	m_pStatusGame->setToolTip( szFgd.isEmpty() ? parts.join( QStringLiteral( "; " ) ) : tr( "Entities from %1" ).arg( szFgd ) );
 }
 
 //-----------------------------------------------------------------------------

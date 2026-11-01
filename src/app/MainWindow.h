@@ -294,6 +294,7 @@ private:
 	QTableWidget *m_pMounts = nullptr;
 	QLabel *m_pGameLabel = nullptr;
 	QLabel *m_pNowPlaying = nullptr;
+	QWidget *m_pPlaybackBar = nullptr; // Stop, the volume and what plays
 	QUndoGroup *m_pUndoGroup = nullptr;
 	std::optional<std::vector<xv::vfs::SteamGame_t>> m_SteamGames;
 	std::optional<ParticleGame_t> m_ParticleGame;

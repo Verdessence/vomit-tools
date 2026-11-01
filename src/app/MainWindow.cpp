@@ -909,7 +909,8 @@ void CMainWindow::BuildPlaybackBar()
 	m_pNowPlaying = new QLabel;
 	m_pNowPlaying->setFixedWidth( 360 );
 
-	auto *pBar = new QWidget;
+	auto *pBar = m_pPlaybackBar = new QWidget;
+	pBar->setObjectName( QStringLiteral( "playbackBar" ) );
 	auto *pLayout = new QHBoxLayout( pBar );
 	pLayout->setContentsMargins( 0, 0, 0, 0 );
 	pLayout->addWidget( pStop );
@@ -920,6 +921,7 @@ void CMainWindow::BuildPlaybackBar()
 
 	connect( m_pPlayer, &CSoundPlayer::Started, this, [ this, pStop ]( const QString &szDescription ) {
 		pStop->setEnabled( true );
+		m_pPlaybackBar->show();
 		const QString szText = QStringLiteral( "♪ " ) + szDescription;
 		m_pNowPlaying->setText( m_pNowPlaying->fontMetrics().elidedText( szText, Qt::ElideMiddle, m_pNowPlaying->width() ) );
 		m_pNowPlaying->setToolTip( szDescription );
@@ -927,6 +929,7 @@ void CMainWindow::BuildPlaybackBar()
 	connect( m_pPlayer, &CSoundPlayer::Stopped, this, [ this, pStop ] {
 		pStop->setEnabled( false );
 		m_pNowPlaying->clear();
+		UpdateMapMenu();
 	} );
 	connect( m_pPlayer, &CSoundPlayer::Failed, this, [ this ]( const QString &szMessage ) {
 		statusBar()->showMessage( szMessage, 6000 );
@@ -5178,9 +5181,20 @@ CMapEditor *CMainWindow::GetCurrentMap() const
 //-----------------------------------------------------------------------------
 void CMainWindow::UpdateMapMenu()
 {
+	const bool bMap = GetCurrentMap() != nullptr;
 	if ( m_pMapMenu )
 	{
-		m_pMapMenu->menuAction()->setVisible( GetCurrentMap() != nullptr );
+		m_pMapMenu->menuAction()->setVisible( bMap );
+	}
+	// A map's own status bar says what it needs; the sound controls (while nothing plays) and
+	// the game's file count would only crowd it.
+	if ( m_pPlaybackBar )
+	{
+		m_pPlaybackBar->setVisible( !bMap || !m_pNowPlaying->text().isEmpty() );
+	}
+	if ( m_pGameLabel )
+	{
+		m_pGameLabel->setVisible( !bMap );
 	}
 }
 
