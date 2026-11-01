@@ -5,8 +5,8 @@
 //          header that folds it and drags it to another place in the column, and a strip of
 //          tabs down the side shows or hides each one (several at once, unlike Blender's
 //          tabs). A panel can belong to a mode, as Blender's tool settings do: while its mode is
-//          off, neither it nor its tab is there (SetAvailable), and its tab sits at the strip's
-//          foot, under a line, apart from the tabs that are always there. The column scrolls when its panels are taller than it; a panel that stretches
+//          off, neither it nor its tab is there (SetAvailable), and its tab sits after the tabs
+//          that are always there, under a line. The column scrolls when its panels are taller than it; a panel that stretches
 //          takes the height left over when they aren't. Which panels show, which are folded and
 //          their order are kept as one value (GetState, SetState).
 //

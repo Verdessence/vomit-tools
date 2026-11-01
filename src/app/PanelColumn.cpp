@@ -602,7 +602,7 @@ void CPanelColumn::Relayout()
 	{
 		m_pPanels->addStretch( 1 );
 	}
-	// The tabs always there at the top; the modes' at the foot, under a line while one is there.
+	// The tabs always there first; the modes' right after them, under a line while one is there.
 	bool bModeTab = false;
 	for ( const Entry_t &entry : m_Entries )
 	{
@@ -610,7 +610,6 @@ void CPanelColumn::Relayout()
 			m_pTabs->addWidget( entry.m_pTab );
 		bModeTab = bModeTab || ( entry.m_bMode && entry.m_bAvailable );
 	}
-	m_pTabs->addStretch( 1 );
 	m_pTabs->addWidget( m_pModeLine );
 	m_pModeLine->setVisible( bModeTab );
 	for ( const Entry_t &entry : m_Entries )
@@ -618,4 +617,5 @@ void CPanelColumn::Relayout()
 		if ( entry.m_bMode )
 			m_pTabs->addWidget( entry.m_pTab );
 	}
+	m_pTabs->addStretch( 1 );
 }
