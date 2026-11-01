@@ -91,6 +91,11 @@ public:
 	// (Blender's Ctrl+click on a header).
 	void FoldOthers( CPanel *pKeep );
 
+	// Blender's way: a tab shows its panel alone (a mode's panel takes over while its mode is on,
+	// and gives the place back after). The stacked layout is kept aside, and back when it is off.
+	void SetOnePanel( bool bOnePanel );
+	[[nodiscard]] bool IsOnePanel() const { return m_bOnePanel; }
+
 	// "order" (ids), "hidden" and "folded" (ids): what SetState takes back. Ids it doesn't
 	// know are passed over, and panels it doesn't name keep their place at the end.
 	[[nodiscard]] QVariantMap GetState() const;
@@ -128,6 +133,9 @@ private:
 	QWidget *m_pStrip = nullptr;
 	QVBoxLayout *m_pTabs = nullptr;
 	QWidget *m_pModeLine = nullptr; // between the tabs always there and the modes' tabs
+	bool m_bOnePanel = false;
+	QStringList m_StackedShown;     // with one panel at a time: the panels the stacked layout shows
+	QString m_szBeforeMode;         // the panel a mode's panel took over from
 	QScrollArea *m_pScroll = nullptr;
 	QWidget *m_pContent = nullptr;
 	QVBoxLayout *m_pPanels = nullptr;

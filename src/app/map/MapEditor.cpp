@@ -435,6 +435,7 @@ CMapEditor::CMapEditor( const QString &szPath, bool bFromGame, QWidget *pParent 
 	m_pPanels->AddPanel( QStringLiteral( "lighting" ), tr( "Lighting" ), MakeIcon( MapIcon_t::MAP_ICON_LIGHT, panelIconColor ), pLighting, true );
 	// Lighting starts folded: its header is there, its settings out of the way until wanted.
 	m_pPanels->SetState( QSettings{}.value( QLatin1String( SIDE_PANELS_SETTING ), QVariantMap{ { QStringLiteral( "folded" ), QStringList{ QStringLiteral( "lighting" ) } } } ).toMap() );
+	m_pPanels->SetOnePanel( CPreferences::Instance().GetMapPreferences().m_bOnePanel );
 	PlaceFaceEdit();
 	connect( m_pPanels, &CPanelColumn::StateChanged, this, [ this ] { QSettings{}.setValue( QLatin1String( SIDE_PANELS_SETTING ), m_pPanels->GetState() ); } );
 	m_pSidePanel->addWidget( m_pPanels );
@@ -1408,6 +1409,7 @@ void CMapEditor::PreferencesChanged()
 	const int nTextureSize = m_nTextureSize;
 	TakePreferences();
 	PlaceFaceEdit();
+	m_pPanels->SetOnePanel( CPreferences::Instance().GetMapPreferences().m_bOnePanel );
 	for ( CMapView *pView : GetViews() )
 	{
 		if ( auto *p3D = qobject_cast<CMapView3D *>( pView ) )

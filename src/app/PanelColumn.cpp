@@ -235,7 +235,27 @@ CPanel *CPanelColumn::AddPanel( const QString &szId, const QString &szTitle, con
 	pTab->setIcon( icon );
 	pTab->setIconSize( QSize{ 20, 20 } );
 	pTab->setToolTip( szTitle );
-	connect( pTab, &QToolButton::toggled, this, [ this ] {
+	connect( pTab, &QToolButton::toggled, this, [ this, szId, pTab ]( bool bChecked ) {
+		if ( m_bOnePanel )
+		{
+			// One tab down at a time: picking another lets this one up; this one can't be let up.
+			if ( !bChecked )
+			{
+				const QSignalBlocker blocker( pTab );
+				pTab->setChecked( true );
+				return;
+			}
+			for ( const Entry_t &entry : m_Entries )
+			{
+				if ( entry.m_pTab != pTab )
+				{
+					const QSignalBlocker blocker( entry.m_pTab );
+					entry.m_pTab->setChecked( false );
+				}
+			}
+			Relayout();
+			return;
+		}
 		Relayout();
 		emit StateChanged();
 	} );
@@ -332,6 +352,18 @@ void CPanelColumn::SetAvailable( const QString &szId, bool bAvailable )
 	}
 	it->m_bAvailable = bAvailable;
 	it->m_bMode = true;
+	if ( m_bOnePanel )
+	{
+		const QString szId = it->m_pPanel->GetId();
+		if ( bAvailable )
+		{
+			const auto current = std::ranges::find_if( m_Entries, []( const Entry_t &entry ) { return entry.m_pTab->isChecked(); } );
+			m_szBeforeMode = current != m_Entries.end() ? current->m_pPanel->GetId() : QString{};
+			SetShown( szId, true );
+		}
+		else if ( it->m_pTab->isChecked() && !m_szBeforeMode.isEmpty() )
+			SetShown( m_szBeforeMode, true );
+	}
 	Relayout();
 }
 
@@ -416,7 +448,7 @@ QVariantMap CPanelColumn::GetState() const
 	for ( const Entry_t &entry : m_Entries )
 	{
 		order.append( entry.m_pPanel->GetId() );
-		if ( !entry.m_pTab->isChecked() )
+		if ( m_bOnePanel ? !m_StackedShown.contains( entry.m_pPanel->GetId() ) : !entry.m_pTab->isChecked() )
 		{
 			hidden.append( entry.m_pPanel->GetId() );
 		}
@@ -449,6 +481,54 @@ void CPanelColumn::SetState( const QVariantMap &state )
 		const QString &szId = entry.m_pPanel->GetId();
 		entry.m_pTab->setChecked( order.contains( szId ) || !entry.m_bHiddenByDefault ? !hidden.contains( szId ) : false );
 		entry.m_pPanel->SetFolded( folded.contains( entry.m_pPanel->GetId() ) );
+	}
+	Relayout();
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: The first panel shown (one that is always there) is the one kept going in.
+//-----------------------------------------------------------------------------
+void CPanelColumn::SetOnePanel( bool bOnePanel )
+{
+	if ( bOnePanel == m_bOnePanel )
+		return;
+	if ( bOnePanel )
+	{
+		m_StackedShown.clear();
+		QString szKeep;
+		for ( const Entry_t &entry : m_Entries )
+		{
+			if ( entry.m_pTab->isChecked() )
+			{
+				m_StackedShown.append( entry.m_pPanel->GetId() );
+				if ( szKeep.isEmpty() && entry.m_bAvailable && !entry.m_bMode )
+					szKeep = entry.m_pPanel->GetId();
+			}
+		}
+		if ( szKeep.isEmpty() && !m_Entries.empty() )
+			szKeep = m_Entries.front().m_pPanel->GetId();
+		// A mode's panel that is there now stays the one shown.
+		for ( const Entry_t &entry : m_Entries )
+			if ( entry.m_bMode && entry.m_bAvailable && entry.m_pTab->isChecked() )
+			{
+				m_szBeforeMode = szKeep;
+				szKeep = entry.m_pPanel->GetId();
+			}
+		m_bOnePanel = true;
+		for ( const Entry_t &entry : m_Entries )
+		{
+			const QSignalBlocker blocker( entry.m_pTab );
+			entry.m_pTab->setChecked( entry.m_pPanel->GetId() == szKeep );
+		}
+	}
+	else
+	{
+		m_bOnePanel = false;
+		for ( const Entry_t &entry : m_Entries )
+		{
+			const QSignalBlocker blocker( entry.m_pTab );
+			entry.m_pTab->setChecked( m_StackedShown.contains( entry.m_pPanel->GetId() ) );
+		}
 	}
 	Relayout();
 }

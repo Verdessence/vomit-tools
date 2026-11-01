@@ -142,6 +142,7 @@ struct MapPreferences_t
 	bool m_bGroupCarve = true;       // a carved brush's pieces grouped (Hammer++'s GroupCarve)
 	bool m_bShowDisplacementBrush = false; // show its ring in Select while the Displacement tab is open
 	bool m_bFaceEditWindow = true;   // Face Edit in a window of its own, as Hammer's (else in the side panel)
+	bool m_bOnePanel = false;        // the side shows the panel whose tab was picked alone, as Blender's tabs do
 
 	// The 2D views.
 	bool m_bHideSmallGrid = true;
