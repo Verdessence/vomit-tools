@@ -168,6 +168,8 @@ private:
 	void FillSkyMenu( QMenu *pMenu );
 	// The Map menu shows while a map tab is current.
 	void UpdateMapMenu();
+	// Tools > Set Up Hammer: the open game's entry in Hammer++'s or Hammer's configuration.
+	void SetUpHammer();
 	QMenu *m_pMapMenu = nullptr;
 	void AddRecent( const QString &szPath );
 	void ChooseGameInfo();

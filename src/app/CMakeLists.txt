@@ -96,6 +96,8 @@ add_library(vomit_tools_ui STATIC
         PopupBlur.h
         Preferences.cpp
         Preferences.h
+        HammerSetupDialog.cpp
+        HammerSetupDialog.h
         PreferencesDialog.cpp
         PreferencesDialog.h
         PremiumDialog.cpp

@@ -5,6 +5,7 @@
 //
 //===========================================================================//
 #include "MainWindow.h"
+#include "HammerSetupDialog.h"
 
 #include <set>
 
@@ -819,7 +820,17 @@ void CMainWindow::BuildMenus( QAction *pSearchPathsToggle )
 	auto *pTools = menuBar()->addMenu( tr( "&Tools" ) );
 	auto *pCreatePrefab = pTools->addAction( tr( "Create Prefab..." ), this, [ this ] { if ( auto *pMap = GetCurrentMap() ) pMap->CreatePrefab(); } );
 	pCreatePrefab->setObjectName( QStringLiteral( "mapCreatePrefabAction" ) );
-	connect( pTools, &QMenu::aboutToShow, this, [ this, pCreatePrefab ] { pCreatePrefab->setEnabled( GetCurrentMap() && !GetCurrentMap()->GetDocument().GetSelection().empty() ); } );
+	auto *pSprinkle = pTools->addAction( tr( "Sprinkle" ), this, [ this ] { if ( auto *pMap = GetCurrentMap() ) pMap->RunAction( MapAction_t::MAP_ACTION_TOOL_SPRINKLE, pMap->GetActiveView() ); } );
+	pSprinkle->setObjectName( QStringLiteral( "mapSprinkleAction" ) );
+	pTools->addSeparator();
+	auto *pHammerSetup = pTools->addAction( tr( "Set Up &Hammer…" ), this, &CMainWindow::SetUpHammer );
+	pHammerSetup->setObjectName( QStringLiteral( "hammerSetupAction" ) );
+	pHammerSetup->setToolTip( tr( "Write the open game's entry into Hammer++'s or Hammer's game configuration" ) );
+	connect( pTools, &QMenu::aboutToShow, this, [ this, pCreatePrefab, pSprinkle, pHammerSetup ] {
+		pCreatePrefab->setEnabled( GetCurrentMap() && !GetCurrentMap()->GetDocument().GetSelection().empty() );
+		pSprinkle->setEnabled( GetCurrentMap() != nullptr );
+		pHammerSetup->setEnabled( m_Game.has_value() );
+	} );
 
 	auto *pView = menuBar()->addMenu( tr( "&View" ) );
 	QAction *pSimple = pView->addAction( tr( "&Simple Interface" ) );
@@ -835,6 +846,18 @@ void CMainWindow::BuildMenus( QAction *pSearchPathsToggle )
 	pHelp->addAction( tr( "&About vomit-tools" ), this, [ this ] { CAboutDialog{ this }.exec(); } );
 	pHelp->addAction( tr( "About &Premium…" ), this, [ this ] { CPremiumDialog{ this }.exec(); } );
 	pHelp->addAction( tr( "About &Qt" ), qApp, &QApplication::aboutQt );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: After a save, maps opened from now on read the game data the entry names.
+//-----------------------------------------------------------------------------
+void CMainWindow::SetUpHammer()
+{
+	if ( !m_Game )
+		return;
+	CHammerSetupDialog dialog( m_Game->m_GameDir, QString::fromStdString( m_Game->m_szGame ), this );
+	if ( dialog.exec() == QDialog::Accepted )
+		statusBar()->showMessage( tr( "Saved %1" ).arg( QString::fromStdString( xv::vfs::ToUtf8( dialog.GetConfigFile() ) ) ), 8000 );
 }
 
 //-----------------------------------------------------------------------------
