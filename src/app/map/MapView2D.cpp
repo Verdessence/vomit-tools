@@ -21,6 +21,9 @@
 #include <QMenu>
 #include <QMouseEvent>
 #include <QPainter>
+#include <QCursor>
+#include <QPixmap>
+#include <QPainterPath>
 #include <QScrollBar>
 #include <QWheelEvent>
 
@@ -106,6 +109,42 @@ QRectF Reached( const QRectF &handle )
 {
 	const double fl = Look().m_nHandleReach;
 	return handle.adjusted( -fl, -fl, fl, fl );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: A turn's cursor (Qt has none): three quarters of a circle and an arrowhead, white
+//          over black so it shows on the grid and on the brushes alike.
+//-----------------------------------------------------------------------------
+const QCursor &RotateCursor()
+{
+	static const QCursor cursor = [] {
+		QPixmap pixmap( 24, 24 );
+		pixmap.fill( Qt::transparent );
+		QPainter painter( &pixmap );
+		painter.setRenderHint( QPainter::Antialiasing, true );
+		// Most of a circle, round from the top left, and an arrowhead where it stops.
+		const QRectF ring{ 4.5, 4.5, 15, 15 };
+		QPainterPath path;
+		path.arcMoveTo( ring, 135 );
+		path.arcTo( ring, 135, -270 );
+		const double flEnd = ( 135.0 - 270.0 ) * std::numbers::pi / 180.0;
+		const QPointF end{ 12 + 7.5 * std::cos( flEnd ), 12 - 7.5 * std::sin( flEnd ) };
+		const QPointF along{ std::sin( flEnd ), std::cos( flEnd ) }; // clockwise on screen
+		const QPointF out{ std::cos( flEnd ), -std::sin( flEnd ) };
+		QPolygonF head;
+		head << end + along * 4.5 << end - out * 4.0 << end + out * 4.0;
+		for ( const auto &[ flWidth, color ] : { std::pair{ 4.5, QColor{ Qt::black } }, std::pair{ 2.0, QColor{ Qt::white } } } )
+		{
+			painter.setPen( QPen{ color, flWidth, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin } );
+			painter.setBrush( Qt::NoBrush );
+			painter.drawPath( path );
+			painter.setPen( QPen{ color, flWidth - 1.5, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin } );
+			painter.setBrush( color );
+			painter.drawPolygon( head );
+		}
+		return QCursor{ pixmap, 12, 12 };
+	}();
+	return cursor;
 }
 
 //-----------------------------------------------------------------------------
@@ -2333,12 +2372,16 @@ void CMapView2D::UpdateCursor( QPointF at )
 		{
 			if ( HandleInMode( where, nMode ) && Reached( handle ).contains( at ) )
 			{
+				if ( nMode == MapEditMode_t::MAP_EDIT_MODE_ROTATE )
+				{
+					setCursor( RotateCursor() );
+					return;
+				}
 				const bool bCorner = where.x() != 0 && where.y() != 0;
-				nShape = nMode == MapEditMode_t::MAP_EDIT_MODE_ROTATE ? Qt::CrossCursor
-					: nMode == MapEditMode_t::MAP_EDIT_MODE_SHEAR     ? ( where.x() == 0 ? Qt::SizeHorCursor : Qt::SizeVerCursor )
-					: bCorner                                         ? ( where.x() == where.y() ? Qt::SizeFDiagCursor : Qt::SizeBDiagCursor )
-					: where.x() == 0                                  ? Qt::SizeVerCursor
-																	  : Qt::SizeHorCursor;
+				nShape = nMode == MapEditMode_t::MAP_EDIT_MODE_SHEAR ? ( where.x() == 0 ? Qt::SizeHorCursor : Qt::SizeVerCursor )
+					: bCorner                                        ? ( where.x() == where.y() ? Qt::SizeFDiagCursor : Qt::SizeBDiagCursor )
+					: where.x() == 0                                 ? Qt::SizeVerCursor
+																	 : Qt::SizeHorCursor;
 				setCursor( nShape );
 				return;
 			}
