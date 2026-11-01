@@ -737,6 +737,7 @@ void CMapView3D::mousePressEvent( QMouseEvent *pEvent )
 				m_DragGizmo = gizmo;
 				m_pGizmoScene = GetDocument().GetSharedScene();
 				m_GizmoSelection = GetDocument().GetSelection();
+				UpdateCursor();
 			}
 		}
 	}
@@ -842,11 +843,11 @@ void CMapView3D::mousePressEvent( QMouseEvent *pEvent )
 //-----------------------------------------------------------------------------
 // Purpose: Selected overlays expose four corners and a centre in the Overlay tool only.
 //-----------------------------------------------------------------------------
-bool CMapView3D::BeginOverlayDrag( QPointF at )
+std::optional<std::pair<std::uint32_t, int>> CMapView3D::OverlayHandleAt( QPointF at ) const
 {
 	const auto *pScene = GetDocument().GetScene();
-	if ( !pScene )
-		return false;
+	if ( !pScene || m_Editor.GetTool() != MapTool_t::MAP_TOOL_OVERLAY )
+		return std::nullopt;
 	const auto camera = GetSizedCamera();
 	for ( const auto nObject : GetDocument().GetSelection() )
 	{
@@ -863,18 +864,33 @@ bool CMapView3D::BeginOverlayDrag( QPointF at )
 			if ( const auto projected = camera.Project( handle ) )
 			{
 				if ( QLineF( at, QPointF{ ( *projected )[ 0 ], ( *projected )[ 1 ] } ).length() <= 8 )
-				{
-					m_pOverlayScene = GetDocument().GetSharedScene();
-					m_nOverlayEntity = pScene->GetIndex( nObject );
-					m_nOverlayCorner = n;
-					m_OverlayFrom = handle;
-					m_OverlayEdit = {};
-					return true;
-				}
+					return std::pair{ pScene->GetIndex( nObject ), n };
 			}
 		}
 	}
-	return false;
+	return std::nullopt;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: The drag of the corner or centre under the mouse begins.
+//-----------------------------------------------------------------------------
+bool CMapView3D::BeginOverlayDrag( QPointF at )
+{
+	const auto handle = OverlayHandleAt( at );
+	if ( !handle )
+		return false;
+	const auto &entity = GetDocument().GetScene()->m_Map.m_Entities[ handle->first ];
+	const auto corners = xv::map::OverlayCorners( entity );
+	const auto origin = xv::map::ParsePoint( entity.GetValue( "BasisOrigin" ) );
+	if ( !corners || !origin )
+		return false;
+	m_pOverlayScene = GetDocument().GetSharedScene();
+	m_nOverlayEntity = handle->first;
+	m_nOverlayCorner = handle->second;
+	m_OverlayFrom = handle->second < 4 ? ( *corners )[ static_cast<std::size_t>( handle->second ) ] : *origin;
+	m_OverlayEdit = {};
+	UpdateCursor();
+	return true;
 }
 
 //-----------------------------------------------------------------------------
@@ -914,6 +930,7 @@ void CMapView3D::EndOverlayDrag( bool bCommit )
 		return;
 	m_pOverlayScene.reset();
 	GetDocument().EndPreview();
+	UpdateCursor();
 	if ( bCommit && !m_OverlayEdit.IsEmpty() )
 		GetDocument().Edit( std::move( m_OverlayEdit ), tr( "Edit Overlay" ) );
 	m_OverlayEdit = {};
@@ -1075,6 +1092,7 @@ void CMapView3D::EndGizmo( bool bCommit, QPointF at, Qt::KeyboardModifiers modif
 	m_DragGizmo.reset();
 	m_pGizmoScene.reset();
 	m_GizmoSelection.clear();
+	UpdateCursor();
 	if ( bCommit )
 	{
 		m_Editor.TransformSelection( transform, nMode == MapGizmoMode_t::MAP_GIZMO_MODE_TRANSLATE ? tr( "Move" ) : nMode == MapGizmoMode_t::MAP_GIZMO_MODE_ROTATE ? tr( "Rotate" )
@@ -1171,6 +1189,7 @@ void CMapView3D::mouseMoveEvent( QMouseEvent *pEvent )
 		{
 			m_nGizmoHover = nHover;
 			RedrawLabels();
+			UpdateCursor();
 		}
 	}
 	auto look = [ & ] { Look( delta ); };
@@ -1436,7 +1455,12 @@ void CMapView3D::UpdateCursor()
 	{
 		return;
 	}
-	const Qt::CursorShape nShape = ( IsPaintingDisplacements() || IsSprinkling() || !m_Editor.GetFacePickKey().isEmpty() ) ? Qt::CrossCursor : Qt::ArrowCursor;
+	// A handle being dragged, one that can be, or a brush (or a face pick) to aim.
+	Qt::CursorShape nShape = ( IsPaintingDisplacements() || IsSprinkling() || !m_Editor.GetFacePickKey().isEmpty() ) ? Qt::CrossCursor : Qt::ArrowCursor;
+	if ( m_nGizmoDrag >= 0 || m_pOverlayScene )
+		nShape = Qt::ClosedHandCursor;
+	else if ( m_nGizmoHover >= 0 || OverlayHandleAt( mapFromGlobal( QCursor::pos() ) ) )
+		nShape = Qt::OpenHandCursor;
 	if ( cursor().shape() != nShape )
 	{
 		setCursor( nShape );

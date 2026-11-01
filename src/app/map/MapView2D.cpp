@@ -2391,6 +2391,7 @@ void CMapView2D::mouseMoveEvent( QMouseEvent *pEvent )
 	}
 	if ( m_MoveFrom && ( pEvent->buttons() & Qt::LeftButton ) && ( m_pMoveScene || ( pEvent->position().toPoint() - m_PressAt ).manhattanLength() >= DRAG_THRESHOLD ) )
 	{
+		setCursor( Qt::ClosedHandCursor );
 		PreviewMove( pEvent->position(), pEvent->modifiers() );
 		return;
 	}
@@ -2489,6 +2490,7 @@ void CMapView2D::mouseReleaseEvent( QMouseEvent *pEvent )
 		}
 		m_BoxFrom.reset();
 		m_PressAt = {};
+		UpdateCursor( pEvent->position() );
 		update();
 		return;
 	}

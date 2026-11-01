@@ -135,6 +135,8 @@ private:
 	void PaintTools( QPainter &painter );
 	void UpdateCollapsibleVertices();
 	bool BeginOverlayDrag( QPointF at );
+	// A selected overlay's corner (0 to 3) or centre (4) under the mouse, with the Overlay tool.
+	[[nodiscard]] std::optional<std::pair<std::uint32_t, int>> OverlayHandleAt( QPointF at ) const;
 	void PreviewOverlayDrag( QPointF at );
 	void EndOverlayDrag( bool bCommit );
 	std::shared_ptr<const xv::map::CScene> m_pOverlayScene;
