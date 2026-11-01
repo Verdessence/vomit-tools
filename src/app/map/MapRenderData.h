@@ -40,7 +40,6 @@ struct MapFrame_t
 	std::shared_ptr<const xv::map::MeshParts_t> m_pEntityParts;
 	std::shared_ptr<const xv::map::MeshParts_t> m_pPropParts;
 	std::shared_ptr<const xv::map::MeshParts_t> m_pOverlayParts;
-	std::shared_ptr<const xv::map::MeshParts_t> m_pSpriteParts;
 	std::shared_ptr<const xv::map::CMapMesh> m_pEntityPreviewMesh;
 	bool m_bEntityPreview = false;
 	std::vector<std::uint32_t> m_EntityPreviewObjects;
@@ -140,7 +139,6 @@ private:
 	std::shared_ptr<const std::vector<xv::map::RasterMaterial_t>> m_pReceivedMaterials;
 	std::uint64_t m_nPropsRevision = 0, m_nPropMaterialsRevision = 0;
 	xv::map::Point_t m_PreviewRight{ 1, 0, 0 }, m_PreviewUp{ 0, 0, 1 };
-	std::map<std::uint32_t, std::vector<xv::map::SpritePlacement_t>> m_SpritePlacements;
 	const xv::map::CScene *m_pBuiltFor = nullptr;
 	const xv::map::CMapMesh *m_pBuiltMesh = nullptr; // the mesh as read of the map it was built for
 	std::uint32_t m_nEntityMaterial = 0;            // where entity boxes' material is in the table

@@ -127,7 +127,7 @@ xv::map::RasterScene_t MapFrame_t::MakeScene() const
 		appendParts( m_pEntityParts, std::shared_ptr<const xv::map::CMapMesh>{} );
 	appendParts( m_pPropParts, m_pPropMesh, true );
 	appendParts( m_pOverlayParts, m_pOverlayMesh );
-	appendParts( m_pSpriteParts, m_pSpriteMesh );
+	append( m_pSpriteMesh, false, m_bEntityPreview );
 	if ( m_pEntityPreviewMesh )
 		scene.m_Meshes.push_back( m_pEntityPreviewMesh.get() );
 	// Last: they are see-through, drawn over what is behind them.
@@ -804,33 +804,20 @@ MapFrame_t CMapRenderData::Snapshot( const xv::map::CViewCamera &camera, const x
 			UpdateFlatColors();
 		}
 	}
-	// Each sprite has a buffer of its own; moving one retains all other billboards.
+	// One mesh for every sprite, made again whenever the camera turns (they all turn with it). A
+	// mesh each would keep the others' buffers when one moves, but a mouselook would make
+	// hundreds of buffers a frame; while entities are dragged the mesh counts as read, so the
+	// dragged ones' old places are left out.
 	if ( m_pSprites && !m_pSprites->empty() )
 	{
 		const auto right = camera.GetRight(), up = camera.GetUp();
 		if ( !m_Frame.m_pSpriteMesh || right != m_SpritesRight || up != m_SpritesUp )
 		{
-			const bool bTurned = right != m_SpritesRight || up != m_SpritesUp;
 			m_SpritesRight = right;
 			m_SpritesUp = up;
-			auto pParts = std::make_shared<xv::map::MeshParts_t>();
-			std::map<std::uint32_t, std::vector<xv::map::SpritePlacement_t>> placements;
-			for ( const auto &sprite : *m_pSprites )
-				placements[ sprite.m_nObject ].push_back( sprite );
-			for ( const auto &[ nObject, sprites ] : placements )
-			{
-				if ( !bTurned && m_Frame.m_pSpriteParts && m_SpritePlacements.contains( nObject ) && m_SpritePlacements.at( nObject ) == sprites && m_Frame.m_pSpriteParts->contains( nObject ) )
-					( *pParts )[ nObject ] = m_Frame.m_pSpriteParts->at( nObject );
-				else
-					( *pParts )[ nObject ] = std::make_shared<const xv::map::CMapMesh>( xv::map::BuildSpriteMesh( sprites, right, up ) );
-			}
-			m_SpritePlacements = std::move( placements );
-			m_Frame.m_pSpriteParts = pParts;
 			m_Frame.m_pSpriteMesh = std::make_shared<const xv::map::CMapMesh>( xv::map::BuildSpriteMesh( *m_pSprites, right, up ) );
 		}
 	}
-	else
-		m_Frame.m_pSpriteParts.reset();
 	if ( m_Frame.m_bEntityPreview && ( camera.GetRight() != m_PreviewRight || camera.GetUp() != m_PreviewUp ) )
 		UpdateEntityPreview( camera.GetRight(), camera.GetUp() );
 	// The particles face this camera; their materials follow everything else's.
@@ -941,7 +928,7 @@ void CMapRenderData::UpdateMeshLights()
 	add( m_Frame.m_pPropMesh, m_Frame.m_pPropParts );
 	add( m_Frame.m_pOverlayMesh, m_Frame.m_pOverlayParts );
 	const std::size_t nSprites = lit.size();
-	add( m_Frame.m_pSpriteMesh, m_Frame.m_pSpriteParts );
+	lit.push_back( m_Frame.m_pSpriteMesh );
 	if ( m_pMeshLights && lit == m_MeshLightsKeep )
 	{
 		return;
