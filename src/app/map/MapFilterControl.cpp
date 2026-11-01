@@ -7,6 +7,7 @@
 //===========================================================================//
 #include "map/MapFilterControl.h"
 
+#include <array>
 #include <set>
 #include <string>
 
@@ -126,14 +127,22 @@ CMapFilterControl::CMapFilterControl( CMapDocument &document, QWidget *pParent )
 	m_pDeleteCordon->setText( tr( "Delete" ) );
 	m_pDeleteCordon->setObjectName( QStringLiteral( "mapCordonsDelete" ) );
 	m_pDeleteCordon->setToolTip( tr( "Delete the picked box, or the cordon when it is its only one" ) );
-	for ( QToolButton *pButton : { pNew, m_pAddBox, m_pDeleteCordon } )
+	// Hidden, each keeps its room: the row beside the tabs is as tall with them as without.
+	const std::array<QToolButton *, 3> cordonButtons{ pNew, m_pAddBox, m_pDeleteCordon };
+	for ( QToolButton *pButton : cordonButtons )
 	{
+		QSizePolicy policy = pButton->sizePolicy();
+		policy.setRetainSizeWhenHidden( true );
+		pButton->setSizePolicy( policy );
 		pCordonButtonsLayout->addWidget( pButton );
 	}
 	m_pTabs->setCornerWidget( pCordonButtons, Qt::BottomRightCorner );
 	// Every tab in sight, and room for the buttons whether they show or not: the side keeps
 	// its width as the tabs change.
 	m_pTabs->setUsesScrollButtons( false );
+	// At the left edge, in line with Mark and Show All under them, in any style: one that
+	// centres tabs would shift them each time the buttons came and went.
+	m_pTabs->setStyleSheet( QStringLiteral( "QTabWidget::tab-bar { alignment: left; left: 0px; }" ) );
 	m_pTabs->tabBar()->setExpanding( false );
 	setMinimumWidth( m_pTabs->tabBar()->sizeHint().width() + pCordonButtons->sizeHint().width() + 8 );
 	pLayout->addWidget( m_pTabs, 1 );
@@ -163,9 +172,12 @@ CMapFilterControl::CMapFilterControl( CMapDocument &document, QWidget *pParent )
 	pRow->addWidget( pVisgroupRow );
 	pRow->addWidget( pCordonRow );
 	pLayout->addWidget( pRow );
-	const auto tabChanged = [ this, pRow, pCordonButtons, pVisgroupRow, pCordonRow ] {
+	const auto tabChanged = [ this, pRow, cordonButtons, pVisgroupRow, pCordonRow ] {
 		const bool bCordons = m_pTabs->currentWidget() == m_pCordons;
-		pCordonButtons->setVisible( bCordons );
+		for ( QToolButton *pButton : cordonButtons )
+		{
+			pButton->setVisible( bCordons );
+		}
 		pRow->setCurrentWidget( bCordons ? pCordonRow : pVisgroupRow );
 	};
 	connect( m_pTabs, &QTabWidget::currentChanged, this, tabChanged );
