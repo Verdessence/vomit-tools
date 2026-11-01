@@ -3685,7 +3685,8 @@ bool CMapEditor::ConfirmClose()
 //-----------------------------------------------------------------------------
 bool CMapEditor::Save()
 {
-	if ( m_bFromGame || m_szPath.isEmpty() || !m_pDocument->IsLoaded() )
+	// A manifest is shown as one map; it is saved as one (a VMF), never over the manifest.
+	if ( m_bFromGame || m_szPath.isEmpty() || !m_pDocument->IsLoaded() || IsManifest() )
 	{
 		return m_pDocument->IsLoaded() && SaveAs();
 	}
@@ -3709,11 +3710,18 @@ bool CMapEditor::SaveAs()
 		return false;
 	}
 	// A bare name starts in the folder the last file window finished in.
-	const QString szStart = m_szPath.isEmpty() ? QStringLiteral( "untitled.vmf" ) : m_bFromGame ? QFileInfo{ m_szPath }.fileName()
-																								: m_szPath;
+	QString szStart = m_szPath.isEmpty() ? QStringLiteral( "untitled.vmf" ) : m_bFromGame ? QFileInfo{ m_szPath }.fileName()
+																						  : m_szPath;
+	if ( IsManifest() )
+		szStart = szStart.chopped( 4 ) + QStringLiteral( ".vmf" );
 	const QString szFile = AskSaveFile( this, tr( "Save Map As" ), szStart, tr( "Hammer maps (*.vmf)" ) );
 	if ( szFile.isEmpty() )
 	{
+		return false;
+	}
+	if ( IsManifest() && szFile.endsWith( u".vmm", Qt::CaseInsensitive ) )
+	{
+		QMessageBox::warning( this, tr( "Save failed" ), tr( "A manifest is saved as one map: choose a .vmf name." ) );
 		return false;
 	}
 	QString szError;

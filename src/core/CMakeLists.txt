@@ -43,6 +43,8 @@ add_library(vomit_tools_core STATIC
         map/Lighting.cpp
         map/Lighting.h
         map/Map.h
+        map/Manifest.cpp
+        map/Manifest.h
         map/Materials.cpp
         map/Materials.h
         map/Mesh.cpp

@@ -247,6 +247,8 @@ public:
 	// Tools > Building Generator: a template filling the block tool's box (else the selection's
 	// bounds), added as one group in one undo step.
 	void ShowBuildingGenerator();
+	// Opened from a .vmm: its submaps are instances, and saving asks for a VMF.
+	[[nodiscard]] bool IsManifest() const { return m_szPath.endsWith( u".vmm", Qt::CaseInsensitive ); }
 	[[nodiscard]] CMapSprinklePanel &GetSprinkle() { return *m_pSprinkle; }
 	// The Displacement tab's edits, each one undo step, on the selected faces (else every face
 	// of the selected objects): displacements made at a power on four-sided faces, taken off,

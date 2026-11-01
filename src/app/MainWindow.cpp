@@ -6,6 +6,7 @@
 //===========================================================================//
 #include "MainWindow.h"
 #include "HammerSetupDialog.h"
+#include "map/Manifest.h"
 
 #include <set>
 
@@ -433,7 +434,7 @@ CMainWindow::CMainWindow( QWidget *pParent, xv::audio::CEngine::Output_t nAudio 
 		{
 			OpenModelFile( szPath );
 		}
-		else if ( szPath.endsWith( u".vmf", Qt::CaseInsensitive ) )
+		else if ( szPath.endsWith( u".vmf", Qt::CaseInsensitive ) || szPath.endsWith( u".vmm", Qt::CaseInsensitive ) )
 		{
 			OpenMapFile( szPath );
 		}
@@ -1053,7 +1054,7 @@ void CMainWindow::ChooseFiles()
 	const QString szStart = LastFolderOr( m_pFolders->GetFolder().isEmpty() && m_Game ? ToQString( m_Game->m_GameDir ) : m_pFolders->GetFolder() );
 	const QStringList files = AskOpenFiles( this, tr( "Open File" ), szStart,
 		tr( "Soundscapes and soundscripts (*.txt);;Detail files (*.vbsp);;Sounds (*.wav *.mp3);;Textures (*.vtf);;Models (*.mdl *.vvd *.vtx *.phy *.ani);;Sky faces and textures (*.vmt *.vtf *.png *.tga *.jpg *.jpeg *.bmp *.psd *.hdr);;Particles (*.pcf *.dmx);;"
-			"KeyValues (*.txt *.vmt *.vdf *.res);;Hammer maps (*.vmf);;Archives and maps (*.vpk *.bsp *.gcf *.gma *.pak *.wad *.xzp *.zip);;Game info (gameinfo.txt);;All files (*)" ) );
+			"KeyValues (*.txt *.vmt *.vdf *.res);;Hammer maps (*.vmf *.vmm);;Archives and maps (*.vpk *.bsp *.gcf *.gma *.pak *.wad *.xzp *.zip);;Game info (gameinfo.txt);;All files (*)" ) );
 	OpenPaths( files );
 }
 
@@ -1878,9 +1879,9 @@ void CMainWindow::PreviewDiskFile( const QString &szPath )
 	{
 		pView = WithEditButton( pView, tr( "This is a detail file." ), tr( "Open in Details Editor" ), [ this, szPath ] { OpenDiskFile( szPath ); } );
 	}
-	else if ( info.suffix().compare( u"vmf", Qt::CaseInsensitive ) == 0 )
+	else if ( info.suffix().compare( u"vmf", Qt::CaseInsensitive ) == 0 || info.suffix().compare( u"vmm", Qt::CaseInsensitive ) == 0 )
 	{
-		pView = WithEditButton( pView, tr( "This is a Hammer map." ), tr( "Open Map Viewer" ), [ this, szPath ] { OpenDiskFile( szPath ); } );
+		pView = WithEditButton( pView, info.suffix().compare( u"vmm", Qt::CaseInsensitive ) == 0 ? tr( "This is a Hammer map manifest." ) : tr( "This is a Hammer map." ), tr( "Open Map Viewer" ), [ this, szPath ] { OpenDiskFile( szPath ); } );
 	}
 	else if ( info.suffix().compare( u"mdl", Qt::CaseInsensitive ) == 0 )
 	{
@@ -1947,7 +1948,7 @@ void CMainWindow::OpenDiskFile( const QString &szPath )
 		OpenModelFile( info.absoluteFilePath() );
 		return;
 	}
-	if ( info.suffix().compare( u"vmf", Qt::CaseInsensitive ) == 0 )
+	if ( info.suffix().compare( u"vmf", Qt::CaseInsensitive ) == 0 || info.suffix().compare( u"vmm", Qt::CaseInsensitive ) == 0 )
 	{
 		OpenMapFile( info.absoluteFilePath() );
 		return;
@@ -5105,6 +5106,21 @@ CMapEditor *CMainWindow::OpenMapFile( const QString &szPath )
 		}
 		source.m_Text.assign( data->begin(), data->end() );
 		source.m_DiskPath = ToPath( szOrigin );
+		// A manifest opens as a map of its submaps, each an instance (map/Manifest.h).
+		if ( szOrigin.endsWith( u".vmm", Qt::CaseInsensitive ) )
+		{
+			std::vector<std::string> problems;
+			const auto maps = xv::map::ReadManifest( std::string_view{ source.m_Text.data(), source.m_Text.size() }, source.m_DiskPath, &problems );
+			if ( std::ranges::none_of( maps, []( const auto &map ) { return !map.m_Path.empty(); } ) )
+			{
+				QMessageBox::warning( this, tr( "Cannot open" ), tr( "%1 names no submap that is there.\n%2" ).arg( QDir::toNativeSeparators( szOrigin ), QString::fromStdString( problems.empty() ? std::string{} : problems.front() ) ) );
+				return nullptr;
+			}
+			const std::string szComposed = xv::map::ManifestToVmf( maps, source.m_DiskPath );
+			source.m_Text.assign( szComposed.begin(), szComposed.end() );
+			for ( const std::string &szProblem : problems )
+				statusBar()->showMessage( tr( "%1: %2" ).arg( QFileInfo( szOrigin ).fileName(), QString::fromStdString( szProblem ) ), 10000 );
+		}
 	}
 	else
 	{
