@@ -6,6 +6,8 @@
 //          two keys (wirebox()), an arrow along its angles (direction()), a projected texture's
 //          frustum (frustum()), the faces a side list names (sidelist()), and its radii
 //          (sphere()) as rings, as segments the 2D and 3D views draw for selected entities.
+//          Besides the FGD's: where moving brushes go (doors, buttons, func_movelinear) and the
+//          way along a train's path.
 //
 //===========================================================================//
 #pragma once

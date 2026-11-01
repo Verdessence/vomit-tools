@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <cmath>
 #include <numbers>
+#include <optional>
 
 #include "kv1/Kv1.h"
 #include "map/Entities.h"
@@ -28,6 +29,10 @@ namespace
 constexpr double ARROW_LENGTH = 32.0;
 constexpr double CONE_LENGTH = 128.0;
 constexpr int RING_SEGMENTS = 48;
+// Where moving brushes go, and which way trains run along their paths.
+constexpr Color_t MOVEMENT_COLOR{ 80, 200, 255 };
+constexpr Color_t PATH_COLOR{ 255, 170, 40 };
+constexpr std::size_t MAX_PATH_LINKS = 512;
 
 //-----------------------------------------------------------------------------
 // Purpose: An entity name as the I/O system matches it: without case, a trailing * matching
@@ -129,6 +134,116 @@ void Box( std::vector<HelperLine_t> &out, Point_t mins, Point_t maxs, Color_t co
 				out.push_back( { corner( n ), corner( n | nBit ), color } );
 }
 
+//-----------------------------------------------------------------------------
+// Purpose: A line with a head at its end (or at its middle when bHeadInMiddle, for a chain's
+//          links, so the head isn't lost in the next one's start).
+//-----------------------------------------------------------------------------
+void Arrow( std::vector<HelperLine_t> &out, Point_t from, Point_t to, Color_t color, bool bHeadInMiddle = false )
+{
+	const Point_t delta = Subtract( to, from );
+	const double flLength = Length( delta );
+	out.push_back( { from, to, color } );
+	if ( flLength < 1e-6 )
+		return;
+	const Point_t forward = Scale( delta, 1.0 / flLength );
+	const Point_t tip = bHeadInMiddle ? Add( from, Scale( delta, 0.5 ) ) : to;
+	const double flHead = std::min( ARROW_LENGTH / 2.0, flLength / 3.0 );
+	const auto [ u, v ] = Across( forward );
+	for ( const Point_t &dir : { u, Scale( u, -1.0 ), v, Scale( v, -1.0 ) } )
+		out.push_back( { tip, Add( Subtract( tip, Scale( forward, flHead ) ), Scale( dir, flHead / 2.0 ) ), color } );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: The way a movedir key points: angles as Hammer writes them, with the game's two
+//          special yaws (-1 up, -2 down).
+//-----------------------------------------------------------------------------
+Point_t MoveDirection( const Entity_t &entity )
+{
+	const std::array<double, 3> angles = ParseTriple( entity.GetValue( "movedir" ) ).value_or( std::array<double, 3>{} );
+	if ( angles[ 0 ] == 0.0 && angles[ 2 ] == 0.0 && angles[ 1 ] == -1.0 )
+		return { 0, 0, 1 };
+	if ( angles[ 0 ] == 0.0 && angles[ 2 ] == 0.0 && angles[ 1 ] == -2.0 )
+		return { 0, 0, -1 };
+	return Transform_t::FromAngles( {}, angles ).Rotate( { 1, 0, 0 } );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Where a moving brush entity goes: the way, from where it starts to where it stops,
+//          and its box at the far end. Doors and buttons travel their own size along movedir
+//          less lip (the game leaves two units of the size out); func_movelinear and
+//          func_water_analog travel movedistance, from startposition of the way along it.
+//-----------------------------------------------------------------------------
+void Movement( const CScene &scene, const Entity_t &entity, std::vector<HelperLine_t> &out )
+{
+	const std::string_view szClass = entity.GetClassname();
+	const bool bDoor = kv1::EqualsIgnoreCase( szClass, "func_door" ) || kv1::EqualsIgnoreCase( szClass, "func_button" ) || kv1::EqualsIgnoreCase( szClass, "momentary_door" );
+	const bool bLinear = kv1::EqualsIgnoreCase( szClass, "func_movelinear" ) || kv1::EqualsIgnoreCase( szClass, "func_water_analog" );
+	if ( ( !bDoor && !bLinear ) || entity.m_Solids.empty() )
+		return;
+	Box_t bounds;
+	for ( const std::uint32_t nSolid : entity.m_Solids )
+		if ( nSolid < scene.m_Solids.size() )
+			bounds.Add( scene.m_Solids[ nSolid ].m_Bounds );
+	if ( bounds.IsEmpty() )
+		return;
+	const Point_t direction = MoveDirection( entity );
+	Point_t start = bounds.GetCenter();
+	double flDistance = 0.0;
+	if ( bDoor )
+	{
+		const Point_t size = Subtract( bounds.m_Maxs, bounds.m_Mins );
+		for ( int i = 0; i < 3; i++ )
+			flDistance += std::abs( direction[ i ] * ( size[ i ] - 2.0 ) );
+		flDistance -= KeyNumber( entity, "lip", 0.0 );
+	}
+	else
+	{
+		flDistance = KeyNumber( entity, "movedistance", 100.0 );
+		start = Subtract( start, Scale( direction, flDistance * KeyNumber( entity, "startposition", 0.0 ) ) );
+	}
+	const Point_t offset = Scale( direction, flDistance );
+	const Point_t end = Add( start, offset );
+	const Point_t shift = Subtract( start, bounds.GetCenter() );
+	Arrow( out, start, end, MOVEMENT_COLOR );
+	Box( out, Add( Add( bounds.m_Mins, shift ), offset ), Add( Add( bounds.m_Maxs, shift ), offset ), MOVEMENT_COLOR );
+	if ( Length( shift ) > 1e-6 )
+		Box( out, Add( bounds.m_Mins, shift ), Add( bounds.m_Maxs, shift ), MOVEMENT_COLOR );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: A train's path, from its first corner (its target), or a path's from itself: each
+//          link along target to the next, with its way marked, until the path ends or comes
+//          round again.
+//-----------------------------------------------------------------------------
+void TrainPath( const CScene &scene, std::uint32_t nEntity, std::vector<HelperLine_t> &out )
+{
+	const auto &entities = scene.m_Map.m_Entities;
+	const Entity_t &entity = entities[ nEntity ];
+	const std::string_view szClass = entity.GetClassname();
+	const bool bTrain = kv1::EqualsIgnoreCase( szClass, "func_tracktrain" ) || kv1::EqualsIgnoreCase( szClass, "func_train" );
+	const bool bPath = kv1::EqualsIgnoreCase( szClass, "path_track" ) || kv1::EqualsIgnoreCase( szClass, "path_corner" );
+	if ( !bTrain && !bPath )
+		return;
+	const auto find = [ & ]( std::string_view szName ) -> std::optional<std::size_t> {
+		if ( szName.empty() )
+			return std::nullopt;
+		for ( std::size_t e = 0; e < entities.size(); e++ )
+			if ( !entities[ e ].m_bDeleted && kv1::EqualsIgnoreCase( entities[ e ].GetValue( "targetname" ), szName ) )
+				return e;
+		return std::nullopt;
+	};
+	std::optional<std::size_t> nAt = bTrain ? find( entity.GetValue( "target" ) ) : std::optional<std::size_t>{ nEntity };
+	std::vector<std::size_t> seen;
+	while ( nAt && seen.size() < MAX_PATH_LINKS && std::ranges::find( seen, *nAt ) == seen.end() )
+	{
+		seen.push_back( *nAt );
+		const std::optional<std::size_t> nNext = find( entities[ *nAt ].GetValue( "target" ) );
+		if ( nNext )
+			Arrow( out, scene.m_Entities[ *nAt ].m_Origin, scene.m_Entities[ *nNext ].m_Origin, PATH_COLOR, true );
+		nAt = nNext;
+	}
+}
+
 } // namespace
 
 //-----------------------------------------------------------------------------
@@ -149,6 +264,8 @@ EntityHelpers_t DescribeHelpers( const CScene &scene, std::uint32_t nEntity )
 		Ring( helpers.m_Rings, origin, { 1, 0, 0 }, { 0, 0, 1 }, flRadius, color );
 		Ring( helpers.m_Rings, origin, { 0, 1, 0 }, { 0, 0, 1 }, flRadius, color );
 	}
+	Movement( scene, entity, helpers.m_Lines );
+	TrainPath( scene, nEntity, helpers.m_Lines );
 	if ( !visual.m_pClass )
 		return helpers;
 	for ( const FgdHelper_t &helper : visual.m_pClass->m_Helpers )
