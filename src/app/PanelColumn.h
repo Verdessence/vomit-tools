@@ -5,7 +5,8 @@
 //          header that folds it and drags it to another place in the column, and a strip of
 //          tabs down the side shows or hides each one (several at once, unlike Blender's
 //          tabs). A panel can belong to a mode, as Blender's tool settings do: while its mode is
-//          off, neither it nor its tab is there (SetAvailable). The column scrolls when its panels are taller than it; a panel that stretches
+//          off, neither it nor its tab is there (SetAvailable), and its tab sits at the strip's
+//          foot, under a line, apart from the tabs that are always there. The column scrolls when its panels are taller than it; a panel that stretches
 //          takes the height left over when they aren't. Which panels show, which are folded and
 //          their order are kept as one value (GetState, SetState).
 //
@@ -112,6 +113,7 @@ private:
 		CPanel *m_pPanel = nullptr;
 		QToolButton *m_pTab = nullptr;
 		bool m_bAvailable = true;
+		bool m_bMode = false; // comes and goes with a mode (SetAvailable has been called)
 	};
 
 	// The layouts' order and stretch from m_Entries.
@@ -122,6 +124,7 @@ private:
 	std::vector<Entry_t> m_Entries; // in the column's order
 	QWidget *m_pStrip = nullptr;
 	QVBoxLayout *m_pTabs = nullptr;
+	QWidget *m_pModeLine = nullptr; // between the tabs always there and the modes' tabs
 	QScrollArea *m_pScroll = nullptr;
 	QWidget *m_pContent = nullptr;
 	QVBoxLayout *m_pPanels = nullptr;

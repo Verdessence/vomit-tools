@@ -14,6 +14,7 @@
 #include <QDragMoveEvent>
 #include <QDropEvent>
 #include <QHBoxLayout>
+#include <QFrame>
 #include <QLabel>
 #include <QMimeData>
 #include <QMouseEvent>
@@ -192,6 +193,10 @@ CPanelColumn::CPanelColumn( QWidget *pParent )
 	m_pTabs->setContentsMargins( 2, 4, 2, 4 );
 	m_pTabs->setSpacing( 2 );
 	m_pTabs->addStretch( 1 );
+	m_pModeLine = new QFrame;
+	m_pModeLine->setObjectName( QStringLiteral( "panelModeLine" ) );
+	static_cast<QFrame *>( m_pModeLine )->setFrameShape( QFrame::HLine );
+	static_cast<QFrame *>( m_pModeLine )->setFrameShadow( QFrame::Sunken );
 	pLayout->addWidget( pStrip );
 
 	m_pScroll = new QScrollArea;
@@ -308,11 +313,12 @@ bool CPanelColumn::IsAvailable( const QString &szId ) const
 void CPanelColumn::SetAvailable( const QString &szId, bool bAvailable )
 {
 	const auto it = std::ranges::find_if( m_Entries, [ & ]( const Entry_t &entry ) { return entry.m_pPanel->GetId() == szId; } );
-	if ( it == m_Entries.end() || it->m_bAvailable == bAvailable )
+	if ( it == m_Entries.end() || ( it->m_bAvailable == bAvailable && it->m_bMode ) )
 	{
 		return;
 	}
 	it->m_bAvailable = bAvailable;
+	it->m_bMode = true;
 	Relayout();
 }
 
@@ -576,12 +582,26 @@ void CPanelColumn::Relayout()
 		bStretching = bStretching || bStretch;
 		m_pPanels->addWidget( entry.m_pPanel, bStretch ? 1 : 0 );
 		entry.m_pPanel->setVisible( bShown );
-		m_pTabs->addWidget( entry.m_pTab );
 		entry.m_pTab->setVisible( entry.m_bAvailable );
 	}
 	if ( !bStretching )
 	{
 		m_pPanels->addStretch( 1 );
 	}
+	// The tabs always there at the top; the modes' at the foot, under a line while one is there.
+	bool bModeTab = false;
+	for ( const Entry_t &entry : m_Entries )
+	{
+		if ( !entry.m_bMode )
+			m_pTabs->addWidget( entry.m_pTab );
+		bModeTab = bModeTab || ( entry.m_bMode && entry.m_bAvailable );
+	}
 	m_pTabs->addStretch( 1 );
+	m_pTabs->addWidget( m_pModeLine );
+	m_pModeLine->setVisible( bModeTab );
+	for ( const Entry_t &entry : m_Entries )
+	{
+		if ( entry.m_bMode )
+			m_pTabs->addWidget( entry.m_pTab );
+	}
 }

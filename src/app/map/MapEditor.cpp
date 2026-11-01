@@ -406,6 +406,7 @@ CMapEditor::CMapEditor( const QString &szPath, bool bFromGame, QWidget *pParent 
 	m_pProperties->setMinimumHeight( 260 );
 	m_pPanels->AddPanel( QStringLiteral( "properties" ), tr( "Object Properties" ), MakeIcon( MapIcon_t::MAP_ICON_PROPERTIES, panelIconColor ), m_pProperties, true );
 	m_pPanels->AddPanel( QStringLiteral( "faceEdit" ), tr( "Face Edit" ), MakeIcon( MapIcon_t::MAP_ICON_TEXTURE, panelIconColor ), m_pFaceEditHolder );
+	m_pPanels->SetAvailable( QStringLiteral( "faceEdit" ), false ); // the texture tool's, there only with it
 	m_pSprinkle = new CMapSprinklePanel;
 	m_pPanels->AddPanel( QStringLiteral( "sprinkle" ), tr( "Sprinkle" ), MakeIcon( MapIcon_t::MAP_ICON_SPRINKLE, panelIconColor ), m_pSprinkle );
 	m_pPanels->SetAvailable( QStringLiteral( "sprinkle" ), false );
