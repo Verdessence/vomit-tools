@@ -68,6 +68,12 @@ struct MaterialInfo_t
 	std::optional<CVec3> m_Reflectivity; // $reflectivity: what it bounces, over its texture's
 	bool m_bSelfIllum = false;         // $selfillum: glows by its base texture's alpha
 	CVec3 m_vecSelfIllumTint{ 1, 1, 1 };
+	// Refract and Water: what is behind tinted (m_szTexture is then the normal map, m_szTexture2
+	// $refracttinttexture), and the reflection ($envmap; water always) more at grazing angles.
+	bool m_bRefract = false;
+	CVec3 m_vecRefractTint{ 1, 1, 1 };
+	bool m_bEnvMap = false;
+	CVec3 m_vecEnvTint{ 1, 1, 1 };
 	// Its proxies that change it over time (AnimatedTexture, TextureScroll, Sine...); null when
 	// none does.
 	std::shared_ptr<const material::CProxies> m_pProxies;

@@ -816,7 +816,7 @@ std::vector<CMapResources::Loaded_t> CMapResources::ReadMaterials( const std::ve
 		{
 			base[ i ] = read( xv::material::TexturePath( loaded.m_Info.m_szTexture ) );
 		}
-		if ( loaded.m_Info.m_bBlend && !loaded.m_Info.m_szTexture2.empty() )
+		if ( ( loaded.m_Info.m_bBlend || loaded.m_Info.m_bRefract ) && !loaded.m_Info.m_szTexture2.empty() )
 		{
 			base2[ i ] = read( xv::material::TexturePath( loaded.m_Info.m_szTexture2 ) );
 		}
@@ -947,6 +947,10 @@ void CMapResources::Take( std::vector<Loaded_t> batch )
 		shade.m_vecColor = info.m_vecColor;
 		shade.m_bSelfIllum = info.m_bSelfIllum;
 		shade.m_vecSelfIllumTint = info.m_vecSelfIllumTint;
+		shade.m_bRefract = info.m_bRefract;
+		shade.m_vecRefractTint = info.m_vecRefractTint;
+		shade.m_bEnvMap = info.m_bEnvMap;
+		shade.m_vecEnvTint = info.m_vecEnvTint;
 		material.m_bNoCull = info.m_bNoCull;
 		shade.m_bSky = info.IsSky();
 		shade.m_bTinted = loaded.m_bSprite;
@@ -978,7 +982,10 @@ void CMapResources::Take( std::vector<Loaded_t> batch )
 		{
 			m_LightCurrent.resize( loaded.m_nMaterial + 1 );
 		}
-		m_LightCurrent[ loaded.m_nMaterial ] = xv::map::DescribeLightMaterial( info, loaded.m_pBase ? loaded.m_pBase->m_Reflectivity : std::array<float, 3>{}, loaded.m_pBase ? std::array<int, 2>{ loaded.m_pBase->m_nWidth, loaded.m_pBase->m_nHeight } : std::array<int, 2>{} );
+		// Refract and water have no $basetexture for vrad to read the reflectivity of (theirs is the
+		// normal map): its default.
+		const bool bReflectivity = loaded.m_pBase && !info.m_bRefract;
+		m_LightCurrent[ loaded.m_nMaterial ] = xv::map::DescribeLightMaterial( info, bReflectivity ? loaded.m_pBase->m_Reflectivity : std::array<float, 3>{}, loaded.m_pBase ? std::array<int, 2>{ loaded.m_pBase->m_nWidth, loaded.m_pBase->m_nHeight } : std::array<int, 2>{} );
 		if ( loaded.m_pBase )
 		{
 			m_Keep.push_back( loaded.m_pBase );

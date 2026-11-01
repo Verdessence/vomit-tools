@@ -42,6 +42,9 @@ layout(std140, binding = 1) uniform Material {
 	vec4 selfIllum; // $selfillumtint, and 1 when it glows by its base texture's alpha
 	vec4 uvTransform; // $basetexturetransform: u' = a*u + b*v + tx, v' = c*u + d*v + ty (a b c d)
 	vec4 uvOffset;    // tx ty
+	vec4 refraction;  // 1: Refract or Water (base is its normal map, base2 its tint texture); 1: the reflection's pass, else the tint's; 1: reflects
+	vec4 refractTint; // rgb
+	vec4 envTint;     // rgb
 } material;
 
 layout(binding = 2) uniform sampler2D base;
@@ -132,6 +135,42 @@ vec4 sampleFiltered(sampler2D tex, vec2 texel, vec2 size, vec2 across, vec2 down
 	return sum / count;
 }
 
+// What a Refract or Water face does to what is behind it, as xv::map::ShadeRefract: the tint
+// (drawn as a multiply) or, in the reflection's pass, the reflection (added).
+vec4 shadeRefract(vec2 across, vec2 down, vec3 face) {
+	vec2 full = max(material.size.xy, vec2(1.0));
+	vec2 uv = v_texel / full;
+	vec3 normal = face;
+	if (material.kind.y > 0.5) {
+		mat2 turn = mat2(material.uvTransform.x, material.uvTransform.z, material.uvTransform.y, material.uvTransform.w);
+		vec2 movedTexel = (turn * uv + material.uvOffset.xy) * full;
+		vec4 bump = sampleFiltered(base, movedTexel, material.size.xy, across, down);
+		vec3 side = abs(face.z) < 0.9 ? vec3(0.0, 0.0, 1.0) : vec3(1.0, 0.0, 0.0);
+		vec3 tangentU = normalize(cross(face, side));
+		vec3 tangentV = cross(face, tangentU);
+		normal = normalize(tangentU * (bump.x * 2.0 - 1.0) + tangentV * (bump.y * 2.0 - 1.0) + face * (bump.z * 2.0 - 1.0));
+	}
+	vec3 tint = material.refractTint.rgb;
+	if (material.kind.z > 0.5) {
+		tint *= sampleFiltered(base2, uv * max(material.size.zw, vec2(1.0)), material.size.zw, across, down).rgb;
+	}
+	vec3 reflection = vec3(0.0);
+	vec3 dir = v_world - frame.eye.xyz;
+	if (material.refraction.z > 0.5 && length(dir) > 1e-6) {
+		vec3 view = normalize(dir);
+		float facing = max(0.0, -dot(view, normal));
+		float fresnel = 0.1 + 0.9 * pow(1.0 - facing, 5.0);
+		vec3 reflected = view - normal * (2.0 * dot(view, normal));
+		vec3 env = sky.translate[0].w > 0.5 ? skyColour(reflected) : vec3(0.25);
+		reflection = env * material.envTint.rgb * fresnel;
+	}
+	int flags = int(v_state.a * 255.0 + 0.5);
+	if ((flags & 2) != 0) {
+		tint = mix(tint, frame.selection.rgb, frame.mode.y);
+	}
+	return material.refraction.y > 0.5 ? vec4(reflection, 1.0) : vec4(tint, 1.0);
+}
+
 float faceShade(vec3 n) {
 	return n.x * n.x * frame.faceShade.x + n.y * n.y * frame.faceShade.y + n.z * n.z * frame.faceShade.z;
 }
@@ -147,6 +186,10 @@ void main() {
 	vec3 albedo = vec3(0.0); // the texture's colour, before light
 	vec3 n = normalize(v_normal);
 	bool textured = mode != MODE_FLAT && mode != MODE_WIREFRAME;
+	if (textured && material.refraction.x > 0.5) {
+		fragColor = shadeRefract(across, down, n);
+		return;
+	}
 	if (textured && material.extra.x > 0.5 && sky.translate[0].w > 0.5) {
 		// Hammer++ shows the map's sky where its sky faces are, the way the game does.
 		color = vec4(skyColour(v_world - frame.eye.xyz), 1.0);

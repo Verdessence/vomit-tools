@@ -75,6 +75,31 @@ MaterialInfo_t DescribeMaterial( const material::CMaterial &material )
 		info.m_vecSelfIllumTint = tint;
 	}
 	info.m_bBlend = !info.m_szTexture2.empty() && ( info.m_szShader == "worldvertextransition" || info.m_szShader == "lightmapped_4wayblend" );
+	if ( info.m_szShader == "refract" || info.m_szShader == "water" )
+	{
+		// As the material editor's preview shades them (material/Preview.cpp): DirectX 9 reads
+		// $normalmap ($bumpmap is often DirectX 8's distortion map); water is tinted by its fog
+		// and always reflects.
+		const bool bWater = info.m_szShader == "water";
+		info.m_bRefract = true;
+		const std::string szNormal = material.Value( "$normalmap" );
+		const std::string szBump = material.Value( "$bumpmap" );
+		info.m_szTexture = !szNormal.empty() ? szNormal : !szBump.empty() ? szBump
+																		  : szTool;
+		info.m_szTexture2 = bWater ? std::string{} : material.Value( "$refracttinttexture" );
+		if ( bWater )
+		{
+			const CVec3 fog = material.Color( "$fogcolor", { 0.2f, 0.25f, 0.25f } );
+			info.m_vecRefractTint = CVec3{ 1, 1, 1 } + ( fog * 3.0f - CVec3{ 1, 1, 1 } ) * 0.6f;
+		}
+		else
+		{
+			info.m_vecRefractTint = material.Color( "$refracttint" );
+		}
+		const std::string szEnvMap = material.Value( "$envmap" );
+		info.m_bEnvMap = bWater || ( !szEnvMap.empty() && szEnvMap != "0" );
+		info.m_vecEnvTint = material.Color( "$envmaptint" );
+	}
 	info.m_bTranslucent = material.Flag( "$translucent" );
 	info.m_bAdditive = material.Flag( "$additive" );
 	info.m_bAlphaTest = material.Flag( "$alphatest" );
@@ -103,7 +128,11 @@ MaterialMotion_t MoveMaterial( const material::CProxies &proxies, float flTime, 
 		const int nFrame = static_cast<int>( std::floor( moved.Number( "$frame", 0.0f ) ) );
 		motion.m_nFrame = ( ( nFrame % nFrames ) + nFrames ) % nFrames;
 	}
-	if ( const material::Parameter_t *pTransform = moved.Find( "$basetexturetransform" ) )
+	// Water and Refract scroll their normal map ($bumptransform) instead.
+	const material::Parameter_t *pTransform = moved.Find( "$basetexturetransform" );
+	if ( !pTransform )
+		pTransform = moved.Find( "$bumptransform" );
+	if ( pTransform )
 	{
 		const sky::CUvTransform transform = sky::CUvTransform::Parse( pTransform->m_szValue );
 		motion.m_UvTransform = { transform.m_flA, transform.m_flB, transform.m_flC, transform.m_flD, transform.m_flTx, transform.m_flTy };

@@ -89,6 +89,12 @@ struct ShadeMaterial_t
 	CVec3 m_vecColor{ 1, 1, 1 };
 	bool m_bSelfIllum = false;                 // glows where its base texture's alpha says, in the lighting preview
 	CVec3 m_vecSelfIllumTint{ 1, 1, 1 };
+	// Refract and Water: drawn by ShadeRefract over what is behind; m_pBase is the normal map,
+	// m_pBase2 the tint texture ($refracttinttexture).
+	bool m_bRefract = false;
+	CVec3 m_vecRefractTint{ 1, 1, 1 };
+	bool m_bEnvMap = false;                    // reflects (water always): the map's sky stands in for env_cubemap
+	CVec3 m_vecEnvTint{ 1, 1, 1 };
 	int m_nWidth = 128;                        // what texels divide by when there's no texture
 	int m_nHeight = 128;
 	// $basetexturetransform (a proxy's TextureScroll, often): u' = a*u + b*v + tx, v' = c*u + d*v + ty,
@@ -180,5 +186,19 @@ inline constexpr std::uint8_t UNMEASURED_ALPHA = 254;
 [[nodiscard]] float FaceShade( CVec3 vecNormal, CVec3 vecShade );
 // RGBA 0-1; nullopt where alpha testing throws the point away.
 [[nodiscard]] std::optional<std::array<float, 4>> ShadeFragment( const ShadeMaterial_t &material, const ShadeInput_t &input, const ShadeOptions_t &options );
+
+// What a Refract or Water face does to what is behind it: times m_vecTint, plus m_vecReflection.
+// The graphics card draws it in two passes (a multiply, then an add); software in one.
+struct RefractColor_t
+{
+	CVec3 m_vecTint{ 1, 1, 1 };
+	CVec3 m_vecReflection{};
+};
+// Whether the material is drawn by ShadeRefract in this mode: the textured ones.
+[[nodiscard]] bool IsRefracting( const ShadeMaterial_t &material, const ShadeOptions_t &options );
+// What is behind is not shifted (the game's refraction): the card would need a copy of the
+// picture so far. The normal map bends the reflection; the reflection is the map's sky (a VMF has
+// no built cubemaps), a grey without one. map.frag does the same steps.
+[[nodiscard]] RefractColor_t ShadeRefract( const ShadeMaterial_t &material, const ShadeInput_t &input, const ShadeOptions_t &options );
 
 } // namespace xv::map

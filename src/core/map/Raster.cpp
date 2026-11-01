@@ -251,7 +251,7 @@ void CRasterizer::Gather()
 			{
 				continue;
 			}
-			const bool bBlended = pMaterial && !pMaterial->m_bObjectColor && m_Options.m_Shade.m_nMode != RasterMode_t::RASTER_MODE_FLAT && ( pMaterial->m_Shade.m_bTranslucent || pMaterial->m_Shade.m_bAdditive || pMaterial->m_Shade.m_flAlpha < 1.0f );
+			const bool bBlended = pMaterial && !pMaterial->m_bObjectColor && m_Options.m_Shade.m_nMode != RasterMode_t::RASTER_MODE_FLAT && ( pMaterial->m_Shade.m_bTranslucent || pMaterial->m_Shade.m_bAdditive || pMaterial->m_Shade.m_flAlpha < 1.0f || IsRefracting( pMaterial->m_Shade, m_Options.m_Shade ) );
 			for ( std::uint32_t i = batch.m_nFirstIndex; i < batch.m_nFirstIndex + batch.m_nIndexCount; i += 3 )
 			{
 				const MeshVertex_t &first = mesh.m_Vertices[ mesh.m_Indices[ i ] ];
@@ -489,13 +489,26 @@ void CRasterizer::FillTriangle( const ScreenVertex_t &a, const ScreenVertex_t &b
 			input.m_vecVertexColor = CVec3{ static_cast<float>( values[ 5 ] ), static_cast<float>( values[ 6 ] ), static_cast<float>( values[ 7 ] ) };
 			input.m_vecNormal = Normalized( input.m_vecVertexColor );
 			input.m_vecDirection = CVec3{ static_cast<float>( values[ 8 ] - m_Camera.m_Eye[ 0 ] ), static_cast<float>( values[ 9 ] - m_Camera.m_Eye[ 1 ] ), static_cast<float>( values[ 10 ] - m_Camera.m_Eye[ 2 ] ) };
-			const std::optional<std::array<float, 4>> color = ShadeFragment( material, input, shade );
+			std::uint8_t *p = m_Out.Pixel( x, y );
+			const bool bRefract = bBlend && IsRefracting( material, shade );
+			const std::optional<std::array<float, 4>> color = bRefract ? std::optional<std::array<float, 4>>{ std::array<float, 4>{} } : ShadeFragment( material, input, shade );
 			if ( !color )
 			{
 				continue;
 			}
-			std::uint8_t *p = m_Out.Pixel( x, y );
-			if ( bBlend )
+			if ( bRefract )
+			{
+				// What is behind times the tint, plus the reflection: the card's two passes.
+				const RefractColor_t refract = ShadeRefract( material, input, shade );
+				const std::array<float, 3> tint{ refract.m_vecTint.m_flX, refract.m_vecTint.m_flY, refract.m_vecTint.m_flZ };
+				const std::array<float, 3> reflection{ refract.m_vecReflection.m_flX, refract.m_vecReflection.m_flY, refract.m_vecReflection.m_flZ };
+				for ( std::size_t i = 0; i < 3; i++ )
+				{
+					const float flResult = p[ i ] * std::clamp( tint[ i ], 0.0f, 1.0f ) + std::clamp( reflection[ i ], 0.0f, 1.0f ) * 255.0f;
+					p[ i ] = static_cast<std::uint8_t>( std::clamp( flResult + 0.5f, 0.0f, 255.0f ) );
+				}
+			}
+			else if ( bBlend )
 			{
 				const float flAlpha = std::clamp( ( *color )[ 3 ], 0.0f, 1.0f );
 				for ( std::size_t i = 0; i < 3; i++ )

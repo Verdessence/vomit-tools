@@ -88,6 +88,9 @@ private:
 		std::unique_ptr<QRhiTexture> m_pBase2;
 		std::unique_ptr<QRhiBuffer> m_pUniforms;
 		std::unique_ptr<QRhiShaderResourceBindings> m_pBindings;
+		// Refract and Water: the reflection's pass (added over the tint's multiply).
+		std::unique_ptr<QRhiBuffer> m_pReflectUniforms;
+		std::unique_ptr<QRhiShaderResourceBindings> m_pReflectBindings;
 		xv::map::RasterMaterial_t m_Source; // what the uniforms and bindings were made from
 		bool m_bMade = false;
 		// An animated material's frames already on the card, by texture, so its proxies can move
@@ -142,6 +145,7 @@ private:
 	std::unique_ptr<QRhiGraphicsPipeline> m_pOpaque;
 	std::unique_ptr<QRhiGraphicsPipeline> m_pBlended;
 	std::unique_ptr<QRhiGraphicsPipeline> m_pAdditive;
+	std::unique_ptr<QRhiGraphicsPipeline> m_pMultiply; // what is behind times the colour (Refract and Water's tint)
 	std::unique_ptr<QRhiGraphicsPipeline> m_pLines;
 	std::unique_ptr<QRhiGraphicsPipeline> m_pSkyFaces; // the world's sky faces over a 3D skybox
 	std::unique_ptr<QRhiGraphicsPipeline> m_pAlpha;    // makes the picture opaque afterwards

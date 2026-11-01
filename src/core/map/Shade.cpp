@@ -527,4 +527,71 @@ std::optional<std::array<float, 4>> ShadeFragment( const ShadeMaterial_t &materi
 	return color;
 }
 
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+bool IsRefracting( const ShadeMaterial_t &material, const ShadeOptions_t &options )
+{
+	return material.m_bRefract && options.m_nMode != RasterMode_t::RASTER_MODE_FLAT && options.m_nMode != RasterMode_t::RASTER_MODE_WIREFRAME;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: The normal map's direction is taken across the face along two directions at right
+//          angles to its normal (as Helpers' Across picks them), so it bends the reflection the
+//          same way in both renderers whatever the face's texture axes.
+//-----------------------------------------------------------------------------
+RefractColor_t ShadeRefract( const ShadeMaterial_t &material, const ShadeInput_t &input, const ShadeOptions_t &options )
+{
+	RefractColor_t out;
+	const int nWidth = material.m_pBase ? material.m_pBase->m_nWidth : material.m_nWidth;
+	const int nHeight = material.m_pBase ? material.m_pBase->m_nHeight : material.m_nHeight;
+	const float flWidth = static_cast<float>( std::max( nWidth, 1 ) );
+	const float flHeight = static_cast<float>( std::max( nHeight, 1 ) );
+	const float u = input.m_Texel[ 0 ] / flWidth;
+	const float v = input.m_Texel[ 1 ] / flHeight;
+	const CVec3 vecFace = input.m_vecNormal;
+	CVec3 vecNormal = vecFace;
+	if ( material.m_pBase )
+	{
+		// The normal map moves as $bumptransform says (water's TextureScroll), as the base
+		// texture's transform moves it in ShadeFragment.
+		ShadeInput_t moved = input;
+		const auto &t = material.m_UvTransform;
+		moved.m_Texel = { ( t[ 0 ] * u + t[ 1 ] * v + t[ 4 ] ) * flWidth, ( t[ 2 ] * u + t[ 3 ] * v + t[ 5 ] ) * flHeight };
+		const std::array<float, 4> bump = SampleFiltered( *material.m_pBase, moved.m_Texel, moved, options );
+		const CVec3 vecSide = std::abs( vecFace.m_flZ ) < 0.9f ? CVec3{ 0, 0, 1 } : CVec3{ 1, 0, 0 };
+		const CVec3 vecU = Normalized( Cross( vecFace, vecSide ) );
+		const CVec3 vecV = Cross( vecFace, vecU );
+		vecNormal = Normalized( vecU * ( bump[ 0 ] * 2.0f - 1.0f ) + vecV * ( bump[ 1 ] * 2.0f - 1.0f ) + vecFace * ( bump[ 2 ] * 2.0f - 1.0f ) );
+	}
+	out.m_vecTint = material.m_vecRefractTint;
+	if ( material.m_pBase2 )
+	{
+		// The tint texture across the face as the normal map is, at its own size.
+		const std::array<float, 2> texel{ u * static_cast<float>( std::max( material.m_pBase2->m_nWidth, 1 ) ), v * static_cast<float>( std::max( material.m_pBase2->m_nHeight, 1 ) ) };
+		const std::array<float, 4> tint = SampleFiltered( *material.m_pBase2, texel, input, options );
+		out.m_vecTint = CVec3{ out.m_vecTint.m_flX * tint[ 0 ], out.m_vecTint.m_flY * tint[ 1 ], out.m_vecTint.m_flZ * tint[ 2 ] };
+	}
+	if ( material.m_bEnvMap && Length( input.m_vecDirection ) > 1.0e-6f )
+	{
+		const CVec3 vecView = Normalized( input.m_vecDirection );
+		const float flFacing = std::max( 0.0f, -Dot( vecView, vecNormal ) );
+		const float flFresnel = 0.1f + 0.9f * std::pow( 1.0f - flFacing, 5.0f );
+		const CVec3 vecReflected = vecView - vecNormal * ( 2.0f * Dot( vecView, vecNormal ) );
+		CVec3 vecEnv{ 0.25f, 0.25f, 0.25f };
+		if ( options.m_pSky )
+		{
+			const std::array<float, 3> sky = sky::Sample( *options.m_pSky, vecReflected );
+			vecEnv = CVec3{ sky[ 0 ] / 255.0f, sky[ 1 ] / 255.0f, sky[ 2 ] / 255.0f };
+		}
+		out.m_vecReflection = CVec3{ vecEnv.m_flX * material.m_vecEnvTint.m_flX, vecEnv.m_flY * material.m_vecEnvTint.m_flY, vecEnv.m_flZ * material.m_vecEnvTint.m_flZ } * flFresnel;
+	}
+	if ( input.m_bSelected )
+	{
+		// Toward the selection's colour, as ShadeFragment tints a selected face.
+		out.m_vecTint += ( options.m_vecSelection - out.m_vecTint ) * options.m_flSelectionTint;
+	}
+	return out;
+}
+
 } // namespace xv::map

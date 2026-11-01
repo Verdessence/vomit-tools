@@ -56,6 +56,9 @@ struct MaterialUniforms_t
 	float m_SelfIllum[ 4 ];
 	float m_UvTransform[ 4 ]; // a b c d
 	float m_UvOffset[ 4 ];    // tx ty
+	float m_Refract[ 4 ];     // 1: Refract or Water; 1: this is the reflection's pass; 1: reflects
+	float m_RefractTint[ 4 ];
+	float m_EnvTint[ 4 ];
 };
 
 // map.frag's sky block, as sky.frag's.
@@ -74,7 +77,7 @@ static_assert( sizeof( xv::map::LightVertex_t ) == 16, "map.vert reads the light
 // Purpose: A material's uniforms, as map.frag reads them (and mapline.vert, for the edges: only
 //          the selection's, and whether they are a models' mesh's).
 //-----------------------------------------------------------------------------
-MaterialUniforms_t MaterialUniforms( const xv::map::RasterMaterial_t *pMaterial, bool bSelectionOnly, bool bModels = false )
+MaterialUniforms_t MaterialUniforms( const xv::map::RasterMaterial_t *pMaterial, bool bSelectionOnly, bool bModels = false, bool bReflection = false )
 {
 	MaterialUniforms_t u{};
 	const xv::map::ShadeMaterial_t shade = pMaterial ? pMaterial->m_Shade : xv::map::ShadeMaterial_t{};
@@ -107,6 +110,15 @@ MaterialUniforms_t MaterialUniforms( const xv::map::RasterMaterial_t *pMaterial,
 		u.m_UvTransform[ i ] = shade.m_UvTransform[ i ];
 	u.m_UvOffset[ 0 ] = shade.m_UvTransform[ 4 ];
 	u.m_UvOffset[ 1 ] = shade.m_UvTransform[ 5 ];
+	u.m_Refract[ 0 ] = shade.m_bRefract ? 1.0f : 0.0f;
+	u.m_Refract[ 1 ] = bReflection ? 1.0f : 0.0f;
+	u.m_Refract[ 2 ] = shade.m_bEnvMap ? 1.0f : 0.0f;
+	u.m_RefractTint[ 0 ] = shade.m_vecRefractTint.m_flX;
+	u.m_RefractTint[ 1 ] = shade.m_vecRefractTint.m_flY;
+	u.m_RefractTint[ 2 ] = shade.m_vecRefractTint.m_flZ;
+	u.m_EnvTint[ 0 ] = shade.m_vecEnvTint.m_flX;
+	u.m_EnvTint[ 1 ] = shade.m_vecEnvTint.m_flY;
+	u.m_EnvTint[ 2 ] = shade.m_vecEnvTint.m_flZ;
 	return u;
 }
 
@@ -115,7 +127,7 @@ MaterialUniforms_t MaterialUniforms( const xv::map::RasterMaterial_t *pMaterial,
 //-----------------------------------------------------------------------------
 bool IsSeeThrough( const xv::map::RasterMaterial_t *pMaterial )
 {
-	return pMaterial && !pMaterial->m_bObjectColor && ( pMaterial->m_Shade.m_bTranslucent || pMaterial->m_Shade.m_bAdditive || pMaterial->m_Shade.m_flAlpha < 1.0f );
+	return pMaterial && !pMaterial->m_bObjectColor && ( pMaterial->m_Shade.m_bTranslucent || pMaterial->m_Shade.m_bAdditive || pMaterial->m_Shade.m_flAlpha < 1.0f || pMaterial->m_Shade.m_bRefract );
 }
 
 } // namespace
@@ -144,6 +156,7 @@ void CMapRenderer::Release()
 	m_pOpaque.reset();
 	m_pBlended.reset();
 	m_pAdditive.reset();
+	m_pMultiply.reset();
 	m_pLines.reset();
 	m_Materials.clear();
 	m_LinesAll = {};
@@ -228,6 +241,7 @@ void CMapRenderer::Initialize( QRhi *pRhi, QRhiRenderTarget * )
 	m_pOpaque.reset();
 	m_pBlended.reset();
 	m_pAdditive.reset();
+	m_pMultiply.reset();
 	m_pLines.reset();
 }
 
@@ -469,24 +483,30 @@ QRhiSampler *CMapRenderer::SamplerFor( const xv::map::RasterTexture_t *pTexture 
 void CMapRenderer::MakeBindings( Material_t &material, QRhiTexture *pBase, QRhiTexture *pBase2, const xv::map::RasterTexture_t *pBaseTexture, const xv::map::RasterTexture_t *pBase2Texture )
 {
 	const auto both = QRhiShaderResourceBinding::VertexStage | QRhiShaderResourceBinding::FragmentStage;
-	material.m_pBindings.reset( m_pRhi->newShaderResourceBindings() );
-	material.m_pBindings->setBindings( {
-		QRhiShaderResourceBinding::uniformBufferWithDynamicOffset( 0, both, m_pFrame.get(), sizeof( FrameUniforms_t ) ),
-		QRhiShaderResourceBinding::uniformBuffer( 1, both, material.m_pUniforms.get() ),
-		QRhiShaderResourceBinding::sampledTexture( 2, QRhiShaderResourceBinding::FragmentStage, pBase, SamplerFor( pBaseTexture ) ),
-		QRhiShaderResourceBinding::sampledTexture( 3, QRhiShaderResourceBinding::FragmentStage, pBase2, SamplerFor( pBase2Texture ) ),
-		QRhiShaderResourceBinding::sampledTexture( 4, both, m_pState.get(), m_pNearest.get() ),
-		QRhiShaderResourceBinding::sampledTexture( 5, QRhiShaderResourceBinding::VertexStage, m_pLineColors.get(), m_pNearest.get() ),
-		QRhiShaderResourceBinding::uniformBuffer( 6, QRhiShaderResourceBinding::FragmentStage, m_pSkyUniforms.get() ),
-		QRhiShaderResourceBinding::sampledTexture( 7, QRhiShaderResourceBinding::FragmentStage, SkyFace( 0 ), SkySampler( 0 ) ),
-		QRhiShaderResourceBinding::sampledTexture( 8, QRhiShaderResourceBinding::FragmentStage, SkyFace( 1 ), SkySampler( 1 ) ),
-		QRhiShaderResourceBinding::sampledTexture( 9, QRhiShaderResourceBinding::FragmentStage, SkyFace( 2 ), SkySampler( 2 ) ),
-		QRhiShaderResourceBinding::sampledTexture( 10, QRhiShaderResourceBinding::FragmentStage, SkyFace( 3 ), SkySampler( 3 ) ),
-		QRhiShaderResourceBinding::sampledTexture( 11, QRhiShaderResourceBinding::FragmentStage, SkyFace( 4 ), SkySampler( 4 ) ),
-		QRhiShaderResourceBinding::sampledTexture( 12, QRhiShaderResourceBinding::FragmentStage, SkyFace( 5 ), SkySampler( 5 ) ),
-		QRhiShaderResourceBinding::sampledTexture( 13, QRhiShaderResourceBinding::FragmentStage, m_pLightmap ? m_pLightmap.get() : m_pWhite.get(), m_pLightSampler.get() ),
-	} );
-	material.m_pBindings->create();
+	auto make = [ & ]( QRhiBuffer *pUniforms ) {
+		std::unique_ptr<QRhiShaderResourceBindings> pBindings( m_pRhi->newShaderResourceBindings() );
+		pBindings->setBindings( {
+			QRhiShaderResourceBinding::uniformBufferWithDynamicOffset( 0, both, m_pFrame.get(), sizeof( FrameUniforms_t ) ),
+			QRhiShaderResourceBinding::uniformBuffer( 1, both, pUniforms ),
+			QRhiShaderResourceBinding::sampledTexture( 2, QRhiShaderResourceBinding::FragmentStage, pBase, SamplerFor( pBaseTexture ) ),
+			QRhiShaderResourceBinding::sampledTexture( 3, QRhiShaderResourceBinding::FragmentStage, pBase2, SamplerFor( pBase2Texture ) ),
+			QRhiShaderResourceBinding::sampledTexture( 4, both, m_pState.get(), m_pNearest.get() ),
+			QRhiShaderResourceBinding::sampledTexture( 5, QRhiShaderResourceBinding::VertexStage, m_pLineColors.get(), m_pNearest.get() ),
+			QRhiShaderResourceBinding::uniformBuffer( 6, QRhiShaderResourceBinding::FragmentStage, m_pSkyUniforms.get() ),
+			QRhiShaderResourceBinding::sampledTexture( 7, QRhiShaderResourceBinding::FragmentStage, SkyFace( 0 ), SkySampler( 0 ) ),
+			QRhiShaderResourceBinding::sampledTexture( 8, QRhiShaderResourceBinding::FragmentStage, SkyFace( 1 ), SkySampler( 1 ) ),
+			QRhiShaderResourceBinding::sampledTexture( 9, QRhiShaderResourceBinding::FragmentStage, SkyFace( 2 ), SkySampler( 2 ) ),
+			QRhiShaderResourceBinding::sampledTexture( 10, QRhiShaderResourceBinding::FragmentStage, SkyFace( 3 ), SkySampler( 3 ) ),
+			QRhiShaderResourceBinding::sampledTexture( 11, QRhiShaderResourceBinding::FragmentStage, SkyFace( 4 ), SkySampler( 4 ) ),
+			QRhiShaderResourceBinding::sampledTexture( 12, QRhiShaderResourceBinding::FragmentStage, SkyFace( 5 ), SkySampler( 5 ) ),
+			QRhiShaderResourceBinding::sampledTexture( 13, QRhiShaderResourceBinding::FragmentStage, m_pLightmap ? m_pLightmap.get() : m_pWhite.get(), m_pLightSampler.get() ),
+		} );
+		pBindings->create();
+		return pBindings;
+	};
+	material.m_pBindings = make( material.m_pUniforms.get() );
+	// A refracting material's reflection pass binds the same, with its own uniforms.
+	material.m_pReflectBindings = material.m_pReflectUniforms ? make( material.m_pReflectUniforms.get() ) : nullptr;
 }
 
 //-----------------------------------------------------------------------------
@@ -624,6 +644,20 @@ void CMapRenderer::UploadMaterials( const MapFrame_t &frame, QRhiResourceUpdateB
 			continue;
 		}
 		uniforms( material, MaterialUniforms( &source, false ) );
+		if ( source.m_Shade.m_bRefract )
+		{
+			if ( !material.m_pReflectUniforms )
+			{
+				material.m_pReflectUniforms.reset( m_pRhi->newBuffer( QRhiBuffer::Dynamic, QRhiBuffer::UniformBuffer, sizeof( MaterialUniforms_t ) ) );
+				material.m_pReflectUniforms->create();
+			}
+			const MaterialUniforms_t reflection = MaterialUniforms( &source, false, false, true );
+			pUpdates->updateDynamicBuffer( material.m_pReflectUniforms.get(), 0, sizeof reflection, &reflection );
+		}
+		else
+		{
+			material.m_pReflectUniforms.reset();
+		}
 		// Textures that are the same as last time stay; new ones go up.
 		QRhiTexture *pBase = m_pWhite.get();
 		QRhiTexture *pBase2 = m_pWhite.get();
@@ -720,6 +754,16 @@ void CMapRenderer::MakePipelines( QRhiRenderTarget *pTarget )
 			blend.dstAlpha = QRhiGraphicsPipeline::Zero;
 			pPipeline->setTargetBlends( { blend } );
 		}
+		else if ( nBlend == 4 )
+		{
+			QRhiGraphicsPipeline::TargetBlend blend;
+			blend.enable = true;
+			blend.srcColor = QRhiGraphicsPipeline::Zero;
+			blend.dstColor = QRhiGraphicsPipeline::SrcColor;
+			blend.srcAlpha = QRhiGraphicsPipeline::Zero;
+			blend.dstAlpha = QRhiGraphicsPipeline::One;
+			pPipeline->setTargetBlends( { blend } );
+		}
 		else if ( nBlend != 0 )
 		{
 			QRhiGraphicsPipeline::TargetBlend blend;
@@ -740,6 +784,7 @@ void CMapRenderer::MakePipelines( QRhiRenderTarget *pTarget )
 	m_pOpaque = make( 0, false );
 	m_pBlended = make( 1, false );
 	m_pAdditive = make( 2, false );
+	m_pMultiply = make( 4, false );
 	m_pLines = make( 0, true );
 	m_pSkyFaces = make( 3, false );
 
@@ -1006,14 +1051,16 @@ void CMapRenderer::Render( QRhiCommandBuffer *pCommands, QRhiRenderTarget *pTarg
 		pBound = pBindings;
 		nBoundOffset = nOffset;
 	};
-	auto draw = [ & ]( std::size_t nMesh, const xv::map::MeshBatch_t &batch, QRhiGraphicsPipeline *pWanted ) {
+	auto draw = [ & ]( std::size_t nMesh, const xv::map::MeshBatch_t &batch, QRhiGraphicsPipeline *pWanted, bool bReflection = false ) {
 		if ( pPipeline != pWanted )
 		{
 			pCommands->setGraphicsPipeline( pWanted );
 			pPipeline = pWanted;
 			pBound = nullptr;
 		}
-		QRhiShaderResourceBindings *pBindings = batch.m_nMaterial < m_Materials.size() ? m_Materials[ batch.m_nMaterial ].m_pBindings.get() : m_LinesAll.m_pBindings.get();
+		QRhiShaderResourceBindings *pBindings = batch.m_nMaterial < m_Materials.size() ? ( bReflection ? m_Materials[ batch.m_nMaterial ].m_pReflectBindings : m_Materials[ batch.m_nMaterial ].m_pBindings ).get() : m_LinesAll.m_pBindings.get();
+		if ( !pBindings )
+			return;
 		bind( pBindings, meshPass( nMesh ) );
 		const QRhiCommandBuffer::VertexInput inputs[] = { { m_Meshes[ nMesh ].m_pVertices.get(), 0 }, { m_Meshes[ nMesh ].m_pLight.get(), 0 } };
 		pCommands->setVertexInput( 0, 2, inputs, m_Meshes[ nMesh ].m_pIndices.get(), 0, QRhiCommandBuffer::IndexUInt32 );
@@ -1057,6 +1104,13 @@ void CMapRenderer::Render( QRhiCommandBuffer *pCommands, QRhiRenderTarget *pTarg
 		for ( const Later_t &batch : later )
 		{
 			const xv::map::RasterMaterial_t *pMaterial = materialOf( batch.m_pBatch->m_nMaterial );
+			if ( pMaterial && pMaterial->m_Shade.m_bRefract )
+			{
+				// What is behind times the tint, then the reflection added (xv::map::ShadeRefract).
+				draw( batch.m_nMesh, *batch.m_pBatch, m_pMultiply.get() );
+				draw( batch.m_nMesh, *batch.m_pBatch, m_pAdditive.get(), true );
+				continue;
+			}
 			draw( batch.m_nMesh, *batch.m_pBatch, pMaterial && pMaterial->m_Shade.m_bAdditive ? m_pAdditive.get() : m_pBlended.get() );
 		}
 	};
