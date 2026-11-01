@@ -79,6 +79,8 @@ add_library(vomit_tools_ui STATIC
         ModelView.h
         MenuPicker.cpp
         MenuPicker.h
+        PanelColumn.cpp
+        PanelColumn.h
         ParticleDocument.cpp
         ParticleDocument.h
         ParticleEditor.cpp

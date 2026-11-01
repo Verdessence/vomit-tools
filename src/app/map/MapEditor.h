@@ -48,6 +48,8 @@ class QLabel;
 class QStackedWidget;
 class QLineEdit;
 class QSplitter;
+class CPanel;
+class CPanelColumn;
 class QToolBar;
 class QVBoxLayout;
 
@@ -332,7 +334,6 @@ private:
 	CMapResources *m_pResources = nullptr;
 	CMapLighting *m_pLighting = nullptr;
 	QTimer *m_pLightingTimer = nullptr;
-	QDialog *m_pLightingWindow = nullptr;
 	// What the last bake asked for was made from: the scene, the materials read (once they all
 	// are), and the preferences that change a bake.
 	std::shared_ptr<const xv::map::CScene> m_pLightingScene;
@@ -384,6 +385,8 @@ private:
 	QDialog *m_pFaceEditWindow = nullptr; // holds Face Edit when it is a window of its own
 	// Face Edit where Preferences wants it: its window, or the side panel under Object Properties.
 	void PlaceFaceEdit();
+	// The side brought out if it was dragged shut.
+	void OpenSide();
 	// The cordon and box the cordon tool's box belongs to (the Cordons tab's pick when the tool
 	// took it up).
 	std::size_t m_nCordonPick = 0;
@@ -401,8 +404,8 @@ private:
 	CMapFilterControl *m_pFilter = nullptr;
 	CMapProperties *m_pProperties = nullptr;
 	CMapFaceEdit *m_pFaceEdit = nullptr;
-	QStackedWidget *m_pPanelStack = nullptr; // Object Properties, or Face Edit with the texture tool
-	QLabel *m_pPanelTitle = nullptr;
+	QWidget *m_pFaceEditHolder = nullptr; // Face Edit's panel, when it isn't in its window
+	CPanelColumn *m_pPanels = nullptr;    // the side's panels below the Filter Control
 	std::vector<xv::map::FaceRef_t> m_SelectedFaces;
 	QLabel *m_pLoading = nullptr;
 	QActionGroup *m_pTools = nullptr;

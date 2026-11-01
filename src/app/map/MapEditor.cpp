@@ -17,6 +17,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <numbers>
 #include <limits>
 
 #include <QAction>
@@ -65,6 +66,7 @@
 #include "map/MapCompileDialog.h"
 #include "map/MapFaceEdit.h"
 #include "map/MapFilterControl.h"
+#include "PanelColumn.h"
 #include "map/MaterialBrowser.h"
 #include "map/MapPanes.h"
 #include "map/MapProperties.h"
@@ -82,6 +84,9 @@
 namespace
 {
 
+// The side panels' order, which are shown and which folded (CPanelColumn::GetState).
+constexpr char SIDE_PANELS_SETTING[] = "maps/sidePanels";
+
 enum class MapIcon_t
 {
 	MAP_ICON_SELECT,
@@ -95,6 +100,9 @@ enum class MapIcon_t
 	MAP_ICON_CLIP,
 	MAP_ICON_CORDON,
 	MAP_ICON_VERTEX,
+	MAP_ICON_PROPERTIES,
+	MAP_ICON_MATERIAL,
+	MAP_ICON_LIGHT,
 };
 
 //-----------------------------------------------------------------------------
@@ -187,6 +195,33 @@ QIcon MakeIcon( MapIcon_t nIcon, const QColor &color )
 			painter.drawLine( QPointF{ 16, 6 }, QPointF{ 16, 15 } );
 			painter.drawEllipse( QPointF{ 16, 6 }, 3, 3 );
 			break;
+		case MapIcon_t::MAP_ICON_PROPERTIES:
+			// A sheet of keys and their values.
+			painter.drawRoundedRect( QRectF{ 5, 4, 22, 24 }, 2, 2 );
+			for ( const double y : { 11.0, 16.5, 22.0 } )
+			{
+				painter.drawLine( QPointF{ 9, y }, QPointF{ 13, y } );
+				painter.drawLine( QPointF{ 16, y }, QPointF{ 23, y } );
+			}
+			break;
+		case MapIcon_t::MAP_ICON_MATERIAL:
+		{
+			// A ball with a shine on it, as a material is shown.
+			painter.drawEllipse( QPointF{ 16, 16 }, 11, 11 );
+			painter.setPen( Qt::NoPen );
+			painter.setBrush( color );
+			painter.drawEllipse( QPointF{ 12, 12 }, 3.5, 3.5 );
+			break;
+		}
+		case MapIcon_t::MAP_ICON_LIGHT:
+			// A sun: a disc and its rays.
+			painter.drawEllipse( QPointF{ 16, 16 }, 6, 6 );
+			for ( int i = 0; i < 8; i++ )
+			{
+				const double flAngle = i * std::numbers::pi / 4.0;
+				painter.drawLine( QPointF{ 16 + 9.5 * std::cos( flAngle ), 16 + 9.5 * std::sin( flAngle ) }, QPointF{ 16 + 13.5 * std::cos( flAngle ), 16 + 13.5 * std::sin( flAngle ) } );
+			}
+			break;
 		case MapIcon_t::MAP_ICON_TEXTURE:
 			// A face with a texture's checker on it.
 			painter.drawRect( QRectF{ 5, 5, 22, 22 } );
@@ -273,24 +308,12 @@ CMapEditor::CMapEditor( const QString &szPath, bool bFromGame, QWidget *pParent 
 	m_pLoading->setStyleSheet( QStringLiteral( "QLabel { color: white; background: rgba(0, 0, 0, 160); padding: 12px; border-radius: 4px; }" ) );
 
 	// Hammer docks the Filter Control at the side and opens Object Properties as a window of
-	// its own; here both share the side, so the selection's keys are always in view.
+	// its own. Here the side is laid out as Blender's: the Filter Control on top where its
+	// outliner is, and below it a column of panels (Object Properties, New Objects, Texture),
+	// any of them shown at once by the tabs down its side, folded, and dragged into an order.
 	m_pSidePanel = new QSplitter( Qt::Vertical );
 	m_pSidePanel->setObjectName( QStringLiteral( "mapSidePanel" ) );
-	m_pSidePanel->setMinimumWidth( 260 );
 	m_pSidePanel->setChildrenCollapsible( false );
-	auto section = [ this ]( const QString &szTitle, QWidget *pContent ) {
-		auto *pBox = new QWidget;
-		auto *pBoxLayout = new QVBoxLayout( pBox );
-		pBoxLayout->setContentsMargins( 4, 4, 4, 4 );
-		auto *pTitle = new QLabel( szTitle );
-		QFont font = pTitle->font();
-		font.setBold( true );
-		pTitle->setFont( font );
-		pBoxLayout->addWidget( pTitle );
-		pBoxLayout->addWidget( pContent, 1 );
-		m_pSidePanel->addWidget( pBox );
-		return pTitle;
-	};
 	m_pFilter = new CMapFilterControl( *m_pDocument );
 	// A new cordon starts round the selection, else where the last block was.
 	m_pFilter->SetNewBoxSource( [ this ]() -> std::optional<xv::map::Box_t> {
@@ -317,12 +340,14 @@ CMapEditor::CMapEditor( const QString &szPath, bool bFromGame, QWidget *pParent 
 	connect( m_pProperties, &CMapProperties::FacesHighlighted, this, &CMapEditor::HighlightSides );
 	connect( this, &CMapEditor::FacePickChanged, m_pProperties, &CMapProperties::SetFacePickKey );
 	m_pFaceEdit = new CMapFaceEdit( *this );
-	// Hammer opens Face Edit as a window of its own; here it takes Object Properties' place
-	// while the texture tool is on.
-	m_pPanelStack = new QStackedWidget;
-	m_pPanelStack->setObjectName( QStringLiteral( "mapPanelStack" ) );
-	m_pPanelStack->addWidget( m_pProperties );
-	m_pPanelStack->addWidget( m_pFaceEdit );
+	// Hammer opens Face Edit as a window of its own; Preferences can put it in the side
+	// instead, in a panel of its own while the texture tool is on.
+	// Face Edit's place in the side: its own panel, there only while the texture tool is on.
+	m_pFaceEditHolder = new QWidget;
+	m_pFaceEditHolder->setObjectName( QStringLiteral( "mapFaceEditPanel" ) );
+	auto *pHolderLayout = new QVBoxLayout( m_pFaceEditHolder );
+	pHolderLayout->setContentsMargins( 0, 0, 0, 0 );
+	pHolderLayout->addWidget( m_pFaceEdit );
 	// Hammer's Face Edit Sheet is a window of its own; closing it puts the selection tool back.
 	m_pFaceEditWindow = new QDialog( this, Qt::Tool );
 	m_pFaceEditWindow->setObjectName( QStringLiteral( "mapFaceEditWindow" ) );
@@ -345,21 +370,47 @@ CMapEditor::CMapEditor( const QString &szPath, bool bFromGame, QWidget *pParent 
 		}
 		RepaintTools();
 	} );
-	section( tr( "Filter Control" ), m_pFilter );
-	m_pPanelTitle = section( tr( "Object Properties" ), m_pPanelStack );
+	{
+		auto *pBox = new QWidget;
+		auto *pBoxLayout = new QVBoxLayout( pBox );
+		pBoxLayout->setContentsMargins( 4, 4, 4, 4 );
+		auto *pTitle = new QLabel( tr( "Filter Control" ) );
+		QFont font = pTitle->font();
+		font.setBold( true );
+		pTitle->setFont( font );
+		pBoxLayout->addWidget( pTitle );
+		pBoxLayout->addWidget( m_pFilter, 1 );
+		m_pSidePanel->addWidget( pBox );
+	}
+	const QColor panelIconColor = palette().buttonText().color();
+	m_pPanels = new CPanelColumn;
+	m_pPanels->setObjectName( QStringLiteral( "mapPanels" ) );
+	// The keys' table and the lights' want room to be of use; they share what the other
+	// panels leave.
+	m_pProperties->setMinimumHeight( 260 );
+	m_pPanels->AddPanel( QStringLiteral( "properties" ), tr( "Object Properties" ), MakeIcon( MapIcon_t::MAP_ICON_PROPERTIES, panelIconColor ), m_pProperties, true );
+	m_pPanels->AddPanel( QStringLiteral( "faceEdit" ), tr( "Face Edit" ), MakeIcon( MapIcon_t::MAP_ICON_TEXTURE, panelIconColor ), m_pFaceEditHolder );
+	m_pPanels->AddPanel( QStringLiteral( "newObjects" ), tr( "New Objects" ), MakeIcon( MapIcon_t::MAP_ICON_BLOCK, panelIconColor ), BuildNewObjects() );
+	m_pPanels->AddPanel( QStringLiteral( "texture" ), tr( "Texture" ), MakeIcon( MapIcon_t::MAP_ICON_MATERIAL, panelIconColor ), BuildTexturePanel() );
+	auto *pLighting = new CMapLightingPanel( *this );
+	pLighting->setObjectName( QStringLiteral( "mapLightingPanel" ) );
+	pLighting->layout()->setContentsMargins( 0, 0, 0, 0 );
+	pLighting->setMinimumHeight( 320 );
+	m_pPanels->AddPanel( QStringLiteral( "lighting" ), tr( "Lighting" ), MakeIcon( MapIcon_t::MAP_ICON_LIGHT, panelIconColor ), pLighting, true );
+	// Lighting starts folded: its header is there, its settings out of the way until wanted.
+	m_pPanels->SetState( QSettings{}.value( QLatin1String( SIDE_PANELS_SETTING ), QVariantMap{ { QStringLiteral( "folded" ), QStringList{ QStringLiteral( "lighting" ) } } } ).toMap() );
 	PlaceFaceEdit();
-	section( tr( "New Objects" ), BuildNewObjects() );
-	section( tr( "Texture" ), BuildTexturePanel() );
-	m_pSidePanel->setStretchFactor( 0, 2 );
+	connect( m_pPanels, &CPanelColumn::StateChanged, this, [ this ] { QSettings{}.setValue( QLatin1String( SIDE_PANELS_SETTING ), m_pPanels->GetState() ); } );
+	m_pSidePanel->addWidget( m_pPanels );
+	m_pSidePanel->setStretchFactor( 0, 1 );
 	m_pSidePanel->setStretchFactor( 1, 3 );
-	m_pSidePanel->setStretchFactor( 2, 0 );
 
 	auto *pMiddle = new QSplitter( Qt::Horizontal );
 	pMiddle->addWidget( m_pSplitter );
 	pMiddle->addWidget( m_pSidePanel );
 	pMiddle->setStretchFactor( 0, 1 );
 	pMiddle->setStretchFactor( 1, 0 );
-	pMiddle->setSizes( { 1000, 280 } );
+	pMiddle->setSizes( { 1000, m_pSidePanel->minimumSizeHint().width() } );
 
 	auto *pCenter = new QHBoxLayout;
 	pCenter->setContentsMargins( 0, 0, 0, 0 );
@@ -1012,17 +1063,25 @@ void CMapEditor::PlaceFaceEdit()
 	const bool bTexture = m_nTool == MapTool_t::MAP_TOOL_TEXTURE;
 	if ( bWindow && m_pFaceEdit->parentWidget() != m_pFaceEditWindow )
 	{
-		m_pPanelStack->removeWidget( m_pFaceEdit );
+		m_pFaceEditHolder->layout()->removeWidget( m_pFaceEdit );
 		m_pFaceEditWindow->layout()->addWidget( m_pFaceEdit );
 		m_pFaceEdit->show();
 	}
 	else if ( !bWindow && m_pFaceEdit->parentWidget() == m_pFaceEditWindow )
 	{
 		m_pFaceEditWindow->layout()->removeWidget( m_pFaceEdit );
-		m_pPanelStack->addWidget( m_pFaceEdit );
+		m_pFaceEditHolder->layout()->addWidget( m_pFaceEdit );
+		m_pFaceEdit->show();
 	}
-	m_pPanelStack->setCurrentWidget( bTexture && !bWindow ? static_cast<QWidget *>( m_pFaceEdit ) : m_pProperties );
-	m_pPanelTitle->setText( bTexture && !bWindow ? tr( "Face Edit" ) : tr( "Object Properties" ) );
+	// Face Edit is a mode's panel, as Blender's tool settings: in the side only with its tool.
+	// It is far wider than the other panels; while it is away the side needn't be.
+	const bool bPanel = bTexture && !bWindow;
+	const bool bWasPanel = m_pPanels->IsAvailable( QStringLiteral( "faceEdit" ) );
+	m_pPanels->SetAvailable( QStringLiteral( "faceEdit" ), bPanel );
+	if ( bPanel && !bWasPanel )
+	{
+		m_pPanels->ScrollTo( QStringLiteral( "faceEdit" ) );
+	}
 	if ( bWindow && bTexture && !m_pFaceEditWindow->isVisible() && isVisible() )
 	{
 		m_pFaceEditWindow->adjustSize();
@@ -3797,24 +3856,12 @@ void CMapEditor::BakeLightingNow()
 }
 
 //-----------------------------------------------------------------------------
-// Purpose: Made the first time, then shown again where it was left.
+// Purpose: The Lighting panel, shown, open and scrolled to.
 //-----------------------------------------------------------------------------
 void CMapEditor::ShowLighting()
 {
-	if ( !m_pLightingWindow )
-	{
-		m_pLightingWindow = new QDialog( this, Qt::Tool );
-		m_pLightingWindow->setObjectName( QStringLiteral( "mapLightingWindow" ) );
-		m_pLightingWindow->setWindowTitle( tr( "Lighting" ) );
-		m_pLightingWindow->setModal( false );
-		auto *pLayout = new QVBoxLayout( m_pLightingWindow );
-		pLayout->setContentsMargins( 0, 0, 0, 0 );
-		pLayout->addWidget( new CMapLightingPanel( *this ) );
-		m_pLightingWindow->resize( 640, 520 );
-	}
-	m_pLightingWindow->show();
-	m_pLightingWindow->raise();
-	m_pLightingWindow->activateWindow();
+	OpenSide();
+	m_pPanels->Reveal( QStringLiteral( "lighting" ) );
 }
 
 //-----------------------------------------------------------------------------
@@ -3833,6 +3880,7 @@ void CMapEditor::StartLighting()
 	options.m_nBounces = std::max( 0, preferences.m_nLightBounces );
 	options.m_nMaxLuxels = static_cast<std::size_t>( std::max( 1, preferences.m_nLightLuxels ) ) << 20;
 	options.m_nSkySamples = std::max( 1, preferences.m_nLightSkySamples );
+	options.m_bSmoothShadows = preferences.m_bLightSmoothShadows;
 	if ( const std::optional<xv::map::CViewCamera> camera = GetCamera(); camera && preferences.m_bLightInRadius )
 	{
 		options.m_Centre = camera->m_Eye;
@@ -3880,7 +3928,6 @@ void CMapEditor::LightingBaked()
 			p3D->Redraw();
 		}
 	}
-	options.m_bSmoothShadows = preferences.m_bLightSmoothShadows;
 	UpdateGameStatus();
 	if ( const auto &pLighting = m_pLighting->GetLighting(); pLighting && !m_pLighting->IsBaking() )
 	{
@@ -3889,20 +3936,30 @@ void CMapEditor::LightingBaked()
 }
 
 //-----------------------------------------------------------------------------
-// Purpose: Alt+Enter: Object Properties, brought out if the side was dragged shut.
+// Purpose: Alt+Enter: Object Properties, brought out if the side was dragged shut or the panel
+//          hidden or folded.
 //-----------------------------------------------------------------------------
 void CMapEditor::ShowProperties()
+{
+	OpenSide();
+	m_pPanels->Reveal( QStringLiteral( "properties" ) );
+	m_pProperties->FocusKeys();
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: The side brought out if it was dragged shut.
+//-----------------------------------------------------------------------------
+void CMapEditor::OpenSide()
 {
 	if ( auto *pMiddle = qobject_cast<QSplitter *>( m_pSidePanel->parentWidget() ) )
 	{
 		QList<int> sizes = pMiddle->sizes();
 		if ( sizes.size() == 2 && sizes[ 1 ] == 0 )
 		{
-			const int nSide = std::max( m_pSidePanel->minimumWidth(), 280 );
+			const int nSide = m_pSidePanel->minimumSizeHint().width();
 			pMiddle->setSizes( { std::max( sizes[ 0 ] - nSide, 0 ), nSide } );
 		}
 	}
-	m_pProperties->FocusKeys();
 }
 
 //-----------------------------------------------------------------------------
