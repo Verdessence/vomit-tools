@@ -49,6 +49,7 @@ struct EntityVisual_t
 	bool m_bInstance = false;             // instance(): a func_instance
 	bool m_bSkyCamera = false;            // Hammer++'s skycamera(): sky_camera
 	std::vector<double> m_Spheres;        // sphere() radii, shown on the selected entity
+	std::vector<std::string_view> m_SphereKeys; // the key each radius is read from (the game data's text)
 	std::string_view m_szName;            // targetname, for labels and lines to it
 };
 

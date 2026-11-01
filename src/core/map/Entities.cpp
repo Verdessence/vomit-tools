@@ -245,6 +245,7 @@ EntityVisual_t DescribeEntity( const Entity_t &entity, const CFgd *pFgd )
 			if ( const auto flRadius = ParseNumber<double>( entity.GetValue( szKey ) ); flRadius && *flRadius > 0.0 )
 			{
 				visual.m_Spheres.push_back( *flRadius );
+				visual.m_SphereKeys.push_back( szKey );
 			}
 		}
 	}

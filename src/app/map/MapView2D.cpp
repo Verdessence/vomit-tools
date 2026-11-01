@@ -939,6 +939,13 @@ void CMapView2D::PaintObjects( QPainter &painter, const QRectF &visible, bool bP
 				painter.drawEllipse( centre, flRadius * m_flZoom, flRadius * m_flZoom );
 			}
 		}
+		// Each radius's handle, on its circle to the right, to drag it bigger or smaller.
+		const double flHalf = Look().m_nHandleSize / 2.0;
+		for ( const RadiusHandle_t &handle : GetRadiusHandles() )
+		{
+			if ( handle.m_nObject == pObject->m_nObject )
+				painter.fillRect( QRectF{ handle.m_At.x() - flHalf, handle.m_At.y() - flHalf, flHalf * 2.0, flHalf * 2.0 }, painter.pen().color() );
+		}
 		// The rest of its helpers (lines to its targets, cones, boxes), each in its own colour.
 		for ( const xv::map::HelperLine_t &helper : xv::map::DescribeHelpers( *pScene, pScene->GetIndex( pObject->m_nObject ) ).m_Lines )
 		{
@@ -1590,6 +1597,17 @@ void CMapView2D::mousePressEvent( QMouseEvent *pEvent )
 		// On one of the selection's handles, a drag resizes, turns or shears it; inside its box, a
 		// drag moves it (Hammer's selection tool).
 		const xv::map::Box_t bounds = GetDocument().GetSelectionBounds();
+		if ( nTool == MapTool_t::MAP_TOOL_SELECT )
+		{
+			if ( std::optional<RadiusHandle_t> handle = RadiusHandleAt( at ) )
+			{
+				m_RadiusDrag = std::move( handle );
+				m_pMoveScene = GetDocument().GetSharedScene();
+				m_BoxFrom.reset();
+				setCursor( Qt::ClosedHandCursor );
+				return;
+			}
+		}
 		if ( !bounds.IsEmpty() && nTool == MapTool_t::MAP_TOOL_SELECT )
 		{
 			// In rotate mode the pivot comes first: it sits inside the selection, where a click
@@ -2202,6 +2220,7 @@ void CMapView2D::CancelMove()
 	m_MoveSelection.clear();
 	m_MoveFrom.reset();
 	m_HandleDrag.reset();
+	m_RadiusDrag.reset();
 	m_bPivotDrag = false;
 }
 
@@ -2211,6 +2230,52 @@ void CMapView2D::CancelMove()
 std::optional<xv::map::Point_t> CMapView2D::GetShownPivot() const
 {
 	return m_Editor.GetTool() == MapTool_t::MAP_TOOL_SELECT ? m_Editor.GetPivot() : std::nullopt;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: The selected entities' radii, while helpers show.
+//-----------------------------------------------------------------------------
+std::vector<CMapView2D::RadiusHandle_t> CMapView2D::GetRadiusHandles() const
+{
+	std::vector<RadiusHandle_t> handles;
+	const xv::map::CScene *pScene = GetDocument().GetScene();
+	if ( !pScene || !m_Editor.GetSettings().m_bHelpers )
+		return handles;
+	for ( const std::uint32_t nObject : GetDocument().GetSelection() )
+	{
+		if ( pScene->IsSolidObject( nObject ) || pScene->IsDeleted( nObject ) )
+			continue;
+		const xv::map::EntityVisual_t &visual = pScene->m_Entities[ pScene->GetIndex( nObject ) ];
+		const QPointF centre = Flatten( visual.m_Origin );
+		for ( std::size_t n = 0; n < visual.m_Spheres.size() && n < visual.m_SphereKeys.size(); n++ )
+			handles.push_back( { nObject, std::string{ visual.m_SphereKeys[ n ] }, centre, ToWidget( centre + QPointF{ visual.m_Spheres[ n ], 0.0 } ) } );
+	}
+	return handles;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+std::optional<CMapView2D::RadiusHandle_t> CMapView2D::RadiusHandleAt( QPointF at ) const
+{
+	const double flHalf = Look().m_nHandleSize / 2.0;
+	for ( RadiusHandle_t &handle : GetRadiusHandles() )
+	{
+		if ( Reached( QRectF{ handle.m_At.x() - flHalf, handle.m_At.y() - flHalf, flHalf * 2.0, flHalf * 2.0 } ).contains( at ) )
+			return std::move( handle );
+	}
+	return std::nullopt;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Never below one unit: a radius of 0 means "none" to most of these keys.
+//-----------------------------------------------------------------------------
+std::string CMapView2D::RadiusAt( QPointF at ) const
+{
+	if ( !m_RadiusDrag )
+		return {};
+	const QPointF delta = ToMap( at ) - m_RadiusDrag->m_Centre;
+	return std::to_string( std::max( 1L, std::lround( std::hypot( delta.x(), delta.y() ) ) ) );
 }
 
 //-----------------------------------------------------------------------------
@@ -2225,6 +2290,11 @@ void CMapView2D::UpdateCursor( QPointF at )
 	}
 	Qt::CursorShape nShape = Qt::ArrowCursor;
 	const xv::map::Box_t bounds = GetDocument().GetSelectionBounds();
+	if ( m_Editor.GetTool() == MapTool_t::MAP_TOOL_SELECT && RadiusHandleAt( at ) )
+	{
+		setCursor( Qt::SizeHorCursor );
+		return;
+	}
 	if ( m_Editor.GetTool() == MapTool_t::MAP_TOOL_SELECT && !bounds.IsEmpty() )
 	{
 		const MapEditMode_t nMode = m_Editor.GetEditMode();
@@ -2299,6 +2369,14 @@ void CMapView2D::mouseMoveEvent( QMouseEvent *pEvent )
 		PreviewHandle( pEvent->position(), pEvent->modifiers() );
 		return;
 	}
+	if ( m_RadiusDrag && m_pMoveScene && ( pEvent->buttons() & Qt::LeftButton ) )
+	{
+		const std::string szValue = RadiusAt( pEvent->position() );
+		const xv::map::CScene &base = *m_pMoveScene;
+		GetDocument().Preview( xv::map::EditEntities( base, { m_RadiusDrag->m_nObject }, [ & ]( xv::map::Entity_t &entity ) { xv::map::SetKeyValue( base.m_Map, entity, m_RadiusDrag->m_szKey, szValue ); } ) );
+		m_Editor.ShowCursor( QStringLiteral( "%1 %2" ).arg( QString::fromStdString( m_RadiusDrag->m_szKey ), QString::fromStdString( szValue ) ) );
+		return;
+	}
 	if ( m_bPivotDrag && ( pEvent->buttons() & Qt::LeftButton ) )
 	{
 		// On the grid (Alt: free); the axis this view doesn't show keeps its place.
@@ -2365,6 +2443,23 @@ void CMapView2D::mouseReleaseEvent( QMouseEvent *pEvent )
 	{
 		ReleaseVertex( pEvent->position(), pEvent->modifiers() );
 		m_PressAt = {};
+		return;
+	}
+	if ( pEvent->button() == Qt::LeftButton && m_RadiusDrag )
+	{
+		// The radius, as one step to undo.
+		const RadiusHandle_t handle = *m_RadiusDrag;
+		const std::string szValue = RadiusAt( pEvent->position() );
+		m_RadiusDrag.reset();
+		CancelMove();
+		CMapDocument &document = GetDocument();
+		if ( const xv::map::CScene *pScene = document.GetScene() )
+		{
+			xv::map::MapEdit_t edit = xv::map::EditEntities( *pScene, { handle.m_nObject }, [ & ]( xv::map::Entity_t &entity ) { xv::map::SetKeyValue( pScene->m_Map, entity, handle.m_szKey, szValue ); } );
+			document.Edit( std::move( edit ), tr( "Change %1" ).arg( QString::fromStdString( handle.m_szKey ) ) );
+		}
+		m_PressAt = {};
+		UpdateCursor( pEvent->position() );
 		return;
 	}
 	if ( pEvent->button() == Qt::LeftButton && m_HandleDrag )

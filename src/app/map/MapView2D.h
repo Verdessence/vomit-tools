@@ -12,6 +12,7 @@
 #include <cstdint>
 #include <memory>
 #include <optional>
+#include <string>
 #include <vector>
 
 #include <QPointF>
@@ -210,6 +211,19 @@ private:
 	xv::map::Box_t m_DragBounds;
 	xv::map::Point_t m_DragPivot{}; // what a turn by the handles is about
 	bool m_bPivotDrag = false;      // the pivot itself being dragged
+	// A selected entity's sphere() radius: a handle on its circle sets the key it is read from.
+	struct RadiusHandle_t
+	{
+		std::uint32_t m_nObject = 0;
+		std::string m_szKey;
+		QPointF m_Centre; // map units, in this view
+		QPointF m_At;     // the handle, in the widget
+	};
+	[[nodiscard]] std::vector<RadiusHandle_t> GetRadiusHandles() const;
+	[[nodiscard]] std::optional<RadiusHandle_t> RadiusHandleAt( QPointF at ) const;
+	// The key's value for the mouse at at: its distance from the centre, in whole units.
+	[[nodiscard]] std::string RadiusAt( QPointF at ) const;
+	std::optional<RadiusHandle_t> m_RadiusDrag;
 	std::shared_ptr<const xv::map::CScene> m_pMoveScene;
 	std::vector<std::uint32_t> m_MoveSelection;
 	// The block tool's drag: what it does, where it began (map units) and the box then.
