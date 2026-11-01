@@ -5,6 +5,7 @@
 //
 //===========================================================================//
 #include "MapRenderData.h"
+#include "MapParticles.h"
 
 #include <algorithm>
 #include <cmath>
@@ -54,6 +55,22 @@ void AddBox( xv::map::CMapMesh &mesh, const xv::map::Box_t &box, std::uint32_t n
 		mesh.m_Indices.insert( mesh.m_Indices.end(), { nBase, nBase + 1, nBase + 2, nBase, nBase + 2, nBase + 3 } );
 		mesh.m_Lines.insert( mesh.m_Lines.end(), { nBase, nBase + 1, nBase + 1, nBase + 2, nBase + 2, nBase + 3, nBase + 3, nBase } );
 	}
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: The same material but for where its proxies have moved it (the frame, the scroll,
+//          the colour): the 2D views, which draw no motion, needn't draw again for that.
+//-----------------------------------------------------------------------------
+bool SameButMotion( const xv::map::RasterMaterial_t &a, const xv::map::RasterMaterial_t &b )
+{
+	if ( !a.m_bAnimated || !b.m_bAnimated || a.m_pFrames != b.m_pFrames )
+		return a == b;
+	xv::map::RasterMaterial_t still = b;
+	still.m_Shade.m_pBase = a.m_Shade.m_pBase;
+	still.m_Shade.m_UvTransform = a.m_Shade.m_UvTransform;
+	still.m_Shade.m_vecColor = a.m_Shade.m_vecColor;
+	still.m_Shade.m_flAlpha = a.m_Shade.m_flAlpha;
+	return a == still;
 }
 
 } // namespace
@@ -113,6 +130,9 @@ xv::map::RasterScene_t MapFrame_t::MakeScene() const
 	appendParts( m_pSpriteParts, m_pSpriteMesh );
 	if ( m_pEntityPreviewMesh )
 		scene.m_Meshes.push_back( m_pEntityPreviewMesh.get() );
+	// Last: they are see-through, drawn over what is behind them.
+	if ( m_pParticleMesh )
+		scene.m_Meshes.push_back( m_pParticleMesh.get() );
 	if ( m_pModelBoxMesh )
 	{
 		scene.m_Meshes.push_back( m_pModelBoxMesh.get() );
@@ -549,7 +569,7 @@ void CMapRenderData::SetMaterials( std::shared_ptr<const std::vector<xv::map::Ra
 		{
 			const auto n = batch.m_nMaterial;
 			if ( !m_pReceivedMaterials || !pMaterials || n >= m_pReceivedMaterials->size() || n >= pMaterials->size() ||
-				( *m_pReceivedMaterials )[ n ] != ( *pMaterials )[ n ] )
+				!SameButMotion( ( *m_pReceivedMaterials )[ n ], ( *pMaterials )[ n ] ) )
 			{
 				++m_nPropMaterialsRevision;
 				break;
@@ -813,7 +833,28 @@ MapFrame_t CMapRenderData::Snapshot( const xv::map::CViewCamera &camera, const x
 		m_Frame.m_pSpriteParts.reset();
 	if ( m_Frame.m_bEntityPreview && ( camera.GetRight() != m_PreviewRight || camera.GetUp() != m_PreviewUp ) )
 		UpdateEntityPreview( camera.GetRight(), camera.GetUp() );
+	// The particles face this camera; their materials follow everything else's.
+	std::shared_ptr<const xv::map::CMapMesh> pParticles;
+	const bool bTextured = options.m_Shade.m_nMode != xv::map::RasterMode_t::RASTER_MODE_WIREFRAME && options.m_Shade.m_nMode != xv::map::RasterMode_t::RASTER_MODE_FLAT;
+	if ( m_pParticles && settings.m_bParticles && bTextured && pScene )
+	{
+		const std::uint32_t nFirst = m_Frame.m_pMaterials ? static_cast<std::uint32_t>( m_Frame.m_pMaterials->size() ) : 0;
+		pParticles = m_pParticles->BuildMesh( camera.m_Eye, camera.GetRight(), camera.GetUp(), nFirst );
+		const auto &pOwn = m_pParticles->GetMaterials();
+		if ( pParticles && std::pair<const void *, const void *>{ m_Frame.m_pMaterials.get(), pOwn.get() } != m_WithParticlesFor )
+		{
+			auto pAll = std::make_shared<std::vector<xv::map::RasterMaterial_t>>( m_Frame.m_pMaterials ? *m_Frame.m_pMaterials : std::vector<xv::map::RasterMaterial_t>{} );
+			pAll->insert( pAll->end(), pOwn->begin(), pOwn->end() );
+			m_pWithParticles = std::move( pAll );
+			m_WithParticlesFor = { m_Frame.m_pMaterials.get(), pOwn.get() };
+		}
+	}
 	MapFrame_t frame = m_Frame;
+	if ( pParticles )
+	{
+		frame.m_pParticleMesh = std::move( pParticles );
+		frame.m_pMaterials = m_pWithParticles;
+	}
 	frame.m_Camera = camera;
 	frame.m_Options = options;
 	frame.m_Options.m_bToolTextures = settings.m_bToolTextures;

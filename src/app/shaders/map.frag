@@ -38,8 +38,10 @@ layout(std140, binding = 1) uniform Material {
 	vec4 options; // alpha test reference (below 0: none), see-through (1 blended, 2 additive), blend to base2, missing
 	vec4 size;    // the base texture's size, then base2's, in texels
 	vec4 kind;    // 1: the object's colour (entity boxes), has a base texture, has base2
-	vec4 extra;   // 1: a sky face, showing the map's sky; times the object's colour; unlit
+	vec4 extra;   // 1: a sky face, showing the map's sky; times the object's colour; unlit; times the vertex's colour (particles)
 	vec4 selfIllum; // $selfillumtint, and 1 when it glows by its base texture's alpha
+	vec4 uvTransform; // $basetexturetransform: u' = a*u + b*v + tx, v' = c*u + d*v + ty (a b c d)
+	vec4 uvOffset;    // tx ty
 } material;
 
 layout(binding = 2) uniform sampler2D base;
@@ -150,12 +152,19 @@ void main() {
 		color = vec4(skyColour(v_world - frame.eye.xyz), 1.0);
 	} else if (textured) {
 		vec2 uv = v_texel / max(material.size.xy, vec2(1.0));
+		// The base texture's transform, in its texels (as xv::map::ShadeFragment's).
+		vec2 full = max(material.size.xy, vec2(1.0));
+		mat2 turn = mat2(material.uvTransform.x, material.uvTransform.z, material.uvTransform.y, material.uvTransform.w);
+		vec2 movedTexel = (turn * uv + material.uvOffset.xy) * full;
+		mat2 turnTexels = mat2(material.uvTransform.x, material.uvTransform.z * full.y / full.x, material.uvTransform.y * full.x / full.y, material.uvTransform.w);
+		vec2 movedAcross = turnTexels * across;
+		vec2 movedDown = turnTexels * down;
 		if (material.options.w > 0.5) {
 			// Source's missing texture: magenta and black, four squares a texture.
 			ivec2 square = ivec2(floor(uv * 4.0));
 			color = ((square.x + square.y) & 1) == 0 ? vec4(1.0, 0.0, 1.0, 1.0) : vec4(0.0, 0.0, 0.0, 1.0);
 		} else if (material.kind.y > 0.5) {
-			color = sampleFiltered(base, v_texel, material.size.xy, across, down);
+			color = sampleFiltered(base, movedTexel, material.size.xy, movedAcross, movedDown);
 			if (material.options.z > 0.5 && material.kind.z > 0.5) {
 				vec4 second = sampleFiltered(base2, v_texel, material.size.zw, across, down);
 				color = mix(color, second, v_blend);
@@ -169,6 +178,11 @@ void main() {
 		color.rgb *= material.color.rgb;
 		if (material.extra.y > 0.5) {
 			color.rgb *= v_state.rgb;
+		}
+		if (material.extra.w > 0.5) {
+			// A particle's own colour and alpha, as xv::map::ShadeFragment's m_bVertexColor.
+			color.rgb *= v_normal;
+			color.a *= v_blend;
 		}
 		if (mode == MODE_LIGHTING && frame.fogRange.w > 0.5 && material.extra.z < 0.5) {
 			// mat_fullbright 2, as xv::map::ShadeFragment: a colourless monotone.

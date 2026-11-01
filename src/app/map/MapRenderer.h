@@ -88,6 +88,12 @@ private:
 		std::unique_ptr<QRhiTexture> m_pBase2;
 		std::unique_ptr<QRhiBuffer> m_pUniforms;
 		std::unique_ptr<QRhiShaderResourceBindings> m_pBindings;
+		xv::map::RasterMaterial_t m_Source; // what the uniforms and bindings were made from
+		bool m_bMade = false;
+		// An animated material's frames already on the card, by texture, so its proxies can move
+		// through them without uploading each again.
+		std::vector<std::pair<const xv::map::RasterTexture_t *, std::unique_ptr<QRhiTexture>>> m_Frames;
+		const void *m_pFramesFor = nullptr; // the frame set they belong to (RasterMaterial_t::m_pFrames)
 	};
 
 	void UploadMeshes( const MapFrame_t &frame, QRhiResourceUpdateBatch *pUpdates );
@@ -109,6 +115,7 @@ private:
 	std::vector<Mesh_t> m_Meshes;
 	std::vector<Material_t> m_Materials;
 	const void *m_pMaterialsFor = nullptr;
+	bool m_bRemakeMaterials = true; // the bindings everything shares changed: every material made again
 	Material_t m_LinesAll;       // the wireframe's edges
 	Material_t m_LinesSelected;  // the selection's
 	Material_t m_ModelLinesAll;  // the same for the models' mesh, where boxed objects' edges aren't the selection's

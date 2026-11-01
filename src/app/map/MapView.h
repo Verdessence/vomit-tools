@@ -84,6 +84,7 @@ struct MapViewSettings_t
 	bool m_bToolTextures = true;  // Ctrl+Shift+F2
 	bool m_bSkybox3D = true;      // Alt+V
 	bool m_bWalkable = false;     // the selected displacements' steep triangles tinted (Hammer's Display walkable area)
+	bool m_bParticles = true;     // info_particle_system playing in the 3D views
 	bool m_bUseGroupColors = true;
 	bool m_bDrawVertices = false;
 	bool m_bCenterHandles = true;

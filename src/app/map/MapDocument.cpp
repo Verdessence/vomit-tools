@@ -12,6 +12,7 @@
 #include <algorithm>
 #include <fstream>
 #include <set>
+#include <utility>
 #include <unordered_map>
 
 #include <QFile>
@@ -120,7 +121,7 @@ CMapDocument::CMapDocument( QObject *pParent )
 //-----------------------------------------------------------------------------
 bool CMapDocument::IsModified() const
 {
-	return !m_pUndo->isClean();
+	return m_bRecovered || !m_pUndo->isClean();
 }
 
 //-----------------------------------------------------------------------------
@@ -160,6 +161,17 @@ void CMapDocument::ApplyEditNow( const xv::map::MapEdit_t &edit, bool bDisplacem
 		m_UserShown.push_back( editor.m_bVisgroupShown ? 1 : 0 );
 		m_AutoShown.push_back( editor.m_bAutoShown ? 1 : 0 );
 		m_QuickHidden.push_back( 0 );
+	}
+	// An edit that hides or shows objects in their visgroups' notes (as saved: a Stripper
+	// import's filtered entities, and its undo) is what the views show.
+	for ( const std::uint32_t n : pScene->m_Changed )
+	{
+		if ( n < m_pScene->GetObjectCount() && n < m_UserShown.size() )
+		{
+			const bool bShown = pScene->GetObjectEditor( n ).m_bVisgroupShown;
+			if ( bShown != m_pScene->GetObjectEditor( n ).m_bVisgroupShown )
+				m_UserShown[ n ] = bShown ? 1 : 0;
+		}
 	}
 	m_pScene = std::move( pScene );
 	UpdateCordonHidden();
@@ -386,6 +398,10 @@ bool CMapDocument::Save( const std::filesystem::path &path, QString *pError )
 	pScene->m_InstanceOptions.m_MapFile = path;
 	m_pScene = std::move( pScene );
 	m_pUndo->setClean();
+	if ( std::exchange( m_bRecovered, false ) )
+	{
+		emit ModifiedChanged( false );
+	}
 	emit Saved( szPath );
 	return true;
 }
@@ -450,6 +466,7 @@ void CMapDocument::Load( Source_t source )
 	Stop();
 	m_bStop = false;
 	m_Game = source.m_Game;
+	m_bLoadingRecovered = source.m_bRecovered;
 	const int nGeneration = ++m_nGeneration;
 	m_Worker = std::thread( [ this, source = std::move( source ), nGeneration ]() mutable { Run( std::move( source ), nGeneration ); } );
 }
@@ -559,10 +576,16 @@ void CMapDocument::Finish( std::shared_ptr<xv::map::CScene> pScene, QString szFg
 	}
 	m_Selection.clear();
 	m_pUndo->clear();
+	const bool bWasModified = IsModified();
+	m_bRecovered = m_bLoadingRecovered;
 	m_pScene = std::move( pScene );
 	UpdateCordonHidden();
 	m_nStateGeneration++;
 	emit Loaded();
+	if ( bWasModified != IsModified() )
+	{
+		emit ModifiedChanged( IsModified() );
+	}
 }
 
 //-----------------------------------------------------------------------------

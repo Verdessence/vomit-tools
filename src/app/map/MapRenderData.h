@@ -25,6 +25,7 @@
 #include "map/Sprites.h"
 
 class CMapDocument;
+class CMapParticles;
 class CMapResources;
 
 // Per mesh, where each vertex's light is in the lighting preview's atlas.
@@ -47,6 +48,7 @@ struct MapFrame_t
 	std::shared_ptr<const xv::map::CMapMesh> m_pOverlayMesh;
 	std::shared_ptr<const xv::map::CMapMesh> m_pSpriteMesh; // facing this frame's camera
 	std::shared_ptr<const xv::map::CMapMesh> m_pModelBoxMesh; // the boxes selected models show instead of their edges
+	std::shared_ptr<const xv::map::CMapMesh> m_pParticleMesh; // the particles, facing this frame's camera
 	std::shared_ptr<const std::vector<xv::map::RasterMaterial_t>> m_pMaterials;
 	std::shared_ptr<const void> m_pTextures; // keeps the materials' textures alive
 	std::shared_ptr<const xv::sky::CCube> m_pSky;
@@ -109,6 +111,8 @@ public:
 	void SetOverlays( std::shared_ptr<const xv::map::CMapMesh> pOverlays, std::shared_ptr<const xv::map::MeshParts_t> pParts = {} );
 	// The entities drawn as sprites, tinted by their own colours: those show no box either.
 	void SetSprites( std::shared_ptr<const std::vector<xv::map::SpritePlacement_t>> pSprites );
+	// The particle systems playing (info_particle_system), drawn in textured 3D frames; null for none.
+	void SetParticles( const CMapParticles *pParticles ) { m_pParticles = pParticles; }
 
 private:
 	// The scene changed: another map (everything starts over), or the same one edited (what the
@@ -126,6 +130,10 @@ private:
 
 	const CMapDocument &m_Document;
 	const CMapResources *m_pResources = nullptr;
+	const CMapParticles *m_pParticles = nullptr;
+	// The frame's materials with the particles' after them, and what that was made of.
+	std::shared_ptr<const std::vector<xv::map::RasterMaterial_t>> m_pWithParticles;
+	std::pair<const void *, const void *> m_WithParticlesFor{};
 	std::shared_ptr<const xv::map::MeshParts_t> m_pEntityBaseParts;
 	std::shared_ptr<const xv::map::MeshParts_t> m_pEntityAllParts;
 	std::unordered_set<std::uint32_t> m_PendingProjections;

@@ -72,7 +72,16 @@ xv::map::CMapMesh ObjectMesh( const xv::map::CMapMesh &source, std::uint32_t nOb
 //-----------------------------------------------------------------------------
 // Purpose:
 //-----------------------------------------------------------------------------
-std::shared_ptr<xv::map::RasterTexture_t> ReadMapTexture( std::span<const std::byte> vtf, int nMaxSize, bool bDecode )
+int MapTextureFrames( std::span<const std::byte> vtf )
+{
+	const auto file = xv::texture::ReadVtf( vtf );
+	return file ? std::max( 1, file->m_Info.m_nFrames ) : 0;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+std::shared_ptr<xv::map::RasterTexture_t> ReadMapTexture( std::span<const std::byte> vtf, int nMaxSize, bool bDecode, int nFrame )
 {
 	const auto file = xv::texture::ReadVtf( vtf );
 	if ( !file || file->m_Info.m_nWidth <= 0 || file->m_Info.m_nHeight <= 0 )
@@ -99,7 +108,7 @@ std::shared_ptr<xv::map::RasterTexture_t> ReadMapTexture( std::span<const std::b
 		const int nHeight = std::max( 1, file->m_Info.m_nHeight >> nMip );
 		if ( bCompressed )
 		{
-			const std::span<const std::byte> data = file->Image( nMip );
+			const std::span<const std::byte> data = file->Image( nMip, nFrame );
 			if ( data.size() < xv::texture::ImageSize( nFormat, nWidth, nHeight ) )
 			{
 				break;
@@ -109,7 +118,7 @@ std::shared_ptr<xv::map::RasterTexture_t> ReadMapTexture( std::span<const std::b
 		}
 		if ( bDecode || !bCompressed )
 		{
-			std::optional<xv::texture::CImage> image = file->Decode( nMip );
+			std::optional<xv::texture::CImage> image = file->Decode( nMip, nFrame );
 			if ( !image || image->Empty() )
 			{
 				break;
@@ -173,6 +182,7 @@ void CMapResources::Start( std::shared_ptr<const xv::map::CScene> pScene, std::o
 	m_Current.assign( m_nEntityMaterial + 1, {} ); // the map's, the places kept for new ones, the entity boxes'
 	m_LightCurrent.clear();
 	m_Keep.clear();
+	m_Animated.clear();
 	m_Placing = {};
 	m_pRefreshNext.reset();
 	m_RefreshChanged.clear();
@@ -817,6 +827,15 @@ std::vector<CMapResources::Loaded_t> CMapResources::ReadMaterials( const std::ve
 			if ( base[ i ] )
 			{
 				batch[ i ].m_pBase = ReadMapTexture( *base[ i ], nMaxSize, bDecoded );
+				// An animated material's every frame, for its proxies to pick from.
+				if ( batch[ i ].m_pBase && batch[ i ].m_Info.m_pProxies )
+				{
+					const int nFrames = std::min( MapTextureFrames( *base[ i ] ), MAX_ANIMATED_FRAMES );
+					batch[ i ].m_Frames.push_back( batch[ i ].m_pBase );
+					for ( int nFrame = 1; nFrame < nFrames; nFrame++ )
+						if ( auto pFrame = ReadMapTexture( *base[ i ], nMaxSize, bDecoded, nFrame ) )
+							batch[ i ].m_Frames.push_back( std::move( pFrame ) );
+				}
 			}
 			if ( base2[ i ] )
 			{
@@ -872,6 +891,37 @@ bool CMapResources::LoadMaterials( std::shared_ptr<const xv::map::CScene> pScene
 }
 
 //-----------------------------------------------------------------------------
+// Purpose: Each animated material from the one read, with what its proxies make of it now.
+//-----------------------------------------------------------------------------
+bool CMapResources::Animate( float flTime )
+{
+	bool bChanged = false;
+	for ( const Animated_t &animated : m_Animated )
+	{
+		if ( animated.m_nMaterial >= m_Current.size() )
+			continue;
+		const xv::map::MaterialMotion_t motion = xv::map::MoveMaterial( *animated.m_pProxies, flTime, static_cast<int>( animated.m_Frames.size() ) );
+		xv::map::RasterMaterial_t material = animated.m_Still;
+		xv::map::ShadeMaterial_t &shade = material.m_Shade;
+		if ( !animated.m_Frames.empty() )
+			shade.m_pBase = animated.m_Frames[ static_cast<std::size_t>( motion.m_nFrame ) % animated.m_Frames.size() ].get();
+		shade.m_UvTransform = motion.m_UvTransform;
+		shade.m_vecColor = motion.m_vecColor;
+		shade.m_flAlpha = motion.m_flAlpha;
+		if ( m_Current[ animated.m_nMaterial ] != material )
+		{
+			m_Current[ animated.m_nMaterial ] = material;
+			bChanged = true;
+		}
+	}
+	if ( bChanged )
+	{
+		m_pMaterials = std::make_shared<const std::vector<xv::map::RasterMaterial_t>>( m_Current );
+	}
+	return bChanged;
+}
+
+//-----------------------------------------------------------------------------
 // Purpose: A batch arrived: the materials are drawn with it from the next frame.
 //-----------------------------------------------------------------------------
 void CMapResources::Take( std::vector<Loaded_t> batch )
@@ -914,6 +964,15 @@ void CMapResources::Take( std::vector<Loaded_t> batch )
 			shade.m_bAlphaTest = false;
 		}
 		material.m_bTool = loaded.m_bTool;
+		std::erase_if( m_Animated, [ & ]( const Animated_t &animated ) { return animated.m_nMaterial == loaded.m_nMaterial; } );
+		if ( info.m_pProxies )
+		{
+			material.m_bAnimated = true;
+			material.m_pFrames = loaded.m_Frames.empty() ? nullptr : loaded.m_Frames.front().get();
+			m_Animated.push_back( { loaded.m_nMaterial, info.m_pProxies, loaded.m_Frames, material } );
+			for ( std::size_t nFrame = 1; nFrame < loaded.m_Frames.size(); nFrame++ )
+				m_Keep.push_back( loaded.m_Frames[ nFrame ] );
+		}
 		m_Current[ loaded.m_nMaterial ] = material;
 		if ( loaded.m_nMaterial >= m_LightCurrent.size() )
 		{

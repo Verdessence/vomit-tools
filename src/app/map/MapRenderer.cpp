@@ -9,6 +9,8 @@
 #ifdef VOMIT_TOOLS_GPU
 
 #include <algorithm>
+#include <iterator>
+#include <utility>
 #include <cstring>
 #include <unordered_map>
 
@@ -52,6 +54,8 @@ struct MaterialUniforms_t
 	float m_Kind[ 4 ];
 	float m_Extra[ 4 ];
 	float m_SelfIllum[ 4 ];
+	float m_UvTransform[ 4 ]; // a b c d
+	float m_UvOffset[ 4 ];    // tx ty
 };
 
 // map.frag's sky block, as sky.frag's.
@@ -94,10 +98,15 @@ MaterialUniforms_t MaterialUniforms( const xv::map::RasterMaterial_t *pMaterial,
 	u.m_Extra[ 0 ] = shade.m_bSky ? 1.0f : 0.0f;
 	u.m_Extra[ 1 ] = shade.m_bTinted ? 1.0f : 0.0f;
 	u.m_Extra[ 2 ] = shade.m_bUnlit ? 1.0f : 0.0f;
+	u.m_Extra[ 3 ] = shade.m_bVertexColor ? 1.0f : 0.0f;
 	u.m_SelfIllum[ 0 ] = shade.m_vecSelfIllumTint.m_flX;
 	u.m_SelfIllum[ 1 ] = shade.m_vecSelfIllumTint.m_flY;
 	u.m_SelfIllum[ 2 ] = shade.m_vecSelfIllumTint.m_flZ;
 	u.m_SelfIllum[ 3 ] = shade.m_bSelfIllum ? 1.0f : 0.0f;
+	for ( std::size_t i = 0; i < 4; i++ )
+		u.m_UvTransform[ i ] = shade.m_UvTransform[ i ];
+	u.m_UvOffset[ 0 ] = shade.m_UvTransform[ 4 ];
+	u.m_UvOffset[ 1 ] = shade.m_UvTransform[ 5 ];
 	return u;
 }
 
@@ -173,6 +182,7 @@ void CMapRenderer::Release()
 	m_pAlphaSky.reset();
 	m_pNoBindings.reset();
 	m_pMaterialsFor = nullptr;
+	m_bRemakeMaterials = true;
 	m_pStateFlags = nullptr;
 	m_pStateColors = nullptr;
 	m_pStateLines = nullptr;
@@ -338,6 +348,7 @@ void CMapRenderer::UploadState( const MapFrame_t &frame, QRhiResourceUpdateBatch
 		m_pStateLines = nullptr;
 		m_Materials.clear(); // bound to the old textures
 		m_pMaterialsFor = nullptr;
+		m_bRemakeMaterials = true;
 		m_LinesAll = {};
 		m_LinesSelected = {};
 		m_ModelLinesAll = {};
@@ -575,6 +586,7 @@ void CMapRenderer::UploadMaterials( const MapFrame_t &frame, QRhiResourceUpdateB
 		m_ModelLinesAll.m_pBindings.reset();
 		m_ModelLinesSelected.m_pBindings.reset();
 		m_pMaterialsFor = nullptr;
+		m_bRemakeMaterials = true;
 	}
 	if ( !m_LinesAll.m_pBindings )
 	{
@@ -592,6 +604,7 @@ void CMapRenderer::UploadMaterials( const MapFrame_t &frame, QRhiResourceUpdateB
 		// The materials bind their samplers.
 		m_bMipBlend = frame.m_Options.m_Shade.m_bMipBlend;
 		m_pMaterialsFor = nullptr;
+		m_bRemakeMaterials = true;
 	}
 	if ( frame.m_pMaterials.get() == m_pMaterialsFor )
 	{
@@ -600,25 +613,57 @@ void CMapRenderer::UploadMaterials( const MapFrame_t &frame, QRhiResourceUpdateB
 	m_pMaterialsFor = frame.m_pMaterials.get();
 	const std::size_t nCount = frame.m_pMaterials ? frame.m_pMaterials->size() : 0;
 	m_Materials.resize( nCount );
+	// Only the materials that changed are made again (animated ones change every few frames).
+	const bool bRemake = std::exchange( m_bRemakeMaterials, false );
 	for ( std::size_t i = 0; i < nCount; i++ )
 	{
 		const xv::map::RasterMaterial_t &source = ( *frame.m_pMaterials )[ i ];
 		Material_t &material = m_Materials[ i ];
+		if ( !bRemake && material.m_bMade && material.m_pBindings && material.m_Source == source )
+		{
+			continue;
+		}
 		uniforms( material, MaterialUniforms( &source, false ) );
 		// Textures that are the same as last time stay; new ones go up.
 		QRhiTexture *pBase = m_pWhite.get();
 		QRhiTexture *pBase2 = m_pWhite.get();
-		if ( source.m_Shade.m_pBase )
+		if ( source.m_Shade.m_pBase && source.m_bAnimated )
 		{
+			// Frames of another reading (the textures read again) are let go.
+			if ( material.m_pFramesFor != source.m_pFrames )
+			{
+				material.m_Frames.clear();
+				material.m_pFramesFor = source.m_pFrames;
+			}
+			auto found = std::ranges::find( material.m_Frames, source.m_Shade.m_pBase, &std::pair<const xv::map::RasterTexture_t *, std::unique_ptr<QRhiTexture>>::first );
+			if ( found == material.m_Frames.end() )
+			{
+				material.m_Frames.emplace_back( source.m_Shade.m_pBase, nullptr );
+				found = std::prev( material.m_Frames.end() );
+				pBase = Upload( *source.m_Shade.m_pBase, found->second, pUpdates );
+			}
+			else
+			{
+				pBase = found->second ? found->second.get() : m_pWhite.get();
+			}
+		}
+		else if ( source.m_Shade.m_pBase )
+		{
+			material.m_Frames.clear();
 			pBase = material.m_pBaseFor == source.m_Shade.m_pBase && material.m_pBase ? material.m_pBase.get() : Upload( *source.m_Shade.m_pBase, material.m_pBase, pUpdates );
 		}
 		if ( source.m_Shade.m_pBase2 )
 		{
 			pBase2 = material.m_pBase2For == source.m_Shade.m_pBase2 && material.m_pBase2 ? material.m_pBase2.get() : Upload( *source.m_Shade.m_pBase2, material.m_pBase2, pUpdates );
 		}
-		material.m_pBaseFor = source.m_Shade.m_pBase;
+		if ( !source.m_bAnimated )
+		{
+			material.m_pBaseFor = source.m_Shade.m_pBase;
+		}
 		material.m_pBase2For = source.m_Shade.m_pBase2;
 		MakeBindings( material, pBase, pBase2, source.m_Shade.m_pBase, source.m_Shade.m_pBase2 );
+		material.m_Source = source;
+		material.m_bMade = true;
 	}
 }
 

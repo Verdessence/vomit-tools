@@ -21,6 +21,7 @@ constexpr auto SINGLE_WINDOW_KEY = "singleWindow";
 constexpr auto MATERIAL_VISUAL_KEY = "materialVisual";
 constexpr auto MANIFEST_REMINDER_KEY = "manifestReminder";
 constexpr auto REOPEN_SESSION_KEY = "reopenSession";
+constexpr auto TAB_GROUPS_KEY = "tabGroups/on";
 constexpr auto DEBUG_LOG_KEY = "debugLog";
 constexpr auto MATERIAL_LIVE_KEY = "materialLivePreview";
 constexpr auto DESKTOP_FILE_CHOOSER_KEY = "desktopFileChooser";
@@ -78,6 +79,8 @@ void ForEachMapPreference( Preferences_t &map, Visit_t &&pfnVisit )
 	pfnVisit( "maps/groupCarve", map.m_bGroupCarve );
 	pfnVisit( "maps/faceEditWindow", map.m_bFaceEditWindow );
 	pfnVisit( "maps/onePanel", map.m_bOnePanel );
+	pfnVisit( "maps/autosave", map.m_bAutosave );
+	pfnVisit( "maps/autosaveMinutes", map.m_nAutosaveMinutes );
 	pfnVisit( "maps/showDisplacementBrush", map.m_bShowDisplacementBrush );
 	pfnVisit( "maps/hideSmallGrid", map.m_bHideSmallGrid );
 	pfnVisit( "maps/hideGridBelow", map.m_flHideGridBelow );
@@ -220,6 +223,7 @@ CPreferences::CPreferences()
 	  m_bMaterialLive( QSettings{}.value( MATERIAL_LIVE_KEY, true ).toBool() ),
 	  m_bManifestReminder( QSettings{}.value( MANIFEST_REMINDER_KEY, true ).toBool() ),
 	  m_bReopenSession( QSettings{}.value( REOPEN_SESSION_KEY, true ).toBool() ),
+	  m_bTabGroups( QSettings{}.value( TAB_GROUPS_KEY, true ).toBool() ),
 	  m_bDesktopFileChooser( QSettings{}.value( DESKTOP_FILE_CHOOSER_KEY, true ).toBool() ),
 	  m_bDebugLog( QSettings{}.value( DEBUG_LOG_KEY, false ).toBool() )
 {
@@ -319,6 +323,16 @@ void CPreferences::SetReopenSession( bool bReopen )
 {
 	m_bReopenSession = bReopen;
 	QSettings{}.setValue( REOPEN_SESSION_KEY, bReopen );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+void CPreferences::SetTabGroups( bool bGroups )
+{
+	m_bTabGroups = bGroups;
+	QSettings{}.setValue( TAB_GROUPS_KEY, bGroups );
+	emit TabGroupsChanged( bGroups );
 }
 
 //-----------------------------------------------------------------------------

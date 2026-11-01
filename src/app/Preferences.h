@@ -143,6 +143,8 @@ struct MapPreferences_t
 	bool m_bShowDisplacementBrush = false; // show its ring in Select while the Displacement tab is open
 	bool m_bFaceEditWindow = true;   // Face Edit in a window of its own, as Hammer's (else in the side panel)
 	bool m_bOnePanel = false;        // the side shows the panel whose tab was picked alone, as Blender's tabs do
+	bool m_bAutosave = true;         // a modified map is written to <map>.vmf.autosave now and then
+	int m_nAutosaveMinutes = 5;      // how often
 
 	// The 2D views.
 	bool m_bHideSmallGrid = true;
@@ -203,6 +205,10 @@ public:
 	[[nodiscard]] bool IsReopenSession() const { return m_bReopenSession; }
 	void SetReopenSession( bool bReopen );
 
+	// Whether the main window's tabs are grouped (by kind, or the user's groups) under a strip.
+	[[nodiscard]] bool IsTabGroups() const { return m_bTabGroups; }
+	void SetTabGroups( bool bGroups );
+
 	// Whether open and save windows are the desktop's own file chooser (the XDG portal's, on
 	// Linux) rather than Qt's.
 	[[nodiscard]] bool IsDesktopFileChooser() const { return m_bDesktopFileChooser; }
@@ -229,6 +235,7 @@ signals:
 	void GridAnimationChanged( bool bAll );
 	void MaterialEditingChanged();
 	void MapPreferencesChanged();
+	void TabGroupsChanged( bool bGroups );
 
 private:
 	CPreferences();
@@ -240,6 +247,7 @@ private:
 	bool m_bMaterialLive = true;
 	bool m_bManifestReminder = true;
 	bool m_bReopenSession = true;
+	bool m_bTabGroups = true;
 	bool m_bDesktopFileChooser = true;
 	bool m_bDebugLog = false;
 	MapPreferences_t m_Map;

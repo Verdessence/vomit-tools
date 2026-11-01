@@ -33,6 +33,8 @@
 // are read into them as they come (LoadMaterials). The entity boxes' material comes after them,
 // then the sprites', props' and overlays'.
 inline constexpr std::uint32_t MAP_MATERIAL_RESERVE = 256;
+// The most frames of an animated texture read (AnimatedTexture picks among them).
+inline constexpr int MAX_ANIMATED_FRAMES = 64;
 
 class CMapResources : public QObject
 {
@@ -81,6 +83,11 @@ public:
 	[[nodiscard]] int GetLoaded() const { return m_nLoaded; }
 	[[nodiscard]] int GetTotal() const { return m_nTotal; }
 	[[nodiscard]] bool IsFinished() const { return m_bFinished; }
+	// Materials whose proxies change them over time (AnimatedTexture, TextureScroll, Sine...).
+	[[nodiscard]] bool HasAnimated() const { return !m_Animated.empty(); }
+	// Those materials as they are at a time (seconds); true when one changed (GetMaterials then
+	// gives the new table).
+	bool Animate( float flTime );
 	[[nodiscard]] bool IsRefreshing() const { return m_bRefreshing || m_pRefreshNext != nullptr; }
 
 signals:
@@ -95,6 +102,7 @@ private:
 		xv::map::MaterialInfo_t m_Info;
 		std::shared_ptr<xv::map::RasterTexture_t> m_pBase;
 		std::shared_ptr<xv::map::RasterTexture_t> m_pBase2;
+		std::vector<std::shared_ptr<xv::map::RasterTexture_t>> m_Frames; // an animated material's base texture, every frame (the first is m_pBase)
 		bool m_bMissing = false;
 		bool m_bTool = false;
 		bool m_bSprite = false; // drawn unlit, tinted by its entity, blended
@@ -147,6 +155,15 @@ private:
 	int m_nGeneration = 0;
 	std::vector<xv::map::RasterMaterial_t> m_Current;
 	std::vector<std::shared_ptr<xv::map::RasterTexture_t>> m_Keep;
+	// A material its proxies move: where it is, what moves it, its frames and how it was read.
+	struct Animated_t
+	{
+		std::uint32_t m_nMaterial = 0;
+		std::shared_ptr<const xv::material::CProxies> m_pProxies;
+		std::vector<std::shared_ptr<xv::map::RasterTexture_t>> m_Frames;
+		xv::map::RasterMaterial_t m_Still;
+	};
+	std::vector<Animated_t> m_Animated;
 	std::shared_ptr<const std::vector<xv::map::RasterMaterial_t>> m_pMaterials;
 	std::shared_ptr<const void> m_pTextures;
 	std::vector<xv::map::LightMaterial_t> m_LightCurrent;
@@ -169,4 +186,6 @@ private:
 // A texture for drawing from a VTF: mips from the largest within nMaxSize down to the smallest.
 // A DXT texture keeps those mips as they are for the card; bDecode also decodes them (any other
 // format is decoded regardless, there being nothing smaller to keep).
-[[nodiscard]] std::shared_ptr<xv::map::RasterTexture_t> ReadMapTexture( std::span<const std::byte> vtf, int nMaxSize, bool bDecode = true );
+[[nodiscard]] std::shared_ptr<xv::map::RasterTexture_t> ReadMapTexture( std::span<const std::byte> vtf, int nMaxSize, bool bDecode = true, int nFrame = 0 );
+// How many frames a VTF has (1 for a plain texture, 0 when it can't be read).
+[[nodiscard]] int MapTextureFrames( std::span<const std::byte> vtf );

@@ -186,6 +186,14 @@ QWidget *CPreferencesDialog::BuildInterfacePage()
 	pLayout->addWidget( pReopen );
 	pLayout->addWidget( Hint( tr( "At the next start, the tabs come back as they were left, with the folder browser's folder. "
 								  "Files opened from the command line or a file manager open instead." ) ) );
+	auto *pGroups = new QCheckBox( tr( "Group the tabs" ) );
+	pGroups->setObjectName( QStringLiteral( "preferencesTabGroups" ) );
+	pGroups->setChecked( CPreferences::Instance().IsTabGroups() );
+	connect( pGroups, &QCheckBox::toggled, this, []( bool bOn ) { CPreferences::Instance().SetTabGroups( bOn ); } );
+	pLayout->addSpacing( 12 );
+	pLayout->addWidget( pGroups );
+	pLayout->addWidget( Hint( tr( "A strip over the tabs shows one group at a time: maps, textures, sounds and so on, or groups "
+								  "of your own (right-click a tab: Move to Group)." ) ) );
 #ifdef VOMIT_TOOLS_PORTAL
 	auto *pChooser = new QCheckBox( tr( "Use the desktop's file chooser" ) );
 	pChooser->setObjectName( QStringLiteral( "preferencesDesktopFileChooser" ) );
@@ -493,9 +501,11 @@ QWidget *CPreferencesDialog::BuildMapsPage()
 		pLayout->addWidget( check( QStringLiteral( "preferencesMapTextureLock" ), tr( "Texture lock on when a map opens" ), current.m_bTextureLock, []( MapPreferences_t &p, bool b ) { p.m_bTextureLock = b; } ) );
 		pLayout->addWidget( check( QStringLiteral( "preferencesMapScaleLock" ), tr( "Texture scale lock on when a map opens (textures stretch with resized faces)" ), current.m_bScaleLock, []( MapPreferences_t &p, bool b ) { p.m_bScaleLock = b; } ) );
 		auto *pEditing = new QFormLayout;
+		pEditing->addRow( tr( "Autosave every" ), whole( QStringLiteral( "preferencesMapAutosaveMinutes" ), current.m_nAutosaveMinutes, 1, 120, tr( " min" ), []( MapPreferences_t &p, int n ) { p.m_nAutosaveMinutes = n; } ) );
 		pEditing->addRow( tr( "Rotation snaps to" ), spin( QStringLiteral( "preferencesMapRotationSnap" ), current.m_flRotationSnap, 1, 90, 1, 0, []( MapPreferences_t &p, double fl ) { p.m_flRotationSnap = fl; } ) );
 		pEditing->addRow( tr( "Carve cuts" ), choice( QStringLiteral( "preferencesMapCarve" ), { { tr( "Blocks into slabs, other shapes into a fan round them" ), static_cast<int>( MapCarve_t::MAP_CARVE_AUTO ) }, { tr( "By the carver's faces in turn (Hammer)" ), static_cast<int>( MapCarve_t::MAP_CARVE_HAMMER ) }, { tr( "By the carver's box first (no cut runs past it)" ), static_cast<int>( MapCarve_t::MAP_CARVE_BOX_FIRST ) }, { tr( "Into a fan round the carver (arch segments round a cylinder)" ), static_cast<int>( MapCarve_t::MAP_CARVE_FAN ) } }, static_cast<int>( current.m_nCarve ), []( MapPreferences_t &p, int n ) { p.m_nCarve = static_cast<MapCarve_t>( n ); } ) );
 		pLayout->addLayout( pEditing );
+		pLayout->addWidget( check( QStringLiteral( "preferencesMapAutosave" ), tr( "Autosave changed maps to <map>.vmf.autosave (offered back when the map opens after a crash)" ), current.m_bAutosave, []( MapPreferences_t &p, bool b ) { p.m_bAutosave = b; } ) );
 		pLayout->addWidget( check( QStringLiteral( "preferencesMapFaceEditWindow" ), tr( "Face Edit in a window of its own (Hammer), else in the side panel" ), current.m_bFaceEditWindow, []( MapPreferences_t &p, bool b ) { p.m_bFaceEditWindow = b; } ) );
 		pLayout->addWidget( check( QStringLiteral( "preferencesMapOnePanel" ), tr( "One side panel at a time: a tab shows its panel alone (Blender), else the panels stack" ), current.m_bOnePanel, []( MapPreferences_t &p, bool b ) { p.m_bOnePanel = b; } ) );
 		pLayout->addWidget( check( QStringLiteral( "preferencesMapDisplacementBrush" ), tr( "Show the paint brush while the Displacement tab is open" ), current.m_bShowDisplacementBrush, []( MapPreferences_t &p, bool b ) { p.m_bShowDisplacementBrush = b; } ) );

@@ -10,7 +10,12 @@
 #include "map/Check.h"
 #include "map/Cordon.h"
 #include "map/DispEdit.h"
+#include "bsp/Stripper.h"
+#include "map/MapAutosave.h"
+#include "map/Stripper.h"
+#include "map/MapToolBars.h"
 #include "map/MapReports.h"
+#include "map/Write.h"
 #include "map/MapSprinkle.h"
 #include "map/MapBuilding.h"
 #include "map/Materials.h"
@@ -39,6 +44,10 @@
 #include <QHBoxLayout>
 #include <QInputDialog>
 #include <QLabel>
+#include <QLocale>
+#include <QLockFile>
+#include <QFile>
+#include <QFrame>
 #include <QPainter>
 #include <QPainterPath>
 #include <QSplitter>
@@ -75,6 +84,7 @@
 #include "map/MapPanes.h"
 #include "map/MapProperties.h"
 #include "map/MapLighting.h"
+#include "map/MapParticles.h"
 #include "map/MapLightingPanel.h"
 #include "map/MapResources.h"
 #include "map/MapView2D.h"
@@ -92,165 +102,6 @@ namespace
 constexpr char SIDE_PANELS_SETTING[] = "maps/sidePanels";
 // The side's width, as last dragged.
 constexpr char SIDE_WIDTH_SETTING[] = "maps/sideWidth";
-
-enum class MapIcon_t
-{
-	MAP_ICON_SELECT,
-	MAP_ICON_MAGNIFY,
-	MAP_ICON_CAMERA,
-	MAP_ICON_ENTITY,
-	MAP_ICON_BLOCK,
-	MAP_ICON_TEXTURE,
-	MAP_ICON_DECAL,
-	MAP_ICON_OVERLAY,
-	MAP_ICON_CLIP,
-	MAP_ICON_CORDON,
-	MAP_ICON_VERTEX,
-	MAP_ICON_SPRINKLE,
-	MAP_ICON_PROPERTIES,
-	MAP_ICON_MATERIAL,
-	MAP_ICON_LIGHT,
-};
-
-//-----------------------------------------------------------------------------
-// Purpose: Our own pictures for the tool bar (Hammer's are Valve's to keep).
-//-----------------------------------------------------------------------------
-QIcon MakeIcon( MapIcon_t nIcon, const QColor &color )
-{
-	QPixmap pixmap( 32, 32 );
-	pixmap.fill( Qt::transparent );
-	QPainter painter( &pixmap );
-	painter.setRenderHint( QPainter::Antialiasing );
-	painter.setPen( QPen{ color, 2.5, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin } );
-	switch ( nIcon )
-	{
-		case MapIcon_t::MAP_ICON_SELECT:
-		{
-			QPainterPath arrow;
-			arrow.moveTo( 9, 5 );
-			arrow.lineTo( 9, 25 );
-			arrow.lineTo( 14, 20 );
-			arrow.lineTo( 18, 28 );
-			arrow.lineTo( 21, 27 );
-			arrow.lineTo( 17, 19 );
-			arrow.lineTo( 24, 19 );
-			arrow.closeSubpath();
-			painter.drawPath( arrow );
-			break;
-		}
-		case MapIcon_t::MAP_ICON_MAGNIFY:
-			painter.drawEllipse( QPointF{ 13, 13 }, 7.5, 7.5 );
-			painter.drawLine( QPointF{ 18.5, 18.5 }, QPointF{ 27, 27 } );
-			break;
-		case MapIcon_t::MAP_ICON_CAMERA:
-			painter.drawRoundedRect( QRectF{ 4, 10, 18, 13 }, 2, 2 );
-			painter.drawPolygon( QPolygonF{ { QPointF{ 22, 14 }, QPointF{ 29, 10 }, QPointF{ 29, 23 }, QPointF{ 22, 19 } } } );
-			break;
-		case MapIcon_t::MAP_ICON_ENTITY:
-			// A marker where the entity goes.
-			painter.drawEllipse( QPointF{ 16, 16 }, 8.5, 8.5 );
-			painter.drawLine( QPointF{ 16, 3 }, QPointF{ 16, 29 } );
-			painter.drawLine( QPointF{ 3, 16 }, QPointF{ 29, 16 } );
-			break;
-		case MapIcon_t::MAP_ICON_BLOCK:
-		{
-			// A box seen from a corner.
-			const QPointF front[ 4 ] = { { 5, 12 }, { 20, 12 }, { 20, 27 }, { 5, 27 } };
-			const QPointF back{ 7, -7 };
-			painter.drawPolygon( front, 4 );
-			painter.drawLine( front[ 0 ], front[ 0 ] + back );
-			painter.drawLine( front[ 1 ], front[ 1 ] + back );
-			painter.drawLine( front[ 2 ], front[ 2 ] + back );
-			painter.drawLine( front[ 0 ] + back, front[ 1 ] + back );
-			painter.drawLine( front[ 1 ] + back, front[ 2 ] + back );
-			break;
-		}
-		case MapIcon_t::MAP_ICON_VERTEX:
-		{
-			// A box with its corners marked.
-			painter.drawRect( QRectF{ 7, 7, 18, 18 } );
-			painter.setBrush( color );
-			for ( const QPointF corner : { QPointF{ 7, 7 }, QPointF{ 25, 7 }, QPointF{ 7, 25 }, QPointF{ 25, 25 } } )
-			{
-				painter.drawRect( QRectF{ corner.x() - 3, corner.y() - 3, 6, 6 } );
-			}
-			break;
-		}
-		case MapIcon_t::MAP_ICON_CORDON:
-			// A dashed fence round a small box.
-			painter.setPen( QPen{ color, 2.0, Qt::DashLine } );
-			painter.drawRect( QRectF{ 4, 4, 24, 24 } );
-			painter.setPen( QPen{ color, 2.0 } );
-			painter.drawRect( QRectF{ 11, 11, 10, 10 } );
-			break;
-		case MapIcon_t::MAP_ICON_CLIP:
-			// A box with a cut through it.
-			painter.drawRect( QRectF{ 6, 8, 20, 16 } );
-			painter.setPen( QPen{ color, 2.5, Qt::DashLine, Qt::RoundCap } );
-			painter.drawLine( QPointF{ 3, 28 }, QPointF{ 29, 4 } );
-			break;
-		case MapIcon_t::MAP_ICON_OVERLAY:
-			painter.drawPolygon( QPolygonF{ { 5, 9 }, { 23, 4 }, { 28, 24 }, { 8, 28 } } );
-			painter.setBrush( color );
-			for ( const QPointF &at : { QPointF{ 5, 9 }, QPointF{ 23, 4 }, QPointF{ 28, 24 }, QPointF{ 8, 28 } } )
-				painter.drawRect( QRectF{ at.x() - 2, at.y() - 2, 4, 4 } );
-			break;
-		case MapIcon_t::MAP_ICON_DECAL:
-			// A stamp above a marked surface.
-			painter.drawLine( QPointF{ 4, 26 }, QPointF{ 28, 26 } );
-			painter.drawRect( QRectF{ 9, 15, 14, 6 } );
-			painter.drawLine( QPointF{ 16, 6 }, QPointF{ 16, 15 } );
-			painter.drawEllipse( QPointF{ 16, 6 }, 3, 3 );
-			break;
-		case MapIcon_t::MAP_ICON_PROPERTIES:
-			// A sheet of keys and their values.
-			painter.drawRoundedRect( QRectF{ 5, 4, 22, 24 }, 2, 2 );
-			for ( const double y : { 11.0, 16.5, 22.0 } )
-			{
-				painter.drawLine( QPointF{ 9, y }, QPointF{ 13, y } );
-				painter.drawLine( QPointF{ 16, y }, QPointF{ 23, y } );
-			}
-			break;
-		case MapIcon_t::MAP_ICON_MATERIAL:
-		{
-			// A ball with a shine on it, as a material is shown.
-			painter.drawEllipse( QPointF{ 16, 16 }, 11, 11 );
-			painter.setPen( Qt::NoPen );
-			painter.setBrush( color );
-			painter.drawEllipse( QPointF{ 12, 12 }, 3.5, 3.5 );
-			break;
-		}
-		case MapIcon_t::MAP_ICON_SPRINKLE:
-		{
-			// A can's spray of dots onto a surface.
-			painter.drawLine( QPointF{ 4, 27 }, QPointF{ 28, 27 } );
-			painter.drawRoundedRect( QRectF{ 5, 4, 7, 11 }, 1.5, 1.5 );
-			painter.setPen( Qt::NoPen );
-			painter.setBrush( color );
-			for ( const QPointF &at : { QPointF{ 16, 10 }, QPointF{ 21, 14 }, QPointF{ 17, 18 }, QPointF{ 25, 20 }, QPointF{ 13, 22 }, QPointF{ 21, 24 } } )
-				painter.drawEllipse( at, 1.6, 1.6 );
-			break;
-		}
-		case MapIcon_t::MAP_ICON_LIGHT:
-			// A sun: a disc and its rays.
-			painter.drawEllipse( QPointF{ 16, 16 }, 6, 6 );
-			for ( int i = 0; i < 8; i++ )
-			{
-				const double flAngle = i * std::numbers::pi / 4.0;
-				painter.drawLine( QPointF{ 16 + 9.5 * std::cos( flAngle ), 16 + 9.5 * std::sin( flAngle ) }, QPointF{ 16 + 13.5 * std::cos( flAngle ), 16 + 13.5 * std::sin( flAngle ) } );
-			}
-			break;
-		case MapIcon_t::MAP_ICON_TEXTURE:
-			// A face with a texture's checker on it.
-			painter.drawRect( QRectF{ 5, 5, 22, 22 } );
-			painter.setBrush( color );
-			painter.setPen( Qt::NoPen );
-			painter.drawRect( QRectF{ 5, 5, 11, 11 } );
-			painter.drawRect( QRectF{ 16, 16, 11, 11 } );
-			break;
-	}
-	return QIcon{ pixmap };
-}
 
 //-----------------------------------------------------------------------------
 // Purpose: A power of two the grid can be, nearest to a map's saved spacing.
@@ -283,6 +134,14 @@ CMapEditor::CMapEditor( const QString &szPath, bool bFromGame, QWidget *pParent 
 	connect( m_pResources, &CMapResources::Arrived, this, &CMapEditor::ResourcesArrived );
 	connect( m_pResources, &CMapResources::Finished, this, [ this ] { m_pRenderData->CompactEntityBoxes(); } );
 	connect( m_pResources, &CMapResources::Finished, this, &CMapEditor::UpdateGameStatus );
+	m_pParticles = new CMapParticles( this );
+	m_pRenderData->SetParticles( m_pParticles );
+	connect( m_pParticles, &CMapParticles::Ready, this, [ this ] {
+		if ( m_pParticles->IsPlaying() && !m_pAnimationTimer->isActive() )
+			m_pAnimationTimer->start();
+		RepaintViews();
+		UpdateGameStatus();
+	} );
 	m_pLighting = new CMapLighting( this );
 	m_pLightingTimer = new QTimer( this );
 	m_pLightingTimer->setSingleShot( true );
@@ -309,7 +168,38 @@ CMapEditor::CMapEditor( const QString &szPath, bool bFromGame, QWidget *pParent 
 	auto *pLayout = new QVBoxLayout( this );
 	pLayout->setContentsMargins( 0, 0, 0, 0 );
 	pLayout->setSpacing( 0 );
-	BuildToolBars( pLayout );
+	BuildToolBars();
+	// An autosave newer than the file is offered back here rather than in a box: the map opens
+	// either way (also while a session is reopened), and the choice can wait.
+	m_pRecoveryBar = new QFrame;
+	m_pRecoveryBar->setObjectName( QStringLiteral( "mapRecoveryBar" ) );
+	m_pRecoveryBar->setStyleSheet( QStringLiteral( "#mapRecoveryBar { background: rgba(230, 160, 40, 70); border-bottom: 1px solid rgba(230, 160, 40, 160); }" ) );
+	{
+		auto *pBarLayout = new QHBoxLayout( m_pRecoveryBar );
+		pBarLayout->setContentsMargins( 8, 4, 8, 4 );
+		m_pRecoveryText = new QLabel;
+		m_pRecoveryText->setWordWrap( true );
+		auto *pRecover = new QPushButton( tr( "Recover" ) );
+		pRecover->setObjectName( QStringLiteral( "mapRecover" ) );
+		auto *pDelete = new QPushButton( tr( "Delete Autosave" ) );
+		pDelete->setObjectName( QStringLiteral( "mapDeleteAutosave" ) );
+		connect( pRecover, &QPushButton::clicked, this, &CMapEditor::RecoverAutosave );
+		connect( pDelete, &QPushButton::clicked, this, &CMapEditor::DeleteOfferedAutosave );
+		pBarLayout->addWidget( m_pRecoveryText, 1 );
+		pBarLayout->addWidget( pRecover );
+		pBarLayout->addWidget( pDelete );
+	}
+	m_pRecoveryBar->hide();
+	pLayout->addWidget( m_pRecoveryBar );
+	// Proxies (AnimatedTexture, TextureScroll...) move materials as the game does: about twenty
+	// times a second, while there are any and a textured 3D view shows them.
+	m_pAnimationTimer = new QTimer( this );
+	m_pAnimationTimer->setInterval( 50 );
+	connect( m_pAnimationTimer, &QTimer::timeout, this, &CMapEditor::AnimateMaterials );
+	m_AnimationClock.start();
+	m_pAutosaveTimer = new QTimer( this );
+	connect( m_pAutosaveTimer, &QTimer::timeout, this, &CMapEditor::Autosave );
+	UpdateAutosaveTimer();
 
 	// Hammer's default panes: the camera top left, then top, front and side.
 	m_Panes = {
@@ -406,20 +296,20 @@ CMapEditor::CMapEditor( const QString &szPath, bool bFromGame, QWidget *pParent 
 	// The keys' table and the lights' want room to be of use; they share what the other
 	// panels leave.
 	m_pProperties->setMinimumHeight( 260 );
-	m_pPanels->AddPanel( QStringLiteral( "properties" ), tr( "Object Properties" ), MakeIcon( MapIcon_t::MAP_ICON_PROPERTIES, panelIconColor ), m_pProperties, true );
-	m_pPanels->AddPanel( QStringLiteral( "faceEdit" ), tr( "Face Edit" ), MakeIcon( MapIcon_t::MAP_ICON_TEXTURE, panelIconColor ), m_pFaceEditHolder );
+	m_pPanels->AddPanel( QStringLiteral( "properties" ), tr( "Object Properties" ), MakeMapIcon( MapIcon_t::MAP_ICON_PROPERTIES, panelIconColor ), m_pProperties, true );
+	m_pPanels->AddPanel( QStringLiteral( "faceEdit" ), tr( "Face Edit" ), MakeMapIcon( MapIcon_t::MAP_ICON_TEXTURE, panelIconColor ), m_pFaceEditHolder );
 	m_pPanels->SetAvailable( QStringLiteral( "faceEdit" ), false ); // the texture tool's, there only with it
 	m_pSprinkle = new CMapSprinklePanel;
-	m_pPanels->AddPanel( QStringLiteral( "sprinkle" ), tr( "Sprinkle" ), MakeIcon( MapIcon_t::MAP_ICON_SPRINKLE, panelIconColor ), m_pSprinkle );
+	m_pPanels->AddPanel( QStringLiteral( "sprinkle" ), tr( "Sprinkle" ), MakeMapIcon( MapIcon_t::MAP_ICON_SPRINKLE, panelIconColor ), m_pSprinkle );
 	m_pPanels->SetAvailable( QStringLiteral( "sprinkle" ), false );
 	m_pBuilding = new CMapBuildingPanel;
-	m_pPanels->AddPanel( QStringLiteral( "building" ), tr( "Building Generator" ), MakeIcon( MapIcon_t::MAP_ICON_BLOCK, panelIconColor ), m_pBuilding );
+	m_pPanels->AddPanel( QStringLiteral( "building" ), tr( "Building Generator" ), MakeMapIcon( MapIcon_t::MAP_ICON_BLOCK, panelIconColor ), m_pBuilding );
 	m_pPanels->SetHiddenByDefault( QStringLiteral( "building" ) );
 	connect( m_pBuilding, &CMapBuildingPanel::CreateRequested, this, &CMapEditor::CreateBuilding );
 	m_pWorldProperties = new CMapProperties( *m_pDocument );
 	m_pWorldProperties->setObjectName( QStringLiteral( "mapWorldProperties" ) );
 	m_pWorldProperties->SetWorld( true );
-	m_pPanels->AddPanel( QStringLiteral( "mapProperties" ), tr( "Map Properties" ), MakeIcon( MapIcon_t::MAP_ICON_PROPERTIES, panelIconColor ), m_pWorldProperties );
+	m_pPanels->AddPanel( QStringLiteral( "mapProperties" ), tr( "Map Properties" ), MakeMapIcon( MapIcon_t::MAP_ICON_PROPERTIES, panelIconColor ), m_pWorldProperties );
 	m_pPanels->SetHiddenByDefault( QStringLiteral( "mapProperties" ) );
 	m_pPanels->SetPinned( QStringLiteral( "mapProperties" ) ); // its tab apart, at the top
 	// The world's sheet follows edits only while it shows.
@@ -427,13 +317,13 @@ CMapEditor::CMapEditor( const QString &szPath, bool bFromGame, QWidget *pParent 
 		if ( m_pWorldProperties->isVisible() )
 			m_pDocument->MeasureEditListener( tr( "Map Properties" ), [ this ] { m_pWorldProperties->Refresh(); } );
 	} );
-	m_pPanels->AddPanel( QStringLiteral( "newObjects" ), tr( "New Objects" ), MakeIcon( MapIcon_t::MAP_ICON_BLOCK, panelIconColor ), BuildNewObjects() );
-	m_pPanels->AddPanel( QStringLiteral( "texture" ), tr( "Texture" ), MakeIcon( MapIcon_t::MAP_ICON_MATERIAL, panelIconColor ), BuildTexturePanel() );
+	m_pPanels->AddPanel( QStringLiteral( "newObjects" ), tr( "New Objects" ), MakeMapIcon( MapIcon_t::MAP_ICON_BLOCK, panelIconColor ), BuildNewObjects() );
+	m_pPanels->AddPanel( QStringLiteral( "texture" ), tr( "Texture" ), MakeMapIcon( MapIcon_t::MAP_ICON_MATERIAL, panelIconColor ), BuildTexturePanel() );
 	auto *pLighting = new CMapLightingPanel( *this );
 	pLighting->setObjectName( QStringLiteral( "mapLightingPanel" ) );
 	pLighting->layout()->setContentsMargins( 0, 0, 0, 0 );
 	pLighting->setMinimumHeight( 320 );
-	m_pPanels->AddPanel( QStringLiteral( "lighting" ), tr( "Lighting" ), MakeIcon( MapIcon_t::MAP_ICON_LIGHT, panelIconColor ), pLighting, true );
+	m_pPanels->AddPanel( QStringLiteral( "lighting" ), tr( "Lighting" ), MakeMapIcon( MapIcon_t::MAP_ICON_LIGHT, panelIconColor ), pLighting, true );
 	// Lighting starts folded: its header is there, its settings out of the way until wanted.
 	m_pPanels->SetState( QSettings{}.value( QLatin1String( SIDE_PANELS_SETTING ), QVariantMap{ { QStringLiteral( "folded" ), QStringList{ QStringLiteral( "lighting" ) } } } ).toMap() );
 	m_pPanels->SetOnePanel( CPreferences::Instance().GetMapPreferences().m_bOnePanel );
@@ -456,13 +346,6 @@ CMapEditor::CMapEditor( const QString &szPath, bool bFromGame, QWidget *pParent 
 			QSettings{}.setValue( QLatin1String( SIDE_WIDTH_SETTING ), sizes[ 1 ] );
 	} );
 
-	auto *pCenter = new QHBoxLayout;
-	pCenter->setContentsMargins( 0, 0, 0, 0 );
-	pCenter->setSpacing( 0 );
-	auto *pTools = new QToolBar;
-	pTools->setObjectName( QStringLiteral( "mapTools" ) );
-	pTools->setOrientation( Qt::Vertical );
-	pTools->setIconSize( QSize{ 24, 24 } );
 	m_pTools = new QActionGroup( this );
 	const QColor iconColor = palette().buttonText().color();
 	const struct
@@ -485,20 +368,25 @@ CMapEditor::CMapEditor( const QString &szPath, bool bFromGame, QWidget *pParent 
 		{ MapTool_t::MAP_TOOL_SPRINKLE, MapIcon_t::MAP_ICON_SPRINKLE, tr( "Sprinkle Tool" ), MapAction_t::MAP_ACTION_TOOL_SPRINKLE },
 		{ MapTool_t::MAP_TOOL_CORDON, MapIcon_t::MAP_ICON_CORDON, tr( "Edit Cordon Bounds" ), MapAction_t::MAP_ACTION_TOOL_CORDON },
 	};
+	MapToolBarSpec_t toolSpec{ QStringLiteral( "mapTools" ), tr( "Tools" ), Qt::LeftToolBarArea, {} };
 	for ( const auto &tool : tools )
 	{
-		QAction *pAction = pTools->addAction( MakeIcon( tool.m_nIcon, iconColor ), tool.m_szName );
+		auto *pAction = new QAction( MakeMapIcon( tool.m_nIcon, iconColor ), tool.m_szName, this );
 		pAction->setCheckable( true );
 		pAction->setChecked( tool.m_nTool == m_nTool );
 		pAction->setToolTip( QStringLiteral( "%1 (%2)" ).arg( tool.m_szName, MapActionKey( tool.m_nKey ).toString( QKeySequence::NativeText ) ) );
 		pAction->setData( static_cast<int>( tool.m_nTool ) );
 		pAction->setObjectName( QStringLiteral( "mapTool%1" ).arg( static_cast<int>( tool.m_nTool ) ) );
 		m_pTools->addAction( pAction );
+		m_ToolBarActions.append( pAction );
+		toolSpec.m_Actions.append( pAction->objectName() );
 	}
 	connect( m_pTools, &QActionGroup::triggered, this, [ this ]( QAction *pAction ) { SetTool( static_cast<MapTool_t>( pAction->data().toInt() ) ); } );
-	pCenter->addWidget( pTools );
-	pCenter->addWidget( pMiddle, 1 );
-	pLayout->addLayout( pCenter, 1 );
+	m_ToolBarSpecs.insert( m_ToolBarSpecs.begin(), toolSpec );
+	m_pToolHost = new CMapToolHost( std::move( m_ToolBarSpecs ), m_ToolBarActions );
+	m_ToolBarSpecs.clear();
+	m_pToolHost->setCentralWidget( pMiddle );
+	pLayout->addWidget( m_pToolHost, 1 );
 
 	// Hammer's status bar: what is selected, its size, the cursor, the zoom, the grid.
 	auto *pStatus = new QWidget;
@@ -585,6 +473,9 @@ CMapEditor::CMapEditor( const QString &szPath, bool bFromGame, QWidget *pParent 
 CMapEditor::~CMapEditor()
 {
 	StopWork();
+	// The tab only goes once its changes were saved or let go (ConfirmClose); a crash never gets
+	// here, which leaves the autosave for the next start.
+	RemoveAutosave();
 	// The views first, while everything they report to is still here.
 	delete m_pSplitter;
 	m_pSplitter = nullptr;
@@ -938,87 +829,129 @@ void CMapEditor::FillPrefabObjects()
 }
 
 //-----------------------------------------------------------------------------
-// Purpose: The bar across the top: Hammer's selection modes and view toggles.
+// Purpose: The commands the bars across the top hold (Hammer's selection modes, the view
+//          toggles...), each with an icon and a name the saved layout goes by. The bars
+//          themselves are made with the tools' bar, round the views.
 //-----------------------------------------------------------------------------
-void CMapEditor::BuildToolBars( QVBoxLayout *pLayout )
+void CMapEditor::BuildToolBars()
 {
-	auto *pBar = new QToolBar;
-	pBar->setObjectName( QStringLiteral( "mapToolBar" ) );
-	pBar->setToolButtonStyle( Qt::ToolButtonTextOnly );
+	const QColor iconColor = palette().buttonText().color();
+	MapToolBarSpec_t *pSpec = nullptr;
+	auto bar = [ this, &pSpec ]( const char *pszName, const QString &szTitle ) {
+		m_ToolBarSpecs.push_back( { QString::fromLatin1( pszName ), szTitle, Qt::TopToolBarArea, {} } );
+		pSpec = &m_ToolBarSpecs.back();
+	};
+	auto add = [ this, &pSpec ]( QAction *pAction ) {
+		m_ToolBarActions.append( pAction );
+		pSpec->m_Actions.append( pAction->objectName() );
+		return pAction;
+	};
+	auto make = [ this, iconColor ]( MapIcon_t nIcon, const QString &szName, const QString &szObjectName ) {
+		auto *pAction = new QAction( MakeMapIcon( nIcon, iconColor ), szName, this );
+		pAction->setObjectName( szObjectName );
+		return pAction;
+	};
+
+	bar( "mapSelectBar", tr( "Selection Mode" ) );
 	m_pModes = new QActionGroup( this );
 	const struct
 	{
 		MapSelectMode_t m_nMode;
+		MapIcon_t m_nIcon;
 		QString m_szName;
 		QString m_szTip;
 	} modes[] = {
-		{ MapSelectMode_t::MAP_SELECT_MODE_GROUPS, tr( "Groups" ), tr( "Clicking picks whole groups" ) },
-		{ MapSelectMode_t::MAP_SELECT_MODE_OBJECTS, tr( "Objects" ), tr( "Clicking picks an entity with its solids, or a world solid" ) },
-		{ MapSelectMode_t::MAP_SELECT_MODE_SOLIDS, tr( "Solids" ), tr( "Clicking picks single solids, even inside entities" ) },
+		{ MapSelectMode_t::MAP_SELECT_MODE_GROUPS, MapIcon_t::MAP_ICON_SELECT_GROUPS, tr( "Groups" ), tr( "Clicking picks whole groups" ) },
+		{ MapSelectMode_t::MAP_SELECT_MODE_OBJECTS, MapIcon_t::MAP_ICON_SELECT_OBJECTS, tr( "Objects" ), tr( "Clicking picks an entity with its solids, or a world solid" ) },
+		{ MapSelectMode_t::MAP_SELECT_MODE_SOLIDS, MapIcon_t::MAP_ICON_SELECT_SOLIDS, tr( "Solids" ), tr( "Clicking picks single solids, even inside entities" ) },
 	};
 	for ( const auto &mode : modes )
 	{
-		QAction *pAction = pBar->addAction( mode.m_szName );
+		QAction *pAction = add( make( mode.m_nIcon, mode.m_szName, QStringLiteral( "mapSelectMode%1" ).arg( static_cast<int>( mode.m_nMode ) ) ) );
 		pAction->setCheckable( true );
-		pAction->setToolTip( mode.m_szTip );
+		pAction->setToolTip( QStringLiteral( "%1: %2" ).arg( mode.m_szName, mode.m_szTip ) );
 		pAction->setChecked( mode.m_nMode == m_pDocument->GetSelectMode() );
 		pAction->setData( static_cast<int>( mode.m_nMode ) );
-		pAction->setObjectName( QStringLiteral( "mapSelectMode%1" ).arg( static_cast<int>( mode.m_nMode ) ) );
 		m_pModes->addAction( pAction );
 	}
 	connect( m_pModes, &QActionGroup::triggered, this, [ this ]( QAction *pAction ) { m_pDocument->SetSelectMode( static_cast<MapSelectMode_t>( pAction->data().toInt() ) ); } );
-	pBar->addSeparator();
-	auto command = [ this, pBar ]( const QString &szName, MapAction_t nAction, bool bCheckable = false, bool bChecked = false ) {
-		QAction *pAction = pBar->addAction( szName );
-		pAction->setToolTip( QStringLiteral( "%1 (%2)" ).arg( szName, MapActionKey( nAction ).toString( QKeySequence::NativeText ) ) );
+
+	auto command = [ & ]( MapIcon_t nIcon, const QString &szName, MapAction_t nAction, const char *pszObjectName, bool bCheckable = false, bool bChecked = false ) {
+		QAction *pAction = add( make( nIcon, szName, QString::fromLatin1( pszObjectName ) ) );
+		const QKeySequence key = MapActionKey( nAction );
+		pAction->setToolTip( key.isEmpty() ? szName : QStringLiteral( "%1 (%2)" ).arg( szName, key.toString( QKeySequence::NativeText ) ) );
 		pAction->setCheckable( bCheckable );
 		pAction->setChecked( bChecked );
 		connect( pAction, &QAction::triggered, this, [ this, nAction ] { RunAction( nAction, m_pActiveView ); } );
 		return pAction;
 	};
+	// Toggles keep their buttons in step with the settings, however they are changed.
+	auto toggle = [ & ]( MapIcon_t nIcon, const QString &szName, MapAction_t nAction, const char *pszObjectName, const bool &bSetting ) {
+		QAction *pAction = command( nIcon, szName, nAction, pszObjectName, true, bSetting );
+		m_SettingActions.emplace_back( pAction, &bSetting );
+		return pAction;
+	};
+
+	bar( "mapGizmoBar", tr( "3D Gizmo" ) );
 	m_pGizmoModes = new QActionGroup( this );
-	for ( const auto &[ szName, nMode ] : std::array<std::pair<QString, MapGizmoMode_t>, 5>{ { { tr( "Move" ), MapGizmoMode_t::MAP_GIZMO_MODE_TRANSLATE },
-			  { tr( "Rotate" ), MapGizmoMode_t::MAP_GIZMO_MODE_ROTATE },
-			  { tr( "Scale" ), MapGizmoMode_t::MAP_GIZMO_MODE_SCALE },
-			  { tr( "Shear" ), MapGizmoMode_t::MAP_GIZMO_MODE_SHEAR },
-			  { tr( "All" ), MapGizmoMode_t::MAP_GIZMO_MODE_ALL } } } )
+	for ( const auto &[ nIcon, szName, nMode ] : std::array<std::tuple<MapIcon_t, QString, MapGizmoMode_t>, 5>{ { { MapIcon_t::MAP_ICON_GIZMO_MOVE, tr( "Move" ), MapGizmoMode_t::MAP_GIZMO_MODE_TRANSLATE },
+			  { MapIcon_t::MAP_ICON_GIZMO_ROTATE, tr( "Rotate" ), MapGizmoMode_t::MAP_GIZMO_MODE_ROTATE },
+			  { MapIcon_t::MAP_ICON_GIZMO_SCALE, tr( "Scale" ), MapGizmoMode_t::MAP_GIZMO_MODE_SCALE },
+			  { MapIcon_t::MAP_ICON_GIZMO_SHEAR, tr( "Shear" ), MapGizmoMode_t::MAP_GIZMO_MODE_SHEAR },
+			  { MapIcon_t::MAP_ICON_GIZMO_ALL, tr( "All" ), MapGizmoMode_t::MAP_GIZMO_MODE_ALL } } } )
 	{
-		auto *pAction = pBar->addAction( szName );
-		pAction->setObjectName( QStringLiteral( "mapGizmoMode%1" ).arg( static_cast<int>( nMode ) ) );
+		QAction *pAction = add( make( nIcon, szName, QStringLiteral( "mapGizmoMode%1" ).arg( static_cast<int>( nMode ) ) ) );
+		pAction->setToolTip( tr( "3D gizmo: %1" ).arg( szName ) );
 		pAction->setCheckable( true );
 		pAction->setData( static_cast<int>( nMode ) );
 		pAction->setChecked( nMode == m_nGizmoMode );
 		m_pGizmoModes->addAction( pAction );
-		connect( pAction, &QAction::triggered, this, [ this, nMode ] { SetGizmoMode( nMode ); } );
+		const MapGizmoMode_t nThis = nMode;
+		connect( pAction, &QAction::triggered, this, [ this, nThis ] { SetGizmoMode( nThis ); } );
 	}
-	pBar->addSeparator();
-	command( tr( "Smaller Grid" ), MapAction_t::MAP_ACTION_GRID_SMALLER );
-	command( tr( "Bigger Grid" ), MapAction_t::MAP_ACTION_GRID_LARGER );
-	// Toggles keep their buttons in step with the settings, however they are changed.
-	auto toggle = [ & ]( const QString &szName, MapAction_t nAction, const bool &bSetting ) {
-		QAction *pAction = command( szName, nAction, true, bSetting );
-		m_SettingActions.emplace_back( pAction, &bSetting );
-		return pAction;
-	};
-	toggle( tr( "Grid" ), MapAction_t::MAP_ACTION_TOGGLE_GRID, m_Settings.m_bShowGrid )->setObjectName( QStringLiteral( "mapToggleGrid" ) );
-	toggle( tr( "Snap to Grid" ), MapAction_t::MAP_ACTION_TOGGLE_SNAP, m_Settings.m_bSnapToGrid )->setObjectName( QStringLiteral( "mapToggleSnap" ) );
-	toggle( tr( "Texture Lock" ), MapAction_t::MAP_ACTION_TOGGLE_TEXTURE_LOCK, m_Settings.m_bTextureLock )->setObjectName( QStringLiteral( "mapToggleTextureLock" ) );
-	toggle( tr( "Scale Lock" ), MapAction_t::MAP_ACTION_TOGGLE_SCALE_LOCK, m_Settings.m_bScaleLock )->setObjectName( QStringLiteral( "mapToggleScaleLock" ) );
-	toggle( tr( "Pivot" ), MapAction_t::MAP_ACTION_TOGGLE_PIVOT, m_Settings.m_bPivot )->setObjectName( QStringLiteral( "mapTogglePivot" ) );
-	pBar->addSeparator();
-	toggle( tr( "Models in 2D" ), MapAction_t::MAP_ACTION_TOGGLE_MODELS_2D, m_Settings.m_bModels2D )->setObjectName( QStringLiteral( "mapToggleModels2D" ) );
-	toggle( tr( "Entity Names" ), MapAction_t::MAP_ACTION_TOGGLE_NAMES, m_Settings.m_bNames );
-	toggle( tr( "Helpers" ), MapAction_t::MAP_ACTION_TOGGLE_HELPERS, m_Settings.m_bHelpers );
-	toggle( tr( "Tool Textures" ), MapAction_t::MAP_ACTION_TOGGLE_TOOL_TEXTURES, m_Settings.m_bToolTextures );
-	toggle( tr( "3D Skybox" ), MapAction_t::MAP_ACTION_TOGGLE_SKYBOX_3D, m_Settings.m_bSkybox3D )->setObjectName( QStringLiteral( "mapToggleSkybox3D" ) );
-	toggle( tr( "Walkable" ), MapAction_t::MAP_ACTION_TOGGLE_WALKABLE, m_Settings.m_bWalkable )->setObjectName( QStringLiteral( "mapToggleWalkable" ) );
-	pBar->addSeparator();
-	command( tr( "Center on Selection" ), MapAction_t::MAP_ACTION_CENTER_2D );
-	command( tr( "Go to Brush…" ), MapAction_t::MAP_ACTION_GO_TO_BRUSH );
-	command( tr( "Autosize Views" ), MapAction_t::MAP_ACTION_AUTOSIZE );
-	pBar->addSeparator();
-	command( tr( "Run Map…" ), MapAction_t::MAP_ACTION_RUN_MAP )->setObjectName( QStringLiteral( "mapRunMap" ) );
-	pLayout->addWidget( pBar );
+
+	bar( "mapGridBar", tr( "Grid" ) );
+	command( MapIcon_t::MAP_ICON_GRID_SMALLER, tr( "Smaller Grid" ), MapAction_t::MAP_ACTION_GRID_SMALLER, "mapGridSmaller" );
+	command( MapIcon_t::MAP_ICON_GRID_LARGER, tr( "Bigger Grid" ), MapAction_t::MAP_ACTION_GRID_LARGER, "mapGridLarger" );
+	toggle( MapIcon_t::MAP_ICON_GRID, tr( "Grid" ), MapAction_t::MAP_ACTION_TOGGLE_GRID, "mapToggleGrid", m_Settings.m_bShowGrid );
+	toggle( MapIcon_t::MAP_ICON_SNAP, tr( "Snap to Grid" ), MapAction_t::MAP_ACTION_TOGGLE_SNAP, "mapToggleSnap", m_Settings.m_bSnapToGrid );
+
+	bar( "mapLockBar", tr( "Locks" ) );
+	toggle( MapIcon_t::MAP_ICON_TEXTURE_LOCK, tr( "Texture Lock" ), MapAction_t::MAP_ACTION_TOGGLE_TEXTURE_LOCK, "mapToggleTextureLock", m_Settings.m_bTextureLock );
+	toggle( MapIcon_t::MAP_ICON_SCALE_LOCK, tr( "Scale Lock" ), MapAction_t::MAP_ACTION_TOGGLE_SCALE_LOCK, "mapToggleScaleLock", m_Settings.m_bScaleLock );
+	toggle( MapIcon_t::MAP_ICON_PIVOT, tr( "Pivot" ), MapAction_t::MAP_ACTION_TOGGLE_PIVOT, "mapTogglePivot", m_Settings.m_bPivot );
+
+	bar( "mapShowBar", tr( "Show" ) );
+	toggle( MapIcon_t::MAP_ICON_MODELS_2D, tr( "Models in 2D" ), MapAction_t::MAP_ACTION_TOGGLE_MODELS_2D, "mapToggleModels2D", m_Settings.m_bModels2D );
+	toggle( MapIcon_t::MAP_ICON_NAMES, tr( "Entity Names" ), MapAction_t::MAP_ACTION_TOGGLE_NAMES, "mapToggleNames", m_Settings.m_bNames );
+	toggle( MapIcon_t::MAP_ICON_HELPERS, tr( "Helpers" ), MapAction_t::MAP_ACTION_TOGGLE_HELPERS, "mapToggleHelpers", m_Settings.m_bHelpers );
+	toggle( MapIcon_t::MAP_ICON_TOOL_TEXTURES, tr( "Tool Textures" ), MapAction_t::MAP_ACTION_TOGGLE_TOOL_TEXTURES, "mapToggleToolTextures", m_Settings.m_bToolTextures );
+	toggle( MapIcon_t::MAP_ICON_SKYBOX, tr( "3D Skybox" ), MapAction_t::MAP_ACTION_TOGGLE_SKYBOX_3D, "mapToggleSkybox3D", m_Settings.m_bSkybox3D );
+	toggle( MapIcon_t::MAP_ICON_WALKABLE, tr( "Walkable" ), MapAction_t::MAP_ACTION_TOGGLE_WALKABLE, "mapToggleWalkable", m_Settings.m_bWalkable );
+	toggle( MapIcon_t::MAP_ICON_PARTICLES, tr( "Particles" ), MapAction_t::MAP_ACTION_TOGGLE_PARTICLES, "mapToggleParticles", m_Settings.m_bParticles );
+
+	bar( "mapObjectBar", tr( "Objects" ) );
+	command( MapIcon_t::MAP_ICON_CARVE, tr( "Carve" ), MapAction_t::MAP_ACTION_CARVE, "mapCarve" );
+	command( MapIcon_t::MAP_ICON_HOLLOW, tr( "Hollow" ), MapAction_t::MAP_ACTION_HOLLOW, "mapHollow" );
+	command( MapIcon_t::MAP_ICON_GROUP, tr( "Group" ), MapAction_t::MAP_ACTION_GROUP, "mapGroup" );
+	command( MapIcon_t::MAP_ICON_UNGROUP, tr( "Ungroup" ), MapAction_t::MAP_ACTION_UNGROUP, "mapUngroup" );
+	command( MapIcon_t::MAP_ICON_TIE, tr( "Tie to Entity" ), MapAction_t::MAP_ACTION_TIE_TO_ENTITY, "mapTieToEntity" );
+	command( MapIcon_t::MAP_ICON_MOVE_TO_WORLD, tr( "Move to World" ), MapAction_t::MAP_ACTION_MOVE_TO_WORLD, "mapMoveToWorld" );
+	command( MapIcon_t::MAP_ICON_HIDE, tr( "Hide Selected" ), MapAction_t::MAP_ACTION_QUICK_HIDE, "mapQuickHide" );
+	command( MapIcon_t::MAP_ICON_HIDE_OTHERS, tr( "Hide Unselected" ), MapAction_t::MAP_ACTION_QUICK_HIDE_OTHERS, "mapQuickHideOthers" );
+	command( MapIcon_t::MAP_ICON_UNHIDE, tr( "Unhide All" ), MapAction_t::MAP_ACTION_QUICK_UNHIDE, "mapQuickUnhide" );
+	// Rarely wanted: there to put on the bar (Customize), not on it.
+	QAction *pStripper = add( make( MapIcon_t::MAP_ICON_STRIPPER, tr( "Import Stripper Config…" ), QStringLiteral( "mapStripperButton" ) ) );
+	connect( pStripper, &QAction::triggered, this, &CMapEditor::ImportStripperConfig );
+	pSpec->m_Actions.back().prepend( QLatin1Char( '!' ) );
+
+	bar( "mapViewBar", tr( "Views" ) );
+	command( MapIcon_t::MAP_ICON_CENTER, tr( "Center on Selection" ), MapAction_t::MAP_ACTION_CENTER_2D, "mapCenter" );
+	command( MapIcon_t::MAP_ICON_GO_TO_BRUSH, tr( "Go to Brush…" ), MapAction_t::MAP_ACTION_GO_TO_BRUSH, "mapGoToBrush" );
+	command( MapIcon_t::MAP_ICON_AUTOSIZE, tr( "Autosize Views" ), MapAction_t::MAP_ACTION_AUTOSIZE, "mapAutosize" );
+
+	bar( "mapCompileBar", tr( "Compile" ) );
+	command( MapIcon_t::MAP_ICON_RUN_MAP, tr( "Run Map…" ), MapAction_t::MAP_ACTION_RUN_MAP, "mapRunMap" );
 }
 
 //-----------------------------------------------------------------------------
@@ -1026,6 +959,9 @@ void CMapEditor::BuildToolBars( QVBoxLayout *pLayout )
 //-----------------------------------------------------------------------------
 void CMapEditor::Load( CMapDocument::Source_t source )
 {
+	m_LastSource = source;
+	m_LastSource.m_Text.clear();
+	m_LastSource.m_bRecovered = false;
 	m_pLoading->show();
 	m_pLoading->raise();
 	m_pDocument->Load( std::move( source ) );
@@ -1044,6 +980,9 @@ void CMapEditor::Loaded()
 	m_Settings.m_bShowGrid = scene.m_Map.m_ViewSettings.m_bShowGrid;
 	m_Settings.m_bSnapToGrid = scene.m_Map.m_ViewSettings.m_bSnapToGrid;
 	m_pLoading->hide();
+	OfferRecovery();
+	m_pParticles->Start( m_pDocument->GetGame(), QFileInfo{ m_szPath }.completeBaseName().toStdString() );
+	m_pParticles->SetScene( m_pDocument->GetSharedScene() );
 	m_pWorldProperties->Refresh();
 	m_pLighting->Clear();
 	m_pLighting->SetRadSources( m_pDocument->GetGame(), m_szPath.toStdString() );
@@ -1422,7 +1361,245 @@ void CMapEditor::PreferencesChanged()
 	{
 		StartResources();
 	}
+	UpdateAutosaveTimer();
 	SettingsChanged();
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+void CMapEditor::UpdateAutosaveTimer()
+{
+	const MapPreferences_t &preferences = CPreferences::Instance().GetMapPreferences();
+	if ( !preferences.m_bAutosave )
+	{
+		m_pAutosaveTimer->stop();
+		return;
+	}
+	const int nInterval = std::max( 1, preferences.m_nAutosaveMinutes ) * 60 * 1000;
+	if ( !m_pAutosaveTimer->isActive() || m_pAutosaveTimer->interval() != nInterval )
+	{
+		m_pAutosaveTimer->start( nInterval );
+	}
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: A new map gets its autosave's name (and the lock that marks it in use) when it is
+//          first written.
+//-----------------------------------------------------------------------------
+QString CMapEditor::GetAutosavePath() const
+{
+	return MapAutosavePath( m_szPath, m_bFromGame, m_szNewAutosaveKey );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: The text written is what Save would write, so recovering it is as lossless as
+//          opening the saved map.
+//-----------------------------------------------------------------------------
+bool CMapEditor::Autosave()
+{
+	if ( !m_pDocument->IsLoaded() || !m_pDocument->IsModified() || m_pDocument->IsPreviewing() || IsOfferingRecovery() )
+	{
+		return false;
+	}
+	if ( m_szPath.isEmpty() && m_szNewAutosaveKey.isEmpty() )
+	{
+		AdoptAutosave( MapAutosavePath( {}, false, NewMapAutosaveKey() ) );
+	}
+	const std::string szText = xv::map::WriteVmf( m_pDocument->GetScene()->m_Map );
+	QString szError;
+	if ( !WriteMapAutosave( GetAutosavePath(), szText, &szError ) )
+	{
+		emit StatusMessage( tr( "Could not autosave %1: %2" ).arg( QDir::toNativeSeparators( GetAutosavePath() ), szError ) );
+		return false;
+	}
+	m_bAutosaveOurs = true;
+	emit StatusMessage( tr( "Autosaved %1" ).arg( GetFileName() ) );
+	return true;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+void CMapEditor::AdoptAutosave( const QString &szAutosave )
+{
+	QString szKey = QFileInfo{ szAutosave }.fileName();
+	szKey.chop( static_cast<qsizetype>( std::string_view{ ".vmf.autosave" }.size() ) );
+	m_szNewAutosaveKey = szKey;
+	QDir{}.mkpath( QFileInfo{ szAutosave }.absolutePath() );
+	m_pAutosaveLock = std::make_unique<QLockFile>( szAutosave + QStringLiteral( ".lock" ) );
+	m_pAutosaveLock->setStaleLockTime( 0 );
+	static_cast<void>( m_pAutosaveLock->tryLock( 0 ) );
+	m_bAutosaveOurs = true;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+bool CMapEditor::IsOfferingRecovery() const
+{
+	return !m_szOfferedAutosave.isEmpty();
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+void CMapEditor::OfferRecovery()
+{
+	m_szOfferedAutosave.clear();
+	m_pRecoveryBar->hide();
+	if ( m_pDocument->IsRecovered() )
+	{
+		return;
+	}
+	const QString szAutosave = RecoverableAutosave( m_szPath, m_bFromGame );
+	if ( szAutosave.isEmpty() )
+	{
+		return;
+	}
+	m_szOfferedAutosave = szAutosave;
+	const QDateTime when = QFileInfo{ szAutosave }.lastModified();
+	m_pRecoveryText->setText( tr( "There is an autosave of %1 from %2, newer than the file: the map wasn't saved before the last close (a crash?). "
+								  "Autosave waits until you choose." )
+			.arg( GetFileName(), QLocale{}.toString( when, QLocale::ShortFormat ) ) );
+	m_pRecoveryBar->show();
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: The autosave read as the map, marked modified until it is saved over the file.
+//-----------------------------------------------------------------------------
+void CMapEditor::RecoverAutosave()
+{
+	if ( m_szOfferedAutosave.isEmpty() )
+	{
+		return;
+	}
+	QFile file( m_szOfferedAutosave );
+	if ( !file.open( QIODevice::ReadOnly ) )
+	{
+		QMessageBox::warning( this, tr( "Recover" ), tr( "Could not read %1:\n%2" ).arg( QDir::toNativeSeparators( m_szOfferedAutosave ), file.errorString() ) );
+		return;
+	}
+	const QByteArray bytes = file.readAll();
+	CMapDocument::Source_t source = m_LastSource;
+	source.m_Text.assign( bytes.begin(), bytes.end() );
+	source.m_bRecovered = true;
+	m_szOfferedAutosave.clear();
+	m_pRecoveryBar->hide();
+	m_bAutosaveOurs = true;
+	Load( std::move( source ) );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+void CMapEditor::DeleteOfferedAutosave()
+{
+	if ( !m_szOfferedAutosave.isEmpty() )
+	{
+		QFile::remove( m_szOfferedAutosave );
+	}
+	m_szOfferedAutosave.clear();
+	m_pRecoveryBar->hide();
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: An autosave this tab didn't write (one still offered) is left alone.
+//-----------------------------------------------------------------------------
+void CMapEditor::RemoveAutosave()
+{
+	if ( m_bAutosaveOurs )
+	{
+		QFile::remove( GetAutosavePath() );
+		m_bAutosaveOurs = false;
+	}
+	if ( m_pAutosaveLock )
+	{
+		m_pAutosaveLock->unlock();
+		m_pAutosaveLock.reset();
+	}
+	m_szNewAutosaveKey.clear();
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: The window starts where the configs are: the map's addons/stripper/maps, else the
+//          game's.
+//-----------------------------------------------------------------------------
+void CMapEditor::ImportStripperConfig()
+{
+	if ( !m_pDocument->IsLoaded() )
+	{
+		return;
+	}
+	std::filesystem::path start;
+	if ( !m_szPath.isEmpty() && !m_bFromGame )
+	{
+		start = xv::bsp::StripperMapConfigPath( m_szPath.toStdString() ).parent_path();
+	}
+	if ( ( start.empty() || !std::filesystem::is_directory( start ) ) && m_pDocument->GetGame() )
+	{
+		const std::filesystem::path game = m_pDocument->GetGame()->m_GameDir;
+		start = std::filesystem::is_directory( game / "addons/stripper/maps" ) ? game / "addons/stripper/maps" : std::filesystem::is_directory( game / "addons/stripper" ) ? game / "addons/stripper"
+																																										   : std::filesystem::path{};
+	}
+	const QStringList files = AskOpenFiles( this, tr( "Import Stripper Config" ), start.empty() ? QString{} : QString::fromStdString( start.string() ), tr( "Stripper:Source configs (*.cfg);;All files (*)" ) );
+	if ( files.isEmpty() )
+	{
+		return;
+	}
+	QString szMessage;
+	if ( !ImportStripperFiles( files, &szMessage ) )
+	{
+		QMessageBox::information( this, tr( "Import Stripper Config" ), szMessage );
+		return;
+	}
+	emit StatusMessage( szMessage );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: One undo step; the added entities end up selected, the filtered ones hidden.
+//-----------------------------------------------------------------------------
+bool CMapEditor::ImportStripperFiles( QStringList files, QString *pMessage )
+{
+	const auto say = [ pMessage ]( const QString &szText ) {
+		if ( pMessage )
+			*pMessage = szText;
+	};
+	const xv::map::CScene *pScene = m_pDocument->GetScene();
+	if ( !pScene || files.isEmpty() )
+	{
+		say( tr( "Nothing to import." ) );
+		return false;
+	}
+	// Stripper reads the global filters before the map's own.
+	std::ranges::stable_partition( files, []( const QString &szFile ) { return QFileInfo{ szFile }.fileName().compare( QStringLiteral( "global_filters.cfg" ), Qt::CaseInsensitive ) == 0; } );
+	std::vector<xv::bsp::StripperConfig_t> configs;
+	QStringList names;
+	QStringList problems;
+	for ( const QString &szFile : files )
+	{
+		QFile file( szFile );
+		if ( !file.open( QIODevice::ReadOnly ) )
+		{
+			say( tr( "Could not read %1: %2" ).arg( QDir::toNativeSeparators( szFile ), file.errorString() ) );
+			return false;
+		}
+		const QByteArray bytes = file.readAll();
+		const QString szName = QFileInfo{ szFile }.fileName();
+		configs.push_back( xv::bsp::ParseStripper( std::string_view{ bytes.constData(), static_cast<std::size_t>( bytes.size() ) }, szName.toStdString() ) );
+		for ( const std::string &szProblem : configs.back().m_Problems )
+			problems << QString::fromStdString( szProblem );
+		names << szName;
+	}
+	const xv::map::StripperImport_t import = xv::map::ImportStripper( *pScene, configs, names.join( QStringLiteral( ", " ) ).toStdString() );
+	if ( import.m_Edit.IsEmpty() )
+	{
+		say( tr( "%1 changes nothing in this map." ).arg( names.join( QStringLiteral( ", " ) ) ) + ( problems.isEmpty() ? QString{} : QLatin1Char( '\n' ) + problems.join( QLatin1Char( '\n' ) ) ) );
+		return false;
+	}
+	m_pDocument->Edit( import.m_Edit, tr( "Import Stripper Config" ), import.m_Added.empty() ? std::nullopt : std::optional{ import.m_Added } );
+	say( tr( "Stripper (%1): %2 added, %3 modified, %4 filtered out (hidden in their visgroup)" ).arg( names.join( QStringLiteral( ", " ) ) ).arg( import.m_nAdded ).arg( import.m_nModified ).arg( import.m_nRemoved ) + ( problems.isEmpty() ? QString{} : tr( "; %n problem(s) reading it", nullptr, static_cast<int>( problems.size() ) ) ) );
+	return true;
 }
 
 //-----------------------------------------------------------------------------
@@ -2009,6 +2186,7 @@ bool CMapEditor::RunAction( MapAction_t nAction, CMapView *pFrom )
 		case MapAction_t::MAP_ACTION_TOGGLE_TOOL_TEXTURES: return toggle( m_Settings.m_bToolTextures );
 		case MapAction_t::MAP_ACTION_TOGGLE_SKYBOX_3D: return toggle( m_Settings.m_bSkybox3D );
 		case MapAction_t::MAP_ACTION_TOGGLE_WALKABLE: return toggle( m_Settings.m_bWalkable );
+		case MapAction_t::MAP_ACTION_TOGGLE_PARTICLES: return toggle( m_Settings.m_bParticles );
 		case MapAction_t::MAP_ACTION_GO_TO_BRUSH:
 			GoToBrush();
 			return true;
@@ -3746,6 +3924,7 @@ bool CMapEditor::Save()
 		QMessageBox::critical( this, tr( "Save failed" ), tr( "Could not write %1:\n%2" ).arg( QDir::toNativeSeparators( m_szPath ), szError ) );
 		return false;
 	}
+	RemoveAutosave();
 	emit StatusMessage( tr( "Saved %1" ).arg( QDir::toNativeSeparators( m_szPath ) ) );
 	return true;
 }
@@ -3780,6 +3959,7 @@ bool CMapEditor::SaveAs()
 		QMessageBox::critical( this, tr( "Save failed" ), tr( "Could not write %1:\n%2" ).arg( QDir::toNativeSeparators( szFile ), szError ) );
 		return false;
 	}
+	RemoveAutosave();
 	m_szPath = QFileInfo{ szFile }.absoluteFilePath();
 	m_bFromGame = false;
 	QStringList recent;
@@ -3797,6 +3977,9 @@ bool CMapEditor::SaveAs()
 void CMapEditor::SceneEdited( const std::vector<std::uint32_t> &changed )
 {
 	const xv::map::CScene *pScene = m_pDocument->GetScene();
+	m_pParticles->SetScene( m_pDocument->GetSharedScene() );
+	if ( m_pParticles->IsPlaying() && !m_pAnimationTimer->isActive() )
+		m_pAnimationTimer->start();
 	// Materials the edit brought in: read into the places kept for them, or everything again
 	// when those are used up.
 	std::vector<std::uint32_t> added;
@@ -3869,6 +4052,7 @@ void CMapEditor::StopWork()
 	RememberCamera();
 	m_pDocument->Stop();
 	m_pResources->Stop();
+	m_pParticles->Stop();
 }
 
 //-----------------------------------------------------------------------------
@@ -3892,6 +4076,13 @@ void CMapEditor::GameChanged( const xv::vfs::CGameInfo *pGame )
 //-----------------------------------------------------------------------------
 void CMapEditor::ResourcesArrived()
 {
+	if ( m_pResources->HasAnimated() )
+	{
+		// Arriving materials start as they are now, not as read.
+		m_pResources->Animate( static_cast<float>( m_AnimationClock.elapsed() ) / 1000.0f );
+		if ( !m_pAnimationTimer->isActive() )
+			m_pAnimationTimer->start();
+	}
 	m_pRenderData->SetMaterials( m_pResources->GetMaterials(), m_pResources->GetTextures(), m_pResources->GetEntityMaterial() );
 	m_pRenderData->SetSky( m_pResources->GetSky() );
 	m_pRenderData->SetProps( m_pResources->GetProps(), m_pResources->GetPropObjects(), m_pResources->GetPropParts() );
@@ -3910,6 +4101,50 @@ void CMapEditor::ResourcesArrived()
 		}
 	}
 	UpdateGameStatus();
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Only textured 3D views on screen show what moves; 2D views draw no materials' motion.
+//-----------------------------------------------------------------------------
+void CMapEditor::AnimateMaterials()
+{
+	const bool bParticles = m_Settings.m_bParticles && m_pParticles->IsPlaying();
+	if ( !m_pResources->HasAnimated() && !m_pParticles->IsPlaying() )
+	{
+		m_pAnimationTimer->stop();
+		return;
+	}
+	const float flNow = static_cast<float>( m_AnimationClock.elapsed() ) / 1000.0f;
+	const float flStep = std::clamp( flNow - m_flAnimatedAt, 0.0f, 0.25f );
+	m_flAnimatedAt = flNow;
+	std::vector<CMapView3D *> shown;
+	for ( CMapView *pView : GetViews() )
+	{
+		auto *p3D = qobject_cast<CMapView3D *>( pView );
+		if ( p3D && p3D->isVisible() && p3D->GetType() != MapViewType_t::MAP_VIEW_TYPE_3D_WIREFRAME && p3D->GetType() != MapViewType_t::MAP_VIEW_TYPE_3D_FLAT )
+			shown.push_back( p3D );
+	}
+	if ( shown.empty() )
+	{
+		return;
+	}
+	if ( bParticles )
+	{
+		m_pParticles->Advance( flStep );
+	}
+	const bool bMaterials = m_pResources->HasAnimated() && m_pResources->Animate( flNow );
+	if ( !bMaterials && !bParticles )
+	{
+		return;
+	}
+	if ( bMaterials )
+	{
+		m_pRenderData->SetMaterials( m_pResources->GetMaterials(), m_pResources->GetTextures(), m_pResources->GetEntityMaterial() );
+	}
+	for ( CMapView3D *p3D : shown )
+	{
+		p3D->Redraw();
+	}
 }
 
 //-----------------------------------------------------------------------------
@@ -3940,6 +4175,13 @@ void CMapEditor::UpdateGameStatus()
 	if ( m_pLighting->IsBaking() )
 	{
 		parts << tr( "lighting %1% (%2)" ).arg( m_pLighting->GetPercent() ).arg( m_pLighting->GetStage().toLower() );
+	}
+	if ( !m_pParticles->GetMissing().empty() )
+	{
+		QStringList missing;
+		for ( const std::string &szName : m_pParticles->GetMissing() )
+			missing << QString::fromStdString( szName );
+		parts << tr( "%n particle system(s) not in the game's manifest: %1", nullptr, static_cast<int>( missing.size() ) ).arg( missing.join( QStringLiteral( ", " ) ) );
 	}
 	m_pStatusGame->setText( parts.join( QStringLiteral( "; " ) ) );
 	m_pStatusGame->setToolTip( szFgd.isEmpty() ? parts.join( QStringLiteral( "; " ) ) : tr( "Entities from %1" ).arg( szFgd ) );

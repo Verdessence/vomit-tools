@@ -80,6 +80,8 @@ add_library(vomit_tools_ui STATIC
         MenuPicker.cpp
         MenuPicker.h
         PanelColumn.cpp
+        TabGroups.cpp
+        TabGroups.h
         PanelColumn.h
         ParticleDocument.cpp
         ParticleDocument.h
@@ -152,6 +154,8 @@ add_library(vomit_tools_ui STATIC
         map/MapEditor.h
         map/MapFilterControl.cpp
         map/MapFilterControl.h
+        map/MapAutosave.cpp
+        map/MapAutosave.h
         map/MapBuilding.cpp
         map/MapBuilding.h
         map/MapCompile.cpp
@@ -175,6 +179,8 @@ add_library(vomit_tools_ui STATIC
         map/MapKeys.cpp
         map/MapKeys.h
         map/MapPanes.cpp
+        map/MapParticles.cpp
+        map/MapParticles.h
         map/MapPanes.h
         map/MapProperties.cpp
         map/MapProperties.h
@@ -186,6 +192,8 @@ add_library(vomit_tools_ui STATIC
         map/MapRenderer.h
         map/MapResources.cpp
         map/MapResources.h
+        map/MapToolBars.cpp
+        map/MapToolBars.h
         map/MapView.cpp
         map/MapView.h
         map/MapView2D.cpp

@@ -198,8 +198,33 @@
 - A map tab's status bar shows only the map's own (no sound controls while nothing plays, no game
   file count).
 - The texture browser remembers its picture size.
+- **Autosave:** a changed map is written to `<map>.vmf.autosave` every five minutes (Preferences →
+  Maps: on or off, how often), as saving would write it. A map that opens with a newer autosave
+  beside it (a crash) shows a bar to recover it or delete it; new maps' autosaves are offered back
+  at the next start.
+- **Tool bars:** the commands are icons on Qt's tool bars round the views (Selection Mode, 3D
+  Gizmo, Grid, Locks, Show, Objects, Views, Compile, and the tools down the side), each moved to
+  any edge, floated or hidden. Right-click a bar for icons, words or both, and Customize Tool Bars
+  to move buttons between bars, reorder and hide them. The layout is every map tab's and kept.
+- **Particles:** `info_particle_system` plays its effect in the 3D views, found by name in the
+  files the game's manifest (and the map's own) lists, from its origin and the entities its
+  `cpoint` keys name, with the particle editor's simulation. Show → Particles turns them off;
+  names the game lacks are listed in the status bar.
+- **Animated materials:** AnimatedTexture, TextureScroll, Sine and the other proxies that need
+  only the time play in textured 3D views: frames, scrolling, colour and alpha.
+- **Where things move:** a selected door, button or momentary_door shows an arrow along its
+  `movedir` as far as it travels (its size less `lip`) and its box where it stops;
+  func_movelinear and func_water_analog by `movedistance` from `startposition`; a train or path
+  arrows along its `target` chain.
+- **Import Stripper Config** (Map menu): a Stripper:Source config's changes made one undoable
+  edit of the map: what it adds becomes entities, what it modifies is changed, and what it filters
+  out is kept but hidden, each kind in a visgroup under "Stripper: <config>" (Added, Modified,
+  Removed). Visgroups made here are saved in the map.
 
 ### Also
+- The main window's tabs are grouped under a strip by kind (maps, textures, sounds...); a tab's
+  right-click moves it into a group of your own, kept across starts. Preferences → General turns
+  grouping off.
 - The File menu is shorter: **New** holds everything that makes something (maps, particles,
   skyboxes, detail files, soundscapes, soundscripts, textures), **Open** holds File, Folder, Game
   and Recent. VPKs and compiled maps open through Open → File; Open Sky moved to the Game menu.

@@ -50,6 +50,8 @@ class CMaterialEditor;
 class CTextureDocument;
 class CTextureEditor;
 class CVfsModel;
+class CEditorTabWidget;
+class CTabGroups;
 namespace xv::bsp
 {
 class CBsp;
@@ -138,6 +140,11 @@ public:
 	void RestoreSessionEntry( const QString &szEntry );
 	// After the last entry: the tab and side panel that were showing.
 	void FinishRestoringSession();
+	// New maps a crash left unsaved: their autosaves offered back as new maps (once the window
+	// shows; maps with files offer theirs in their own tab).
+	void OfferNewMapAutosaves();
+	// The tabs' groups (the strip over them).
+	[[nodiscard]] CTabGroups &GetTabGroups() const { return *m_pTabGroups; }
 
 protected:
 	void closeEvent( QCloseEvent *pEvent ) override;
@@ -289,7 +296,8 @@ private:
 	QPointer<QWidget> m_pRestoredCurrent; // the tab to show once the last session is reopened
 	QWidget *m_pGameBrowser = nullptr;
 	CFolderBrowser *m_pFolders = nullptr;
-	QTabWidget *m_pTabs = nullptr;
+	CEditorTabWidget *m_pTabs = nullptr;
+	CTabGroups *m_pTabGroups = nullptr;
 	QWidget *m_pPreviewHost = nullptr;
 	QTableWidget *m_pMounts = nullptr;
 	QLabel *m_pGameLabel = nullptr;

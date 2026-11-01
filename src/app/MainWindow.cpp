@@ -32,6 +32,7 @@
 #include <QClipboard>
 #include <QMimeData>
 #include <QProgressDialog>
+#include <QLocale>
 #include <QPushButton>
 #include <QRegularExpression>
 #include <QSaveFile>
@@ -70,6 +71,8 @@
 #include "ParticleDocument.h"
 #include "ParticleSearch.h"
 #include "Preferences.h"
+#include "TabGroups.h"
+#include "map/MapAutosave.h"
 #include "map/MapEditor.h"
 #include "map/Write.h"
 #include "PreferencesDialog.h"
@@ -476,7 +479,8 @@ CMainWindow::CMainWindow( QWidget *pParent, xv::audio::CEngine::Output_t nAudio 
 												"in the skybox editor (File → New Skybox) and particle files (.pcf) in the particle editor; sounds, "
 												"textures and other files show here." ) ) );
 
-	m_pTabs = new QTabWidget;
+	m_pTabs = new CEditorTabWidget;
+	m_pTabs->setObjectName( QStringLiteral( "editorTabs" ) );
 	m_pTabs->setDocumentMode( true );
 	m_pTabs->setTabsClosable( true );
 	m_pTabs->addTab( m_pPreviewHost, tr( "Preview" ) );
@@ -500,9 +504,21 @@ CMainWindow::CMainWindow( QWidget *pParent, xv::audio::CEngine::Output_t nAudio 
 		UpdateMapMenu();
 	} );
 
+	// The groups' strip over the tabs.
+	m_pTabGroups = new CTabGroups( m_pTabs );
+	m_pTabGroups->SetKeyFunction( [ this ]( QWidget *pTab ) { return SessionEntryFor( m_pTabs->indexOf( pTab ) ); } );
+	m_pTabGroups->SetEnabled( CPreferences::Instance().IsTabGroups() );
+	connect( &CPreferences::Instance(), &CPreferences::TabGroupsChanged, m_pTabGroups, &CTabGroups::SetEnabled );
+	auto *pTabArea = new QWidget;
+	auto *pTabLayout = new QVBoxLayout( pTabArea );
+	pTabLayout->setContentsMargins( 0, 0, 0, 0 );
+	pTabLayout->setSpacing( 0 );
+	pTabLayout->addWidget( m_pTabGroups->GetBar() );
+	pTabLayout->addWidget( m_pTabs, 1 );
+
 	auto *pSplitter = new QSplitter;
 	pSplitter->addWidget( m_pSides );
-	pSplitter->addWidget( m_pTabs );
+	pSplitter->addWidget( pTabArea );
 	pSplitter->setStretchFactor( 1, 3 );
 	pSplitter->setSizes( { 320, 1080 } );
 	setCentralWidget( pSplitter );
@@ -771,6 +787,13 @@ void CMainWindow::BuildMenus( QAction *pSearchPathsToggle )
 			pMap->RunAction( MapAction_t::MAP_ACTION_PASTE_SPECIAL, pMap->GetActiveView() );
 		}
 	} );
+	m_pMapMenu->addAction( tr( "Import &Stripper Config…" ), this, [ this ] {
+				  if ( CMapEditor *pMap = GetCurrentMap() )
+				  {
+					  pMap->ImportStripperConfig();
+				  }
+			  } )
+		->setObjectName( QStringLiteral( "mapImportStripper" ) );
 	m_pMapMenu->addSeparator();
 	m_pMapMenu->addAction( tr( "Make &Hollow…" ), this, [ this ] {
 		if ( CMapEditor *pMap = GetCurrentMap() )
@@ -5166,6 +5189,61 @@ CMapEditor *CMainWindow::NewMap()
 	AddMapTab( pEditor );
 	pEditor->Load( std::move( source ) );
 	return pEditor;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Each opens as a new map, modified, that takes the autosave over (it is removed once
+//          the map is saved or closed).
+//-----------------------------------------------------------------------------
+void CMainWindow::OfferNewMapAutosaves()
+{
+	const std::vector<OrphanAutosave_t> orphans = OrphanNewMapAutosaves();
+	if ( orphans.empty() )
+	{
+		return;
+	}
+	QMessageBox box( QMessageBox::Question, tr( "Recover Maps" ), tr( "%n new map(s) weren't saved before vomit-tools last closed. Open their autosaves?", nullptr, static_cast<int>( orphans.size() ) ), QMessageBox::NoButton, this );
+	QStringList details;
+	for ( const OrphanAutosave_t &orphan : orphans )
+	{
+		details << QStringLiteral( "%1 (%2)" ).arg( QDir::toNativeSeparators( orphan.m_szPath ), QLocale{}.toString( orphan.m_Modified, QLocale::ShortFormat ) );
+	}
+	box.setDetailedText( details.join( QLatin1Char( '\n' ) ) );
+	QPushButton *pOpen = box.addButton( tr( "Open" ), QMessageBox::AcceptRole );
+	QPushButton *pDelete = box.addButton( tr( "Delete" ), QMessageBox::DestructiveRole );
+	box.addButton( tr( "Later" ), QMessageBox::RejectRole );
+	box.setDefaultButton( pOpen );
+	box.exec();
+	for ( const OrphanAutosave_t &orphan : orphans )
+	{
+		if ( box.clickedButton() == pDelete )
+		{
+			QFile::remove( orphan.m_szPath );
+			continue;
+		}
+		if ( box.clickedButton() != pOpen )
+		{
+			continue;
+		}
+		const auto data = ReadDiskFile( orphan.m_szPath );
+		if ( !data )
+		{
+			continue;
+		}
+		CMapDocument::Source_t source;
+		source.m_Text.assign( data->begin(), data->end() );
+		source.m_bRecovered = true;
+		source.m_Game = m_Game;
+		for ( const QString &szFgd : CPreferences::Instance().GetMapPreferences().m_Fgds )
+		{
+			source.m_Fgds.push_back( ToPath( szFgd ) );
+		}
+		auto *pEditor = new CMapEditor( QString{}, false );
+		pEditor->AdoptAutosave( orphan.m_szPath );
+		source.m_szName = pEditor->GetTabTitle();
+		AddMapTab( pEditor );
+		pEditor->Load( std::move( source ) );
+	}
 }
 
 //-----------------------------------------------------------------------------

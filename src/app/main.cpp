@@ -117,6 +117,8 @@ int main( int nArgc, char *argv[] )
 	}
 	window.show();
 	splash.finish( &window );
+	// New maps a crash left unsaved, once the window is up (maps with files ask in their tabs).
+	QTimer::singleShot( 0, &window, [ &window ] { window.OfferNewMapAutosaves(); } );
 	// The first start says hello.
 	if ( !CPremiumDialog::HasBeenShown() )
 	{

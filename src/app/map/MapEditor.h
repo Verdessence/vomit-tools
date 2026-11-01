@@ -15,6 +15,7 @@
 #include <vector>
 
 #include <QDialog>
+#include <QElapsedTimer>
 #include <QPointer>
 #include <QWidget>
 
@@ -28,6 +29,7 @@
 #include "map/MapGizmo.h"
 #include "map/MapRenderData.h"
 #include "map/MapDialogs.h"
+#include "map/MapToolBars.h"
 #include "map/MapView.h"
 
 class CMapCheckDialog;
@@ -39,6 +41,7 @@ class CMapFilterControl;
 class CMapPane;
 class CMapProperties;
 class CMapLighting;
+class CMapParticles;
 class CMapResources;
 class CMapQuadSplitter;
 class QTimer;
@@ -47,6 +50,7 @@ class QActionGroup;
 class QComboBox;
 class QSpinBox;
 class QLabel;
+class QLockFile;
 class QStackedWidget;
 class QLineEdit;
 class QSplitter;
@@ -86,6 +90,7 @@ public:
 	[[nodiscard]] CMapRenderData &GetRenderData() { return *m_pRenderData; }
 	[[nodiscard]] CMapResources &GetResources() { return *m_pResources; }
 	[[nodiscard]] CMapLighting &GetLighting() { return *m_pLighting; }
+	[[nodiscard]] CMapParticles &GetParticles() { return *m_pParticles; }
 	// A view shows the lighting preview: the map is baked (again, if it changed since), soon.
 	void WantLighting();
 	// Bakes now, whatever changed (Hammer++'s Bake Lighting).
@@ -274,6 +279,26 @@ public:
 	// A 3D view changed how it draws (the card's drawing failed): software needs the textures decoded.
 	void RendererChanged();
 
+	// Map > Import Stripper Config: configs picked (from the game's addons/stripper) brought into
+	// the map as one edit: adds as entities, modifies applied, filtered entities kept but hidden,
+	// each kind in a visgroup under "Stripper: <config>".
+	void ImportStripperConfig();
+	// The same for these files, in order (global_filters.cfg first, as Stripper reads them).
+	// false (with why in pMessage) when one can't be read or they change nothing.
+	bool ImportStripperFiles( QStringList files, QString *pMessage = nullptr );
+
+	// Autosave: the map as it would be saved, written to GetAutosavePath() (the timer's work).
+	// false when there was nothing to write (not modified, a drag under way, a newer autosave
+	// still offered) or it couldn't be written.
+	bool Autosave();
+	[[nodiscard]] QString GetAutosavePath() const;
+	// A new map's tab takes over an autosave a crash left (MainWindow's recovery).
+	void AdoptAutosave( const QString &szAutosave );
+	// The bar offering an autosave newer than the map back: shown, Recover and Delete.
+	[[nodiscard]] bool IsOfferingRecovery() const;
+	void RecoverAutosave();
+	void DeleteOfferedAutosave();
+
 	// IEditorTab
 	[[nodiscard]] QString GetTabTitle() const override;
 	[[nodiscard]] QString GetSessionEntry() const override;
@@ -300,7 +325,7 @@ signals:
 	void TextureGameChanged();
 
 private:
-	void BuildToolBars( QVBoxLayout *pLayout );
+	void BuildToolBars();
 	[[nodiscard]] QWidget *BuildNewObjects();
 	[[nodiscard]] QWidget *BuildTexturePanel();
 	void HighlightSides( const QString &szKey, const QString &szValue );
@@ -317,6 +342,9 @@ private:
 	void UpdateStatus();
 	void UpdateGameStatus();
 	void ResourcesArrived();
+	// The clock moved on: animated materials drawn as they are now and the particle systems a
+	// step further, while a textured 3D view shows them.
+	void AnimateMaterials();
 	void StartLighting();
 	void LightingBaked();
 	// An edit made a new scene: the views follow, and materials it brought in are read.
@@ -338,11 +366,18 @@ private:
 	[[nodiscard]] QString GetFileName() const;
 	void PreferencesChanged();
 	[[nodiscard]] CMapPane *PaneOf( const CMapView *pView ) const;
+	// The timer as Preferences says (on or off, how often).
+	void UpdateAutosaveTimer();
+	// After a load: the bar, when there is an autosave newer than the file.
+	void OfferRecovery();
+	// The autosave this tab wrote or recovered from, taken away (saved, or closed without saving).
+	void RemoveAutosave();
 
 	CMapDocument *m_pDocument = nullptr;
 	std::unique_ptr<CMapRenderData> m_pRenderData;
 	CMapResources *m_pResources = nullptr;
 	CMapLighting *m_pLighting = nullptr;
+	CMapParticles *m_pParticles = nullptr;
 	QTimer *m_pLightingTimer = nullptr;
 	// What the last bake asked for was made from: the scene, the materials read (once they all
 	// are), and the preferences that change a bake.
@@ -352,6 +387,18 @@ private:
 	std::array<const void *, 5> m_LightingExtras{}; // the props, overlays and sprites, whole and in parts
 	QString m_szPath;
 	bool m_bFromGame = false;
+	// What the map was last loaded from, but its text: a recovery loads the autosave with it.
+	CMapDocument::Source_t m_LastSource;
+	QTimer *m_pAutosaveTimer = nullptr;
+	QTimer *m_pAnimationTimer = nullptr;
+	QElapsedTimer m_AnimationClock;
+	float m_flAnimatedAt = 0.0f; // the clock's seconds at the last step
+	QString m_szNewAutosaveKey;               // a new map's autosave name, once it has one
+	std::unique_ptr<QLockFile> m_pAutosaveLock; // held while a new map's autosave is this tab's
+	bool m_bAutosaveOurs = false;             // written or recovered by this tab: removed with it
+	QWidget *m_pRecoveryBar = nullptr;
+	QLabel *m_pRecoveryText = nullptr;
+	QString m_szOfferedAutosave;
 	MapViewSettings_t m_Settings;
 	MapTool_t m_nTool = MapTool_t::MAP_TOOL_SELECT;
 	MapEditMode_t m_nEditMode = MapEditMode_t::MAP_EDIT_MODE_RESIZE;
@@ -423,6 +470,10 @@ private:
 	std::vector<xv::map::FaceRef_t> m_SelectedFaces;
 	QLabel *m_pLoading = nullptr;
 	QActionGroup *m_pTools = nullptr;
+	CMapToolHost *m_pToolHost = nullptr;
+	// The bars' commands and the bars as they first come, until the host takes them.
+	QList<QAction *> m_ToolBarActions;
+	std::vector<MapToolBarSpec_t> m_ToolBarSpecs;
 	QActionGroup *m_pModes = nullptr;
 	QLabel *m_pStatusSelection = nullptr;
 	QLabel *m_pStatusSize = nullptr;

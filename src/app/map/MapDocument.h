@@ -52,6 +52,7 @@ public:
 		std::filesystem::path m_DiskPath;         // empty for a game file
 		std::optional<xv::vfs::CGameInfo> m_Game; // what materials, models and FGDs come from
 		std::vector<std::filesystem::path> m_Fgds; // empty: the ones the game's Hammer config names
+		bool m_bRecovered = false;                // the text is an autosave: modified until saved
 	};
 
 	explicit CMapDocument( QObject *pParent = nullptr );
@@ -78,6 +79,8 @@ public:
 	void Edit( xv::map::MapEdit_t edit, const QString &szName, std::optional<std::vector<std::uint32_t>> selectAfter = std::nullopt );
 	[[nodiscard]] QUndoStack *GetUndoStack() const { return m_pUndo; }
 	[[nodiscard]] bool IsModified() const;
+	// Read from an autosave (Source_t::m_bRecovered) and not saved since.
+	[[nodiscard]] bool IsRecovered() const { return m_bRecovered; }
 	// Writes the map (the text read, patched with every edit) to path, keeping what was there as
 	// Hammer does, in a .vmx beside it. The undo stack is clean afterwards.
 	bool Save( const std::filesystem::path &path, QString *pError );
@@ -175,6 +178,8 @@ private:
 	bool m_bCamerasPreview = false;
 	std::shared_ptr<const xv::map::CScene> m_pPreviewBase; // the scene before the drag
 	std::optional<xv::vfs::CGameInfo> m_Game;
+	bool m_bRecovered = false;
+	bool m_bLoadingRecovered = false; // the load under way is of an autosave
 	QString m_szFgdSource;
 	xv::map::HammerDefaults_t m_Defaults;
 
