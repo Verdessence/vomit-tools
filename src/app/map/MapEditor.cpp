@@ -11,6 +11,7 @@
 #include "map/Cordon.h"
 #include "map/DispEdit.h"
 #include "map/MapReports.h"
+#include "map/MapSprinkle.h"
 #include "map/Materials.h"
 #include "texture/Vtf.h"
 #include "vfs/Vfs.h"
@@ -100,6 +101,7 @@ enum class MapIcon_t
 	MAP_ICON_CLIP,
 	MAP_ICON_CORDON,
 	MAP_ICON_VERTEX,
+	MAP_ICON_SPRINKLE,
 	MAP_ICON_PROPERTIES,
 	MAP_ICON_MATERIAL,
 	MAP_ICON_LIGHT,
@@ -211,6 +213,17 @@ QIcon MakeIcon( MapIcon_t nIcon, const QColor &color )
 			painter.setPen( Qt::NoPen );
 			painter.setBrush( color );
 			painter.drawEllipse( QPointF{ 12, 12 }, 3.5, 3.5 );
+			break;
+		}
+		case MapIcon_t::MAP_ICON_SPRINKLE:
+		{
+			// A can's spray of dots onto a surface.
+			painter.drawLine( QPointF{ 4, 27 }, QPointF{ 28, 27 } );
+			painter.drawRoundedRect( QRectF{ 5, 4, 7, 11 }, 1.5, 1.5 );
+			painter.setPen( Qt::NoPen );
+			painter.setBrush( color );
+			for ( const QPointF &at : { QPointF{ 16, 10 }, QPointF{ 21, 14 }, QPointF{ 17, 18 }, QPointF{ 25, 20 }, QPointF{ 13, 22 }, QPointF{ 21, 24 } } )
+				painter.drawEllipse( at, 1.6, 1.6 );
 			break;
 		}
 		case MapIcon_t::MAP_ICON_LIGHT:
@@ -390,6 +403,9 @@ CMapEditor::CMapEditor( const QString &szPath, bool bFromGame, QWidget *pParent 
 	m_pProperties->setMinimumHeight( 260 );
 	m_pPanels->AddPanel( QStringLiteral( "properties" ), tr( "Object Properties" ), MakeIcon( MapIcon_t::MAP_ICON_PROPERTIES, panelIconColor ), m_pProperties, true );
 	m_pPanels->AddPanel( QStringLiteral( "faceEdit" ), tr( "Face Edit" ), MakeIcon( MapIcon_t::MAP_ICON_TEXTURE, panelIconColor ), m_pFaceEditHolder );
+	m_pSprinkle = new CMapSprinklePanel;
+	m_pPanels->AddPanel( QStringLiteral( "sprinkle" ), tr( "Sprinkle" ), MakeIcon( MapIcon_t::MAP_ICON_SPRINKLE, panelIconColor ), m_pSprinkle );
+	m_pPanels->SetAvailable( QStringLiteral( "sprinkle" ), false );
 	m_pPanels->AddPanel( QStringLiteral( "newObjects" ), tr( "New Objects" ), MakeIcon( MapIcon_t::MAP_ICON_BLOCK, panelIconColor ), BuildNewObjects() );
 	m_pPanels->AddPanel( QStringLiteral( "texture" ), tr( "Texture" ), MakeIcon( MapIcon_t::MAP_ICON_MATERIAL, panelIconColor ), BuildTexturePanel() );
 	auto *pLighting = new CMapLightingPanel( *this );
@@ -438,6 +454,7 @@ CMapEditor::CMapEditor( const QString &szPath, bool bFromGame, QWidget *pParent 
 		{ MapTool_t::MAP_TOOL_DECAL, MapIcon_t::MAP_ICON_DECAL, tr( "Apply Decals" ), MapAction_t::MAP_ACTION_TOOL_DECAL },
 		{ MapTool_t::MAP_TOOL_CLIP, MapIcon_t::MAP_ICON_CLIP, tr( "Clipping Tool" ), MapAction_t::MAP_ACTION_TOOL_CLIP },
 		{ MapTool_t::MAP_TOOL_VERTEX, MapIcon_t::MAP_ICON_VERTEX, tr( "Vertex Tool" ), MapAction_t::MAP_ACTION_TOOL_VERTEX },
+		{ MapTool_t::MAP_TOOL_SPRINKLE, MapIcon_t::MAP_ICON_SPRINKLE, tr( "Sprinkle Tool" ), MapAction_t::MAP_ACTION_TOOL_SPRINKLE },
 		{ MapTool_t::MAP_TOOL_CORDON, MapIcon_t::MAP_ICON_CORDON, tr( "Edit Cordon Bounds" ), MapAction_t::MAP_ACTION_TOOL_CORDON },
 	};
 	for ( const auto &tool : tools )
@@ -789,6 +806,16 @@ void CMapEditor::FillNewObjects()
 	}
 	SetCurrentMaterial( recent.empty() ? szBefore : recent.front() );
 	FillPrefabs();
+	LoadSprinkleTypes();
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: The definitions of the game the map is edited for.
+//-----------------------------------------------------------------------------
+void CMapEditor::LoadSprinkleTypes()
+{
+	const auto &game = m_pDocument->GetGame();
+	m_pSprinkle->Load( game ? std::optional<std::filesystem::path>{ game->m_GameDir } : std::nullopt );
 }
 
 //-----------------------------------------------------------------------------
@@ -1020,6 +1047,15 @@ void CMapEditor::SetTool( MapTool_t nTool )
 	for ( QAction *pAction : m_pTools->actions() )
 	{
 		pAction->setChecked( pAction->data().toInt() == static_cast<int>( nTool ) );
+	}
+	// The sprinkle settings are its tool's panel, as Face Edit is the texture tool's.
+	const bool bSprinkle = nTool == MapTool_t::MAP_TOOL_SPRINKLE;
+	const bool bWasSprinkle = m_pPanels->IsAvailable( QStringLiteral( "sprinkle" ) );
+	m_pPanels->SetAvailable( QStringLiteral( "sprinkle" ), bSprinkle );
+	if ( bSprinkle && !bWasSprinkle )
+	{
+		m_pSprinkle->SetEditorGrid( m_Settings.m_nGridSize );
+		m_pPanels->ScrollTo( QStringLiteral( "sprinkle" ) );
 	}
 	for ( CMapView *pView : GetViews() )
 	{
@@ -1909,6 +1945,9 @@ bool CMapEditor::RunAction( MapAction_t nAction, CMapView *pFrom )
 			return true;
 		case MapAction_t::MAP_ACTION_TOOL_DECAL:
 			SetTool( MapTool_t::MAP_TOOL_DECAL );
+			return true;
+		case MapAction_t::MAP_ACTION_TOOL_SPRINKLE:
+			SetTool( MapTool_t::MAP_TOOL_SPRINKLE );
 			return true;
 		case MapAction_t::MAP_ACTION_TOOL_TEXTURE:
 			SetTool( MapTool_t::MAP_TOOL_TEXTURE );
@@ -3751,6 +3790,7 @@ void CMapEditor::GameChanged( const xv::vfs::CGameInfo *pGame )
 		StartResources();
 		m_pFaceEdit->Refresh();
 	}
+	LoadSprinkleTypes();
 	emit TextureGameChanged();
 }
 

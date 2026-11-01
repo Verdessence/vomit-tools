@@ -49,6 +49,7 @@ enum class MapTool_t
 	MAP_TOOL_OVERLAY, // Shift+O: place and edit overlays
 	MAP_TOOL_DECAL,   // Shift+D: place an infodecal on a picked surface
 	MAP_TOOL_VERTEX,  // Hammer's Vertex Tool: the selected solids' corners and edges dragged in 2D
+	MAP_TOOL_SPRINKLE, // Hammer++'s Sprinkle Tool: entities painted on the surfaces in 3D
 };
 
 // What the vertex tool shows as handles: Hammer's cycle (Shift+V again).

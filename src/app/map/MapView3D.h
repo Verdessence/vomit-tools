@@ -28,6 +28,7 @@
 #include "map/MapRenderData.h"
 #include "map/MapRenderer.h"
 #include "map/MapView.h"
+#include "map/Sprinkle.h"
 #include "map/Trace.h"
 #include "map/ViewCamera.h"
 
@@ -153,6 +154,21 @@ private:
 	// (previewed), and the stroke made one undo step (or dropped).
 	[[nodiscard]] bool IsPaintingDisplacements() const;
 	[[nodiscard]] bool IsDisplacementBrushShown() const;
+	// The ring under the mouse: the displacement brush's or the sprinkle tool's, at its radius.
+	[[nodiscard]] bool IsBrushShown() const;
+	[[nodiscard]] double GetBrushRadius() const;
+	void SetBrushRadius( double flRadius );
+	// The sprinkle tool: a stroke from the press to the release, previewed as it goes, one undo
+	// step at the end (or dropped).
+	[[nodiscard]] bool IsSprinkling() const;
+	void BeginSprinkle( QPointF at, Qt::KeyboardModifiers modifiers );
+	void SprinkleAt( QPointF at, Qt::KeyboardModifiers modifiers );
+	void EndSprinkle( bool bCommit );
+	std::unique_ptr<xv::map::CSprinkleStroke> m_pSprinkleStroke;
+	std::optional<MapFrame_t> m_SprinkleFrame; // what a dab's rays trace, made once a dab
+	xv::map::RasterScene_t m_SprinkleRaster;
+	QPoint m_SprinkleLast;
+	std::uint32_t m_nSprinkleStrokes = 0;
 	void PaintStroke( QPointF at );
 	void PreviewPaint();
 	void PaintFrameSubmitted();

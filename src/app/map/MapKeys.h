@@ -57,6 +57,7 @@ enum class MapAction_t
 	MAP_ACTION_TOOL_CLIP,            // Shift+X (again: the next clip mode)
 	MAP_ACTION_TOOL_CORDON,          // the Map menu and tool bar: Edit Cordon Bounds
 	MAP_ACTION_TOOL_VERTEX,          // Shift+V (again: the next handle mode)
+	MAP_ACTION_TOOL_SPRINKLE,        // Shift+F (Hammer++'s Tools_Sprinkle)
 	MAP_ACTION_TOGGLE_CORDON,        // the Map menu: the cordon on or off
 	MAP_ACTION_CARVE,                // Ctrl+Shift+C
 	MAP_ACTION_HOLLOW,               // the Map menu

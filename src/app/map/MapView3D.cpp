@@ -18,6 +18,7 @@
 #include <QAbstractEventDispatcher>
 #include <QGuiApplication>
 #include <QCursor>
+#include <QDateTime>
 #include <QKeyEvent>
 #include <QMouseEvent>
 #include <QPainter>
@@ -27,6 +28,7 @@
 #include "Preferences.h"
 #include "DebugLog.h"
 #include "map/Cordon.h"
+#include "map/MapSprinkle.h"
 #include "map/DispEdit.h"
 #include "map/Overlay.h"
 #include "map/VmfValues.h"
@@ -737,6 +739,21 @@ void CMapView3D::mousePressEvent( QMouseEvent *pEvent )
 			}
 		}
 	}
+	// The sprinkle tool paints with the left button; the right one drags the radius.
+	if ( IsSprinkling() && !m_bSpaceHeld && !m_bMouselook )
+	{
+		if ( pEvent->button() == Qt::RightButton )
+		{
+			m_RadiusFrom = pEvent->position().toPoint();
+			m_flRadiusFrom = GetBrushRadius();
+			return;
+		}
+		if ( pEvent->button() == Qt::LeftButton )
+		{
+			BeginSprinkle( pEvent->position(), pEvent->modifiers() );
+			return;
+		}
+	}
 	// The Displacement tab's brush: a press starts a stroke on the displacements under it (the
 	// selected ones, else the one hit); the right button lowers.
 	// Alt with the brush: Alt+right-click takes the face's normal as the axis, Alt+drag sizes it.
@@ -1103,8 +1120,14 @@ void CMapView3D::mouseMoveEvent( QMouseEvent *pEvent )
 	if ( m_RadiusFrom && ( pEvent->buttons() & ( Qt::LeftButton | Qt::RightButton ) ) )
 	{
 		// A hundred pixels right makes the brush about 2.7 times as big.
-		m_Editor.GetFaceEdit().SetBrushRadius( std::clamp( m_flRadiusFrom * std::exp( ( at.x() - m_RadiusFrom->x() ) / 100.0 ), 1.0, 8192.0 ) );
+		SetBrushRadius( std::clamp( m_flRadiusFrom * std::exp( ( at.x() - m_RadiusFrom->x() ) / 100.0 ), 1.0, 8192.0 ) );
 		RedrawLabels();
+		return;
+	}
+	if ( m_pSprinkleStroke && ( pEvent->buttons() & Qt::LeftButton ) )
+	{
+		if ( ( at - m_SprinkleLast ).manhattanLength() >= 8 )
+			SprinkleAt( pEvent->position(), pEvent->modifiers() );
 		return;
 	}
 	if ( m_pPaintScene && ( pEvent->buttons() & ( Qt::LeftButton | Qt::RightButton ) ) )
@@ -1118,7 +1141,7 @@ void CMapView3D::mouseMoveEvent( QMouseEvent *pEvent )
 		}
 		return;
 	}
-	if ( pEvent->buttons() == Qt::NoButton && !m_bMouselook && IsDisplacementBrushShown() )
+	if ( pEvent->buttons() == Qt::NoButton && !m_bMouselook && IsBrushShown() )
 	{
 		m_BrushAt = SurfaceAt( pEvent->position() );
 		RedrawLabels();
@@ -1213,6 +1236,11 @@ void CMapView3D::mouseReleaseEvent( QMouseEvent *pEvent )
 	if ( m_pPaintScene && ( pEvent->button() == Qt::LeftButton || pEvent->button() == Qt::RightButton ) )
 	{
 		EndPaint( true );
+		return;
+	}
+	if ( m_pSprinkleStroke && pEvent->button() == Qt::LeftButton )
+	{
+		EndSprinkle( true );
 		return;
 	}
 	if ( !bWasLeft || m_bMoved || m_bSpaceHeld || m_bMouselook || pEvent->button() != Qt::LeftButton )
@@ -1396,22 +1424,24 @@ void CMapView3D::UpdateCursor()
 		EndOverlayDrag( false );
 	if ( m_pPaintScene && !IsPaintingDisplacements() )
 		EndPaint( false );
+	if ( m_pSprinkleStroke && !IsSprinkling() )
+		EndSprinkle( false );
 	if ( m_bMouselook )
 	{
 		return;
 	}
-	const Qt::CursorShape nShape = ( IsPaintingDisplacements() || !m_Editor.GetFacePickKey().isEmpty() ) ? Qt::CrossCursor : Qt::ArrowCursor;
+	const Qt::CursorShape nShape = ( IsPaintingDisplacements() || IsSprinkling() || !m_Editor.GetFacePickKey().isEmpty() ) ? Qt::CrossCursor : Qt::ArrowCursor;
 	if ( cursor().shape() != nShape )
 	{
 		setCursor( nShape );
 	}
-	if ( IsDisplacementBrushShown() && !m_pPaintScene )
+	if ( IsBrushShown() && !m_pPaintScene )
 	{
 		const QPoint at = mapFromGlobal( QCursor::pos() );
 		if ( rect().contains( at ) )
 			m_BrushAt = SurfaceAt( at );
 	}
-	if ( !IsDisplacementBrushShown() && m_BrushAt && !m_pPaintScene )
+	if ( !IsBrushShown() && m_BrushAt && !m_pPaintScene )
 	{
 		m_BrushAt.reset();
 		RedrawLabels();
@@ -1439,7 +1469,121 @@ bool CMapView3D::IsDisplacementBrushShown() const
 //-----------------------------------------------------------------------------
 bool CMapView3D::HasPaintBrushRing() const
 {
-	return m_BrushAt.has_value() && IsDisplacementBrushShown();
+	return m_BrushAt.has_value() && IsBrushShown();
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+bool CMapView3D::IsBrushShown() const
+{
+	return IsDisplacementBrushShown() || IsSprinkling();
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+double CMapView3D::GetBrushRadius() const
+{
+	return IsSprinkling() ? m_Editor.GetSprinkle().GetRadius() : m_Editor.GetFaceEdit().GetBrushRadius();
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+void CMapView3D::SetBrushRadius( double flRadius )
+{
+	if ( IsSprinkling() )
+		m_Editor.GetSprinkle().SetRadius( flRadius );
+	else
+		m_Editor.GetFaceEdit().SetBrushRadius( flRadius );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+bool CMapView3D::IsSprinkling() const
+{
+	return m_Editor.GetTool() == MapTool_t::MAP_TOOL_SPRINKLE;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: The stroke starts on the scene as it is, and its rays see only brushes and
+//          displacements, never what it (or anything else) placed.
+//-----------------------------------------------------------------------------
+void CMapView3D::BeginSprinkle( QPointF at, Qt::KeyboardModifiers modifiers )
+{
+	const xv::map::SprinkleType_t *pType = m_Editor.GetSprinkle().GetType();
+	if ( !pType || !GetDocument().GetScene() )
+	{
+		emit m_Editor.StatusMessage( tr( "No sprinkle type to paint with: add definitions to the game's scripts/hammer/sprinkle" ) );
+		return;
+	}
+	auto trace = [ this ]( xv::map::Point_t from, xv::map::Point_t dir, double flMax ) -> std::optional<std::pair<xv::map::Point_t, xv::map::Point_t>> {
+		if ( !m_SprinkleFrame || !m_SprinkleFrame->m_pScene )
+			return std::nullopt;
+		const xv::map::RasterScene_t &scene = m_SprinkleRaster;
+		for ( const xv::map::TraceHit_t &hit : xv::map::TraceScene( scene, m_Editor.GetSettings().m_bToolTextures, from, dir, flMax ) )
+		{
+			if ( !m_SprinkleFrame->m_pScene->IsSolidObject( hit.m_nObject ) )
+				continue;
+			const xv::map::CMapMesh &mesh = *scene.m_Meshes[ hit.m_nMesh ];
+			std::array<xv::map::Point_t, 3> corners{};
+			for ( std::size_t k = 0; k < 3; k++ )
+				corners[ k ] = xv::map::ToPoint( mesh.m_Vertices[ mesh.m_Indices[ hit.m_nTriangle * 3 + k ] ].m_vecPosition );
+			xv::map::Point_t normal = xv::map::Normalized( xv::map::Cross( xv::map::Subtract( corners[ 1 ], corners[ 0 ] ), xv::map::Subtract( corners[ 2 ], corners[ 0 ] ) ) );
+			if ( xv::map::Dot( normal, dir ) > 0.0 )
+				normal = xv::map::Scale( normal, -1.0 );
+			return std::pair{ xv::map::Add( from, xv::map::Scale( dir, hit.m_flDistance ) ), normal };
+		}
+		return std::nullopt;
+	};
+	const auto nSeed = static_cast<std::uint32_t>( QDateTime::currentMSecsSinceEpoch() ) ^ ++m_nSprinkleStrokes;
+	m_pSprinkleStroke = std::make_unique<xv::map::CSprinkleStroke>( GetDocument().GetSharedScene(), *pType, m_Editor.GetSprinkle().GetOptions( nSeed ), std::move( trace ) );
+	SprinkleAt( at, modifiers );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: A dab where the surface under the mouse is (Ctrl: taking away).
+//-----------------------------------------------------------------------------
+void CMapView3D::SprinkleAt( QPointF at, Qt::KeyboardModifiers modifiers )
+{
+	m_SprinkleLast = at.toPoint();
+	if ( !m_pSprinkleStroke )
+		return;
+	const auto surface = SurfaceAt( at );
+	m_BrushAt = surface;
+	RedrawLabels();
+	if ( !surface )
+		return;
+	const auto nMode = modifiers.testFlag( Qt::ControlModifier ) ? std::optional{ xv::map::SprinkleMode_t::SPRINKLE_MODE_SUBTRACTIVE } : std::nullopt;
+	m_SprinkleFrame = MakeFrame( size() );
+	m_SprinkleRaster = m_SprinkleFrame->MakeScene();
+	const bool bChanged = m_pSprinkleStroke->Dab( surface->first, surface->second, GetBrushRadius(), nMode );
+	m_SprinkleRaster = {};
+	m_SprinkleFrame.reset();
+	if ( bChanged )
+	{
+		GetDocument().Preview( m_pSprinkleStroke->GetEdit() );
+		emit m_Editor.StatusMessage( tr( "Sprinkle: %n added", "", static_cast<int>( m_pSprinkleStroke->GetAddedCount() ) ) + tr( ", %n taken away", "", static_cast<int>( m_pSprinkleStroke->GetRemovedCount() ) ) );
+	}
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+void CMapView3D::EndSprinkle( bool bCommit )
+{
+	if ( !m_pSprinkleStroke )
+		return;
+	const std::unique_ptr<xv::map::CSprinkleStroke> pStroke = std::move( m_pSprinkleStroke );
+	if ( GetDocument().IsPreviewing() )
+		GetDocument().EndPreview();
+	if ( !bCommit )
+		return;
+	xv::map::MapEdit_t edit = pStroke->GetEdit();
+	if ( !edit.IsEmpty() )
+		GetDocument().Edit( std::move( edit ), tr( "Sprinkle" ) );
 }
 
 //-----------------------------------------------------------------------------
@@ -1843,7 +1987,7 @@ void CMapView3D::PaintTools( QPainter &painter )
 		const xv::map::Point_t side = std::abs( normal[ 2 ] ) < 0.9 ? xv::map::Point_t{ 0, 0, 1 } : xv::map::Point_t{ 1, 0, 0 };
 		const xv::map::Point_t u = xv::map::Normalized( xv::map::Cross( normal, side ) );
 		const xv::map::Point_t v = xv::map::Cross( normal, u );
-		const double flRadius = m_Editor.GetFaceEdit().GetBrushRadius();
+		const double flRadius = GetBrushRadius();
 		constexpr int SEGMENTS = 36;
 		for ( int i = 0; i < SEGMENTS; i++ )
 		{
@@ -1851,7 +1995,7 @@ void CMapView3D::PaintTools( QPainter &painter )
 			const double a1 = ( i + 1 ) * 2.0 * std::numbers::pi / SEGMENTS;
 			line( xv::map::Add( centre, xv::map::Add( xv::map::Scale( u, std::cos( a0 ) * flRadius ), xv::map::Scale( v, std::sin( a0 ) * flRadius ) ) ), xv::map::Add( centre, xv::map::Add( xv::map::Scale( u, std::cos( a1 ) * flRadius ), xv::map::Scale( v, std::sin( a1 ) * flRadius ) ) ) );
 		}
-		if ( m_Editor.GetFaceEdit().GetDispPaintMode() == DispPaintMode_t::DISP_PAINT_SCULPT )
+		if ( !IsSprinkling() && m_Editor.GetFaceEdit().GetDispPaintMode() == DispPaintMode_t::DISP_PAINT_SCULPT )
 		{
 			const xv::map::SculptBrush_t sculpt = m_Editor.GetFaceEdit().GetSculptBrush();
 			if ( sculpt.m_bCarve )
@@ -2090,11 +2234,15 @@ void CMapView3D::keyPressEvent( QKeyEvent *pEvent )
 		EndPaint( false );
 		return;
 	}
-	// Hammer++'s [ and ] shrink and enlarge the brush while painting (they size the grid else).
-	if ( IsPaintingDisplacements() && pEvent->modifiers() == Qt::NoModifier && ( pEvent->key() == Qt::Key_BracketLeft || pEvent->key() == Qt::Key_BracketRight ) )
+	if ( pEvent->key() == Qt::Key_Escape && m_pSprinkleStroke )
 	{
-		CMapFaceEdit &sheet = m_Editor.GetFaceEdit();
-		sheet.SetBrushRadius( std::clamp( sheet.GetBrushRadius() * ( pEvent->key() == Qt::Key_BracketRight ? 1.25 : 0.8 ), 1.0, 8192.0 ) );
+		EndSprinkle( false );
+		return;
+	}
+	// Hammer++'s [ and ] shrink and enlarge the brush while painting (they size the grid else).
+	if ( ( IsPaintingDisplacements() || IsSprinkling() ) && pEvent->modifiers() == Qt::NoModifier && ( pEvent->key() == Qt::Key_BracketLeft || pEvent->key() == Qt::Key_BracketRight ) )
+	{
+		SetBrushRadius( std::clamp( GetBrushRadius() * ( pEvent->key() == Qt::Key_BracketRight ? 1.25 : 0.8 ), 1.0, 8192.0 ) );
 		RedrawLabels();
 		return;
 	}

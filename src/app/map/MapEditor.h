@@ -33,6 +33,7 @@
 class CMapCheckDialog;
 class CMapEntityReport;
 class CMapFaceEdit;
+class CMapSprinklePanel;
 class CMapFilterControl;
 class CMapPane;
 class CMapProperties;
@@ -243,6 +244,7 @@ public:
 	void ClickFace( const xv::map::FaceRef_t &face, Qt::KeyboardModifiers modifiers );
 	void ApplyToFace( const xv::map::FaceRef_t &face, bool bValues );
 	[[nodiscard]] CMapFaceEdit &GetFaceEdit() { return *m_pFaceEdit; }
+	[[nodiscard]] CMapSprinklePanel &GetSprinkle() { return *m_pSprinkle; }
 	// The Displacement tab's edits, each one undo step, on the selected faces (else every face
 	// of the selected objects): displacements made at a power on four-sided faces, taken off,
 	// sewn to each other and to plain faces among them, subdivided together, given noise along
@@ -299,6 +301,7 @@ private:
 	void FillNewObjects();
 	void SyncMapCameras();
 	void FillPrefabs();
+	void LoadSprinkleTypes();
 	void FillPrefabObjects();
 	void RepaintViews();
 	void RepaintTools();
@@ -404,6 +407,7 @@ private:
 	CMapFilterControl *m_pFilter = nullptr;
 	CMapProperties *m_pProperties = nullptr;
 	CMapFaceEdit *m_pFaceEdit = nullptr;
+	CMapSprinklePanel *m_pSprinkle = nullptr;
 	QWidget *m_pFaceEditHolder = nullptr; // Face Edit's panel, when it isn't in its window
 	CPanelColumn *m_pPanels = nullptr;    // the side's panels below the Filter Control
 	std::vector<xv::map::FaceRef_t> m_SelectedFaces;

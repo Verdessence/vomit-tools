@@ -174,6 +174,8 @@ add_library(vomit_tools_ui STATIC
         map/MapPanes.h
         map/MapProperties.cpp
         map/MapProperties.h
+        map/MapSprinkle.cpp
+        map/MapSprinkle.h
         map/MapRenderData.cpp
         map/MapRenderData.h
         map/MapRenderer.cpp
