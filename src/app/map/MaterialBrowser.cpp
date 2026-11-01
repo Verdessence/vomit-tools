@@ -20,6 +20,7 @@
 #include <QListView>
 #include <QPainter>
 #include <QPixmap>
+#include <QSettings>
 #include <QTimer>
 #include <QThread>
 #include "MaterialPictures.h"
@@ -37,6 +38,9 @@ namespace
 
 constexpr int SMALL_PICTURE = 128; // what is kept for every material; smaller sizes are scaled from it
 constexpr int LARGE_PICTURE = 512; // made only for those shown at 256 or 512
+// The pictures' size and the used-only tick, kept between openings.
+constexpr char SIZE_SETTING[] = "maps/textureBrowserSize";
+constexpr char ONLY_USED_SETTING[] = "maps/textureBrowserOnlyUsed";
 
 //-----------------------------------------------------------------------------
 // Purpose: Hammer's name for a material file: "materials/brick/wall.vmt" is BRICK/WALL.
@@ -268,7 +272,13 @@ CMaterialBrowser::CMaterialBrowser( const xv::vfs::CGameInfo &game, QStringList 
 		const int nSize = m_pSize->currentData().toInt();
 		m_pView->setIconSize( QSize( nSize, nSize ) );
 		m_pList->SetSize( nSize );
+		QSettings{}.setValue( QLatin1String( SIZE_SETTING ), nSize );
 	} );
+	connect( m_pOnlyUsed, &QCheckBox::toggled, this, []( bool bOn ) { QSettings{}.setValue( QLatin1String( ONLY_USED_SETTING ), bOn ); } );
+	// The browser opens as it was last left.
+	if ( const int nIndex = m_pSize->findData( QSettings{}.value( QLatin1String( SIZE_SETTING ), 64 ).toInt() ); nIndex >= 0 )
+		m_pSize->setCurrentIndex( nIndex );
+	m_pOnlyUsed->setChecked( QSettings{}.value( QLatin1String( ONLY_USED_SETTING ), false ).toBool() );
 	connect( m_pView, &QListView::doubleClicked, this, [ this ] {
 		PickCurrent();
 		accept();
