@@ -43,6 +43,7 @@ struct MapRenderStats_t
 class QRhiBuffer;
 class QRhiGraphicsPipeline;
 class QRhiResourceUpdateBatch;
+struct QRhiReadbackResult;
 class QRhiSampler;
 class QRhiShaderResourceBindings;
 
@@ -58,6 +59,11 @@ public:
 	void Initialize( QRhi *pRhi, QRhiRenderTarget *pTarget ) override;
 	void Render( QRhiCommandBuffer *pCommands, QRhiRenderTarget *pTarget ) override;
 	void Release() override;
+
+	// The HDR lighting preview's auto exposure: now and then a picture is read back and measured
+	// (xv::map::NextExposure), and pfnExposure given what the next should use; pfnAgain asks for
+	// another picture while a reading is on its way (it arrives a frame or two later).
+	void SetExposureSink( std::function<void( float )> pfnExposure, std::function<void()> pfnAgain );
 
 	// Draw calls and triangles of the last picture, for the statistics.
 	[[nodiscard]] int GetDrawCalls() const { return m_nDrawCalls; }
@@ -132,11 +138,19 @@ private:
 	std::unique_ptr<QRhiGraphicsPipeline> m_pLines;
 	std::unique_ptr<QRhiGraphicsPipeline> m_pSkyFaces; // the world's sky faces over a 3D skybox
 	std::unique_ptr<QRhiGraphicsPipeline> m_pAlpha;    // makes the picture opaque afterwards
+	std::unique_ptr<QRhiGraphicsPipeline> m_pAlphaSky; // the same, marking what is left as sky (the HDR lighting preview)
 	std::unique_ptr<QRhiShaderResourceBindings> m_pNoBindings;
 	quint32 m_nFrameStride = 0; // the world's frame uniforms, then the 3D skybox's
 	int m_nDrawCalls = 0;
 	MapRenderStats_t m_Stats;
 	QElapsedTimer m_Interval;
+	// Reading the picture back for the auto exposure.
+	void MeasureExposure( const MapFrame_t &frame, QRhiRenderTarget *pTarget, QRhiResourceUpdateBatch *&pReadback );
+	std::function<void( float )> m_pfnExposure;
+	std::function<void()> m_pfnAgain;
+	std::unique_ptr<QRhiReadbackResult> m_pReadback; // set while one is on its way
+	std::unique_ptr<QRhiReadbackResult> m_pReadbackDone;
+	QElapsedTimer m_SinceMeasured;
 	// The last frame, held so nothing it points to is freed (and its address reused) while the
 	// uploads above are still compared with it.
 	MapFrame_t m_Held;

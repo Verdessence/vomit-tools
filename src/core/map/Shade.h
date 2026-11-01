@@ -10,6 +10,7 @@
 
 #include <array>
 #include <cstddef>
+#include <cstdint>
 #include <optional>
 #include <vector>
 
@@ -128,16 +129,37 @@ struct ShadeOptions_t
 	const Fog_t *m_pFog = nullptr;             // the map's fog, in the lighting preview; null: none
 	bool m_bLightOnly = false;                 // the lighting preview's light alone (mat_fullbright 2): textures a plain grey
 	CVec3 m_vecViewForward{ 1, 0, 0 };         // for fog measured along the view
+	float m_flMonitorGamma = 2.2f;             // the lighting preview's mat_monitorgamma (the game's brightness setting): 2.2 changes nothing
 };
+
+// With HDR the game draws a lightmap linear, times a scale its shaders take from the engine
+// (GetLightMapScaleFactor, not in the SDK). 2 is what CS:S's pictures of the lighting playground
+// show (docs/comparison/m8-lighting-2): a dark room needs it with the exposure at its most, and
+// the sunlit courtyard with it near its least.
+inline constexpr float HDR_LIGHTMAP_SCALE = 2.0f;
 
 // What the lighting preview multiplies a texture by for a light (linear, 1 fully lit), as Source
 // shows a lightmap without HDR: stored at half (its overbright of 2) in gamma 2.2, doubled when
-// drawn. A face lit fully comes out about 1.46 times its texture.
+// drawn. A face lit fully comes out about 1.46 times its texture. With HDR: the light times
+// HDR_LIGHTMAP_SCALE, in gamma 2.2 (flScale carries the exposure).
 [[nodiscard]] float LightFactor( float flLight, float flScale, bool bHdr = false );
-// With HDR the game draws a lightmap without the overbright, scaled by its auto exposure, which
-// keeps the picture's brightness between its limits (env_tonemap_controller's defaults: 0.5 and
-// 2). Here the bake's mean brightness stands for the picture's.
-[[nodiscard]] float AutoExposure( float flMeanLight, float flMin = 0.5f, float flMax = 2.0f );
+
+// The game's auto exposure (mat_tonemap_algorithm 1, viewpostprocess.cpp): from the luminance of
+// the picture drawn with flLast (linear, 0 to 1), the scale that puts the brightest 2% of it at
+// 60%, or the middle of it at 3% when that is brighter; within the limits
+// (mat_autoexposure_min/max: 0.5 and 2). The game eases toward it over time: flRate is how much
+// of the way (in stops) this step goes.
+[[nodiscard]] float NextExposure( std::vector<float> luminance, float flLast, float flMin = 0.5f, float flMax = 2.0f, float flRate = 0.5f );
+// The alpha the HDR lighting preview draws with what its auto exposure leaves out: the sky (its
+// 2D sky and the 3D skybox), and the faces it shows unlit (tool textures), which the game doesn't
+// draw at all. CS:S keeps the ground's brightness with a white sky over most of the screen
+// (docs/comparison/m8-lighting-2), which counting the sky would pull to the least.
+inline constexpr std::uint8_t UNMEASURED_ALPHA = 254;
+
+// The linear luminance (the game's weights) of an RGBA8 picture as drawn, every nStep-th pixel
+// each way, with the monitor gamma the lighting preview applied (ShadeOptions_t) undone; pixels
+// marked UNMEASURED_ALPHA left out.
+[[nodiscard]] std::vector<float> ShownLuminance( const std::uint8_t *pRgba, int nWidth, int nHeight, std::size_t nStride, int nStep, float flMonitorGamma = 2.2f );
 
 // Bilinear between texels, trilinear between mips (or the nearest mip without bMipBlend); u and v
 // in texture widths (wrapping). DXT mips are read as they are when there are no decoded ones.

@@ -118,6 +118,13 @@ CMapLightingPanel::CMapLightingPanel( CMapEditor &editor, QWidget *pParent )
 	m_pBrightness->setSingleStep( 0.1 );
 	m_pBrightness->setToolTip( tr( "The light times this before it is shown (no bake needed)" ) );
 	pForm->addRow( tr( "Brightness" ), m_pBrightness );
+	m_pMonitorGamma = new QDoubleSpinBox;
+	m_pMonitorGamma->setObjectName( QStringLiteral( "mapLightingMonitorGamma" ) );
+	m_pMonitorGamma->setRange( 1.6, 2.6 );
+	m_pMonitorGamma->setSingleStep( 0.1 );
+	m_pMonitorGamma->setDecimals( 1 );
+	m_pMonitorGamma->setToolTip( tr( "The game's brightness setting (mat_monitorgamma): 2.2 by default, 1.6 the brightest, 2.6 the darkest" ) );
+	pForm->addRow( tr( "Game gamma" ), m_pMonitorGamma );
 	m_pBounces = new QSpinBox;
 	m_pBounces->setObjectName( QStringLiteral( "mapLightingBounces" ) );
 	m_pBounces->setRange( 0, 8 );
@@ -168,6 +175,10 @@ CMapLightingPanel::CMapLightingPanel( CMapEditor &editor, QWidget *pParent )
 	m_pPropShadows = new QCheckBox( tr( "prop_static casts shadows" ) );
 	m_pPropShadows->setObjectName( QStringLiteral( "mapLightingPropShadows" ) );
 	pLayout->addWidget( m_pPropShadows );
+	m_pSmoothShadows = new QCheckBox( tr( "Smooth shadow edges (as -final)" ) );
+	m_pSmoothShadows->setObjectName( QStringLiteral( "mapLightingSmoothShadows" ) );
+	m_pSmoothShadows->setToolTip( tr( "Luxels on a shadow's edge are lit across their area, not at their middle alone: no stair steps, a little slower" ) );
+	pLayout->addWidget( m_pSmoothShadows );
 	m_pAutoBake = new QCheckBox( tr( "Bake again after every edit" ) );
 	m_pAutoBake->setObjectName( QStringLiteral( "mapLightingAutoBake" ) );
 	pLayout->addWidget( m_pAutoBake );
@@ -214,8 +225,9 @@ CMapLightingPanel::CMapLightingPanel( CMapEditor &editor, QWidget *pParent )
 		connect( pSpin, &QSpinBox::valueChanged, this, &CMapLightingPanel::StorePreferences );
 	}
 	connect( m_pBrightness, &QDoubleSpinBox::valueChanged, this, &CMapLightingPanel::StorePreferences );
+	connect( m_pMonitorGamma, &QDoubleSpinBox::valueChanged, this, &CMapLightingPanel::StorePreferences );
 	connect( m_pRadius, &QDoubleSpinBox::valueChanged, this, &CMapLightingPanel::StorePreferences );
-	for ( QCheckBox *pCheck : { m_pHdr, m_pFog, m_pLightOnly, m_pPropShadows, m_pAutoBake, m_pInRadius } )
+	for ( QCheckBox *pCheck : { m_pHdr, m_pFog, m_pLightOnly, m_pPropShadows, m_pSmoothShadows, m_pAutoBake, m_pInRadius } )
 	{
 		connect( pCheck, &QCheckBox::toggled, this, &CMapLightingPanel::StorePreferences );
 	}
@@ -234,8 +246,9 @@ CMapLightingPanel::CMapLightingPanel( CMapEditor &editor, QWidget *pParent )
 void CMapLightingPanel::LoadPreferences()
 {
 	const MapPreferences_t &preferences = CPreferences::Instance().GetMapPreferences();
-	const QSignalBlocker blockBrightness( m_pBrightness ), blockBounces( m_pBounces ), blockLuxels( m_pLuxels ), blockHdr( m_pHdr ), blockShadows( m_pPropShadows ), blockAuto( m_pAutoBake );
-	const QSignalBlocker blockFog( m_pFog ), blockOnly( m_pLightOnly );
+	const QSignalBlocker blockBrightness( m_pBrightness ), blockBounces( m_pBounces ), blockLuxels( m_pLuxels ), blockHdr( m_pHdr ), blockShadows( m_pPropShadows ), blockSmooth( m_pSmoothShadows ), blockAuto( m_pAutoBake );
+	const QSignalBlocker blockFog( m_pFog ), blockOnly( m_pLightOnly ), blockGamma( m_pMonitorGamma );
+	m_pMonitorGamma->setValue( preferences.m_flLightMonitorGamma );
 	m_pFog->setChecked( preferences.m_bLightFog );
 	m_pLightOnly->setChecked( preferences.m_bLightOnly );
 	const QSignalBlocker blockInRadius( m_pInRadius ), blockRadius( m_pRadius ), blockDelay( m_pDelay ), blockSky( m_pSkySamples );
@@ -248,6 +261,7 @@ void CMapLightingPanel::LoadPreferences()
 	m_pLuxels->setValue( preferences.m_nLightLuxels );
 	m_pHdr->setChecked( preferences.m_bLightHdr );
 	m_pPropShadows->setChecked( preferences.m_bLightPropShadows );
+	m_pSmoothShadows->setChecked( preferences.m_bLightSmoothShadows );
 	m_pAutoBake->setChecked( preferences.m_bLightAutoBake );
 }
 
@@ -258,12 +272,14 @@ void CMapLightingPanel::StorePreferences()
 {
 	MapPreferences_t preferences = CPreferences::Instance().GetMapPreferences();
 	preferences.m_flLightBrightness = m_pBrightness->value();
+	preferences.m_flLightMonitorGamma = m_pMonitorGamma->value();
 	preferences.m_nLightBounces = m_pBounces->value();
 	preferences.m_nLightLuxels = m_pLuxels->value();
 	preferences.m_bLightHdr = m_pHdr->isChecked();
 	preferences.m_bLightFog = m_pFog->isChecked();
 	preferences.m_bLightOnly = m_pLightOnly->isChecked();
 	preferences.m_bLightPropShadows = m_pPropShadows->isChecked();
+	preferences.m_bLightSmoothShadows = m_pSmoothShadows->isChecked();
 	preferences.m_bLightAutoBake = m_pAutoBake->isChecked();
 	preferences.m_bLightInRadius = m_pInRadius->isChecked();
 	preferences.m_flLightRadius = m_pRadius->value();
@@ -285,10 +301,6 @@ void CMapLightingPanel::UpdateStatus()
 	else if ( const auto &pLighting = lighting.GetLighting() )
 	{
 		QString szText = tr( "%n light(s), %1 by %2 luxels (every %3), in %4 s", nullptr, static_cast<int>( pLighting->m_nLights ) ).arg( pLighting->m_nWidth ).arg( pLighting->m_nHeight ).arg( pLighting->m_nStep ).arg( lighting.GetBakeMs() / 1000.0, 0, 'f', 1 );
-		if ( CPreferences::Instance().GetMapPreferences().m_bLightHdr )
-		{
-			szText += tr( "; exposure %1" ).arg( xv::map::AutoExposure( pLighting->m_flMeanLight ), 0, 'f', 2 );
-		}
 		m_pStatus->setText( szText );
 	}
 	else

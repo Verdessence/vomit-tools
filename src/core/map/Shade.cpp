@@ -276,17 +276,70 @@ float LightFactor( float flLight, float flScale, bool bHdr )
 {
 	if ( bHdr )
 	{
-		return std::pow( std::max( flLight * flScale, 0.0f ), 1.0f / 2.2f );
+		return std::pow( std::max( flLight * flScale * HDR_LIGHTMAP_SCALE, 0.0f ), 1.0f / 2.2f );
 	}
 	return 2.0f * std::pow( std::max( flLight * flScale * 0.5f, 0.0f ), 1.0f / 2.2f );
 }
 
 //-----------------------------------------------------------------------------
-// Purpose: A middle grey (0.18) for the mean, within the limits.
+// Purpose:
 //-----------------------------------------------------------------------------
-float AutoExposure( float flMeanLight, float flMin, float flMax )
+float NextExposure( std::vector<float> luminance, float flLast, float flMin, float flMax, float flRate )
 {
-	return flMeanLight > 0.0f ? std::clamp( 0.18f / flMeanLight, flMin, flMax ) : flMax;
+	flLast = std::clamp( flLast, flMin, flMax );
+	if ( luminance.empty() )
+	{
+		return flLast;
+	}
+	const auto at = [ & ]( float flFraction ) {
+		const auto n = std::min( luminance.size() - 1, static_cast<std::size_t>( flFraction * static_cast<float>( luminance.size() ) ) );
+		std::ranges::nth_element( luminance, luminance.begin() + static_cast<std::ptrdiff_t>( n ) );
+		return luminance[ n ];
+	};
+	const float flBright = std::max( at( 0.98f ), 1.0e-4f );
+	const float flMiddle = at( 0.5f );
+	float flScale = 0.6f / flBright;
+	if ( flMiddle > 0.0f )
+	{
+		flScale = std::max( flScale, 0.03f / flMiddle );
+	}
+	const float flTarget = std::clamp( flLast * flScale, flMin, flMax );
+	return std::clamp( flLast * std::pow( flTarget / flLast, std::clamp( flRate, 0.0f, 1.0f ) ), flMin, flMax );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+std::vector<float> ShownLuminance( const std::uint8_t *pRgba, int nWidth, int nHeight, std::size_t nStride, int nStep, float flMonitorGamma )
+{
+	std::vector<float> luminance;
+	if ( !pRgba || nWidth <= 0 || nHeight <= 0 )
+	{
+		return luminance;
+	}
+	nStep = std::max( nStep, 1 );
+	// Bytes to linear, through the monitor gamma (applied as a power of flMonitorGamma / 2.2).
+	std::array<float, 256> linear{};
+	const float flPower = 2.2f * 2.2f / std::max( flMonitorGamma, 0.1f );
+	for ( std::size_t i = 0; i < linear.size(); i++ )
+	{
+		linear[ i ] = std::pow( static_cast<float>( i ) / 255.0f, flPower );
+	}
+	luminance.reserve( static_cast<std::size_t>( ( nWidth / nStep + 1 ) * ( nHeight / nStep + 1 ) ) );
+	for ( int y = 0; y < nHeight; y += nStep )
+	{
+		const std::uint8_t *pRow = pRgba + static_cast<std::size_t>( y ) * nStride;
+		for ( int x = 0; x < nWidth; x += nStep )
+		{
+			const std::uint8_t *p = pRow + static_cast<std::size_t>( x ) * 4;
+			if ( p[ 3 ] == UNMEASURED_ALPHA )
+			{
+				continue;
+			}
+			luminance.push_back( 0.30f * linear[ p[ 0 ] ] + 0.59f * linear[ p[ 1 ] ] + 0.11f * linear[ p[ 2 ] ] );
+		}
+	}
+	return luminance;
 }
 
 //-----------------------------------------------------------------------------
@@ -416,6 +469,15 @@ std::optional<std::array<float, 4>> ShadeFragment( const ShadeMaterial_t &materi
 		color[ 0 ] += ( vecFog.m_flX - color[ 0 ] ) * flAmount;
 		color[ 1 ] += ( vecFog.m_flY - color[ 1 ] ) * flAmount;
 		color[ 2 ] += ( vecFog.m_flZ - color[ 2 ] ) * flAmount;
+	}
+	if ( options.m_nMode == RasterMode_t::RASTER_MODE_LIGHTING && options.m_flMonitorGamma != 2.2f )
+	{
+		// mat_monitorgamma, last of all as the game's gamma ramp: below 2.2 brighter.
+		const float flPower = options.m_flMonitorGamma / 2.2f;
+		for ( std::size_t i = 0; i < 3; i++ )
+		{
+			color[ i ] = std::pow( std::max( color[ i ], 0.0f ), flPower );
+		}
 	}
 	if ( ( options.m_nMode == RasterMode_t::RASTER_MODE_FLAT || options.m_nMode == RasterMode_t::RASTER_MODE_TEXTURED_SHADED ) && !material.m_bUnlit )
 	{

@@ -61,6 +61,7 @@ struct MapFrame_t
 	xv::map::RasterOptions_t m_Options;
 	std::uint64_t m_nGeneration = 0; // changes whenever anything but the camera does
 	bool m_bModelEdges = true;       // the props' edges in the wireframe view
+	float m_flExposure = 0.0f;       // the HDR lighting preview's auto exposure, in the light's scale; 0: none (nothing to measure)
 
 	[[nodiscard]] xv::map::RasterScene_t MakeScene() const;
 };

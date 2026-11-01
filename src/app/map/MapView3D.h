@@ -64,6 +64,8 @@ public:
 	void CenterOn( const xv::map::Box_t &box ) override;
 
 	[[nodiscard]] const xv::map::CViewCamera &GetCamera() const { return m_Camera; }
+	// The HDR lighting preview's auto exposure, as this view last measured it.
+	[[nodiscard]] float GetExposure() const { return m_flExposure; }
 	void SetCamera( const xv::map::CViewCamera &camera );
 	// The map's state changed (selection, visibility, settings): draw it again.
 	void Redraw() { RequestRender(); }
@@ -90,6 +92,7 @@ public:
 	[[nodiscard]] double GetSpeed() const { return m_flSpeed; }
 	// The frame the view draws next: the document's state with this view's camera and look.
 	[[nodiscard]] MapFrame_t MakeFrame( QSize size );
+	void ExposureMeasured( float flExposure );
 	// The statistics and focus frame, over the picture.
 	void PaintLabels( QPainter &painter );
 	// The gizmo at the selection, if there is one to show, and the camera at this view's size.
@@ -170,6 +173,7 @@ private:
 	bool m_bQuit = false;
 	QImage m_Image;
 	double m_flRenderMs = 0.0;
+	float m_flExposure = 1.0f; // the HDR lighting preview's auto exposure, as last measured
 	bool m_bReduced = false;
 	QTimer *m_pSettle = nullptr; // full resolution once the camera stops
 

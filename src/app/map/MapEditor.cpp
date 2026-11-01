@@ -3766,7 +3766,7 @@ void CMapEditor::WantLighting()
 	const MapFrame_t shared = m_pRenderData->GetShared();
 	const std::array<const void *, 5> extras = bFinished ? std::array<const void *, 5>{ shared.m_pPropMesh.get(), shared.m_pPropParts.get(), shared.m_pOverlayMesh.get(), shared.m_pOverlayParts.get(), m_pResources->GetSprites().get() } : std::array<const void *, 5>{};
 	const MapPreferences_t &preferences = CPreferences::Instance().GetMapPreferences();
-	const std::array<int, 7> wanted{ preferences.m_nLightBounces, preferences.m_nLightLuxels, preferences.m_bLightHdr ? 1 : 0, preferences.m_bLightPropShadows ? 1 : 0, preferences.m_bLightInRadius ? 1 : 0, static_cast<int>( preferences.m_flLightRadius ), preferences.m_nLightSkySamples };
+	const std::array<int, 8> wanted{ preferences.m_bLightSmoothShadows ? 1 : 0, preferences.m_nLightBounces, preferences.m_nLightLuxels, preferences.m_bLightHdr ? 1 : 0, preferences.m_bLightPropShadows ? 1 : 0, preferences.m_bLightInRadius ? 1 : 0, static_cast<int>( preferences.m_flLightRadius ), preferences.m_nLightSkySamples };
 	const bool bFirst = !m_pLightingScene;
 	if ( !bFirst && !preferences.m_bLightAutoBake )
 	{
@@ -3880,6 +3880,7 @@ void CMapEditor::LightingBaked()
 			p3D->Redraw();
 		}
 	}
+	options.m_bSmoothShadows = preferences.m_bLightSmoothShadows;
 	UpdateGameStatus();
 	if ( const auto &pLighting = m_pLighting->GetLighting(); pLighting && !m_pLighting->IsBaking() )
 	{

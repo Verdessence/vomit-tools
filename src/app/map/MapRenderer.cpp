@@ -129,6 +129,9 @@ CMapRenderer::~CMapRenderer() = default;
 //-----------------------------------------------------------------------------
 void CMapRenderer::Release()
 {
+	// Its QRhi goes, and with it any reading still on its way.
+	m_pReadback.reset();
+	m_pReadbackDone.reset();
 	m_pOpaque.reset();
 	m_pBlended.reset();
 	m_pAdditive.reset();
@@ -167,6 +170,7 @@ void CMapRenderer::Release()
 	m_pNearest.reset();
 	m_pSkyFaces.reset();
 	m_pAlpha.reset();
+	m_pAlphaSky.reset();
 	m_pNoBindings.reset();
 	m_pMaterialsFor = nullptr;
 	m_pStateFlags = nullptr;
@@ -705,6 +709,91 @@ void CMapRenderer::MakePipelines( QRhiRenderTarget *pTarget )
 	m_pAlpha->setShaderResourceBindings( m_pNoBindings.get() );
 	m_pAlpha->setRenderPassDescriptor( pTarget->renderPassDescriptor() );
 	m_pAlpha->create();
+	m_pAlphaSky.reset( m_pRhi->newGraphicsPipeline() );
+	m_pAlphaSky->setShaderStages( { { QRhiShaderStage::Vertex, LoadShader( QStringLiteral( ":/shaders/mapalpha.vert.qsb" ) ) }, { QRhiShaderStage::Fragment, LoadShader( QStringLiteral( ":/shaders/mapalphasky.frag.qsb" ) ) } } );
+	QRhiGraphicsPipeline::TargetBlend keepMarks = alphaOnly;
+	keepMarks.enable = true;
+	keepMarks.opAlpha = QRhiGraphicsPipeline::Max;
+	m_pAlphaSky->setTargetBlends( { keepMarks } );
+	m_pAlphaSky->setSampleCount( pTarget->sampleCount() );
+	m_pAlphaSky->setShaderResourceBindings( m_pNoBindings.get() );
+	m_pAlphaSky->setRenderPassDescriptor( pTarget->renderPassDescriptor() );
+	m_pAlphaSky->create();
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+void CMapRenderer::SetExposureSink( std::function<void( float )> pfnExposure, std::function<void()> pfnAgain )
+{
+	m_pfnExposure = std::move( pfnExposure );
+	m_pfnAgain = std::move( pfnAgain );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Reads this picture back (into pReadback, for the pass's end) when the HDR lighting
+//          preview shows and the last reading is a while ago; measured when it arrives.
+//-----------------------------------------------------------------------------
+void CMapRenderer::MeasureExposure( const MapFrame_t &frame, QRhiRenderTarget *pTarget, QRhiResourceUpdateBatch *&pReadback )
+{
+	if ( m_pReadback )
+	{
+		// Frames go on until it arrives.
+		if ( m_pfnAgain )
+		{
+			m_pfnAgain();
+		}
+		return;
+	}
+	if ( frame.m_flExposure <= 0.0f || !m_pfnExposure || pTarget->resourceType() != QRhiResource::TextureRenderTarget )
+	{
+		return;
+	}
+	if ( m_SinceMeasured.isValid() && m_SinceMeasured.elapsed() < 150 )
+	{
+		return;
+	}
+	const QRhiColorAttachment *pAttachment = static_cast<QRhiTextureRenderTarget *>( pTarget )->description().cbeginColorAttachments();
+	QRhiTexture *pTexture = pAttachment ? ( pAttachment->resolveTexture() ? pAttachment->resolveTexture() : pAttachment->texture() ) : nullptr;
+	if ( !pTexture || ( pTexture->format() != QRhiTexture::RGBA8 && pTexture->format() != QRhiTexture::BGRA8 ) )
+	{
+		return;
+	}
+	m_SinceMeasured.start();
+	m_pReadback = std::make_unique<QRhiReadbackResult>();
+	const float flExposure = frame.m_flExposure;
+	const float flGamma = frame.m_Options.m_Shade.m_flMonitorGamma;
+	m_pReadback->completed = [ this, flExposure, flGamma ] {
+		// Kept until the next reading: QRhi may still hold it while this runs.
+		m_pReadbackDone = std::move( m_pReadback );
+		QRhiReadbackResult *pResult = m_pReadbackDone.get();
+		const int nWidth = pResult->pixelSize.width();
+		const int nHeight = pResult->pixelSize.height();
+		if ( nWidth <= 0 || nHeight <= 0 || pResult->data.size() < static_cast<qsizetype>( nWidth ) * nHeight * 4 )
+		{
+			return;
+		}
+		auto *pPixels = reinterpret_cast<std::uint8_t *>( pResult->data.data() );
+		if ( pResult->format == QRhiTexture::BGRA8 )
+		{
+			for ( qsizetype i = 0; i + 3 < pResult->data.size(); i += 4 )
+			{
+				std::swap( pPixels[ i ], pPixels[ i + 2 ] );
+			}
+		}
+		// Every fourth pixel each way is plenty for its brightest 2% and its middle.
+		const float flNext = xv::map::NextExposure( xv::map::ShownLuminance( pPixels, nWidth, nHeight, static_cast<std::size_t>( nWidth ) * 4, 4, flGamma ), flExposure );
+		if ( m_pfnExposure )
+		{
+			m_pfnExposure( flNext );
+		}
+	};
+	pReadback = m_pRhi->nextResourceUpdateBatch();
+	pReadback->readBackTexture( { pTexture }, m_pReadback.get() );
+	if ( m_pfnAgain )
+	{
+		m_pfnAgain();
+	}
 }
 
 //-----------------------------------------------------------------------------
@@ -811,6 +900,7 @@ void CMapRenderer::Render( QRhiCommandBuffer *pCommands, QRhiRenderTarget *pTarg
 		uniforms.m_ViewForward[ 0 ] = shade.m_vecViewForward.m_flX;
 		uniforms.m_ViewForward[ 1 ] = shade.m_vecViewForward.m_flY;
 		uniforms.m_ViewForward[ 2 ] = shade.m_vecViewForward.m_flZ;
+		uniforms.m_ViewForward[ 3 ] = shade.m_flMonitorGamma / 2.2f;
 		return uniforms;
 	};
 	// Slot 1 and 3 are 0 and 2 for meshes as read.
@@ -967,12 +1057,14 @@ void CMapRenderer::Render( QRhiCommandBuffer *pCommands, QRhiRenderTarget *pTarg
 	edges( m_LinesSelected, m_ModelLinesSelected, false );
 	if ( bSky )
 	{
-		pCommands->setGraphicsPipeline( m_pAlpha.get() );
+		pCommands->setGraphicsPipeline( frame.m_flExposure > 0.0f ? m_pAlphaSky.get() : m_pAlpha.get() );
 		pCommands->setShaderResources( m_pNoBindings.get() );
 		pCommands->setViewport( { 0, 0, flWidth, flHeight } );
 		pCommands->draw( 3 );
 	}
-	pCommands->endPass();
+	QRhiResourceUpdateBatch *pReadback = nullptr;
+	MeasureExposure( frame, pTarget, pReadback );
+	pCommands->endPass( pReadback );
 	m_Held = frame;
 	m_Stats.m_nDrawCalls = m_nDrawCalls;
 	m_Stats.m_flRecordMs = static_cast<double>( timer.nsecsElapsed() ) / 1e6 - flRecordFrom;

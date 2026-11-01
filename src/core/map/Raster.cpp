@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <cmath>
 
+#include "map/Lighting.h"
 #include "util/Parallel.h"
 
 namespace xv::map
@@ -511,7 +512,9 @@ void CRasterizer::FillTriangle( const ScreenVertex_t &a, const ScreenVertex_t &b
 					p[ i ] = static_cast<std::uint8_t>( std::clamp( ( *color )[ i ] * 255.0f + 0.5f, 0.0f, 255.0f ) );
 				}
 			}
-			p[ 3 ] = 255;
+			// The HDR lighting preview's sky and unlit faces, marked for its auto exposure to leave out.
+			const bool bUnmeasured = m_bSkyPass || ( material.m_bSky && shade.m_pSky ) || input.m_Light[ 3 ] == LIGHT_KIND_FULLBRIGHT;
+			p[ 3 ] = shade.m_nMode == RasterMode_t::RASTER_MODE_LIGHTING && shade.m_pLighting && shade.m_bLightHdr && !bBlend && bUnmeasured ? UNMEASURED_ALPHA : 255;
 			if ( m_bSkyPass )
 			{
 				( *m_pSkyMask )[ nPixel ] = 1;

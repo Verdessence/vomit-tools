@@ -115,11 +115,13 @@ struct MapPreferences_t
 	bool m_bLightFog = true;           // env_fog_controller's fog, as the game draws it
 	bool m_bLightOnly = false;         // the light alone, textures a plain grey (mat_fullbright 2)
 	bool m_bLightPropShadows = true;   // prop_static's models cast shadows, as vrad's do
+	bool m_bLightSmoothShadows = true; // shadow edges smoothed across their luxels, as vrad's -final
 	bool m_bLightAutoBake = true;      // the preview bakes again by itself after edits (else on Bake Lighting, as Hammer++)
 	bool m_bLightInRadius = false;     // bake only around the 3D camera (Hammer++'s Bake in Radius)
 	double m_flLightRadius = 1024.0;   // and how far
 	int m_nLightDelay = 250;           // milliseconds after an edit before baking (Hammer++'s update delay)
 	int m_nLightSkySamples = 48;       // rays to the sky a sample, for its ambient (Hammer++'s visibility samples)
+	double m_flLightMonitorGamma = 2.2; // the lighting preview's mat_monitorgamma (the game's brightness: 1.6 brightest, 2.6 darkest)
 	bool m_bSkybox3D = true;
 	bool m_bSprites = true;          // iconsprites and env_sprites drawn as such (else as boxes)
 	bool m_bWireframeModels = true;  // props' edges in the wireframe view

@@ -224,11 +224,18 @@ void CMapView3D::SetUseGpu( bool bOn )
 #ifdef VOMIT_TOOLS_GPU
 	if ( bOn )
 	{
-		m_pGpu = new CGpuView( std::make_unique<CMapRenderer>( [ this ]( QSize size ) {
+		auto pRenderer = std::make_unique<CMapRenderer>( [ this ]( QSize size ) {
 			StepFlight();
 			return MakeFrame( size );
-		} ),
-			this );
+		} );
+		pRenderer->SetExposureSink( [ this ]( float flExposure ) { ExposureMeasured( flExposure ); },
+			[ this ] { QTimer::singleShot( 0, this, [ this ] {
+						   if ( m_pGpu )
+						   {
+							   m_pGpu->update();
+						   }
+					   } ); } );
+		m_pGpu = new CGpuView( std::move( pRenderer ), this );
 		connect( m_pGpu, &QRhiWidget::frameSubmitted, this, &CMapView3D::PaintFrameSubmitted );
 		m_pGpu->setAttribute( Qt::WA_TransparentForMouseEvents );
 		m_pGpu->setFocusPolicy( Qt::NoFocus );
@@ -371,6 +378,12 @@ MapFrame_t CMapView3D::MakeFrame( QSize size )
 	}
 	MapFrame_t frame = m_Editor.GetRenderData().Snapshot( camera, options, m_Editor.GetSettings() );
 	frame.m_bModelEdges = preferences.m_bWireframeModels;
+	// HDR's auto exposure is this view's own, measured from what it draws.
+	if ( frame.m_pLighting && frame.m_Options.m_Shade.m_bLightHdr )
+	{
+		frame.m_flExposure = m_flExposure;
+		frame.m_Options.m_Shade.m_flLightScale *= m_flExposure;
+	}
 	return frame;
 }
 
@@ -431,14 +444,35 @@ void CMapView3D::WorkerLoop()
 		xv::map::RenderView( frame.MakeScene(), frame.m_Camera, frame.m_Options, image );
 		const double flMs = static_cast<double>( timer.nsecsElapsed() ) / 1e6;
 		QImage picture = ToQImage( image );
+		// The HDR lighting preview's next exposure, from this picture (every fourth pixel each way).
+		const float flExposure = frame.m_flExposure > 0.0f ? xv::map::NextExposure( xv::map::ShownLuminance( image.m_Pixels.data(), image.m_nWidth, image.m_nHeight, static_cast<std::size_t>( image.m_nWidth ) * 4, 4, frame.m_Options.m_Shade.m_flMonitorGamma ), frame.m_flExposure ) : 0.0f;
 		QMetaObject::invokeMethod(
-			this, [ this, picture = std::move( picture ), flMs ]() mutable {
+			this, [ this, picture = std::move( picture ), flMs, flExposure ]() mutable {
 				m_Image = std::move( picture );
 				m_flRenderMs = flMs;
 				update();
+				if ( flExposure > 0.0f )
+				{
+					ExposureMeasured( flExposure );
+				}
 			},
 			Qt::QueuedConnection );
 	}
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: A measured exposure: drawn again with it while it still moves, and measured again
+//          a little later, so it settles as the game's does when the eye adapts.
+//-----------------------------------------------------------------------------
+void CMapView3D::ExposureMeasured( float flExposure )
+{
+	if ( std::abs( std::log2( flExposure / std::max( m_flExposure, 1.0e-6f ) ) ) < 0.02f )
+	{
+		return;
+	}
+	m_flExposure = flExposure;
+	RequestRender();
+	QTimer::singleShot( 200, this, [ this ] { RequestRender(); } );
 }
 
 //-----------------------------------------------------------------------------

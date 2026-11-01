@@ -51,12 +51,14 @@ private:
 
 	CMapEditor &m_Editor;
 	QDoubleSpinBox *m_pBrightness = nullptr;
+	QDoubleSpinBox *m_pMonitorGamma = nullptr;
 	QSpinBox *m_pBounces = nullptr;
 	QSpinBox *m_pLuxels = nullptr;
 	QCheckBox *m_pHdr = nullptr;
 	QCheckBox *m_pFog = nullptr;
 	QCheckBox *m_pLightOnly = nullptr;
 	QCheckBox *m_pPropShadows = nullptr;
+	QCheckBox *m_pSmoothShadows = nullptr;
 	QCheckBox *m_pAutoBake = nullptr;
 	QCheckBox *m_pInRadius = nullptr;
 	QDoubleSpinBox *m_pRadius = nullptr;

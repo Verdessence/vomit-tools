@@ -145,6 +145,7 @@ struct LightingOptions_t
 	bool m_bHdr = false;
 	int m_nBounces = 3;           // passes of light bounced between faces
 	bool m_bConverge = true;      // the passes not made estimated from the last two (as vrad bounces until it settles)
+	bool m_bSmoothShadows = true; // luxels on a shadow's edge lit as the mean across them (as vrad's -final), not at their middle alone
 	int m_nSkySamples = 48;       // rays toward the sky per sample, for its ambient
 	int m_nSkySpacing = 2;        // the sky's ambient is gathered every this many atlas texels, then smoothed
 	int m_nBounceSamples = 32;    // rays gathering bounced light per sample
@@ -214,7 +215,6 @@ public:
 	std::map<std::uint32_t, std::array<float, 3>> m_Points; // the extras' points, by object
 	std::size_t m_nLights = 0;
 	std::uint64_t m_nRevision = 0;           // the scene's, when it was baked
-	float m_flMeanLight = 0.0f;              // the luxels' mean brightness (linear, 1 fully lit), for HDR's auto exposure
 
 	// The light a texel holds, linear (1: fully lit), RGB.
 	[[nodiscard]] std::array<float, 3> GetTexel( int x, int y ) const;

@@ -37,7 +37,7 @@ layout(std140, binding = 0) uniform Frame {
 	vec4 fogColor2;     // rgb, and 1 to blend to it by the view's direction
 	vec4 fogDirection;  // xyz, and 1 when measured from the eye (else along the view)
 	vec4 fogRange;      // start, end, 1 when there is fog; w 1: the light alone (mat_fullbright 2)
-	vec4 viewForward;   // xyz
+	vec4 viewForward;   // xyz; w: the lighting preview's mat_monitorgamma / 2.2
 } frame;
 
 layout(binding = 4) uniform sampler2D stateTexture;

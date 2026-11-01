@@ -30,7 +30,7 @@ layout(std140, binding = 0) uniform Frame {
 	vec4 fogColor2;     // rgb, and 1 to blend to it by the view's direction
 	vec4 fogDirection;  // xyz, and 1 when measured from the eye (else along the view)
 	vec4 fogRange;      // start, end, 1 when there is fog; w 1: the light alone (mat_fullbright 2)
-	vec4 viewForward;   // xyz
+	vec4 viewForward;   // xyz; w: the lighting preview's mat_monitorgamma / 2.2 (1: none)
 } frame;
 
 layout(std140, binding = 1) uniform Material {
@@ -196,9 +196,10 @@ void main() {
 			lit = true;
 		}
 		if (lit) {
-			// xv::map::LightFactor: Source's overbright of 2, in gamma 2.2; with HDR, none.
+			// xv::map::LightFactor: Source's overbright of 2, in gamma 2.2; with HDR, linear times
+			// HDR_LIGHTMAP_SCALE (2).
 			if (frame.lighting.w > 1.5) {
-				color.rgb *= pow(max(light * frame.lighting.z, vec3(0.0)), vec3(1.0 / 2.2));
+				color.rgb *= pow(max(light * frame.lighting.z * 2.0, vec3(0.0)), vec3(1.0 / 2.2));
 			} else {
 				color.rgb *= 2.0 * pow(max(light * frame.lighting.z * 0.5, vec3(0.0)), vec3(1.0 / 2.2));
 			}
@@ -221,6 +222,10 @@ void main() {
 		}
 		color.rgb = mix(color.rgb, fogColour, amount);
 	}
+	if (mode == MODE_LIGHTING && frame.viewForward.w > 0.0 && frame.viewForward.w != 1.0) {
+		// mat_monitorgamma, last of all as the game's gamma ramp.
+		color.rgb = pow(max(color.rgb, vec3(0.0)), vec3(frame.viewForward.w));
+	}
 	if ((mode == MODE_FLAT || mode == MODE_TEXTURED_SHADED) && material.extra.z < 0.5) {
 		color.rgb *= faceShade(n);
 	}
@@ -233,6 +238,11 @@ void main() {
 	}
 	if ((flags & 2) != 0) {
 		color.rgb = mix(color.rgb, frame.selection.rgb, frame.mode.y);
+	}
+	// The HDR lighting preview's sky (its 2D sky and the 3D skybox) and unlit faces, marked for its
+	// auto exposure to leave out: xv::map::UNMEASURED_ALPHA.
+	if (mode == MODE_LIGHTING && frame.lighting.w > 1.5 && material.options.y < 0.5 && (frame.pass.x > 0.5 || (material.extra.x > 0.5 && sky.translate[0].w > 0.5) || kind > 2.5)) {
+		color.a = 254.0 / 255.0;
 	}
 	fragColor = color;
 }

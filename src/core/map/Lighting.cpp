@@ -12,6 +12,7 @@
 #include <bit>
 #include <cmath>
 #include <limits>
+#include <map>
 #include <numbers>
 #include <cctype>
 #include <optional>
@@ -30,8 +31,10 @@ namespace xv::map
 namespace
 {
 
-// Light below this (in vrad's units, of 255) isn't worth a ray: one step of an 8-bit lightmap.
-constexpr double LIGHT_THRESHOLD = 1.0;
+// Light below this (in vrad's units, of 255) isn't worth a ray. vrad cuts no light off (but at
+// its _distance), and many faint lights add up: dozens across a hall, each under one unit, light
+// it as VRAD++ does only from about this low.
+constexpr double LIGHT_THRESHOLD = 0.02;
 // Rays leave a face this far along its normal, past the face and its coplanar neighbours.
 constexpr double RAY_OFFSET = 0.5;
 // As far as any ray goes: across the largest map there can be.
@@ -40,6 +43,9 @@ constexpr double RAY_LENGTH = 65536.0;
 constexpr double MIN_DISTANCE = 1.0;
 // The sun's rays when it has a size (SunSpreadAngle).
 constexpr int SUN_SPREAD_SAMPLES = 8;
+// How many gathers each way the sky's ambient and bounced light are averaged over (GatherSparse).
+constexpr int SKY_BLUR = 1;
+constexpr int BOUNCE_BLUR = 1;
 
 //-----------------------------------------------------------------------------
 // Purpose:
@@ -532,14 +538,17 @@ bool CTracer::HitsTriangle( const TraceTriangle_t &triangle, const Ray_t &ray, f
 	}
 	const float flInv = 1.0f / flDet;
 	const std::array<float, 3> s{ ray.m_Origin[ 0 ] - triangle.m_V0[ 0 ], ray.m_Origin[ 1 ] - triangle.m_V0[ 1 ], ray.m_Origin[ 2 ] - triangle.m_V0[ 2 ] };
+	// A little past the edges: a ray down the seam between two triangles would otherwise slip
+	// through both now and then, by float rounding (specks of shadow in the sun).
+	constexpr float EDGE = 1.0e-4f;
 	const float u = dot( s, p ) * flInv;
-	if ( u < 0.0f || u > 1.0f )
+	if ( u < -EDGE || u > 1.0f + EDGE )
 	{
 		return false;
 	}
 	const std::array<float, 3> q = cross( s, triangle.m_E1 );
 	const float v = dot( ray.m_Dir, q ) * flInv;
-	if ( v < 0.0f || u + v > 1.0f )
+	if ( v < -EDGE || u + v > 1.0f + EDGE )
 	{
 		return false;
 	}
@@ -676,6 +685,7 @@ struct LuxelSample_t
 {
 	Point_t m_Position{};
 	Point_t m_Normal{};
+	bool m_bBuried = false; // inside a solid next door: the face as written runs on under it
 };
 
 // A face being lit.
@@ -701,6 +711,8 @@ struct BakeFace_t
 	std::vector<std::uint32_t> m_Lights;     // the point and spot lights that may reach it
 	float m_flMinLight = 0.0f;               // its entity's _minlight, in vrad's units
 	std::array<double, 2> m_TexelsPerUnit{ 4.0, 4.0 }; // the texture's, for a texture light's brightness
+	Point_t m_AxisU{};                       // a luxel step across it in the world, along u and v
+	Point_t m_AxisV{};
 };
 
 //-----------------------------------------------------------------------------
@@ -770,6 +782,27 @@ void PlaceSamples( BakeFace_t &face, int nStep )
 		{
 			const MeshVertex_t &vertex = mesh.m_Vertices[ mesh.m_Indices[ face.m_Triangles[ t ] * 3 + k ] ];
 			luxels[ t ][ k ] = { vertex.m_Luxel[ 0 ], vertex.m_Luxel[ 1 ] };
+		}
+	}
+	// The world's step for a luxel step, from the first triangle (the luxels are linear over a
+	// flat face; near enough over a displacement's).
+	if ( !luxels.empty() )
+	{
+		std::array<Point_t, 3> corners;
+		for ( std::size_t k = 0; k < 3; k++ )
+		{
+			corners[ k ] = ToPoint( mesh.m_Vertices[ mesh.m_Indices[ face.m_Triangles[ 0 ] * 3 + k ] ].m_vecPosition );
+		}
+		const auto &t = luxels[ 0 ];
+		const double a = t[ 1 ][ 0 ] - t[ 0 ][ 0 ], b = t[ 2 ][ 0 ] - t[ 0 ][ 0 ];
+		const double c = t[ 1 ][ 1 ] - t[ 0 ][ 1 ], d = t[ 2 ][ 1 ] - t[ 0 ][ 1 ];
+		const double flDet = a * d - b * c;
+		if ( std::abs( flDet ) > 1.0e-12 )
+		{
+			const Point_t e1 = Subtract( corners[ 1 ], corners[ 0 ] );
+			const Point_t e2 = Subtract( corners[ 2 ], corners[ 0 ] );
+			face.m_AxisU = Scale( Add( Scale( e1, d ), Scale( e2, -c ) ), static_cast<double>( nStep ) / flDet );
+			face.m_AxisV = Scale( Add( Scale( e1, -b ), Scale( e2, a ) ), static_cast<double>( nStep ) / flDet );
 		}
 	}
 	Point_t centre = face.m_Bounds.GetCenter();
@@ -1043,15 +1076,306 @@ Rgb_t SkyAmbient( const Bake_t &bake, const LuxelSample_t &sample, std::uint32_t
 }
 
 //-----------------------------------------------------------------------------
+// Purpose: The solids that block light, as the planes their faces lie in, to tell which luxels
+//          are buried. The faces aren't cut where brushes meet (vbsp does that), so a wall's
+//          face runs on inside the wall next to it, and a ceiling's over the tops of the walls
+//          and out past them; light gathered there would bleed along the edges.
+//-----------------------------------------------------------------------------
+class CSolids
+{
+public:
+	explicit CSolids( const Bake_t &bake )
+	{
+		std::map<std::pair<const CMapMesh *, std::uint32_t>, std::size_t> found;
+		std::vector<bool> skip;
+		for ( const BakeFace_t &face : bake.m_Faces )
+		{
+			if ( !face.m_pMesh || face.m_nFace >= face.m_pMesh->m_Faces.size() )
+			{
+				continue;
+			}
+			const MeshFace_t &meshFace = face.m_pMesh->m_Faces[ face.m_nFace ];
+			const auto [ it, bNew ] = found.try_emplace( { face.m_pMesh, meshFace.m_nSolid }, m_Solids.size() );
+			if ( bNew )
+			{
+				m_Solids.emplace_back();
+				skip.push_back( false );
+			}
+			Volume_t &solid = m_Solids[ it->second ];
+			// A displacement's solid isn't one any more; a solid of faces that let light
+			// through (clips, triggers) doesn't count.
+			if ( meshFace.m_bDisplacement || meshFace.m_nVertexCount < 3 )
+			{
+				skip[ it->second ] = true;
+				continue;
+			}
+			solid.m_bBlocks = solid.m_bBlocks || face.m_bBlocks;
+			const MeshVertex_t &vertex = face.m_pMesh->m_Vertices[ meshFace.m_nFirstVertex ];
+			solid.m_Planes.push_back( { ToPoint( vertex.m_vecPosition ), ToPoint( vertex.m_vecNormal ) } );
+			solid.m_Bounds.Add( face.m_Bounds );
+		}
+		for ( std::size_t n = 0; n < m_Solids.size(); n++ )
+		{
+			const Volume_t &solid = m_Solids[ n ];
+			if ( skip[ n ] || !solid.m_bBlocks || solid.m_Planes.size() < 4 || solid.m_Bounds.IsEmpty() )
+			{
+				continue;
+			}
+			for ( long long x = Cell( solid.m_Bounds.m_Mins[ 0 ] ); x <= Cell( solid.m_Bounds.m_Maxs[ 0 ] ); x++ )
+				for ( long long y = Cell( solid.m_Bounds.m_Mins[ 1 ] ); y <= Cell( solid.m_Bounds.m_Maxs[ 1 ] ); y++ )
+					for ( long long z = Cell( solid.m_Bounds.m_Mins[ 2 ] ); z <= Cell( solid.m_Bounds.m_Maxs[ 2 ] ); z++ )
+						m_Cells[ Key( x, y, z ) ].push_back( static_cast<std::uint32_t>( n ) );
+		}
+	}
+
+	// Inside a solid, or on its surface (a luxel's point lies off its own face, so a point
+	// on another's is where the faces meet, inside the corner).
+	[[nodiscard]] bool Contains( Point_t point ) const
+	{
+		const auto cell = m_Cells.find( Key( Cell( point[ 0 ] ), Cell( point[ 1 ] ), Cell( point[ 2 ] ) ) );
+		if ( cell == m_Cells.end() )
+		{
+			return false;
+		}
+		for ( const std::uint32_t n : cell->second )
+		{
+			const Volume_t &solid = m_Solids[ n ];
+			if ( std::ranges::all_of( solid.m_Planes, [ & ]( const auto &plane ) { return Dot( Subtract( point, plane.first ), plane.second ) <= 0.01; } ) )
+			{
+				return true;
+			}
+		}
+		return false;
+	}
+
+private:
+	struct Volume_t
+	{
+		std::vector<std::pair<Point_t, Point_t>> m_Planes; // a point on each face, and its normal (out)
+		Box_t m_Bounds;
+		bool m_bBlocks = false;
+	};
+	static constexpr double CELL = 512.0;
+	[[nodiscard]] static long long Cell( double fl ) { return static_cast<long long>( std::floor( fl / CELL ) ); }
+	[[nodiscard]] static std::uint64_t Key( long long x, long long y, long long z )
+	{
+		return ( static_cast<std::uint64_t>( x & 0x1fffff ) << 42 ) | ( static_cast<std::uint64_t>( y & 0x1fffff ) << 21 ) | static_cast<std::uint64_t>( z & 0x1fffff );
+	}
+
+	std::vector<Volume_t> m_Solids;
+	std::unordered_map<std::uint64_t, std::vector<std::uint32_t>> m_Cells;
+};
+
+//-----------------------------------------------------------------------------
+// Purpose: Gives buried luxels the light of the nearest ones that aren't, a ring at a time,
+//          so the edges a graphics card filters toward see the face's own light. Where a face
+//          runs on under a wall (a floor through two rooms) its luxels there have neighbours on
+//          both sides: the darker side wins, as a little shade at a wall's foot looks like the
+//          game and light under a wall looks like a leak.
+//-----------------------------------------------------------------------------
+void FillBuried( const Bake_t &bake, std::vector<Rgb_t> &buffer )
+{
+	ParallelFor( bake.m_Faces.size(), 64, [ & ]( std::size_t nBegin, std::size_t nEnd ) {
+		std::vector<std::uint8_t> known;
+		std::vector<int> ring;
+		std::vector<int> next;
+		for ( std::size_t f = nBegin; f < nEnd; f++ )
+		{
+			const BakeFace_t &face = bake.m_Faces[ f ];
+			if ( !face.m_bLit || face.m_nWidth == 0 )
+			{
+				continue;
+			}
+			const int nCount = face.m_nWidth * face.m_nHeight;
+			known.assign( static_cast<std::size_t>( nCount ), 0 );
+			ring.clear();
+			bool bAny = false;
+			for ( int n = 0; n < nCount; n++ )
+			{
+				known[ static_cast<std::size_t>( n ) ] = face.m_Samples[ static_cast<std::size_t>( n ) ].m_bBuried ? 0 : 1;
+				bAny = bAny || known[ static_cast<std::size_t>( n ) ] == 0;
+			}
+			if ( !bAny )
+			{
+				continue;
+			}
+			const auto neighbours = [ & ]( int n, auto &&visit ) {
+				const int i = n % face.m_nWidth;
+				const int j = n / face.m_nWidth;
+				for ( const auto [ di, dj ] : { std::pair{ -1, 0 }, std::pair{ 1, 0 }, std::pair{ 0, -1 }, std::pair{ 0, 1 } } )
+				{
+					if ( i + di >= 0 && i + di < face.m_nWidth && j + dj >= 0 && j + dj < face.m_nHeight )
+					{
+						visit( ( j + dj ) * face.m_nWidth + i + di );
+					}
+				}
+			};
+			for ( int n = 0; n < nCount; n++ )
+			{
+				if ( known[ static_cast<std::size_t>( n ) ] == 0 )
+				{
+					bool bNext = false;
+					neighbours( n, [ & ]( int m ) { bNext = bNext || known[ static_cast<std::size_t>( m ) ] != 0; } );
+					if ( bNext )
+					{
+						ring.push_back( n );
+					}
+				}
+			}
+			while ( !ring.empty() )
+			{
+				next.clear();
+				for ( const int n : ring )
+				{
+					constexpr float NONE = std::numeric_limits<float>::max();
+					Rgb_t least{ NONE, NONE, NONE };
+					neighbours( n, [ & ]( int m ) {
+						if ( known[ static_cast<std::size_t>( m ) ] == 1 )
+						{
+							const Rgb_t &value = buffer[ bake.TexelIndex( face, m % face.m_nWidth, m / face.m_nWidth ) ];
+							for ( std::size_t k = 0; k < 3; k++ )
+							{
+								least[ k ] = std::min( least[ k ], value[ k ] );
+							}
+						}
+					} );
+					Rgb_t &texel = buffer[ bake.TexelIndex( face, n % face.m_nWidth, n / face.m_nWidth ) ];
+					for ( std::size_t k = 0; k < 3; k++ )
+					{
+						texel[ k ] = least[ k ] == NONE ? 0.0f : least[ k ];
+					}
+				}
+				// The ring done, it lights the next.
+				for ( const int n : ring )
+				{
+					known[ static_cast<std::size_t>( n ) ] = 1;
+				}
+				for ( const int n : ring )
+				{
+					neighbours( n, [ & ]( int m ) {
+						if ( known[ static_cast<std::size_t>( m ) ] == 0 )
+						{
+							known[ static_cast<std::size_t>( m ) ] = 2;
+							next.push_back( m );
+						}
+					} );
+				}
+				for ( const int n : next )
+				{
+					known[ static_cast<std::size_t>( n ) ] = 0;
+				}
+				std::swap( ring, next );
+			}
+		}
+	} );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Luxels whose direct light is far from a neighbour's sit on a shadow's edge: lit again
+//          as the mean of nine points across them, so the edge steps through the luxel's
+//          shades (vrad's -final supersamples the same luxels) instead of the luxel's middle
+//          deciding all of it.
+//-----------------------------------------------------------------------------
+void SmoothShadowEdges( const Bake_t &bake, std::vector<Rgb_t> &direct, std::vector<Rgb_t> &source )
+{
+	const std::vector<Rgb_t> before = direct;
+	ParallelFor( bake.m_Faces.size(), 16, [ & ]( std::size_t nBegin, std::size_t nEnd ) {
+		for ( std::size_t f = nBegin; f < nEnd && !bake.IsCancelled(); f++ )
+		{
+			const BakeFace_t &face = bake.m_Faces[ f ];
+			if ( !face.m_bLit || Length( face.m_AxisU ) <= 0.0 || Length( face.m_AxisV ) <= 0.0 )
+			{
+				continue;
+			}
+			const auto bright = [ & ]( int i, int j ) {
+				const Rgb_t &texel = before[ bake.TexelIndex( face, i, j ) ];
+				return std::max( { texel[ 0 ], texel[ 1 ], texel[ 2 ] } );
+			};
+			for ( int j = 0; j < face.m_nHeight; j++ )
+			{
+				for ( int i = 0; i < face.m_nWidth; i++ )
+				{
+					const LuxelSample_t &sample = face.m_Samples[ static_cast<std::size_t>( j * face.m_nWidth + i ) ];
+					if ( sample.m_bBuried )
+					{
+						continue;
+					}
+					const float flHere = bright( i, j );
+					bool bEdge = false;
+					for ( const auto [ di, dj ] : { std::pair{ -1, 0 }, std::pair{ 1, 0 }, std::pair{ 0, -1 }, std::pair{ 0, 1 } } )
+					{
+						const int x = i + di;
+						const int y = j + dj;
+						if ( x < 0 || y < 0 || x >= face.m_nWidth || y >= face.m_nHeight || face.m_Samples[ static_cast<std::size_t>( y * face.m_nWidth + x ) ].m_bBuried )
+						{
+							continue;
+						}
+						const float flThere = bright( x, y );
+						bEdge = bEdge || ( std::max( flHere, flThere ) > 2.0f && std::abs( flHere - flThere ) > 0.25f * std::max( flHere, flThere ) );
+					}
+					if ( !bEdge )
+					{
+						continue;
+					}
+					const std::size_t nTexel = bake.TexelIndex( face, i, j );
+					Rgb_t total{};
+					Rgb_t bounces{};
+					for ( int b = -1; b <= 1; b++ )
+					{
+						for ( int a = -1; a <= 1; a++ )
+						{
+							LuxelSample_t at = sample;
+							at.m_Position = Add( sample.m_Position, Add( Scale( face.m_AxisU, a / 3.0 ), Scale( face.m_AxisV, b / 3.0 ) ) );
+							Rgb_t bounce{};
+							const Rgb_t light = DirectLight( bake, face.m_Lights, at, static_cast<std::uint32_t>( nTexel * 9 + static_cast<std::size_t>( ( b + 1 ) * 3 + a + 1 ) ), &bounce );
+							for ( std::size_t k = 0; k < 3; k++ )
+							{
+								total[ k ] += light[ k ] / 9.0f;
+								bounces[ k ] += bounce[ k ] / 9.0f;
+							}
+						}
+					}
+					direct[ nTexel ] = total;
+					source[ nTexel ] = bounces;
+				}
+			}
+		}
+	} );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Whether a luxel and another of its face are on the same side of every solid that
+//          its face runs on under: no buried luxel on the line between them.
+//-----------------------------------------------------------------------------
+bool Reaches( const BakeFace_t &face, int i, int j, std::array<int, 2> to )
+{
+	const int nSteps = std::max( std::abs( to[ 0 ] - i ), std::abs( to[ 1 ] - j ) );
+	for ( int n = 1; n < nSteps; n++ )
+	{
+		const int x = i + static_cast<int>( std::lround( static_cast<double>( ( to[ 0 ] - i ) * n ) / nSteps ) );
+		const int y = j + static_cast<int>( std::lround( static_cast<double>( ( to[ 1 ] - j ) * n ) / nSteps ) );
+		if ( face.m_Samples[ static_cast<std::size_t>( y * face.m_nWidth + x ) ].m_bBuried )
+		{
+			return false;
+		}
+	}
+	return true;
+}
+
+//-----------------------------------------------------------------------------
 // Purpose: Light that changes slowly across a face, gathered on every nSpacing-th luxel (and the
-//          last row and column) by gather(sample, seed), then smoothed back over every luxel
-//          between the four gathered around it, and added to out.
+//          last row and column) by gather(sample, seed), each averaged with the gathers up to
+//          nBlur steps around it, then smoothed back over every luxel between the four gathered
+//          around it, and added to out.
 //-----------------------------------------------------------------------------
 template <typename Gather>
-void GatherSparse( const Bake_t &bake, int nSpacing, std::vector<Rgb_t> &out, Gather &&gather )
+void GatherSparse( const Bake_t &bake, int nSpacing, int nBlur, std::vector<Rgb_t> &out, Gather &&gather )
 {
 	ParallelFor( bake.m_Faces.size(), 16, [ & ]( std::size_t nBegin, std::size_t nEnd ) {
 		std::vector<Rgb_t> coarse;
+		std::vector<Rgb_t> blurred;
+		std::vector<bool> valid;
+		std::vector<std::array<int, 2>> where; // the luxel each gather was made at
 		for ( std::size_t f = nBegin; f < nEnd && !bake.IsCancelled(); f++ )
 		{
 			const BakeFace_t &face = bake.m_Faces[ f ];
@@ -1065,14 +1389,84 @@ void GatherSparse( const Bake_t &bake, int nSpacing, std::vector<Rgb_t> &out, Ga
 			const int nCoarseH = count( face.m_nHeight );
 			const auto at = [ nSpacing ]( int n, int nSize ) { return nSize <= nSpacing ? nSize / 2 : std::min( n * nSpacing, nSize - 1 ); };
 			coarse.assign( static_cast<std::size_t>( nCoarseW * nCoarseH ), Rgb_t{} );
+			valid.assign( coarse.size(), false );
+			where.assign( coarse.size(), {} );
 			for ( int cj = 0; cj < nCoarseH; cj++ )
 			{
 				for ( int ci = 0; ci < nCoarseW; ci++ )
 				{
-					const int i = at( ci, face.m_nWidth );
-					const int j = at( cj, face.m_nHeight );
-					coarse[ static_cast<std::size_t>( cj * nCoarseW + ci ) ] = gather( face.m_Samples[ static_cast<std::size_t>( j * face.m_nWidth + i ) ], static_cast<std::uint32_t>( bake.TexelIndex( face, i, j ) ) );
+					// A buried point gathers from where it can't be seen: the nearest luxel of its
+					// cell that isn't buried stands in, or none.
+					const int i0 = at( ci, face.m_nWidth );
+					const int j0 = at( cj, face.m_nHeight );
+					int nBest = -1;
+					int nBestDistance = std::numeric_limits<int>::max();
+					for ( int dj = -nSpacing / 2; dj <= nSpacing / 2; dj++ )
+					{
+						for ( int di = -nSpacing / 2; di <= nSpacing / 2; di++ )
+						{
+							const int i = i0 + di;
+							const int j = j0 + dj;
+							const int nDistance = di * di + dj * dj;
+							if ( i < 0 || j < 0 || i >= face.m_nWidth || j >= face.m_nHeight || nDistance >= nBestDistance || face.m_Samples[ static_cast<std::size_t>( j * face.m_nWidth + i ) ].m_bBuried )
+							{
+								continue;
+							}
+							nBest = j * face.m_nWidth + i;
+							nBestDistance = nDistance;
+						}
+					}
+					if ( nBest < 0 )
+					{
+						continue;
+					}
+					const int i = nBest % face.m_nWidth;
+					const int j = nBest / face.m_nWidth;
+					coarse[ static_cast<std::size_t>( cj * nCoarseW + ci ) ] = gather( face.m_Samples[ static_cast<std::size_t>( nBest ) ], static_cast<std::uint32_t>( bake.TexelIndex( face, i, j ) ) );
+					valid[ static_cast<std::size_t>( cj * nCoarseW + ci ) ] = true;
+					where[ static_cast<std::size_t>( cj * nCoarseW + ci ) ] = { i, j };
 				}
+			}
+			// A few dozen rays leave each gather noticeably off when a small bright patch is in
+			// or out of view; spread over the luxels between gathers, that shows as blotches.
+			// Light that changes this slowly loses nothing averaged over its neighbours.
+			if ( nBlur > 0 )
+			{
+				blurred = coarse;
+				for ( int cj = 0; cj < nCoarseH; cj++ )
+				{
+					for ( int ci = 0; ci < nCoarseW; ci++ )
+					{
+						const std::size_t c = static_cast<std::size_t>( cj * nCoarseW + ci );
+						if ( !valid[ c ] )
+						{
+							continue;
+						}
+						Rgb_t sum{};
+						int nCount = 0;
+						for ( int nj = std::max( cj - nBlur, 0 ); nj <= std::min( cj + nBlur, nCoarseH - 1 ); nj++ )
+						{
+							for ( int ni = std::max( ci - nBlur, 0 ); ni <= std::min( ci + nBlur, nCoarseW - 1 ); ni++ )
+							{
+								const std::size_t n = static_cast<std::size_t>( nj * nCoarseW + ni );
+								if ( !valid[ n ] || ( n != c && !Reaches( face, where[ c ][ 0 ], where[ c ][ 1 ], where[ n ] ) ) )
+								{
+									continue;
+								}
+								for ( std::size_t k = 0; k < 3; k++ )
+								{
+									sum[ k ] += coarse[ n ][ k ];
+								}
+								nCount++;
+							}
+						}
+						for ( std::size_t k = 0; k < 3; k++ )
+						{
+							blurred[ c ][ k ] = sum[ k ] / static_cast<float>( nCount );
+						}
+					}
+				}
+				std::swap( coarse, blurred );
 			}
 			for ( int j = 0; j < face.m_nHeight; j++ )
 			{
@@ -1088,14 +1482,42 @@ void GatherSparse( const Bake_t &bake, int nSpacing, std::vector<Rgb_t> &out, Ga
 					const int i0 = at( ci0, face.m_nWidth );
 					const int i1 = at( ci1, face.m_nWidth );
 					const float tx = i1 > i0 ? static_cast<float>( i - i0 ) / static_cast<float>( i1 - i0 ) : 0.0f;
-					const Rgb_t &a = coarse[ static_cast<std::size_t>( cj0 * nCoarseW + ci0 ) ];
-					const Rgb_t &b = coarse[ static_cast<std::size_t>( cj0 * nCoarseW + ci1 ) ];
-					const Rgb_t &c = coarse[ static_cast<std::size_t>( cj1 * nCoarseW + ci0 ) ];
-					const Rgb_t &d = coarse[ static_cast<std::size_t>( cj1 * nCoarseW + ci1 ) ];
+					// Between the gathers around it that weren't buried (buried luxels are filled
+					// from their neighbours afterwards, FillBuried).
+					const std::array<std::size_t, 4> corners{ static_cast<std::size_t>( cj0 * nCoarseW + ci0 ), static_cast<std::size_t>( cj0 * nCoarseW + ci1 ), static_cast<std::size_t>( cj1 * nCoarseW + ci0 ), static_cast<std::size_t>( cj1 * nCoarseW + ci1 ) };
+					const std::array<float, 4> weights{ ( 1.0f - tx ) * ( 1.0f - ty ), tx * ( 1.0f - ty ), ( 1.0f - tx ) * ty, tx * ty };
+					Rgb_t sum{};
+					float flWeight = 0.0f;
+					for ( std::size_t n = 0; n < 4; n++ )
+					{
+						if ( valid[ corners[ n ] ] && Reaches( face, i, j, where[ corners[ n ] ] ) )
+						{
+							for ( std::size_t k = 0; k < 3; k++ )
+							{
+								sum[ k ] += coarse[ corners[ n ] ][ k ] * weights[ n ];
+							}
+							flWeight += weights[ n ];
+						}
+					}
+					const LuxelSample_t &sample = face.m_Samples[ static_cast<std::size_t>( j * face.m_nWidth + i ) ];
+					if ( flWeight <= 1.0e-6f )
+					{
+						// Walled off from every gather around it: one of its own.
+						if ( !sample.m_bBuried )
+						{
+							const std::size_t nTexel = bake.TexelIndex( face, i, j );
+							const Rgb_t own = gather( sample, static_cast<std::uint32_t>( nTexel ) );
+							for ( std::size_t k = 0; k < 3; k++ )
+							{
+								out[ nTexel ][ k ] += own[ k ];
+							}
+						}
+						continue;
+					}
 					Rgb_t &texel = out[ bake.TexelIndex( face, i, j ) ];
 					for ( std::size_t k = 0; k < 3; k++ )
 					{
-						texel[ k ] += ( a[ k ] * ( 1.0f - tx ) + b[ k ] * tx ) * ( 1.0f - ty ) + ( c[ k ] * ( 1.0f - tx ) + d[ k ] * tx ) * ty;
+						texel[ k ] += sum[ k ] / flWeight;
 					}
 				}
 			}
@@ -1631,10 +2053,7 @@ std::shared_ptr<CLighting> MakeResult( const CScene &scene, const Bake_t &bake, 
 			final[ n ][ k ] = direct[ n ][ k ] + ( bounced.empty() ? 0.0f : bounced[ n ][ k ] );
 		}
 	}
-	// _minlight: no luxel of its faces darker than that, channel by channel; and the mean, for
-	// HDR's auto exposure.
-	double flSum = 0.0;
-	std::size_t nCounted = 0;
+	// _minlight: no luxel of its faces darker than that, channel by channel.
 	for ( const BakeFace_t &face : bake.m_Faces )
 	{
 		if ( !face.m_bLit || face.m_nWidth == 0 )
@@ -1650,12 +2069,9 @@ std::shared_ptr<CLighting> MakeResult( const CScene &scene, const Bake_t &bake, 
 				{
 					flChannel = std::max( flChannel, face.m_flMinLight );
 				}
-				flSum += ( 0.3 * texel[ 0 ] + 0.59 * texel[ 1 ] + 0.11 * texel[ 2 ] ) / 255.0;
-				nCounted++;
 			}
 		}
 	}
-	pLighting->m_flMeanLight = nCounted > 0 ? static_cast<float>( flSum / static_cast<double>( nCounted ) ) : 0.0f;
 	pLighting->m_Texels.assign( direct.size() * 4, 0 );
 	for ( std::size_t n = 0; n < direct.size(); n++ )
 	{
@@ -1991,8 +2407,9 @@ LightMaterial_t DescribeLightMaterial( const MaterialInfo_t &info, std::array<fl
 	const bool bWater = ( info.m_nCompile & MATERIAL_COMPILE_WATER ) != 0;
 	material.m_bLit = !info.IsTool() && !material.m_bSky && !bUnlit && !bWater && ( info.m_nCompile & MATERIAL_COMPILE_NOLIGHT ) == 0;
 	material.m_TextureSize = textureSize;
-	constexpr std::uint32_t PASSES = MATERIAL_COMPILE_CLIP | MATERIAL_COMPILE_PLAYERCLIP | MATERIAL_COMPILE_NPCCLIP | MATERIAL_COMPILE_TRIGGER | MATERIAL_COMPILE_HINT | MATERIAL_COMPILE_SKIP | MATERIAL_COMPILE_AREAPORTAL | MATERIAL_COMPILE_ORIGIN | MATERIAL_COMPILE_INVISIBLE | MATERIAL_COMPILE_OCCLUDER | MATERIAL_COMPILE_FOG | MATERIAL_COMPILE_LADDER | MATERIAL_COMPILE_WATER | MATERIAL_COMPILE_NONSOLID;
-	material.m_bBlocks = material.m_bSky || ( ( info.m_nCompile & PASSES ) == 0 && !info.m_bTranslucent && !info.m_bAdditive );
+	constexpr std::uint32_t PASSES = MATERIAL_COMPILE_CLIP | MATERIAL_COMPILE_PLAYERCLIP | MATERIAL_COMPILE_NPCCLIP | MATERIAL_COMPILE_TRIGGER | MATERIAL_COMPILE_HINT | MATERIAL_COMPILE_SKIP | MATERIAL_COMPILE_AREAPORTAL | MATERIAL_COMPILE_ORIGIN | MATERIAL_COMPILE_INVISIBLE | MATERIAL_COMPILE_OCCLUDER | MATERIAL_COMPILE_FOG | MATERIAL_COMPILE_LADDER | MATERIAL_COMPILE_WATER;
+	// %compilenonsolid makes a brush opaque (vbsp), which vrad's shadows stop at: toolsblocklight.
+	material.m_bBlocks = material.m_bSky || ( info.m_nCompile & MATERIAL_COMPILE_BLOCKLIGHT ) != 0 || ( ( info.m_nCompile & PASSES ) == 0 && !info.m_bTranslucent && !info.m_bAdditive );
 	if ( info.m_Reflectivity )
 	{
 		// The VMT's $reflectivity overrides the VTF's.
@@ -2377,6 +2794,18 @@ std::shared_ptr<const CLighting> BakeLighting( const CScene &scene, std::span<co
 	{
 		return nullptr;
 	}
+	{
+		const CSolids solids( bake );
+		ParallelFor( bake.m_Faces.size(), 16, [ & ]( std::size_t nBegin, std::size_t nEnd ) {
+			for ( std::size_t f = nBegin; f < nEnd && !bake.IsCancelled(); f++ )
+			{
+				for ( LuxelSample_t &sample : bake.m_Faces[ f ].m_Samples )
+				{
+					sample.m_bBuried = solids.Contains( Add( sample.m_Position, Scale( sample.m_Normal, RAY_OFFSET ) ) );
+				}
+			}
+		} );
+	}
 
 	const std::size_t nTexels = static_cast<std::size_t>( nWidth ) * static_cast<std::size_t>( nHeight );
 	std::vector<Rgb_t> direct( nTexels, Rgb_t{} );
@@ -2397,7 +2826,11 @@ std::shared_ptr<const CLighting> BakeLighting( const CScene &scene, std::span<co
 				for ( int i = 0; i < face.m_nWidth; i++ )
 				{
 					const std::size_t nTexel = bake.TexelIndex( face, i, j );
-					direct[ nTexel ] = DirectLight( bake, face.m_Lights, face.m_Samples[ static_cast<std::size_t>( j * face.m_nWidth + i ) ], static_cast<std::uint32_t>( nTexel ), &source[ nTexel ] );
+					const LuxelSample_t &sample = face.m_Samples[ static_cast<std::size_t>( j * face.m_nWidth + i ) ];
+					if ( !sample.m_bBuried )
+					{
+						direct[ nTexel ] = DirectLight( bake, face.m_Lights, sample, static_cast<std::uint32_t>( nTexel ), &source[ nTexel ] );
+					}
 				}
 			}
 		}
@@ -2408,11 +2841,18 @@ std::shared_ptr<const CLighting> BakeLighting( const CScene &scene, std::span<co
 	{
 		return nullptr;
 	}
+	if ( options.m_bSmoothShadows )
+	{
+		SmoothShadowEdges( bake, direct, source );
+	}
+	FillBuried( bake, direct );
+	FillBuried( bake, source );
 	// The sky's ambient is soft: gathered on a sparser grid.
 	bake.Progress( 50, "Sky light" );
 	const std::vector<Point_t> skyDirs = CosineDirections( std::max( options.m_nSkySamples, 1 ) );
 	std::vector<Rgb_t> sky( nTexels, Rgb_t{} );
-	GatherSparse( bake, std::max( 1, options.m_nSkySpacing ), sky, [ & ]( const LuxelSample_t &sample, std::uint32_t nSeed ) { return SkyAmbient( bake, sample, nSeed, skyDirs ); } );
+	GatherSparse( bake, std::max( 1, options.m_nSkySpacing ), SKY_BLUR, sky, [ & ]( const LuxelSample_t &sample, std::uint32_t nSeed ) { return SkyAmbient( bake, sample, nSeed, skyDirs ); } );
+	FillBuried( bake, sky );
 	const auto ambient = std::ranges::find( bake.m_Lights, LightType_t::LIGHT_TYPE_SKY_AMBIENT, &Light_t::m_nType );
 	const bool bSkyBounces = ambient != bake.m_Lights.end() && !ambient->m_bNamed;
 	for ( std::size_t n = 0; n < nTexels; n++ )
@@ -2444,7 +2884,8 @@ std::shared_ptr<const CLighting> BakeLighting( const CScene &scene, std::span<co
 		bake.Progress( 60 + 40 * nBounce / std::max( options.m_nBounces, 1 ), "Bounced light" );
 		std::vector<Rgb_t> next( nTexels, Rgb_t{} );
 		const std::uint32_t nSalt = static_cast<std::uint32_t>( nBounce + 1 ) * 0x9e3779b9u;
-		GatherSparse( bake, std::max( 1, options.m_nBounceSpacing ), next, [ & ]( const LuxelSample_t &sample, std::uint32_t nSeed ) { return GatherBounce( bake, last, sample, nSeed ^ nSalt, bounceDirs ); } );
+		GatherSparse( bake, std::max( 1, options.m_nBounceSpacing ), BOUNCE_BLUR, next, [ & ]( const LuxelSample_t &sample, std::uint32_t nSeed ) { return GatherBounce( bake, last, sample, nSeed ^ nSalt, bounceDirs ); } );
+		FillBuried( bake, next );
 		if ( bake.IsCancelled() )
 		{
 			return nullptr;

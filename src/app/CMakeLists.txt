@@ -232,7 +232,7 @@ if(Qt6_VERSION VERSION_GREATER_EQUAL 6.7 AND TARGET Qt6::ShaderTools AND TARGET 
             GLSL "300es,330"
             HLSL 50
             MSL 12
-            FILES shaders/map.vert shaders/map.frag shaders/mapline.vert shaders/mapline.frag shaders/mapalpha.vert shaders/mapalpha.frag)
+            FILES shaders/map.vert shaders/map.frag shaders/mapline.vert shaders/mapline.frag shaders/mapalpha.vert shaders/mapalpha.frag shaders/mapalphasky.frag)
     target_link_libraries(vomit_tools_ui PRIVATE Qt6::GuiPrivate)
     target_compile_definitions(vomit_tools_ui PUBLIC VOMIT_TOOLS_GPU)
     message(STATUS "vomit-tools: previews on the graphics card")

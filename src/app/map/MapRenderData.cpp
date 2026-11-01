@@ -822,6 +822,7 @@ MapFrame_t CMapRenderData::Snapshot( const xv::map::CViewCamera &camera, const x
 	frame.m_Options.m_Shade.m_flLightScale = static_cast<float>( preferences.m_flLightBrightness );
 	frame.m_Options.m_Shade.m_bLightHdr = preferences.m_bLightHdr;
 	frame.m_Options.m_Shade.m_bLightOnly = preferences.m_bLightOnly;
+	frame.m_Options.m_Shade.m_flMonitorGamma = static_cast<float>( std::clamp( preferences.m_flLightMonitorGamma, 1.6, 2.6 ) );
 	if ( options.m_Shade.m_nMode == xv::map::RasterMode_t::RASTER_MODE_LIGHTING && pScene )
 	{
 		if ( m_pLighting )
@@ -830,10 +831,6 @@ MapFrame_t CMapRenderData::Snapshot( const xv::map::CViewCamera &camera, const x
 			frame.m_pLighting = m_pLighting;
 			frame.m_pMeshLights = m_pMeshLights;
 			frame.m_Options.m_Shade.m_pLighting = m_pLighting.get();
-			if ( preferences.m_bLightHdr )
-			{
-				frame.m_Options.m_Shade.m_flLightScale *= xv::map::AutoExposure( m_pLighting->m_flMeanLight );
-			}
 		}
 		// The fog as the game draws it (Preferences: on unless turned off).
 		// (A scene's address can be another's later: its revision tells them apart.)
