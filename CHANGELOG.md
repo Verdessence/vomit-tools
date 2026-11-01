@@ -183,6 +183,17 @@
   them one map to save as a VMF.
 - CS:GO's displacement blend rows (`multiblend` and the like) are kept when a displacement is
   edited.
+- Map Properties and the building generator are panels in the side; the tools' own panels
+  (Face Edit, Sprinkle) have their tabs at the foot of the strip, under a line.
+- A selected entity's radii (a sound's reach, a light's falloff) can be dragged by a handle in
+  the 2D views; the cursor shows what a handle does and when it is being dragged.
+- The sprinkle brush is sized with Alt+wheel and, Photoshop-style, by a right-drag that also sets
+  the density.
+- The block tool keeps the box it was drawing while another tool is used.
+- Changing an entity's class drops the keys only its old class had.
+- A map tab's status bar shows only the map's own (no sound controls while nothing plays, no game
+  file count).
+- The texture browser remembers its picture size.
 
 ### Also
 - The File menu is shorter: **New** holds everything that makes something (maps, particles,
