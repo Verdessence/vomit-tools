@@ -184,7 +184,11 @@
 - CS:GO's displacement blend rows (`multiblend` and the like) are kept when a displacement is
   edited.
 - Map Properties and the building generator are panels in the side; the tools' own panels
-  (Face Edit, Sprinkle) have their tabs at the foot of the strip, under a line.
+  (Face Edit, Sprinkle) have their tabs after the others, under a line. The side keeps its width
+  when Face Edit comes and goes, and remembers the width it is dragged to. Preferences → Maps can
+  make it show one panel at a time, as Blender's tabs do.
+- The 2D views draw a brush as it is turned, resized or sheared, not only the selection's box,
+  and keep a dragged radius in view.
 - A selected entity's radii (a sound's reach, a light's falloff) can be dragged by a handle in
   the 2D views; the cursor shows what a handle does and when it is being dragged.
 - The sprinkle brush is sized with Alt+wheel and, Photoshop-style, by a right-drag that also sets
