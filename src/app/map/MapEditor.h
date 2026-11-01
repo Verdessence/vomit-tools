@@ -363,6 +363,7 @@ private:
 	std::optional<xv::map::CViewCamera> m_RememberedCamera;
 	CMapView *m_pActiveView = nullptr;
 	std::optional<xv::map::Box_t> m_NewBox;
+	std::optional<xv::map::Box_t> m_ParkedBox; // the block tool's, while another tool is in use
 	xv::map::Box_t m_LastBox{ { 0, 0, 0 }, { 64, 64, 64 } };
 	std::optional<xv::map::Point_t> m_EntityMarker;
 	std::optional<ClipLine_t> m_ClipLine;

@@ -21,6 +21,7 @@
 #include <cmath>
 #include <numbers>
 #include <limits>
+#include <utility>
 
 #include <QAction>
 #include <QCryptographicHash>
@@ -822,6 +823,8 @@ void CMapEditor::ShowBuildingGenerator()
 	xv::map::Box_t box{ { 0, 0, 0 }, { 256, 256, 128 } };
 	if ( m_NewBox && !m_NewBox->IsEmpty() )
 		box = *m_NewBox;
+	else if ( m_ParkedBox && !m_ParkedBox->IsEmpty() )
+		box = *m_ParkedBox;
 	else if ( !m_pDocument->GetSelection().empty() && !m_pDocument->GetSelectionBounds().IsEmpty() )
 		box = m_pDocument->GetSelectionBounds();
 	CMapBuildingDialog dialog( box, this );
@@ -855,6 +858,7 @@ void CMapEditor::ShowBuildingGenerator()
 	}
 	pUndo->endMacro();
 	SetNewBox( std::nullopt );
+	m_ParkedBox.reset();
 }
 
 //-----------------------------------------------------------------------------
@@ -1046,6 +1050,13 @@ void CMapEditor::Loaded()
 //-----------------------------------------------------------------------------
 void CMapEditor::SetTool( MapTool_t nTool )
 {
+	// A box the block tool was drawing waits while another tool is used, and comes back with it.
+	const bool bLeavingBlock = m_nTool == MapTool_t::MAP_TOOL_BLOCK && nTool != MapTool_t::MAP_TOOL_BLOCK;
+	const bool bEnteringBlock = m_nTool != MapTool_t::MAP_TOOL_BLOCK && nTool == MapTool_t::MAP_TOOL_BLOCK;
+	if ( bLeavingBlock )
+	{
+		m_ParkedBox = m_NewBox;
+	}
 	// Leaving the cordon tool keeps the box it drew (Hammer: pick another tool to finish); taking
 	// it up shows the cordon there is.
 	if ( m_nTool == MapTool_t::MAP_TOOL_CORDON && nTool != MapTool_t::MAP_TOOL_CORDON )
@@ -1079,6 +1090,10 @@ void CMapEditor::SetTool( MapTool_t nTool )
 	if ( nTool != MapTool_t::MAP_TOOL_BLOCK && nTool != MapTool_t::MAP_TOOL_CORDON )
 	{
 		SetNewBox( std::nullopt );
+	}
+	if ( bEnteringBlock )
+	{
+		SetNewBox( std::exchange( m_ParkedBox, std::nullopt ) );
 	}
 	if ( nTool != MapTool_t::MAP_TOOL_ENTITY )
 	{
