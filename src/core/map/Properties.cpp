@@ -10,6 +10,8 @@
 #include <optional>
 
 #include "kv1/Kv1.h"
+#include "map/Edit.h"
+#include "map/Fgd.h"
 #include "map/Scene.h"
 #include "map/Instance.h"
 #include "util/Numbers.h"
@@ -292,6 +294,30 @@ PropertySheet_t DescribeSelection( const CScene &scene, const std::vector<std::u
 PropertySheet_t DescribeWorld( const CScene &scene, bool bSmartEdit )
 {
 	return DescribeEntities( scene, { &scene.m_Map.m_World }, { WORLD_OBJECT }, bSmartEdit, false );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: The keys every entity has whatever its class stay, even where a class leaves them out.
+//-----------------------------------------------------------------------------
+void ChangeClass( const CMap &map, const CFgd *pFgd, Entity_t &entity, std::string_view szClass )
+{
+	const FgdClass_t *pOld = pFgd ? pFgd->Find( entity.GetClassname() ) : nullptr;
+	const FgdClass_t *pNew = pFgd ? pFgd->Find( szClass ) : nullptr;
+	if ( pOld && pNew )
+	{
+		std::vector<std::string> gone;
+		for ( const EntityKey_t &key : entity.m_Keys )
+		{
+			if ( key.m_bDeleted )
+				continue;
+			const bool bCommon = std::ranges::any_of( std::initializer_list<std::string_view>{ "classname", "origin", "angles", "targetname", "parentname", "spawnflags" }, [ & ]( std::string_view sz ) { return kv1::EqualsIgnoreCase( sz, key.m_szKey ); } );
+			if ( !bCommon && pOld->FindKey( key.m_szKey ) && !pNew->FindKey( key.m_szKey ) )
+				gone.emplace_back( key.m_szKey );
+		}
+		for ( const std::string &szKey : gone )
+			RemoveKey( entity, szKey );
+	}
+	SetKeyValue( map, entity, "classname", szClass );
 }
 
 } // namespace xv::map

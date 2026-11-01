@@ -4,7 +4,7 @@
 // Purpose: What Hammer's Object Properties shows for a selection: the entities' class and keys
 //          (with SmartEdit, the FGD's names for the keys and their choices), their flags, their
 //          outputs and the outputs that reach them. Several entities show what they share;
-//          values they disagree on are left blank.
+//          values they disagree on are left blank. Also a class change, as the sheet makes it.
 //
 //===========================================================================//
 #pragma once
@@ -19,6 +19,9 @@ namespace xv::map
 {
 
 class CScene;
+class CFgd;
+struct Entity_t;
+class CMap;
 
 struct PropertyRow_t
 {
@@ -85,5 +88,10 @@ inline constexpr std::uint32_t WORLD_OBJECT = ~0u;
 // Whether an output's target names the entity: names compare ignoring case, and a target ending
 // in '*' takes every name that starts with the rest, as the game matches them.
 [[nodiscard]] bool TargetMatches( std::string_view szTarget, std::string_view szName );
+
+// The entity made szClass: the keys its old class has and the new one hasn't go (they meant
+// something only to the old class); keys neither class knows (added by hand) stay. Without the
+// classes in pFgd, only the classname changes.
+void ChangeClass( const CMap &map, const CFgd *pFgd, Entity_t &entity, std::string_view szClass );
 
 } // namespace xv::map

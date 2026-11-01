@@ -731,7 +731,7 @@ void CMapProperties::CommitClass( const std::string &szClass )
 		return;
 	}
 	Apply( tr( "Change Class" ), [ this, szClass, selection = m_Document.GetSelection() ]( const xv::map::CScene &scene ) {
-		return EditShown( scene, selection, [ & ]( xv::map::Entity_t &entity ) { xv::map::SetKeyValue( scene.m_Map, entity, "classname", szClass ); } );
+		return EditShown( scene, selection, [ & ]( xv::map::Entity_t &entity ) { xv::map::ChangeClass( scene.m_Map, scene.m_pFgd.get(), entity, szClass ); } );
 	} );
 }
 
