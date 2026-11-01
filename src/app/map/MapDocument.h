@@ -22,6 +22,7 @@
 
 #include "map/Edit.h"
 #include "map/GameConfig.h"
+#include "map/Helpers.h"
 #include "map/Scene.h"
 #include "vfs/Vfs.h"
 
@@ -65,6 +66,9 @@ public:
 	[[nodiscard]] bool IsLoaded() const { return m_pScene != nullptr; }
 	[[nodiscard]] const xv::map::CScene *GetScene() const { return m_pScene.get(); }
 	[[nodiscard]] std::shared_ptr<const xv::map::CScene> GetSharedScene() const { return m_pScene; }
+	// Every path_track's and path_corner's link to its next corner in the scene shown, worked
+	// out once per scene for the views that draw them all.
+	[[nodiscard]] const std::vector<xv::map::PathLink_t> &GetPathLinks() const;
 	[[nodiscard]] const std::optional<xv::vfs::CGameInfo> &GetGame() const { return m_Game; }
 	// How many maps have finished loading: an edit makes a new scene, but the same map.
 	[[nodiscard]] int GetLoadCount() const { return m_nLoads; }
@@ -166,6 +170,10 @@ private:
 	void UpdateCordonHidden();
 
 	std::shared_ptr<const xv::map::CScene> m_pScene;
+	// GetPathLinks' answer and the scene it is for (weak, so a new scene at the old one's
+	// address isn't taken for it).
+	mutable std::weak_ptr<const xv::map::CScene> m_pPathLinkScene;
+	mutable std::vector<xv::map::PathLink_t> m_PathLinks;
 	QUndoStack *m_pUndo = nullptr;
 	QStringList m_EditListenerCosts;
 	double m_flPreviewMs = 0.0;

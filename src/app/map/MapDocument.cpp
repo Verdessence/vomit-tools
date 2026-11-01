@@ -627,6 +627,19 @@ void CMapDocument::Changed( bool bVisibility )
 }
 
 //-----------------------------------------------------------------------------
+// Purpose: Worked out again only when the scene has changed since the last call.
+//-----------------------------------------------------------------------------
+const std::vector<xv::map::PathLink_t> &CMapDocument::GetPathLinks() const
+{
+	if ( m_pPathLinkScene.lock() != m_pScene )
+	{
+		m_PathLinks = m_pScene ? xv::map::DescribePathLinks( *m_pScene ) : std::vector<xv::map::PathLink_t>{};
+		m_pPathLinkScene = m_pScene;
+	}
+	return m_PathLinks;
+}
+
+//-----------------------------------------------------------------------------
 // Purpose: An entity's solids follow the entity as well as their own flags.
 //-----------------------------------------------------------------------------
 bool CMapDocument::IsShown( std::uint32_t nObject ) const

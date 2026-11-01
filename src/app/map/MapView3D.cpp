@@ -1845,7 +1845,13 @@ void CMapView3D::PaintTools( QPainter &painter )
 			if ( !pScene->IsSolidObject( nObject ) && !pScene->IsDeleted( nObject ) )
 				if ( auto entity = xv::map::DescribeHelpers( *pScene, pScene->GetIndex( nObject ) ); !entity.m_Lines.empty() || !entity.m_Rings.empty() || !entity.m_Sides.empty() )
 					helpers.push_back( std::move( entity ) );
-	if ( !box && !marker && !gizmo && faces.empty() && !pointfile && !bBrush && !bWalkable && !bOverlay && !m_ModalTransform && helpers.empty() )
+	// Every path's line to its next corner, selected or not, while both ends are shown.
+	std::vector<const xv::map::PathLink_t *> paths;
+	if ( const xv::map::CScene *pScene = GetDocument().GetScene(); pScene && m_Editor.GetSettings().m_bHelpers )
+		for ( const xv::map::PathLink_t &link : GetDocument().GetPathLinks() )
+			if ( GetDocument().IsShown( pScene->EntityObject( link.m_nFrom ) ) && GetDocument().IsShown( pScene->EntityObject( link.m_nTo ) ) )
+				paths.push_back( &link );
+	if ( !box && !marker && !gizmo && faces.empty() && !pointfile && !bBrush && !bWalkable && !bOverlay && !m_ModalTransform && helpers.empty() && paths.empty() )
 	{
 		return;
 	}
@@ -1993,6 +1999,22 @@ void CMapView3D::PaintTools( QPainter &painter )
 			lines.emplace_back( QPointF{ pa[ 0 ], pa[ 1 ] }, QPointF{ pb[ 0 ], pb[ 1 ] } );
 		}
 	};
+	auto drawHelper = [ & ]( const xv::map::HelperLine_t &helper ) {
+		if ( const auto projected = camera.ProjectLine( helper.m_From, helper.m_To ) )
+		{
+			const auto &[ pa, pb ] = *projected;
+			painter.setPen( QPen{ QColor{ helper.m_Color.m_nR, helper.m_Color.m_nG, helper.m_Color.m_nB }, 1.5 } );
+			painter.drawLine( QPointF{ pa[ 0 ], pa[ 1 ] }, QPointF{ pb[ 0 ], pb[ 1 ] } );
+		}
+	};
+	if ( !paths.empty() )
+	{
+		painter.setRenderHint( QPainter::Antialiasing, true );
+		for ( const xv::map::PathLink_t *pLink : paths )
+			for ( const xv::map::HelperLine_t &helper : pLink->m_Lines )
+				drawHelper( helper );
+		painter.setRenderHint( QPainter::Antialiasing, false );
+	}
 	if ( !helpers.empty() )
 	{
 		const xv::map::CScene &scene = *GetDocument().GetScene();
@@ -2002,14 +2024,7 @@ void CMapView3D::PaintTools( QPainter &painter )
 			for ( const auto *pLines : { &entity.m_Lines, &entity.m_Rings } )
 			{
 				for ( const xv::map::HelperLine_t &helper : *pLines )
-				{
-					if ( const auto projected = camera.ProjectLine( helper.m_From, helper.m_To ) )
-					{
-						const auto &[ pa, pb ] = *projected;
-						painter.setPen( QPen{ QColor{ helper.m_Color.m_nR, helper.m_Color.m_nG, helper.m_Color.m_nB }, 1.5 } );
-						painter.drawLine( QPointF{ pa[ 0 ], pa[ 1 ] }, QPointF{ pb[ 0 ], pb[ 1 ] } );
-					}
-				}
+					drawHelper( helper );
 			}
 			// A side list's faces, tinted as Hammer marks a cubemap's.
 			if ( !entity.m_Sides.empty() )

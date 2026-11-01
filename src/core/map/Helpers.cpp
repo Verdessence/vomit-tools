@@ -8,9 +8,12 @@
 #include "map/Helpers.h"
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
+#include <map>
 #include <numbers>
 #include <optional>
+#include <string>
 
 #include "kv1/Kv1.h"
 #include "map/Entities.h"
@@ -135,22 +138,25 @@ void Box( std::vector<HelperLine_t> &out, Point_t mins, Point_t maxs, Color_t co
 }
 
 //-----------------------------------------------------------------------------
-// Purpose: A line with a head at its end (or at its middle when bHeadInMiddle, for a chain's
-//          links, so the head isn't lost in the next one's start).
+// Purpose: An arrowhead flHead long at tip, pointing along forward (of unit length).
 //-----------------------------------------------------------------------------
-void Arrow( std::vector<HelperLine_t> &out, Point_t from, Point_t to, Color_t color, bool bHeadInMiddle = false )
+void Head( std::vector<HelperLine_t> &out, Point_t tip, Point_t forward, double flHead, Color_t color )
+{
+	const auto [ u, v ] = Across( forward );
+	for ( const Point_t &dir : { u, Scale( u, -1.0 ), v, Scale( v, -1.0 ) } )
+		out.push_back( { tip, Add( Subtract( tip, Scale( forward, flHead ) ), Scale( dir, flHead / 2.0 ) ), color } );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: A line with a head at its end.
+//-----------------------------------------------------------------------------
+void Arrow( std::vector<HelperLine_t> &out, Point_t from, Point_t to, Color_t color )
 {
 	const Point_t delta = Subtract( to, from );
 	const double flLength = Length( delta );
 	out.push_back( { from, to, color } );
-	if ( flLength < 1e-6 )
-		return;
-	const Point_t forward = Scale( delta, 1.0 / flLength );
-	const Point_t tip = bHeadInMiddle ? Add( from, Scale( delta, 0.5 ) ) : to;
-	const double flHead = std::min( ARROW_LENGTH / 2.0, flLength / 3.0 );
-	const auto [ u, v ] = Across( forward );
-	for ( const Point_t &dir : { u, Scale( u, -1.0 ), v, Scale( v, -1.0 ) } )
-		out.push_back( { tip, Add( Subtract( tip, Scale( forward, flHead ) ), Scale( dir, flHead / 2.0 ) ), color } );
+	if ( flLength >= 1e-6 )
+		Head( out, to, Scale( delta, 1.0 / flLength ), std::min( ARROW_LENGTH / 2.0, flLength / 3.0 ), color );
 }
 
 //-----------------------------------------------------------------------------
@@ -211,8 +217,115 @@ void Movement( const CScene &scene, const Entity_t &entity, std::vector<HelperLi
 }
 
 //-----------------------------------------------------------------------------
+// Purpose: Which way rotating doors and buttons turn and how far, as the game sets them up:
+//          about the entity's origin, one of its angles growing by distance degrees (yaw unless
+//          a flag picks roll or pitch; another turns it the other way). func_rotating spins
+//          round for good, its flags naming the axis. An arc traced by the brushes' middle, its
+//          head where they stop, and (for those that stop) their box there.
+//-----------------------------------------------------------------------------
+void Turning( const CScene &scene, const Entity_t &entity, std::vector<HelperLine_t> &out )
+{
+	const std::string_view szClass = entity.GetClassname();
+	const bool bSpinner = kv1::EqualsIgnoreCase( szClass, "func_rotating" );
+	const bool bDoor = kv1::EqualsIgnoreCase( szClass, "func_door_rotating" );
+	const bool bButton = kv1::EqualsIgnoreCase( szClass, "func_rot_button" ) || kv1::EqualsIgnoreCase( szClass, "momentary_rot_button" );
+	if ( ( !bSpinner && !bDoor && !bButton ) || entity.m_Solids.empty() )
+		return;
+	Box_t bounds;
+	for ( const std::uint32_t nSolid : entity.m_Solids )
+		if ( nSolid < scene.m_Solids.size() )
+			bounds.Add( scene.m_Solids[ nSolid ].m_Bounds );
+	if ( bounds.IsEmpty() )
+		return;
+	const int nFlags = static_cast<int>( KeyNumber( entity, "spawnflags", 0.0 ) );
+	std::array<double, 3> step{ 0, 1, 0 };
+	double flDegrees = 360.0;
+	if ( bSpinner )
+	{
+		if ( nFlags & 4 )
+			step = { 0, 0, 1 };
+		else if ( nFlags & 8 )
+			step = { 1, 0, 0 };
+	}
+	else
+	{
+		if ( nFlags & 64 )
+			step = { 0, 0, 1 };
+		else if ( nFlags & 128 )
+			step = { 1, 0, 0 };
+		flDegrees = KeyNumber( entity, "distance", bDoor ? 90.0 : 0.0 );
+	}
+	if ( nFlags & 2 )
+		flDegrees = -flDegrees;
+	if ( std::abs( flDegrees ) < 1e-3 )
+		return;
+	const Point_t pivot = ParsePoint( entity.GetValue( "origin" ) ).value_or( bounds.GetCenter() );
+	const std::array<double, 3> angles = ParseTriple( entity.GetValue( "angles" ) ).value_or( std::array<double, 3>{} );
+	const Transform_t start = Transform_t::FromAngles( {}, angles );
+	// A point as it is when the angles have grown by flTurn: back to the entity's own frame
+	// (the turn's rows transposed), then out again at the new angles.
+	const auto turned = [ & ]( Point_t point, double flTurn ) {
+		const Point_t offset = Subtract( point, pivot );
+		const auto &r = start.m_Rotation;
+		const Point_t local{ r[ 0 ] * offset[ 0 ] + r[ 3 ] * offset[ 1 ] + r[ 6 ] * offset[ 2 ], r[ 1 ] * offset[ 0 ] + r[ 4 ] * offset[ 1 ] + r[ 7 ] * offset[ 2 ], r[ 2 ] * offset[ 0 ] + r[ 5 ] * offset[ 1 ] + r[ 8 ] * offset[ 2 ] };
+		std::array<double, 3> now = angles;
+		for ( int i = 0; i < 3; i++ )
+			now[ i ] += step[ i ] * flTurn;
+		return Add( pivot, Transform_t::FromAngles( {}, now ).Rotate( local ) );
+	};
+	// The brushes' middle traces the arc; one on the axis is moved out to the box's half size,
+	// across the axis, so the arc can be seen.
+	Point_t traced = bounds.GetCenter();
+	const Point_t spin = [ & ] {
+		// The axis the turn is about: the direction a small turn leaves alone.
+		Point_t best{ 1, 0, 0 };
+		double flLeast = 1e30;
+		for ( const Point_t &candidate : { Point_t{ 1, 0, 0 }, Point_t{ 0, 1, 0 }, Point_t{ 0, 0, 1 }, Normalized( start.Rotate( { 1, 0, 0 } ) ), Normalized( start.Rotate( { 0, 1, 0 } ) ), Normalized( start.Rotate( { 0, 0, 1 } ) ) } )
+			if ( const double flMoved = Length( Subtract( turned( Add( pivot, candidate ), 10.0 ), Add( pivot, candidate ) ) ); flMoved < flLeast )
+			{
+				flLeast = flMoved;
+				best = candidate;
+			}
+		return best;
+	}();
+	const Point_t fromAxis = Subtract( Subtract( traced, pivot ), Scale( spin, Dot( Subtract( traced, pivot ), spin ) ) );
+	const double flHalf = Length( Subtract( bounds.m_Maxs, bounds.m_Mins ) ) / 2.0;
+	if ( Length( fromAxis ) < std::max( 8.0, flHalf / 4.0 ) )
+		traced = Add( traced, Scale( Across( spin ).first, std::max( 16.0, flHalf ) ) );
+	const int nSteps = std::max( 8, static_cast<int>( std::abs( flDegrees ) / 5.0 ) );
+	Point_t previous = traced;
+	for ( int n = 1; n <= nSteps; n++ )
+	{
+		const Point_t at = turned( traced, flDegrees * n / nSteps );
+		out.push_back( { previous, at, MOVEMENT_COLOR } );
+		if ( n == nSteps && Length( Subtract( at, previous ) ) > 1e-6 )
+			Head( out, at, Normalized( Subtract( at, previous ) ), ARROW_LENGTH / 2.0, MOVEMENT_COLOR );
+		previous = at;
+	}
+	if ( bSpinner )
+		return;
+	auto corner = [ & ]( int n ) { return turned( Point_t{ ( n & 1 ) ? bounds.m_Maxs[ 0 ] : bounds.m_Mins[ 0 ], ( n & 2 ) ? bounds.m_Maxs[ 1 ] : bounds.m_Mins[ 1 ], ( n & 4 ) ? bounds.m_Maxs[ 2 ] : bounds.m_Mins[ 2 ] }, flDegrees ); };
+	for ( int n = 0; n < 8; n++ )
+		for ( int nBit = 1; nBit < 8; nBit <<= 1 )
+			if ( !( n & nBit ) )
+				out.push_back( { corner( n ), corner( n | nBit ), MOVEMENT_COLOR } );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: A trigger_teleport's arrow to where it sends things (its target, an
+//          info_teleport_destination most often).
+//-----------------------------------------------------------------------------
+void Teleport( const CScene &scene, const Entity_t &entity, Point_t origin, std::vector<HelperLine_t> &out )
+{
+	if ( !kv1::EqualsIgnoreCase( entity.GetClassname(), "trigger_teleport" ) )
+		return;
+	for ( const Point_t &to : EntitiesWhere( scene, "targetname", entity.GetValue( "target" ) ) )
+		Arrow( out, origin, to, MOVEMENT_COLOR );
+}
+
+//-----------------------------------------------------------------------------
 // Purpose: A train's path, from its first corner (its target), or a path's from itself: each
-//          link along target to the next, with its way marked, until the path ends or comes
+//          link along target to the next, its head where it goes, until the path ends or comes
 //          round again.
 //-----------------------------------------------------------------------------
 void TrainPath( const CScene &scene, std::uint32_t nEntity, std::vector<HelperLine_t> &out )
@@ -239,7 +352,7 @@ void TrainPath( const CScene &scene, std::uint32_t nEntity, std::vector<HelperLi
 		seen.push_back( *nAt );
 		const std::optional<std::size_t> nNext = find( entities[ *nAt ].GetValue( "target" ) );
 		if ( nNext )
-			Arrow( out, scene.m_Entities[ *nAt ].m_Origin, scene.m_Entities[ *nNext ].m_Origin, PATH_COLOR, true );
+			Arrow( out, scene.m_Entities[ *nAt ].m_Origin, scene.m_Entities[ *nNext ].m_Origin, PATH_COLOR );
 		nAt = nNext;
 	}
 }
@@ -265,6 +378,8 @@ EntityHelpers_t DescribeHelpers( const CScene &scene, std::uint32_t nEntity )
 		Ring( helpers.m_Rings, origin, { 0, 1, 0 }, { 0, 0, 1 }, flRadius, color );
 	}
 	Movement( scene, entity, helpers.m_Lines );
+	Turning( scene, entity, helpers.m_Lines );
+	Teleport( scene, entity, origin, helpers.m_Lines );
 	TrainPath( scene, nEntity, helpers.m_Lines );
 	if ( !visual.m_pClass )
 		return helpers;
@@ -366,6 +481,42 @@ EntityHelpers_t DescribeHelpers( const CScene &scene, std::uint32_t nEntity )
 		}
 	}
 	return helpers;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Every path's link to its target. Names are looked up once for the whole map, and a
+//          name two entities share links to the first, as TrainPath finds it.
+//-----------------------------------------------------------------------------
+std::vector<PathLink_t> DescribePathLinks( const CScene &scene )
+{
+	const auto &entities = scene.m_Map.m_Entities;
+	const auto lower = []( std::string_view szText ) {
+		std::string szLower{ szText };
+		std::ranges::transform( szLower, szLower.begin(), []( unsigned char ch ) { return static_cast<char>( std::tolower( ch ) ); } );
+		return szLower;
+	};
+	std::map<std::string, std::uint32_t> names;
+	for ( std::uint32_t e = 0; e < entities.size(); e++ )
+		if ( !entities[ e ].m_bDeleted )
+			if ( std::string szName = lower( entities[ e ].GetValue( "targetname" ) ); !szName.empty() )
+				names.try_emplace( std::move( szName ), e );
+	std::vector<PathLink_t> links;
+	for ( std::uint32_t e = 0; e < entities.size(); e++ )
+	{
+		const Entity_t &entity = entities[ e ];
+		if ( entity.m_bDeleted || ( !kv1::EqualsIgnoreCase( entity.GetClassname(), "path_track" ) && !kv1::EqualsIgnoreCase( entity.GetClassname(), "path_corner" ) ) )
+			continue;
+		const std::string szTarget = lower( entity.GetValue( "target" ) );
+		const auto found = names.find( szTarget );
+		if ( szTarget.empty() || found == names.end() || found->second == e )
+			continue;
+		PathLink_t link;
+		link.m_nFrom = e;
+		link.m_nTo = found->second;
+		Arrow( link.m_Lines, scene.m_Entities[ e ].m_Origin, scene.m_Entities[ found->second ].m_Origin, PATH_COLOR );
+		links.push_back( std::move( link ) );
+	}
+	return links;
 }
 
 } // namespace xv::map

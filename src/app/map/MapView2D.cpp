@@ -977,6 +977,20 @@ void CMapView2D::PaintObjects( QPainter &painter, const QRectF &visible, bool bP
 		add( *pObject, chosen, true );
 	}
 	draw( chosen );
+	// Paths' lines to their next corner, selected or not.
+	if ( settings.m_bHelpers )
+	{
+		for ( const xv::map::PathLink_t &link : document.GetPathLinks() )
+		{
+			if ( !document.IsShown( pScene->EntityObject( link.m_nFrom ) ) || !document.IsShown( pScene->EntityObject( link.m_nTo ) ) )
+				continue;
+			for ( const xv::map::HelperLine_t &line : link.m_Lines )
+			{
+				painter.setPen( QPen{ QColor{ line.m_Color.m_nR, line.m_Color.m_nG, line.m_Color.m_nB }, 0 } );
+				painter.drawLine( ToWidget( Flatten( line.m_From ) ), ToWidget( Flatten( line.m_To ) ) );
+			}
+		}
+	}
 	// A selected entity's helpers (a light's falloff distances, say).
 	for ( const MapFlatObject_t *pObject : selected )
 	{
