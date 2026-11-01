@@ -90,6 +90,8 @@ namespace
 
 // The side panels' order, which are shown and which folded (CPanelColumn::GetState).
 constexpr char SIDE_PANELS_SETTING[] = "maps/sidePanels";
+// The side's width, as last dragged.
+constexpr char SIDE_WIDTH_SETTING[] = "maps/sideWidth";
 
 enum class MapIcon_t
 {
@@ -444,7 +446,13 @@ CMapEditor::CMapEditor( const QString &szPath, bool bFromGame, QWidget *pParent 
 	pMiddle->addWidget( m_pSidePanel );
 	pMiddle->setStretchFactor( 0, 1 );
 	pMiddle->setStretchFactor( 1, 0 );
-	pMiddle->setSizes( { 1000, m_pSidePanel->minimumSizeHint().width() } );
+	// The side as wide as it was last left (dragged), else as narrow as its panels allow.
+	const int nSideWidth = QSettings{}.value( QLatin1String( SIDE_WIDTH_SETTING ), 0 ).toInt();
+	pMiddle->setSizes( { 1000, std::max( nSideWidth, m_pSidePanel->minimumSizeHint().width() ) } );
+	connect( pMiddle, &QSplitter::splitterMoved, this, [ pMiddle ] {
+		if ( const QList<int> sizes = pMiddle->sizes(); sizes.size() == 2 && sizes[ 1 ] > 0 )
+			QSettings{}.setValue( QLatin1String( SIDE_WIDTH_SETTING ), sizes[ 1 ] );
+	} );
 
 	auto *pCenter = new QHBoxLayout;
 	pCenter->setContentsMargins( 0, 0, 0, 0 );

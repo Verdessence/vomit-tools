@@ -203,7 +203,8 @@ CPanelColumn::CPanelColumn( QWidget *pParent )
 	m_pScroll->setObjectName( QStringLiteral( "panelScroll" ) );
 	m_pScroll->setFrameShape( QFrame::NoFrame );
 	m_pScroll->setWidgetResizable( true );
-	m_pScroll->setHorizontalScrollBarPolicy( Qt::ScrollBarAlwaysOff );
+	// A mode's panel wider than the column scrolls across rather than widening it.
+	m_pScroll->setHorizontalScrollBarPolicy( Qt::ScrollBarAsNeeded );
 	m_pContent = new QWidget;
 	m_pContent->setObjectName( QStringLiteral( "panelColumn" ) );
 	m_pContent->setAcceptDrops( true );
@@ -554,8 +555,17 @@ bool CPanelColumn::eventFilter( QObject *pObject, QEvent *pEvent )
 //-----------------------------------------------------------------------------
 QSize CPanelColumn::minimumSizeHint() const
 {
+	// The panels that are always there set the width; a mode's coming and going (Face Edit with
+	// its tool) leaves it as it is.
+	int nContent = 0;
+	for ( const Entry_t &entry : m_Entries )
+	{
+		if ( !entry.m_bMode && entry.m_bAvailable && entry.m_pTab->isChecked() )
+			nContent = std::max( nContent, entry.m_pPanel->minimumSizeHint().width() );
+	}
+	const QMargins margins = m_pPanels->contentsMargins();
 	const int nScrollBar = m_pScroll->verticalScrollBar()->sizeHint().width();
-	return { m_pStrip->sizeHint().width() + m_pContent->minimumSizeHint().width() + nScrollBar, m_pStrip->sizeHint().height() };
+	return { m_pStrip->sizeHint().width() + nContent + margins.left() + margins.right() + nScrollBar, m_pStrip->sizeHint().height() };
 }
 
 //-----------------------------------------------------------------------------
