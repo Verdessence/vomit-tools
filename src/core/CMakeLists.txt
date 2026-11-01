@@ -32,6 +32,8 @@ add_library(vomit_tools_core STATIC
         map/InstanceEdit.h
         map/Helpers.cpp
         map/Helpers.h
+        map/Generator.cpp
+        map/Generator.h
         map/Instance.cpp
         map/Instance.h
         map/Geometry.cpp

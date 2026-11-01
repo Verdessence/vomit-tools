@@ -12,6 +12,7 @@
 #include "map/DispEdit.h"
 #include "map/MapReports.h"
 #include "map/MapSprinkle.h"
+#include "map/MapBuilding.h"
 #include "map/Materials.h"
 #include "texture/Vtf.h"
 #include "vfs/Vfs.h"
@@ -58,6 +59,7 @@
 #include <QHideEvent>
 #include <QShowEvent>
 #include <QTimer>
+#include <QUndoStack>
 #include <QVBoxLayout>
 
 #include "FileDialogs.h"
@@ -807,6 +809,52 @@ void CMapEditor::FillNewObjects()
 	SetCurrentMaterial( recent.empty() ? szBefore : recent.front() );
 	FillPrefabs();
 	LoadSprinkleTypes();
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Without a box or a selection, a 256 unit room's worth at the grid's origin.
+//-----------------------------------------------------------------------------
+void CMapEditor::ShowBuildingGenerator()
+{
+	const xv::map::CScene *pScene = m_pDocument->GetScene();
+	if ( !pScene )
+		return;
+	xv::map::Box_t box{ { 0, 0, 0 }, { 256, 256, 128 } };
+	if ( m_NewBox && !m_NewBox->IsEmpty() )
+		box = *m_NewBox;
+	else if ( !m_pDocument->GetSelection().empty() && !m_pDocument->GetSelectionBounds().IsEmpty() )
+		box = m_pDocument->GetSelectionBounds();
+	CMapBuildingDialog dialog( box, this );
+	if ( dialog.exec() != QDialog::Accepted || !m_pDocument->GetScene() )
+		return;
+	pScene = m_pDocument->GetScene();
+	const xv::map::HammerDefaults_t &defaults = m_pDocument->GetDefaults();
+	const std::string szMaterial = GetCurrentMaterial().trimmed().toUpper().toStdString();
+	xv::map::FaceDefaults_t faces;
+	if ( !szMaterial.empty() )
+		faces.m_szMaterial = szMaterial;
+	faces.m_flTextureScale = defaults.m_flTextureScale;
+	faces.m_nLightmapScale = defaults.m_nLightmapScale;
+	std::string szError;
+	std::vector<xv::map::Solid_t> solids = xv::map::GenerateBuilding( pScene->m_Map, dialog.GetKind(), dialog.GetBox(), dialog.GetParams(), faces, &szError );
+	if ( solids.empty() )
+	{
+		emit StatusMessage( QString::fromStdString( szError ) );
+		return;
+	}
+	std::vector<std::uint32_t> added;
+	xv::map::MapEdit_t edit = xv::map::AddObjects( *pScene, std::move( solids ), {}, &added );
+	QUndoStack *pUndo = m_pDocument->GetUndoStack();
+	pUndo->beginMacro( tr( "Building Generator" ) );
+	m_pDocument->Edit( std::move( edit ), tr( "Building Generator" ), added );
+	if ( added.size() > 1 )
+	{
+		xv::map::MapEdit_t group = xv::map::GroupObjects( *m_pDocument->GetScene(), added, nullptr );
+		if ( !group.IsEmpty() )
+			m_pDocument->Edit( std::move( group ), tr( "Group" ), added );
+	}
+	pUndo->endMacro();
+	SetNewBox( std::nullopt );
 }
 
 //-----------------------------------------------------------------------------

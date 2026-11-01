@@ -244,6 +244,9 @@ public:
 	void ClickFace( const xv::map::FaceRef_t &face, Qt::KeyboardModifiers modifiers );
 	void ApplyToFace( const xv::map::FaceRef_t &face, bool bValues );
 	[[nodiscard]] CMapFaceEdit &GetFaceEdit() { return *m_pFaceEdit; }
+	// Tools > Building Generator: a template filling the block tool's box (else the selection's
+	// bounds), added as one group in one undo step.
+	void ShowBuildingGenerator();
 	[[nodiscard]] CMapSprinklePanel &GetSprinkle() { return *m_pSprinkle; }
 	// The Displacement tab's edits, each one undo step, on the selected faces (else every face
 	// of the selected objects): displacements made at a power on four-sided faces, taken off,

@@ -820,15 +820,18 @@ void CMainWindow::BuildMenus( QAction *pSearchPathsToggle )
 	auto *pTools = menuBar()->addMenu( tr( "&Tools" ) );
 	auto *pCreatePrefab = pTools->addAction( tr( "Create Prefab..." ), this, [ this ] { if ( auto *pMap = GetCurrentMap() ) pMap->CreatePrefab(); } );
 	pCreatePrefab->setObjectName( QStringLiteral( "mapCreatePrefabAction" ) );
+	auto *pBuilding = pTools->addAction( tr( "&Building Generator…" ), this, [ this ] { if ( auto *pMap = GetCurrentMap() ) pMap->ShowBuildingGenerator(); } );
+	pBuilding->setObjectName( QStringLiteral( "mapBuildingAction" ) );
 	auto *pSprinkle = pTools->addAction( tr( "Sprinkle" ), this, [ this ] { if ( auto *pMap = GetCurrentMap() ) pMap->RunAction( MapAction_t::MAP_ACTION_TOOL_SPRINKLE, pMap->GetActiveView() ); } );
 	pSprinkle->setObjectName( QStringLiteral( "mapSprinkleAction" ) );
 	pTools->addSeparator();
 	auto *pHammerSetup = pTools->addAction( tr( "Set Up &Hammer…" ), this, &CMainWindow::SetUpHammer );
 	pHammerSetup->setObjectName( QStringLiteral( "hammerSetupAction" ) );
 	pHammerSetup->setToolTip( tr( "Write the open game's entry into Hammer++'s or Hammer's game configuration" ) );
-	connect( pTools, &QMenu::aboutToShow, this, [ this, pCreatePrefab, pSprinkle, pHammerSetup ] {
+	connect( pTools, &QMenu::aboutToShow, this, [ this, pCreatePrefab, pBuilding, pSprinkle, pHammerSetup ] {
 		pCreatePrefab->setEnabled( GetCurrentMap() && !GetCurrentMap()->GetDocument().GetSelection().empty() );
 		pSprinkle->setEnabled( GetCurrentMap() != nullptr );
+		pBuilding->setEnabled( GetCurrentMap() != nullptr );
 		pHammerSetup->setEnabled( m_Game.has_value() );
 	} );
 
