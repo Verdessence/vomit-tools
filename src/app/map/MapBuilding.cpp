@@ -8,7 +8,6 @@
 
 #include <QCheckBox>
 #include <QComboBox>
-#include <QDialogButtonBox>
 #include <QDoubleSpinBox>
 #include <QFormLayout>
 #include <QGridLayout>
@@ -26,7 +25,7 @@ CBuildingPreview::CBuildingPreview( QWidget *pParent )
 	: QWidget( pParent )
 {
 	setObjectName( QStringLiteral( "mapBuildingPreview" ) );
-	setMinimumSize( 480, 220 );
+	setMinimumSize( 220, 120 );
 }
 
 //-----------------------------------------------------------------------------
@@ -95,12 +94,13 @@ void CBuildingPreview::paintEvent( QPaintEvent * )
 //-----------------------------------------------------------------------------
 // Purpose:
 //-----------------------------------------------------------------------------
-CMapBuildingDialog::CMapBuildingDialog( const xv::map::Box_t &box, QWidget *pParent )
-	: QDialog( pParent )
+CMapBuildingPanel::CMapBuildingPanel( QWidget *pParent )
+	: QWidget( pParent )
 {
 	setObjectName( QStringLiteral( "mapBuilding" ) );
-	setWindowTitle( tr( "Building Generator" ) );
+	const xv::map::Box_t box{ { 0, 0, 0 }, { 256, 256, 128 } };
 	auto *pLayout = new QVBoxLayout( this );
+	pLayout->setContentsMargins( 0, 0, 0, 0 );
 	auto *pTop = new QFormLayout;
 	pLayout->addLayout( pTop );
 	m_pKind = new QComboBox;
@@ -139,7 +139,7 @@ CMapBuildingDialog::CMapBuildingDialog( const xv::map::Box_t &box, QWidget *pPar
 		pSpin->setObjectName( QString::fromLatin1( pszName ) );
 		pSpin->setRange( nMin, nMax );
 		pSpin->setValue( nValue );
-		connect( pSpin, &QSpinBox::valueChanged, this, &CMapBuildingDialog::Update );
+		connect( pSpin, &QSpinBox::valueChanged, this, &CMapBuildingPanel::Update );
 		return pSpin;
 	};
 	auto number = [ this ]( const char *pszName, double flMin, double flMax, double flValue ) {
@@ -148,13 +148,13 @@ CMapBuildingDialog::CMapBuildingDialog( const xv::map::Box_t &box, QWidget *pPar
 		pSpin->setRange( flMin, flMax );
 		pSpin->setDecimals( 2 );
 		pSpin->setValue( flValue );
-		connect( pSpin, &QDoubleSpinBox::valueChanged, this, &CMapBuildingDialog::Update );
+		connect( pSpin, &QDoubleSpinBox::valueChanged, this, &CMapBuildingPanel::Update );
 		return pSpin;
 	};
 	auto check = [ this ]( const QString &szText, bool bOn ) {
 		auto *pCheck = new QCheckBox( szText );
 		pCheck->setChecked( bOn );
-		connect( pCheck, &QCheckBox::toggled, this, &CMapBuildingDialog::Update );
+		connect( pCheck, &QCheckBox::toggled, this, &CMapBuildingPanel::Update );
 		return pCheck;
 	};
 	const xv::map::BuildingParams_t defaults;
@@ -172,7 +172,7 @@ CMapBuildingDialog::CMapBuildingDialog( const xv::map::Box_t &box, QWidget *pPar
 		m_pDirection = new QComboBox;
 		m_pDirection->setObjectName( QStringLiteral( "mapBuildingDirection" ) );
 		m_pDirection->addItems( { tr( "Up toward +x" ), tr( "Up toward -x" ), tr( "Up toward +y" ), tr( "Up toward -y" ) } );
-		connect( m_pDirection, &QComboBox::currentIndexChanged, this, &CMapBuildingDialog::Update );
+		connect( m_pDirection, &QComboBox::currentIndexChanged, this, &CMapBuildingPanel::Update );
 		m_pSolidUnder = check( tr( "Solid underneath" ), defaults.m_bSolidUnder );
 		pForm->addRow( tr( "Steps" ), m_pSteps );
 		pForm->addRow( tr( "Climbs" ), m_pDirection );
@@ -258,27 +258,26 @@ CMapBuildingDialog::CMapBuildingDialog( const xv::map::Box_t &box, QWidget *pPar
 	m_pProblem->setObjectName( QStringLiteral( "mapBuildingProblem" ) );
 	m_pProblem->setWordWrap( true );
 	pLayout->addWidget( m_pProblem );
-	auto *pButtons = new QDialogButtonBox( QDialogButtonBox::Ok | QDialogButtonBox::Cancel );
-	m_pOk = pButtons->button( QDialogButtonBox::Ok );
-	m_pOk->setText( tr( "Create" ) );
-	pLayout->addWidget( pButtons );
-	connect( pButtons, &QDialogButtonBox::accepted, this, &QDialog::accept );
-	connect( pButtons, &QDialogButtonBox::rejected, this, &QDialog::reject );
+	m_pOk = new QPushButton( tr( "Create" ) );
+	m_pOk->setObjectName( QStringLiteral( "mapBuildingCreate" ) );
+	m_pOk->setToolTip( tr( "Add the brushes, as one group" ) );
+	pLayout->addWidget( m_pOk, 0, Qt::AlignRight );
+	connect( m_pOk, &QPushButton::clicked, this, &CMapBuildingPanel::CreateRequested );
 	connect( m_pKind, &QComboBox::currentIndexChanged, this, [ this ]( int n ) {
 		m_pPages->setCurrentIndex( n );
 		Update();
 	} );
 	for ( auto *pSpin : m_Mins )
-		connect( pSpin, &QDoubleSpinBox::valueChanged, this, &CMapBuildingDialog::Update );
+		connect( pSpin, &QDoubleSpinBox::valueChanged, this, &CMapBuildingPanel::Update );
 	for ( auto *pSpin : m_Maxs )
-		connect( pSpin, &QDoubleSpinBox::valueChanged, this, &CMapBuildingDialog::Update );
+		connect( pSpin, &QDoubleSpinBox::valueChanged, this, &CMapBuildingPanel::Update );
 	Update();
 }
 
 //-----------------------------------------------------------------------------
 // Purpose:
 //-----------------------------------------------------------------------------
-xv::map::BuildingKind_t CMapBuildingDialog::GetKind() const
+xv::map::BuildingKind_t CMapBuildingPanel::GetKind() const
 {
 	return static_cast<xv::map::BuildingKind_t>( m_pKind->currentData().toInt() );
 }
@@ -286,7 +285,7 @@ xv::map::BuildingKind_t CMapBuildingDialog::GetKind() const
 //-----------------------------------------------------------------------------
 // Purpose:
 //-----------------------------------------------------------------------------
-xv::map::Box_t CMapBuildingDialog::GetBox() const
+xv::map::Box_t CMapBuildingPanel::GetBox() const
 {
 	xv::map::Box_t box;
 	for ( std::size_t a = 0; a < 3; a++ )
@@ -298,9 +297,24 @@ xv::map::Box_t CMapBuildingDialog::GetBox() const
 }
 
 //-----------------------------------------------------------------------------
+// Purpose: The block tool's box (or the selection's), when the panel is called up.
+//-----------------------------------------------------------------------------
+void CMapBuildingPanel::SetBox( const xv::map::Box_t &box )
+{
+	for ( std::size_t a = 0; a < 3; a++ )
+	{
+		const QSignalBlocker blockMin( m_Mins[ a ] );
+		const QSignalBlocker blockMax( m_Maxs[ a ] );
+		m_Mins[ a ]->setValue( box.m_Mins[ a ] );
+		m_Maxs[ a ]->setValue( box.m_Maxs[ a ] );
+	}
+	Update();
+}
+
+//-----------------------------------------------------------------------------
 // Purpose:
 //-----------------------------------------------------------------------------
-xv::map::BuildingParams_t CMapBuildingDialog::GetParams() const
+xv::map::BuildingParams_t CMapBuildingPanel::GetParams() const
 {
 	xv::map::BuildingParams_t params;
 	const bool bSpiral = GetKind() == xv::map::BuildingKind_t::BUILDING_KIND_SPIRAL_STAIRS;
@@ -334,7 +348,7 @@ xv::map::BuildingParams_t CMapBuildingDialog::GetParams() const
 // Purpose: The brushes made on a map of their own, so trying numbers leaves nothing in the
 //          real one.
 //-----------------------------------------------------------------------------
-void CMapBuildingDialog::Update()
+void CMapBuildingPanel::Update()
 {
 	if ( !m_pOk )
 		return;

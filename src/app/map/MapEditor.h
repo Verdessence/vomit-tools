@@ -34,6 +34,7 @@ class CMapCheckDialog;
 class CMapEntityReport;
 class CMapFaceEdit;
 class CMapSprinklePanel;
+class CMapBuildingPanel;
 class CMapFilterControl;
 class CMapPane;
 class CMapProperties;
@@ -146,7 +147,7 @@ public:
 	// the side normal faces.
 	void PlaceEntityOn( const xv::map::Point_t &point, const xv::map::Point_t &normal );
 	// What new blocks' faces get, and the class the entity tool places.
-	// Map > Map Properties: the world's keys (the sky) in a window of their own.
+	// Map > Map Properties: the world's keys (the sky) in their panel.
 	void ShowMapProperties();
 	// Map > Lighting: the lighting preview's window.
 	void ShowLighting();
@@ -244,9 +245,10 @@ public:
 	void ClickFace( const xv::map::FaceRef_t &face, Qt::KeyboardModifiers modifiers );
 	void ApplyToFace( const xv::map::FaceRef_t &face, bool bValues );
 	[[nodiscard]] CMapFaceEdit &GetFaceEdit() { return *m_pFaceEdit; }
-	// Tools > Building Generator: a template filling the block tool's box (else the selection's
-	// bounds), added as one group in one undo step.
+	// Tools > Building Generator: its panel, with the block tool's box (else the selection's
+	// bounds); Create adds the template's brushes as one group in one undo step.
 	void ShowBuildingGenerator();
+	void CreateBuilding();
 	// Opened from a .vmm: its submaps are instances, and saving asks for a VMF.
 	[[nodiscard]] bool IsManifest() const { return m_szPath.endsWith( u".vmm", Qt::CaseInsensitive ); }
 	[[nodiscard]] CMapSprinklePanel &GetSprinkle() { return *m_pSprinkle; }
@@ -414,6 +416,8 @@ private:
 	CMapProperties *m_pProperties = nullptr;
 	CMapFaceEdit *m_pFaceEdit = nullptr;
 	CMapSprinklePanel *m_pSprinkle = nullptr;
+	CMapBuildingPanel *m_pBuilding = nullptr;
+	CMapProperties *m_pWorldProperties = nullptr; // Map Properties: the world's keys
 	QWidget *m_pFaceEditHolder = nullptr; // Face Edit's panel, when it isn't in its window
 	CPanelColumn *m_pPanels = nullptr;    // the side's panels below the Filter Control
 	std::vector<xv::map::FaceRef_t> m_SelectedFaces;

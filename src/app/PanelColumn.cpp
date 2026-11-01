@@ -250,6 +250,18 @@ CPanel *CPanelColumn::AddPanel( const QString &szId, const QString &szTitle, con
 //-----------------------------------------------------------------------------
 // Purpose:
 //-----------------------------------------------------------------------------
+void CPanelColumn::SetHiddenByDefault( const QString &szId )
+{
+	const auto it = std::ranges::find_if( m_Entries, [ & ]( const Entry_t &entry ) { return entry.m_pPanel->GetId() == szId; } );
+	if ( it == m_Entries.end() )
+		return;
+	it->m_bHiddenByDefault = true;
+	SetShown( szId, false );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
 CPanel *CPanelColumn::GetPanel( const QString &szId ) const
 {
 	const auto it = std::ranges::find_if( m_Entries, [ & ]( const Entry_t &entry ) { return entry.m_pPanel->GetId() == szId; } );
@@ -432,7 +444,9 @@ void CPanelColumn::SetState( const QVariantMap &state )
 	{
 		const QSignalBlocker blockTab( entry.m_pTab );
 		const QSignalBlocker blockPanel( entry.m_pPanel );
-		entry.m_pTab->setChecked( !hidden.contains( entry.m_pPanel->GetId() ) );
+		// A panel the state doesn't know (newer than it) starts as it does by default.
+		const QString &szId = entry.m_pPanel->GetId();
+		entry.m_pTab->setChecked( order.contains( szId ) || !entry.m_bHiddenByDefault ? !hidden.contains( szId ) : false );
 		entry.m_pPanel->SetFolded( folded.contains( entry.m_pPanel->GetId() ) );
 	}
 	Relayout();

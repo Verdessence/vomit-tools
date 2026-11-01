@@ -1,9 +1,9 @@
 //===========================================================================//
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
-// Purpose: Tools > Building Generator: a template (stairs, spiral stairs, Hammer's arch, a room,
-//          a wall with windows, a railing), its numbers and the box it fills, with the brushes
-//          it would make drawn from above and from the front as the numbers change.
+// Purpose: The Building Generator panel: a template (stairs, spiral stairs, Hammer's arch, a
+//          room, a wall with windows, a railing), its numbers and the box it fills, with the
+//          brushes it would make drawn from above and from the front as the numbers change.
 //
 //===========================================================================//
 #pragma once
@@ -11,7 +11,7 @@
 #include <array>
 #include <vector>
 
-#include <QDialog>
+#include <QWidget>
 
 #include "map/Brushes.h"
 #include "map/Generator.h"
@@ -41,16 +41,21 @@ private:
 	xv::map::Box_t m_Box;
 };
 
-class CMapBuildingDialog : public QDialog
+class CMapBuildingPanel : public QWidget
 {
 	Q_OBJECT
 
 public:
-	CMapBuildingDialog( const xv::map::Box_t &box, QWidget *pParent = nullptr );
+	explicit CMapBuildingPanel( QWidget *pParent = nullptr );
 
 	[[nodiscard]] xv::map::BuildingKind_t GetKind() const;
 	[[nodiscard]] xv::map::Box_t GetBox() const;
+	void SetBox( const xv::map::Box_t &box );
 	[[nodiscard]] xv::map::BuildingParams_t GetParams() const;
+
+signals:
+	// Create was pressed, with numbers that make brushes.
+	void CreateRequested();
 
 private:
 	void Update();

@@ -410,6 +410,20 @@ CMapEditor::CMapEditor( const QString &szPath, bool bFromGame, QWidget *pParent 
 	m_pSprinkle = new CMapSprinklePanel;
 	m_pPanels->AddPanel( QStringLiteral( "sprinkle" ), tr( "Sprinkle" ), MakeIcon( MapIcon_t::MAP_ICON_SPRINKLE, panelIconColor ), m_pSprinkle );
 	m_pPanels->SetAvailable( QStringLiteral( "sprinkle" ), false );
+	m_pBuilding = new CMapBuildingPanel;
+	m_pPanels->AddPanel( QStringLiteral( "building" ), tr( "Building Generator" ), MakeIcon( MapIcon_t::MAP_ICON_BLOCK, panelIconColor ), m_pBuilding );
+	m_pPanels->SetHiddenByDefault( QStringLiteral( "building" ) );
+	connect( m_pBuilding, &CMapBuildingPanel::CreateRequested, this, &CMapEditor::CreateBuilding );
+	m_pWorldProperties = new CMapProperties( *m_pDocument );
+	m_pWorldProperties->setObjectName( QStringLiteral( "mapWorldProperties" ) );
+	m_pWorldProperties->SetWorld( true );
+	m_pPanels->AddPanel( QStringLiteral( "mapProperties" ), tr( "Map Properties" ), MakeIcon( MapIcon_t::MAP_ICON_PROPERTIES, panelIconColor ), m_pWorldProperties );
+	m_pPanels->SetHiddenByDefault( QStringLiteral( "mapProperties" ) );
+	// The world's sheet follows edits only while it shows.
+	connect( m_pDocument, &CMapDocument::SceneEdited, m_pWorldProperties, [ this ] {
+		if ( m_pWorldProperties->isVisible() )
+			m_pDocument->MeasureEditListener( tr( "Map Properties" ), [ this ] { m_pWorldProperties->Refresh(); } );
+	} );
 	m_pPanels->AddPanel( QStringLiteral( "newObjects" ), tr( "New Objects" ), MakeIcon( MapIcon_t::MAP_ICON_BLOCK, panelIconColor ), BuildNewObjects() );
 	m_pPanels->AddPanel( QStringLiteral( "texture" ), tr( "Texture" ), MakeIcon( MapIcon_t::MAP_ICON_MATERIAL, panelIconColor ), BuildTexturePanel() );
 	auto *pLighting = new CMapLightingPanel( *this );
@@ -828,10 +842,18 @@ void CMapEditor::ShowBuildingGenerator()
 		box = *m_ParkedBox;
 	else if ( !m_pDocument->GetSelection().empty() && !m_pDocument->GetSelectionBounds().IsEmpty() )
 		box = m_pDocument->GetSelectionBounds();
-	CMapBuildingDialog dialog( box, this );
-	if ( dialog.exec() != QDialog::Accepted || !m_pDocument->GetScene() )
+	m_pBuilding->SetBox( box );
+	m_pPanels->Reveal( QStringLiteral( "building" ) );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: The panel's brushes, one group in one undo step; the block tool's box is used up.
+//-----------------------------------------------------------------------------
+void CMapEditor::CreateBuilding()
+{
+	const xv::map::CScene *pScene = m_pDocument->GetScene();
+	if ( !pScene )
 		return;
-	pScene = m_pDocument->GetScene();
 	const xv::map::HammerDefaults_t &defaults = m_pDocument->GetDefaults();
 	const std::string szMaterial = GetCurrentMaterial().trimmed().toUpper().toStdString();
 	xv::map::FaceDefaults_t faces;
@@ -840,7 +862,7 @@ void CMapEditor::ShowBuildingGenerator()
 	faces.m_flTextureScale = defaults.m_flTextureScale;
 	faces.m_nLightmapScale = defaults.m_nLightmapScale;
 	std::string szError;
-	std::vector<xv::map::Solid_t> solids = xv::map::GenerateBuilding( pScene->m_Map, dialog.GetKind(), dialog.GetBox(), dialog.GetParams(), faces, &szError );
+	std::vector<xv::map::Solid_t> solids = xv::map::GenerateBuilding( pScene->m_Map, m_pBuilding->GetKind(), m_pBuilding->GetBox(), m_pBuilding->GetParams(), faces, &szError );
 	if ( solids.empty() )
 	{
 		emit StatusMessage( QString::fromStdString( szError ) );
@@ -1012,6 +1034,7 @@ void CMapEditor::Loaded()
 	m_Settings.m_bShowGrid = scene.m_Map.m_ViewSettings.m_bShowGrid;
 	m_Settings.m_bSnapToGrid = scene.m_Map.m_ViewSettings.m_bSnapToGrid;
 	m_pLoading->hide();
+	m_pWorldProperties->Refresh();
 	m_pLighting->Clear();
 	m_pLighting->SetRadSources( m_pDocument->GetGame(), m_szPath.toStdString() );
 	m_pLightingTimer->stop();
@@ -3811,21 +3834,8 @@ void CMapEditor::ShowMapProperties()
 	{
 		return;
 	}
-	auto *pDialog = new QDialog( this );
-	pDialog->setObjectName( QStringLiteral( "mapPropertiesDialog" ) );
-	pDialog->setWindowTitle( tr( "Map Properties" ) );
-	pDialog->setAttribute( Qt::WA_DeleteOnClose );
-	pDialog->resize( 420, 520 );
-	auto *pLayout = new QVBoxLayout( pDialog );
-	auto *pPanel = new CMapProperties( *m_pDocument );
-	pPanel->setObjectName( QStringLiteral( "mapWorldProperties" ) );
-	pPanel->SetWorld( true );
-	pLayout->addWidget( pPanel, 1 );
-	auto *pButtons = new QDialogButtonBox( QDialogButtonBox::Close );
-	connect( pButtons, &QDialogButtonBox::rejected, pDialog, &QDialog::close );
-	pLayout->addWidget( pButtons );
-	connect( m_pDocument, &CMapDocument::SceneEdited, pPanel, [ this, pPanel ] { m_pDocument->MeasureEditListener( tr( "Properties window" ), [ pPanel ] { pPanel->Refresh(); } ); } );
-	pDialog->show();
+	m_pWorldProperties->Refresh();
+	m_pPanels->Reveal( QStringLiteral( "mapProperties" ) );
 }
 
 //-----------------------------------------------------------------------------

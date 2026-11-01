@@ -70,6 +70,8 @@ public:
 	// A panel at the column's end, and its tab. A stretching panel takes the column's spare
 	// height; the others keep the height their content asks for.
 	CPanel *AddPanel( const QString &szId, const QString &szTitle, const QIcon &icon, QWidget *pContent, bool bStretch = false );
+	// Hidden until asked for (a command reveals it), also for a saved state from before it existed.
+	void SetHiddenByDefault( const QString &szId );
 	[[nodiscard]] CPanel *GetPanel( const QString &szId ) const;
 	[[nodiscard]] QToolButton *GetTab( const QString &szId ) const;
 	[[nodiscard]] std::vector<CPanel *> GetPanels() const; // in the column's order
@@ -114,6 +116,7 @@ private:
 		QToolButton *m_pTab = nullptr;
 		bool m_bAvailable = true;
 		bool m_bMode = false; // comes and goes with a mode (SetAvailable has been called)
+		bool m_bHiddenByDefault = false;
 	};
 
 	// The layouts' order and stretch from m_Entries.
