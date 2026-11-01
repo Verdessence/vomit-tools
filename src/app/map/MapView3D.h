@@ -247,5 +247,6 @@ private:
 	// Alt+drag sizing the brush: where it began and the radius then.
 	std::optional<QPoint> m_RadiusFrom;
 	double m_flRadiusFrom = 0.0;
+	double m_flDensityFrom = 0.0; // the sprinkle tool's, as the right-drag began
 	QElapsedTimer m_LogClock; // the statistics go to the debug log once a second
 };

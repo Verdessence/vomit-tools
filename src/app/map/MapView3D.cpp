@@ -747,6 +747,7 @@ void CMapView3D::mousePressEvent( QMouseEvent *pEvent )
 		{
 			m_RadiusFrom = pEvent->position().toPoint();
 			m_flRadiusFrom = GetBrushRadius();
+			m_flDensityFrom = m_Editor.GetSprinkle().GetDensity();
 			return;
 		}
 		if ( pEvent->button() == Qt::LeftButton )
@@ -1122,6 +1123,10 @@ void CMapView3D::mouseMoveEvent( QMouseEvent *pEvent )
 	{
 		// A hundred pixels right makes the brush about 2.7 times as big.
 		SetBrushRadius( std::clamp( m_flRadiusFrom * std::exp( ( at.x() - m_RadiusFrom->x() ) / 100.0 ), 1.0, 8192.0 ) );
+		// The sprinkle tool's drag works as Photoshop's brush: up makes it denser, down sparser,
+		// two hundred pixels the whole range.
+		if ( IsSprinkling() )
+			m_Editor.GetSprinkle().SetDensity( m_flDensityFrom - ( at.y() - m_RadiusFrom->y() ) / 200.0 );
 		RedrawLabels();
 		return;
 	}
@@ -2218,6 +2223,15 @@ void CMapView3D::Select( QPointF at, bool bToggle )
 //-----------------------------------------------------------------------------
 void CMapView3D::wheelEvent( QWheelEvent *pEvent )
 {
+	// Alt turns the wheel to the brush's size; some systems turn an Alt wheel sideways.
+	if ( IsBrushShown() && pEvent->modifiers().testFlag( Qt::AltModifier ) )
+	{
+		const int nDelta = pEvent->angleDelta().y() != 0 ? pEvent->angleDelta().y() : pEvent->angleDelta().x();
+		SetBrushRadius( std::clamp( GetBrushRadius() * std::pow( 1.1, nDelta / 120.0 ), 1.0, 8192.0 ) );
+		RedrawLabels();
+		pEvent->accept();
+		return;
+	}
 	const double flNotches = pEvent->angleDelta().y() / 120.0;
 	m_Camera.m_Eye = xv::map::Add( m_Camera.m_Eye, xv::map::Scale( m_Camera.GetForward(), flNotches * CPreferences::Instance().GetMapPreferences().m_flWheelStep ) );
 	Changed();

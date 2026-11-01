@@ -6,6 +6,9 @@
 //===========================================================================//
 #include "map/MapSprinkle.h"
 
+#include <algorithm>
+#include <cmath>
+
 #include <QCheckBox>
 #include <QComboBox>
 #include <QDoubleSpinBox>
@@ -198,4 +201,20 @@ double CMapSprinklePanel::GetRadius() const
 void CMapSprinklePanel::SetRadius( double flRadius )
 {
 	m_pRadius->setValue( flRadius );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+double CMapSprinklePanel::GetDensity() const
+{
+	return m_pDensity->value() / 100.0;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+void CMapSprinklePanel::SetDensity( double flDensity )
+{
+	m_pDensity->setValue( static_cast<int>( std::lround( std::clamp( flDensity, 0.0, 1.0 ) * 100.0 ) ) );
 }

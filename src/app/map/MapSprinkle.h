@@ -37,6 +37,9 @@ public:
 	[[nodiscard]] xv::map::SprinkleOptions_t GetOptions( std::uint32_t nSeed ) const;
 	[[nodiscard]] double GetRadius() const;
 	void SetRadius( double flRadius );
+	// Each cell's chance, 0 to 1.
+	[[nodiscard]] double GetDensity() const;
+	void SetDensity( double flDensity );
 	// The editor's grid, for Use Grid.
 	void SetEditorGrid( int nGrid ) { m_nEditorGrid = nGrid; }
 
