@@ -3,9 +3,10 @@
 //
 // Purpose: Hammer's Filter Control: the map's own visgroups (User) and the automatic ones
 //          (Auto), each ticked while its objects are shown. Unticking hides them; Mark selects
-//          them. Hiding is the viewer's own state; the map isn't changed. A pane beside them,
-//          hidden until its button shows it, lists Hammer++'s cordons, each with its boxes, to
-//          switch, rename, add and delete; the one picked is what Edit Cordon Bounds edits.
+//          them. Hiding is the viewer's own state; the map isn't changed. A third tab lists
+//          Hammer++'s cordons, each with its boxes, to switch, rename, add and delete (its
+//          buttons beside the tabs while it is picked); the one picked is what Edit Cordon
+//          Bounds edits.
 //
 //===========================================================================//
 #pragma once
@@ -23,6 +24,7 @@
 class CMapDocument;
 class QCheckBox;
 class QPushButton;
+class QToolButton;
 class QTabWidget;
 class QTreeWidget;
 class QTreeWidgetItem;
@@ -43,7 +45,7 @@ public:
 	// Selects the current item's objects.
 	void Mark();
 
-	// The cordons' pane (hidden until its button shows it): the tree, and the cordon (and its box) picked in it. A new cordon or box
+	// The Cordons tab: the tree, and the cordon (and its box) picked in it. A new cordon or box
 	// gets the box pfnNewBox gives (the selection's, say).
 	[[nodiscard]] QTreeWidget *GetCordonTree() const { return m_pCordons; }
 	[[nodiscard]] std::size_t GetPickedCordon() const { return m_nPickedCordon; }
@@ -77,10 +79,8 @@ private:
 	QTreeWidget *m_pAuto = nullptr;
 	QTreeWidget *m_pCordons = nullptr;
 	QCheckBox *m_pCordonsOn = nullptr;
-	QWidget *m_pCordonPane = nullptr;
-	QPushButton *m_pShowCordons = nullptr; // shows the cordons' pane
-	QPushButton *m_pAddBox = nullptr;
-	QPushButton *m_pDeleteCordon = nullptr;
+	QToolButton *m_pAddBox = nullptr;
+	QToolButton *m_pDeleteCordon = nullptr;
 	std::size_t m_nPickedCordon = 0;
 	std::size_t m_nPickedBox = 0;
 	std::function<std::optional<xv::map::Box_t>()> m_pfnNewBox;

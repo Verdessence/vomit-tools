@@ -14,8 +14,9 @@
 #include <QHBoxLayout>
 #include <QPainter>
 #include <QPushButton>
-#include <QSettings>
-#include <QSplitter>
+#include <QStackedWidget>
+#include <QTabBar>
+#include <QToolButton>
 #include <QTabWidget>
 #include <QTreeWidget>
 #include <QTreeWidgetItemIterator>
@@ -27,9 +28,6 @@
 
 namespace
 {
-
-// Whether the cordons' pane shows beside the visgroups.
-constexpr char CORDONS_SHOWN_SETTING[] = "maps/filterCordonsShown";
 
 //-----------------------------------------------------------------------------
 // Purpose: A small square of a visgroup's colour, as the tree shows it beside the name.
@@ -58,7 +56,7 @@ QTreeWidget *MakeTree( const QString &szName )
 }
 
 //-----------------------------------------------------------------------------
-// Purpose: A box as the cordons' list shows it: its lowest corner and its highest.
+// Purpose: A box as the Cordons tab lists it: its lowest corner and its highest.
 //-----------------------------------------------------------------------------
 QString BoxText( const xv::map::Box_t &box )
 {
@@ -98,77 +96,80 @@ CMapFilterControl::CMapFilterControl( CMapDocument &document, QWidget *pParent )
 	pLayout->setContentsMargins( 0, 0, 0, 0 );
 	m_pUser = MakeTree( QStringLiteral( "mapVisgroupsUser" ) );
 	m_pAuto = MakeTree( QStringLiteral( "mapVisgroupsAuto" ) );
-	// The visgroups' tabs down the left side; the cordons beside them on the right, a pane
-	// of their own hidden until wanted, so picking one doesn't change the Filter Control's
-	// height and push the panels below it about.
+	// The tabs along the bottom. Every page is a list of the same height and the row under
+	// them keeps its height too, so picking a tab moves nothing below the Filter Control.
 	m_pTabs = new QTabWidget;
-	m_pTabs->setObjectName( QStringLiteral( "mapVisgroupTabs" ) );
-	m_pTabs->setTabPosition( QTabWidget::West );
+	m_pTabs->setObjectName( QStringLiteral( "mapFilterTabs" ) );
+	m_pTabs->setTabPosition( QTabWidget::South );
 	m_pTabs->addTab( m_pUser, tr( "User" ) );
 	m_pTabs->addTab( m_pAuto, tr( "Auto" ) );
-
-	// Cordons: the switch for them all, the list, and its buttons.
-	auto *pCordonPage = m_pCordonPane = new QWidget;
-	pCordonPage->setObjectName( QStringLiteral( "mapCordonPane" ) );
-	// As tall as the visgroups beside it, whatever it holds: its list scrolls instead.
-	pCordonPage->setSizePolicy( QSizePolicy::Preferred, QSizePolicy::Ignored );
-	auto *pCordonLayout = new QVBoxLayout( pCordonPage );
-	pCordonLayout->setContentsMargins( 0, 0, 0, 0 );
-	m_pCordonsOn = new QCheckBox( tr( "Cordon on" ) );
-	m_pCordonsOn->setObjectName( QStringLiteral( "mapCordonsOn" ) );
-	m_pCordonsOn->setToolTip( tr( "Toggle Cordon State: while it is on, what lies outside the ticked cordons is hidden and left out of compiles" ) );
 	m_pCordons = MakeTree( QStringLiteral( "mapCordons" ) );
 	m_pCordons->setToolTip( tr( "Tick a cordon to use it, double-click to rename it; Edit Cordon Bounds drags the box picked here" ) );
-	auto *pCordonButtons = new QHBoxLayout;
-	pCordonButtons->setSpacing( 2 );
-	auto *pNew = new QPushButton( tr( "New" ) );
+	m_pTabs->addTab( m_pCordons, tr( "Cordons" ) );
+
+	// The cordons' buttons beside the tabs, there only while the Cordons tab is picked.
+	auto *pCordonButtons = new QWidget;
+	pCordonButtons->setObjectName( QStringLiteral( "mapCordonButtons" ) );
+	auto *pCordonButtonsLayout = new QHBoxLayout( pCordonButtons );
+	pCordonButtonsLayout->setContentsMargins( 4, 0, 0, 0 );
+	pCordonButtonsLayout->setSpacing( 2 );
+	// Tool buttons: push buttons' padding wouldn't leave the tabs room beside them.
+	auto *pNew = new QToolButton;
+	pNew->setText( tr( "New" ) );
 	pNew->setObjectName( QStringLiteral( "mapCordonsNew" ) );
 	pNew->setToolTip( tr( "A new cordon round the selection, to drag into shape" ) );
-	m_pAddBox = new QPushButton( tr( "Add Box" ) );
+	m_pAddBox = new QToolButton;
+	m_pAddBox->setText( tr( "Add Box" ) );
 	m_pAddBox->setObjectName( QStringLiteral( "mapCordonsAddBox" ) );
 	m_pAddBox->setToolTip( tr( "Another box for the picked cordon" ) );
-	m_pDeleteCordon = new QPushButton( tr( "Delete" ) );
+	m_pDeleteCordon = new QToolButton;
+	m_pDeleteCordon->setText( tr( "Delete" ) );
 	m_pDeleteCordon->setObjectName( QStringLiteral( "mapCordonsDelete" ) );
 	m_pDeleteCordon->setToolTip( tr( "Delete the picked box, or the cordon when it is its only one" ) );
-	for ( QPushButton *pButton : { pNew, m_pAddBox, m_pDeleteCordon } )
+	for ( QToolButton *pButton : { pNew, m_pAddBox, m_pDeleteCordon } )
 	{
-		pCordonButtons->addWidget( pButton );
+		pCordonButtonsLayout->addWidget( pButton );
 	}
-	pCordonButtons->addStretch( 1 );
-	pCordonLayout->addWidget( m_pCordonsOn );
-	pCordonLayout->addWidget( m_pCordons, 1 );
-	pCordonLayout->addLayout( pCordonButtons );
-	auto *pSplit = new QSplitter( Qt::Horizontal );
-	pSplit->setObjectName( QStringLiteral( "mapFilterSplit" ) );
-	pSplit->setChildrenCollapsible( false );
-	pSplit->addWidget( m_pTabs );
-	pSplit->addWidget( pCordonPage );
-	pSplit->setStretchFactor( 0, 1 );
-	pSplit->setStretchFactor( 1, 1 );
-	pLayout->addWidget( pSplit, 1 );
+	m_pTabs->setCornerWidget( pCordonButtons, Qt::BottomRightCorner );
+	// Every tab in sight, and room for the buttons whether they show or not: the side keeps
+	// its width as the tabs change.
+	m_pTabs->setUsesScrollButtons( false );
+	m_pTabs->tabBar()->setExpanding( false );
+	setMinimumWidth( m_pTabs->tabBar()->sizeHint().width() + pCordonButtons->sizeHint().width() + 8 );
+	pLayout->addWidget( m_pTabs, 1 );
 
-	auto *pButtons = new QHBoxLayout;
+	// Under the tabs: the visgroups' Mark and Show All, or the switch for all the cordons.
+	auto *pRow = new QStackedWidget;
+	pRow->setObjectName( QStringLiteral( "mapFilterRow" ) );
+	auto *pVisgroupRow = new QWidget;
+	auto *pButtons = new QHBoxLayout( pVisgroupRow );
+	pButtons->setContentsMargins( 0, 0, 0, 0 );
 	auto *pMark = new QPushButton( tr( "Mark" ) );
 	pMark->setObjectName( QStringLiteral( "mapVisgroupsMark" ) );
 	pMark->setToolTip( tr( "Select the objects in the visgroup" ) );
 	auto *pShowAll = new QPushButton( tr( "Show All" ) );
 	pShowAll->setObjectName( QStringLiteral( "mapVisgroupsShowAll" ) );
-	m_pShowCordons = new QPushButton( tr( "Cordons" ) );
-	m_pShowCordons->setObjectName( QStringLiteral( "mapShowCordons" ) );
-	m_pShowCordons->setCheckable( true );
-	m_pShowCordons->setToolTip( tr( "Show the cordons beside the visgroups" ) );
 	pButtons->addWidget( pMark );
 	pButtons->addWidget( pShowAll );
 	pButtons->addStretch( 1 );
-	pButtons->addWidget( m_pShowCordons );
-	pLayout->addLayout( pButtons );
-	connect( m_pShowCordons, &QPushButton::toggled, this, [ this ]( bool bShown ) {
-		m_pCordonPane->setVisible( bShown );
-		QSettings{}.setValue( QLatin1String( CORDONS_SHOWN_SETTING ), bShown );
-	} );
-	const bool bCordons = QSettings{}.value( QLatin1String( CORDONS_SHOWN_SETTING ), false ).toBool();
-	m_pShowCordons->setChecked( bCordons );
-	m_pCordonPane->setVisible( bCordons );
+	auto *pCordonRow = new QWidget;
+	auto *pCordonRowLayout = new QHBoxLayout( pCordonRow );
+	pCordonRowLayout->setContentsMargins( 0, 0, 0, 0 );
+	m_pCordonsOn = new QCheckBox( tr( "Cordon on" ) );
+	m_pCordonsOn->setObjectName( QStringLiteral( "mapCordonsOn" ) );
+	m_pCordonsOn->setToolTip( tr( "Toggle Cordon State: while it is on, what lies outside the ticked cordons is hidden and left out of compiles" ) );
+	pCordonRowLayout->addWidget( m_pCordonsOn );
+	pCordonRowLayout->addStretch( 1 );
+	pRow->addWidget( pVisgroupRow );
+	pRow->addWidget( pCordonRow );
+	pLayout->addWidget( pRow );
+	const auto tabChanged = [ this, pRow, pCordonButtons, pVisgroupRow, pCordonRow ] {
+		const bool bCordons = m_pTabs->currentWidget() == m_pCordons;
+		pCordonButtons->setVisible( bCordons );
+		pRow->setCurrentWidget( bCordons ? pCordonRow : pVisgroupRow );
+	};
+	connect( m_pTabs, &QTabWidget::currentChanged, this, tabChanged );
+	tabChanged();
 	connect( pMark, &QPushButton::clicked, this, &CMapFilterControl::Mark );
 	connect( pShowAll, &QPushButton::clicked, this, [ this ] { m_Document.ShowAll(); } );
 	connect( m_pUser, &QTreeWidget::itemChanged, this, &CMapFilterControl::ItemChanged );
@@ -179,9 +180,9 @@ CMapFilterControl::CMapFilterControl( CMapDocument &document, QWidget *pParent )
 	connect( &m_Document, &CMapDocument::SceneEdited, this, [ this ] { m_Document.MeasureEditListener( tr( "Filter Control" ), [ this ] { Rebuild(); } ); } );
 	connect( &m_Document, &CMapDocument::VisibilityChanged, this, &CMapFilterControl::UpdateStates );
 
-	connect( pNew, &QPushButton::clicked, this, &CMapFilterControl::NewCordon );
-	connect( m_pAddBox, &QPushButton::clicked, this, &CMapFilterControl::AddCordonBox );
-	connect( m_pDeleteCordon, &QPushButton::clicked, this, &CMapFilterControl::DeleteCordon );
+	connect( pNew, &QToolButton::clicked, this, &CMapFilterControl::NewCordon );
+	connect( m_pAddBox, &QToolButton::clicked, this, &CMapFilterControl::AddCordonBox );
+	connect( m_pDeleteCordon, &QToolButton::clicked, this, &CMapFilterControl::DeleteCordon );
 	connect( m_pCordons, &QTreeWidget::itemChanged, this, &CMapFilterControl::CordonChanged );
 	connect( m_pCordonsOn, &QCheckBox::toggled, this, [ this ]( bool bOn ) {
 		if ( const xv::map::CScene *pScene = m_Document.GetScene(); !m_bUpdating && pScene )
