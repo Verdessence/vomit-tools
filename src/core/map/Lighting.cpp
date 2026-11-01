@@ -66,6 +66,8 @@ double KeyNumber( const Entity_t &entity, std::string_view szKey, double flDefau
 	return ParseNumber<double>( szValue.substr( 0, nEnd ) ).value_or( 0.0 );
 }
 
+} // namespace
+
 //-----------------------------------------------------------------------------
 // Purpose: The way a light points, from its keys as vrad reads them: "angle" (-1 up, -2 down)
 //          or the yaw of "angles", and "pitch" unless it is 0, else the pitch of "angles", where
@@ -104,6 +106,9 @@ Point_t LightDirection( const Entity_t &entity )
 	dir[ 1 ] *= std::cos( flRadians );
 	return Normalized( dir );
 }
+
+namespace
+{
 
 //-----------------------------------------------------------------------------
 // Purpose: The light's brightness, from _lightHDR (times _lightscaleHDR) in an HDR compile when

@@ -26,6 +26,7 @@
 
 #include "Preferences.h"
 #include "map/Cordon.h"
+#include "map/Helpers.h"
 #include "map/Displacement.h"
 #include "map/Vertex.h"
 #include "map/MapConstants.h"
@@ -937,6 +938,12 @@ void CMapView2D::PaintObjects( QPainter &painter, const QRectF &visible, bool bP
 			{
 				painter.drawEllipse( centre, flRadius * m_flZoom, flRadius * m_flZoom );
 			}
+		}
+		// The rest of its helpers (lines to its targets, cones, boxes), each in its own colour.
+		for ( const xv::map::HelperLine_t &helper : xv::map::DescribeHelpers( *pScene, pScene->GetIndex( pObject->m_nObject ) ).m_Lines )
+		{
+			painter.setPen( QPen{ QColor{ helper.m_Color.m_nR, helper.m_Color.m_nG, helper.m_Color.m_nB }, 0 } );
+			painter.drawLine( ToWidget( Flatten( helper.m_From ) ), ToWidget( Flatten( helper.m_To ) ) );
 		}
 	}
 	dots();

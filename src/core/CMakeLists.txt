@@ -30,6 +30,8 @@ add_library(vomit_tools_core STATIC
         map/GameConfig.h
         map/InstanceEdit.cpp
         map/InstanceEdit.h
+        map/Helpers.cpp
+        map/Helpers.h
         map/Instance.cpp
         map/Instance.h
         map/Geometry.cpp

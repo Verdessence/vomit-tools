@@ -28,6 +28,7 @@
 #include "Preferences.h"
 #include "DebugLog.h"
 #include "map/Cordon.h"
+#include "map/Helpers.h"
 #include "map/MapSprinkle.h"
 #include "map/DispEdit.h"
 #include "map/Overlay.h"
@@ -1808,7 +1809,14 @@ void CMapView3D::PaintTools( QPainter &painter )
 	const bool bBrush = HasPaintBrushRing();
 	const bool bOverlay = m_Editor.GetTool() == MapTool_t::MAP_TOOL_OVERLAY && !GetDocument().GetSelection().empty();
 	const bool bWalkable = m_Editor.GetSettings().m_bWalkable && GetDocument().GetScene();
-	if ( !box && !marker && !gizmo && faces.empty() && !pointfile && !bBrush && !bWalkable && !bOverlay && !m_ModalTransform )
+	// The selected entities' FGD helpers (Ctrl+Shift+H): lines to their targets, cones, radii.
+	std::vector<xv::map::EntityHelpers_t> helpers;
+	if ( const xv::map::CScene *pScene = GetDocument().GetScene(); pScene && m_Editor.GetSettings().m_bHelpers )
+		for ( const std::uint32_t nObject : GetDocument().GetSelection() )
+			if ( !pScene->IsSolidObject( nObject ) && !pScene->IsDeleted( nObject ) )
+				if ( auto entity = xv::map::DescribeHelpers( *pScene, pScene->GetIndex( nObject ) ); !entity.m_Lines.empty() || !entity.m_Rings.empty() || !entity.m_Sides.empty() )
+					helpers.push_back( std::move( entity ) );
+	if ( !box && !marker && !gizmo && faces.empty() && !pointfile && !bBrush && !bWalkable && !bOverlay && !m_ModalTransform && helpers.empty() )
 	{
 		return;
 	}
@@ -1956,6 +1964,45 @@ void CMapView3D::PaintTools( QPainter &painter )
 			lines.emplace_back( QPointF{ pa[ 0 ], pa[ 1 ] }, QPointF{ pb[ 0 ], pb[ 1 ] } );
 		}
 	};
+	if ( !helpers.empty() )
+	{
+		const xv::map::CScene &scene = *GetDocument().GetScene();
+		painter.setRenderHint( QPainter::Antialiasing, true );
+		for ( const xv::map::EntityHelpers_t &entity : helpers )
+		{
+			for ( const auto *pLines : { &entity.m_Lines, &entity.m_Rings } )
+			{
+				for ( const xv::map::HelperLine_t &helper : *pLines )
+				{
+					if ( const auto projected = camera.ProjectLine( helper.m_From, helper.m_To ) )
+					{
+						const auto &[ pa, pb ] = *projected;
+						painter.setPen( QPen{ QColor{ helper.m_Color.m_nR, helper.m_Color.m_nG, helper.m_Color.m_nB }, 1.5 } );
+						painter.drawLine( QPointF{ pa[ 0 ], pa[ 1 ] }, QPointF{ pb[ 0 ], pb[ 1 ] } );
+					}
+				}
+			}
+			// A side list's faces, tinted as Hammer marks a cubemap's.
+			if ( !entity.m_Sides.empty() )
+			{
+				painter.setPen( Qt::NoPen );
+				painter.setBrush( QColor{ 255, 160, 0, 90 } );
+				for ( std::uint32_t nSolid = 0; nSolid < scene.m_Map.m_Solids.size(); nSolid++ )
+				{
+					const auto &solid = scene.m_Map.m_Solids[ nSolid ];
+					for ( std::uint32_t nSide = 0; nSide < solid.m_Sides.size(); nSide++ )
+					{
+						if ( solid.m_bDeleted || std::ranges::find( entity.m_Sides, solid.m_Sides[ nSide ].m_nId ) == entity.m_Sides.end() )
+							continue;
+						if ( const xv::map::FaceGeometry_t *pFace = scene.m_Solids[ nSolid ].FindFace( nSide ) )
+							painter.drawPolygon( project( pFace->m_Points ) );
+					}
+				}
+				painter.setBrush( Qt::NoBrush );
+			}
+		}
+		painter.setRenderHint( QPainter::Antialiasing, false );
+	}
 	if ( box )
 	{
 		auto corner = [ & ]( int n ) { return xv::map::Point_t{ ( n & 1 ) ? box->m_Maxs[ 0 ] : box->m_Mins[ 0 ], ( n & 2 ) ? box->m_Maxs[ 1 ] : box->m_Mins[ 1 ], ( n & 4 ) ? box->m_Maxs[ 2 ] : box->m_Mins[ 2 ] }; };

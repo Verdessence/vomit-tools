@@ -74,6 +74,9 @@ struct Light_t
 // first light_environment (its sun and its ambient). Named lights that start dark give none.
 // bHdr reads the _lightHDR values where they are set, as an HDR compile does.
 [[nodiscard]] std::vector<Light_t> ReadLights( const CMap &map, bool bHdr = false );
+// The way a light points, from its keys as vrad reads them: "angle" (-1 up, -2 down) or the yaw
+// of "angles", and "pitch" unless it is 0, else the pitch of "angles" (positive points up).
+[[nodiscard]] Point_t LightDirection( const Entity_t &entity );
 // A light's "_light"-style value: "r g b brightness" (or "r g b", or one value), gamma 2.2 made
 // linear and scaled by the brightness, as vrad reads it; nullopt when it isn't one.
 [[nodiscard]] std::optional<CVec3> ParseLightValue( std::string_view szValue );
