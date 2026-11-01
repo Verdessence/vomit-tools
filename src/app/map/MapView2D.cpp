@@ -766,12 +766,28 @@ void CMapView2D::PaintObjects( QPainter &painter, const QRectF &visible, bool bP
 	if ( bPreviewOnly && document.GetEntityPreviewBase() )
 	{
 		const auto frame = m_Editor.GetRenderData().GetShared();
+		painter.setPen( QPen{ Look().m_Colors.m_Selection, 1.0 } );
 		if ( frame.m_pEntityPreviewMesh )
 		{
 			const auto &mesh = *frame.m_pEntityPreviewMesh;
-			painter.setPen( QPen{ Look().m_Colors.m_Selection, 1.0 } );
 			for ( std::size_t i = 0; i + 1 < mesh.m_Lines.size(); i += 2 )
 				painter.drawLine( ToWidget( Flatten( xv::map::ToPoint( mesh.m_Vertices[ mesh.m_Lines[ i ] ].m_vecPosition ) ) ), ToWidget( Flatten( xv::map::ToPoint( mesh.m_Vertices[ mesh.m_Lines[ i + 1 ] ].m_vecPosition ) ) ) );
+		}
+		// The brushes being moved, turned or sheared, as they are now (that mesh has the
+		// entities alone), and the selected entities' helpers (a radius being dragged).
+		for ( const std::uint32_t nObject : document.GetPreviewObjects() )
+		{
+			if ( nObject >= pScene->GetObjectCount() || pScene->IsDeleted( nObject ) )
+				continue;
+			if ( pScene->IsSolidObject( nObject ) )
+			{
+				painter.setPen( QPen{ Look().m_Colors.m_Selection, 1.0 } );
+				for ( const xv::map::FaceGeometry_t &face : pScene->m_Solids[ pScene->GetIndex( nObject ) ].m_Faces )
+					for ( std::size_t n = 0; n < face.m_Points.size(); n++ )
+						painter.drawLine( ToWidget( Flatten( face.m_Points[ n ] ) ), ToWidget( Flatten( face.m_Points[ ( n + 1 ) % face.m_Points.size() ] ) ) );
+			}
+			else if ( document.IsSelected( nObject ) )
+				PaintEntityHelpers( painter, nObject );
 		}
 		return;
 	}
@@ -922,36 +938,11 @@ void CMapView2D::PaintObjects( QPainter &painter, const QRectF &visible, bool bP
 		add( *pObject, chosen, true );
 	}
 	draw( chosen );
-	// A selected entity's sphere helpers (a light's falloff distances, say), in its colour.
+	// A selected entity's helpers (a light's falloff distances, say).
 	for ( const MapFlatObject_t *pObject : selected )
 	{
-		if ( !settings.m_bHelpers || !pObject->m_bPointEntity || !m_pLineColors || pObject->m_nObject >= m_pLineColors->size() )
-		{
-			continue;
-		}
-		const xv::map::EntityVisual_t &visual = pScene->m_Entities[ pScene->GetIndex( pObject->m_nObject ) ];
-		painter.setPen( QPen{ ToColor( ( *m_pLineColors )[ pObject->m_nObject ] ), 0 } );
-		const QPointF centre = ToWidget( Flatten( visual.m_Origin ) );
-		for ( const double flRadius : visual.m_Spheres )
-		{
-			if ( flRadius > 0.0 )
-			{
-				painter.drawEllipse( centre, flRadius * m_flZoom, flRadius * m_flZoom );
-			}
-		}
-		// Each radius's handle, on its circle to the right, to drag it bigger or smaller.
-		const double flHalf = Look().m_nHandleSize / 2.0;
-		for ( const RadiusHandle_t &handle : GetRadiusHandles() )
-		{
-			if ( handle.m_nObject == pObject->m_nObject )
-				painter.fillRect( QRectF{ handle.m_At.x() - flHalf, handle.m_At.y() - flHalf, flHalf * 2.0, flHalf * 2.0 }, painter.pen().color() );
-		}
-		// The rest of its helpers (lines to its targets, cones, boxes), each in its own colour.
-		for ( const xv::map::HelperLine_t &helper : xv::map::DescribeHelpers( *pScene, pScene->GetIndex( pObject->m_nObject ) ).m_Lines )
-		{
-			painter.setPen( QPen{ QColor{ helper.m_Color.m_nR, helper.m_Color.m_nG, helper.m_Color.m_nB }, 0 } );
-			painter.drawLine( ToWidget( Flatten( helper.m_From ) ), ToWidget( Flatten( helper.m_To ) ) );
-		}
+		if ( pObject->m_bPointEntity )
+			PaintEntityHelpers( painter, pObject->m_nObject );
 	}
 	dots();
 
@@ -974,6 +965,36 @@ void CMapView2D::PaintObjects( QPainter &painter, const QRectF &visible, bool bP
 			painter.setPen( ColorOf( object ) );
 			painter.drawText( QPointF{ box.left(), box.top() - 3.0 }, QString::fromUtf8( szName.data(), static_cast<qsizetype>( szName.size() ) ) );
 		}
+	}
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Its radii in its colour, each with its handle on the circle to the right, and the
+//          other helpers (lines to its targets, cones, boxes) each in its own.
+//-----------------------------------------------------------------------------
+void CMapView2D::PaintEntityHelpers( QPainter &painter, std::uint32_t nObject ) const
+{
+	const xv::map::CScene *pScene = GetDocument().GetScene();
+	if ( !pScene || !m_Editor.GetSettings().m_bHelpers || !m_pLineColors || nObject >= m_pLineColors->size() || pScene->IsSolidObject( nObject ) )
+		return;
+	const xv::map::EntityVisual_t &visual = pScene->m_Entities[ pScene->GetIndex( nObject ) ];
+	painter.setPen( QPen{ ToColor( ( *m_pLineColors )[ nObject ] ), 0 } );
+	const QPointF centre = ToWidget( Flatten( visual.m_Origin ) );
+	for ( const double flRadius : visual.m_Spheres )
+	{
+		if ( flRadius > 0.0 )
+			painter.drawEllipse( centre, flRadius * m_flZoom, flRadius * m_flZoom );
+	}
+	const double flHalf = Look().m_nHandleSize / 2.0;
+	for ( const RadiusHandle_t &handle : GetRadiusHandles() )
+	{
+		if ( handle.m_nObject == nObject )
+			painter.fillRect( QRectF{ handle.m_At.x() - flHalf, handle.m_At.y() - flHalf, flHalf * 2.0, flHalf * 2.0 }, painter.pen().color() );
+	}
+	for ( const xv::map::HelperLine_t &helper : xv::map::DescribeHelpers( *pScene, pScene->GetIndex( nObject ) ).m_Lines )
+	{
+		painter.setPen( QPen{ QColor{ helper.m_Color.m_nR, helper.m_Color.m_nG, helper.m_Color.m_nB }, 0 } );
+		painter.drawLine( ToWidget( Flatten( helper.m_From ) ), ToWidget( Flatten( helper.m_To ) ) );
 	}
 }
 

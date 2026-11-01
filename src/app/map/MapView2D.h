@@ -123,6 +123,8 @@ private:
 	// Whether a prop is drawn textured rather than as its edges or box.
 	[[nodiscard]] bool IsTexturedModel( const MapFlatObject_t &object, const QRectF &box ) const;
 	void PaintObjects( QPainter &painter, const QRectF &visible, bool bPreviewOnly = false ) const;
+	// A selected entity's FGD helpers: its radii (with their handles), lines to its targets, cones.
+	void PaintEntityHelpers( QPainter &painter, std::uint32_t nObject ) const;
 	void PaintSelection( QPainter &painter ) const;
 	// The block tool's box and the entity tool's marker.
 	void PaintTools( QPainter &painter ) const;
