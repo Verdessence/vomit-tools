@@ -363,13 +363,26 @@ std::optional<std::array<float, 4>> ShadeFragment( const ShadeMaterial_t &materi
 		const int nHeight = material.m_pBase ? material.m_pBase->m_nHeight : material.m_nHeight;
 		const float u = input.m_Texel[ 0 ] / static_cast<float>( std::max( nWidth, 1 ) );
 		const float v = input.m_Texel[ 1 ] / static_cast<float>( std::max( nHeight, 1 ) );
+		// The base texture's transform, in its texels (as map.frag's moveTexel).
+		ShadeInput_t moved = input;
+		if ( material.HasUvTransform() )
+		{
+			const auto &t = material.m_UvTransform;
+			const float flWidth = static_cast<float>( std::max( nWidth, 1 ) );
+			const float flHeight = static_cast<float>( std::max( nHeight, 1 ) );
+			moved.m_Texel = { ( t[ 0 ] * u + t[ 1 ] * v + t[ 4 ] ) * flWidth, ( t[ 2 ] * u + t[ 3 ] * v + t[ 5 ] ) * flHeight };
+			const auto turn = [ & ]( float flU, float flV ) { return std::array<float, 2>{ t[ 0 ] * flU + t[ 1 ] * flV * flWidth / flHeight, t[ 2 ] * flU * flHeight / flWidth + t[ 3 ] * flV }; };
+			const std::array<float, 2> across = turn( input.m_Gradient[ 0 ], input.m_Gradient[ 1 ] );
+			const std::array<float, 2> down = turn( input.m_Gradient[ 2 ], input.m_Gradient[ 3 ] );
+			moved.m_Gradient = { across[ 0 ], across[ 1 ], down[ 0 ], down[ 1 ] };
+		}
 		if ( material.m_bMissing )
 		{
 			color = MissingChecker( u, v );
 		}
 		else if ( material.m_pBase )
 		{
-			color = SampleFiltered( *material.m_pBase, input.m_Texel, input, options );
+			color = SampleFiltered( *material.m_pBase, moved.m_Texel, moved, options );
 			if ( material.m_bBlend && material.m_pBase2 )
 			{
 				// The second texture uses the same texture coordinates, scaled to its own size.
@@ -396,6 +409,13 @@ std::optional<std::array<float, 4>> ShadeFragment( const ShadeMaterial_t &materi
 			color[ 0 ] *= input.m_vecObjectColor.m_flX;
 			color[ 1 ] *= input.m_vecObjectColor.m_flY;
 			color[ 2 ] *= input.m_vecObjectColor.m_flZ;
+		}
+		if ( material.m_bVertexColor )
+		{
+			color[ 0 ] *= input.m_vecVertexColor.m_flX;
+			color[ 1 ] *= input.m_vecVertexColor.m_flY;
+			color[ 2 ] *= input.m_vecVertexColor.m_flZ;
+			color[ 3 ] *= input.m_flBlend;
 		}
 		if ( options.m_nMode == RasterMode_t::RASTER_MODE_LIGHTING && options.m_bLightOnly && !material.m_bUnlit )
 		{

@@ -7,6 +7,11 @@
 //===========================================================================//
 #include "Materials.h"
 
+#include <cmath>
+
+#include "kv1/Kv1.h"
+#include "sky/Sky.h"
+
 #include <array>
 #include <utility>
 
@@ -78,7 +83,34 @@ MaterialInfo_t DescribeMaterial( const material::CMaterial &material )
 	info.m_vecColor = material.Color( "$color" );
 	info.m_bNoCull = material.Flag( "$nocull" );
 	info.m_flDecalScale = material.Number( "$decalscale", 1.0f );
+	if ( auto pProxies = std::make_shared<const material::CProxies>( material ); pProxies->IsAnimated() )
+	{
+		info.m_pProxies = std::move( pProxies );
+	}
 	return info;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: The proxies run at the time as the material editor's preview runs them; what the
+//          map's views draw is read back from the parameters they write.
+//-----------------------------------------------------------------------------
+MaterialMotion_t MoveMaterial( const material::CProxies &proxies, float flTime, int nFrames )
+{
+	const material::CMaterial moved = proxies.At( flTime, [ nFrames ]( std::string_view szParameter ) { return kv1::EqualsIgnoreCase( szParameter, "$basetexture" ) ? nFrames : 0; } );
+	MaterialMotion_t motion;
+	if ( nFrames > 0 )
+	{
+		const int nFrame = static_cast<int>( std::floor( moved.Number( "$frame", 0.0f ) ) );
+		motion.m_nFrame = ( ( nFrame % nFrames ) + nFrames ) % nFrames;
+	}
+	if ( const material::Parameter_t *pTransform = moved.Find( "$basetexturetransform" ) )
+	{
+		const sky::CUvTransform transform = sky::CUvTransform::Parse( pTransform->m_szValue );
+		motion.m_UvTransform = { transform.m_flA, transform.m_flB, transform.m_flC, transform.m_flD, transform.m_flTx, transform.m_flTy };
+	}
+	motion.m_vecColor = moved.Color( "$color" );
+	motion.m_flAlpha = moved.Number( "$alpha", 1.0f );
+	return motion;
 }
 
 //-----------------------------------------------------------------------------

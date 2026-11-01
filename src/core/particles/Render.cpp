@@ -915,6 +915,114 @@ std::vector<ScreenQuad_t> Layout( const CSimulation &simulation, const CCamera &
 }
 
 //-----------------------------------------------------------------------------
+// Purpose: Layout's shapes made in the world: the screen's right is vecRight, its down -vecUp.
+//-----------------------------------------------------------------------------
+std::vector<WorldQuad_t> WorldLayout( const CSimulation &simulation, CVec3 vecEye, CVec3 vecRight, CVec3 vecUp, const SpriteLookup_t &pfnSprites )
+{
+	const CLibrary &library = simulation.GetLibrary();
+	const CVec3 vecForward = Cross( vecUp, vecRight );
+	const CVec3 vecDown = vecUp * -1.0f;
+	std::vector<WorldQuad_t> quads;
+	std::function<void( const CSimulation::Instance_t & )> pfnCollect = [ & ]( const CSimulation::Instance_t &instance ) {
+		const CDefinition &definition = *instance.m_pDefinition;
+		const auto nIndex = static_cast<std::size_t>( &definition - library.m_Definitions.data() );
+		const Sprite_t *pSprite = pfnSprites ? pfnSprites( nIndex ) : nullptr;
+		std::vector<WorldQuad_t> mine;
+		if ( pSprite && pSprite->m_bVisible && !pSprite->m_Mips.empty() )
+		{
+			for ( const CCompiledOperator *pRenderer : definition.Of( Category_t::CATEGORY_RENDERERS ) )
+			{
+				if ( !pRenderer->m_bSimulated )
+					continue;
+				const bool bTrail = pRenderer->m_szFunction == "render_sprite_trail";
+				const bool bRope = pRenderer->m_szFunction == "render_rope";
+				const bool bVelocityTurn = pRenderer->m_szFunction == "render_screen_velocity_rotate";
+				const int nOrientation = pRenderer->m_szFunction == "render_animated_sprites" ? pRenderer->Integer( "orientation_type" ) : 0;
+				std::vector<const Particle_t *> ordered;
+				for ( const Particle_t &p : instance.m_Particles )
+					ordered.push_back( &p );
+				if ( bRope )
+					std::ranges::sort( ordered, {}, &Particle_t::m_flCreationTime );
+				for ( std::size_t i = 0; i < ordered.size(); i++ )
+				{
+					const Particle_t &p = *ordered[ i ];
+					WorldQuad_t quad;
+					quad.m_nDefinition = nIndex;
+					quad.m_flDepth = Dot( p.m_vecPosition - vecEye, vecForward );
+					quad.m_Rect = FrameRect( *pSprite, pRenderer, p );
+					quad.m_flAlpha = std::clamp( p.m_flAlpha, 0.0f, 1.0f );
+					quad.m_vecColor = { p.m_vecColor[ 0 ] * pSprite->m_flOverbright, p.m_vecColor[ 1 ] * pSprite->m_flOverbright, p.m_vecColor[ 2 ] * pSprite->m_flOverbright };
+					if ( quad.m_flDepth <= 0.0f || quad.m_flAlpha <= 0.0f )
+						continue;
+					// u runs along the texture's width, v down its height; both are half sizes.
+					const auto around = [ & ]( CVec3 u, CVec3 v ) { quad.m_Corners = { p.m_vecPosition - u - v, p.m_vecPosition + u - v, p.m_vecPosition + u + v, p.m_vecPosition - u + v }; };
+					std::optional<CVec3> end;
+					if ( bTrail )
+					{
+						const float flSpeed = Length( p.m_vecVelocity );
+						const float flTrailLength = std::clamp( flSpeed * p.m_flTrailLength, pRenderer->Number( "min length" ), pRenderer->Number( "max length", 2000.0f ) );
+						if ( flSpeed > 0.0f && flTrailLength > 0.0f )
+							end = p.m_vecPosition - p.m_vecVelocity * ( flTrailLength / flSpeed );
+					}
+					else if ( bRope && i + 1 < ordered.size() )
+					{
+						end = ordered[ i + 1 ]->m_vecPosition;
+					}
+					if ( end )
+					{
+						// A strip from here to the end, as wide as the particle, turned to face the eye.
+						const CVec3 vecAlong = *end - p.m_vecPosition;
+						const CVec3 vecAcross = Cross( vecAlong, p.m_vecPosition - vecEye );
+						if ( Length( vecAcross ) < 1e-6f )
+							continue;
+						const CVec3 n = Normalized( vecAcross ) * p.m_flRadius;
+						quad.m_Corners = { p.m_vecPosition - n, p.m_vecPosition + n, *end + n, *end - n };
+					}
+					else if ( bTrail || bRope )
+					{
+						continue;
+					}
+					else if ( nOrientation >= 2 )
+					{
+						const float c = std::cos( p.m_flRotation ) * p.m_flRadius;
+						const float s = std::sin( p.m_flRotation ) * p.m_flRadius;
+						around( { c, s, 0 }, { s, -c, 0 } );
+					}
+					else if ( nOrientation == 1 )
+					{
+						const CVec3 vecAcross = Normalized( CVec3{ -vecForward.m_flY, vecForward.m_flX, 0 } );
+						around( vecAcross * -p.m_flRadius, CVec3{ 0, 0, -p.m_flRadius } );
+					}
+					else
+					{
+						float flTurn = p.m_flRotation;
+						if ( bVelocityTurn )
+						{
+							const float flDx = Dot( p.m_vecVelocity, vecRight );
+							const float flDy = Dot( p.m_vecVelocity, vecDown );
+							const float flWay = flDx != 0.0f || flDy != 0.0f ? std::atan2( flDy, flDx ) : 0.0f;
+							flTurn = flWay - pRenderer->Number( "forward_angle", -90.0f ) * DEGREES + pRenderer->Number( "rotate_rate(dps)" ) * DEGREES * p.m_flAge;
+						}
+						const float c = std::cos( flTurn ) * p.m_flRadius;
+						const float s = std::sin( flTurn ) * p.m_flRadius;
+						around( vecRight * c + vecDown * s, vecRight * -s + vecDown * c );
+					}
+					mine.push_back( quad );
+				}
+			}
+		}
+		if ( definition.m_bSort )
+			std::ranges::stable_sort( mine, std::greater{}, &WorldQuad_t::m_flDepth );
+		quads.insert( quads.end(), mine.begin(), mine.end() );
+		for ( const CSimulation::Instance_t &child : instance.m_Children )
+			pfnCollect( child );
+	};
+	if ( simulation.GetRoot().m_pDefinition )
+		pfnCollect( simulation.GetRoot() );
+	return quads;
+}
+
+//-----------------------------------------------------------------------------
 // Purpose: The simulation's model on the screen, a mesh per texture, lit from over the camera's
 //          shoulder with some light all round so the far side isn't black.
 //-----------------------------------------------------------------------------

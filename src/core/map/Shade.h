@@ -79,6 +79,7 @@ struct ShadeMaterial_t
 	bool m_bSky = false;                       // toolsskybox and its kind: the map's sky shows
 	bool m_bTinted = false;                    // sprites: times the object's colour (a light's)
 	bool m_bUnlit = false;                     // sprites: never shaded by facing
+	bool m_bVertexColor = false;               // particles: times their vertices' colour (carried in the normal) and alpha (in the blend)
 	bool m_bBlend = false;
 	bool m_bAlphaTest = false;
 	bool m_bTranslucent = false;
@@ -90,7 +91,12 @@ struct ShadeMaterial_t
 	CVec3 m_vecSelfIllumTint{ 1, 1, 1 };
 	int m_nWidth = 128;                        // what texels divide by when there's no texture
 	int m_nHeight = 128;
+	// $basetexturetransform (a proxy's TextureScroll, often): u' = a*u + b*v + tx, v' = c*u + d*v + ty,
+	// in the base texture's 0-1 coordinates.
+	std::array<float, 6> m_UvTransform{ 1, 0, 0, 1, 0, 0 };
 	friend bool operator==( const ShadeMaterial_t &, const ShadeMaterial_t & ) = default;
+
+	[[nodiscard]] bool HasUvTransform() const { return m_UvTransform != std::array<float, 6>{ 1, 0, 0, 1, 0, 0 }; }
 };
 
 struct ShadeInput_t
@@ -99,6 +105,7 @@ struct ShadeInput_t
 	std::array<float, 2> m_Luxel{};            // in luxels
 	float m_flBlend = 0.0f;                    // displacement alpha, 0-1
 	CVec3 m_vecNormal{ 0, 0, 1 };
+	CVec3 m_vecVertexColor{ 1, 1, 1 };         // the normal as interpolated, not made unit length: particles' colour
 	float m_flLod = 0.0f;                      // mip level, fractional
 	std::array<float, 4> m_Gradient{};         // texels the point moves a pixel right (u, v) and down (u, v)
 	CVec3 m_vecObjectColor{ 1, 1, 1 };         // the flat colour (Hammer's editor colour), 0-1

@@ -8,7 +8,9 @@
 //===========================================================================//
 #pragma once
 
+#include <array>
 #include <cstdint>
+#include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -66,6 +68,9 @@ struct MaterialInfo_t
 	std::optional<CVec3> m_Reflectivity; // $reflectivity: what it bounces, over its texture's
 	bool m_bSelfIllum = false;         // $selfillum: glows by its base texture's alpha
 	CVec3 m_vecSelfIllumTint{ 1, 1, 1 };
+	// Its proxies that change it over time (AnimatedTexture, TextureScroll, Sine...); null when
+	// none does.
+	std::shared_ptr<const material::CProxies> m_pProxies;
 
 	[[nodiscard]] bool IsTool() const { return ( m_nCompile & MATERIAL_COMPILE_TOOLS ) != 0; }
 	[[nodiscard]] bool IsSky() const { return ( m_nCompile & ( MATERIAL_COMPILE_SKY | MATERIAL_COMPILE_2DSKY ) ) != 0; }
@@ -73,6 +78,19 @@ struct MaterialInfo_t
 };
 
 // szMaterial is a map's name for it ("brick/brickwall001a", any case).
+// What a material's proxies make of it at a time: its base texture's frame (of nFrames), its
+// $basetexturetransform, $color and $alpha.
+struct MaterialMotion_t
+{
+	int m_nFrame = 0;
+	std::array<float, 6> m_UvTransform{ 1, 0, 0, 1, 0, 0 }; // u' = a*u + b*v + tx, v' = c*u + d*v + ty
+	CVec3 m_vecColor{ 1, 1, 1 };
+	float m_flAlpha = 1.0f;
+
+	friend bool operator==( const MaterialMotion_t &, const MaterialMotion_t & ) = default;
+};
+[[nodiscard]] MaterialMotion_t MoveMaterial( const material::CProxies &proxies, float flTime, int nFrames );
+
 [[nodiscard]] MaterialInfo_t ReadMaterialInfo( std::string_view szMaterial, const material::Reader_t &pfnRead );
 [[nodiscard]] MaterialInfo_t DescribeMaterial( const material::CMaterial &material );
 

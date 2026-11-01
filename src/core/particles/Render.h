@@ -111,6 +111,21 @@ struct ScreenQuad_t
 [[nodiscard]] std::vector<ScreenQuad_t> Layout( const CSimulation &simulation, const CCamera &camera, const SpriteLookup_t &pfnSprites );
 // The distance between the ground grid's lines, which depends on how far away the camera is.
 [[nodiscard]] float GridSpacing( const CCamera &camera );
+
+// A particle as a quad in the world, for drawing among other things (the map's 3D views).
+struct WorldQuad_t
+{
+	std::array<CVec3, 4> m_Corners{};               // where the texture's top-left, top-right, bottom-right and bottom-left go
+	std::array<float, 4> m_Rect{ 0, 0, 1, 1 };     // the part of the texture shown
+	std::array<float, 3> m_vecColor{ 1, 1, 1 };    // tint, overbright included
+	float m_flAlpha = 1.0f;
+	std::size_t m_nDefinition = 0;                  // whose sprite it shows
+	float m_flDepth = 0.0f;                         // along the view, from the eye
+};
+// The particles as Layout puts them on the screen, but in the world, seen from an eye with the
+// view's right and up (unit length): facing it, upright, flat, along their trails and ropes.
+// Sorted far to near within each system that sorts.
+[[nodiscard]] std::vector<WorldQuad_t> WorldLayout( const CSimulation &simulation, CVec3 vecEye, CVec3 vecRight, CVec3 vecUp, const SpriteLookup_t &pfnSprites );
 // A corner of a model's triangle as it lands on the screen: x, y (pixels) and depth; texture
 // coordinates; the light on it.
 struct ScreenVertex_t

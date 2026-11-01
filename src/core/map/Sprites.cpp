@@ -55,4 +55,37 @@ CMapMesh BuildSpriteMesh( std::span<const SpritePlacement_t> sprites, Point_t ri
 	return mesh;
 }
 
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+CMapMesh BuildParticleMesh( std::span<const ParticleSprite_t> particles )
+{
+	CMapMesh mesh;
+	mesh.m_Vertices.reserve( particles.size() * 4 );
+	mesh.m_Indices.reserve( particles.size() * 6 );
+	for ( const ParticleSprite_t &particle : particles )
+	{
+		const auto &r = particle.m_Rect;
+		const std::array<std::array<float, 2>, 4> texels{ { { r[ 0 ], r[ 1 ] }, { r[ 2 ], r[ 1 ] }, { r[ 2 ], r[ 3 ] }, { r[ 0 ], r[ 3 ] } } };
+		const auto nBase = static_cast<std::uint32_t>( mesh.m_Vertices.size() );
+		for ( std::size_t k = 0; k < 4; k++ )
+		{
+			MeshVertex_t vertex;
+			vertex.m_vecPosition = particle.m_Corners[ k ];
+			vertex.m_vecNormal = { particle.m_Color[ 0 ], particle.m_Color[ 1 ], particle.m_Color[ 2 ] };
+			vertex.m_flAlpha = particle.m_Color[ 3 ];
+			vertex.m_Texel = { texels[ k ][ 0 ] * static_cast<float>( particle.m_TextureSize[ 0 ] ), texels[ k ][ 1 ] * static_cast<float>( particle.m_TextureSize[ 1 ] ) };
+			vertex.m_nObject = particle.m_nObject;
+			mesh.m_Vertices.push_back( vertex );
+		}
+		if ( mesh.m_Batches.empty() || mesh.m_Batches.back().m_nMaterial != particle.m_nMaterial )
+		{
+			mesh.m_Batches.push_back( { particle.m_nMaterial, ~0u, static_cast<std::uint32_t>( mesh.m_Indices.size() ), 0 } );
+		}
+		mesh.m_Indices.insert( mesh.m_Indices.end(), { nBase, nBase + 1, nBase + 2, nBase, nBase + 2, nBase + 3 } );
+		mesh.m_Batches.back().m_nIndexCount += 6;
+	}
+	return mesh;
+}
+
 } // namespace xv::map

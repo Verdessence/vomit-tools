@@ -45,6 +45,8 @@ struct RasterMaterial_t
 	bool m_bTool = false;        // hidden when tool textures are toggled off
 	bool m_bNoCull = false;      // both sides drawn
 	bool m_bObjectColor = false; // entity boxes: the object's colour, shaded, in every mode
+	bool m_bAnimated = false;    // its proxies change it over time (its base texture's frames come and go)
+	const void *m_pFrames = nullptr; // and the frames it moves through, as one (their first): what the card keeps them by
 	friend bool operator==( const RasterMaterial_t &, const RasterMaterial_t & ) = default;
 };
 

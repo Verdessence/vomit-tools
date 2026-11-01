@@ -486,7 +486,8 @@ void CRasterizer::FillTriangle( const ScreenVertex_t &a, const ScreenVertex_t &b
 			input.m_Luxel = { static_cast<float>( values[ 2 ] ), static_cast<float>( values[ 3 ] ) };
 			input.m_flBlend = static_cast<float>( values[ 4 ] );
 			input.m_Light = { static_cast<float>( values[ 11 ] ), static_cast<float>( values[ 12 ] ), static_cast<float>( values[ 13 ] ), static_cast<float>( values[ 14 ] ) };
-			input.m_vecNormal = Normalized( CVec3{ static_cast<float>( values[ 5 ] ), static_cast<float>( values[ 6 ] ), static_cast<float>( values[ 7 ] ) } );
+			input.m_vecVertexColor = CVec3{ static_cast<float>( values[ 5 ] ), static_cast<float>( values[ 6 ] ), static_cast<float>( values[ 7 ] ) };
+			input.m_vecNormal = Normalized( input.m_vecVertexColor );
 			input.m_vecDirection = CVec3{ static_cast<float>( values[ 8 ] - m_Camera.m_Eye[ 0 ] ), static_cast<float>( values[ 9 ] - m_Camera.m_Eye[ 1 ] ), static_cast<float>( values[ 10 ] - m_Camera.m_Eye[ 2 ] ) };
 			const std::optional<std::array<float, 4>> color = ShadeFragment( material, input, shade );
 			if ( !color )
