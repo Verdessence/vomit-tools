@@ -29,6 +29,7 @@
 #include <QVBoxLayout>
 
 #include "DebugLog.h"
+#include "DiscordPresence.h"
 #include "FileActions.h"
 #include "FileDialogs.h"
 #include "Graphics.h"
@@ -94,6 +95,7 @@ CPreferencesDialog::CPreferencesDialog( QWidget *pParent )
 	AddPage( tr( "Materials" ), BuildMaterialsPage() );
 	AddPage( tr( "Maps" ), BuildMapsPage() );
 	AddPage( tr( "Source Tools" ), BuildSourceToolsPage() );
+	AddPage( tr( "Discord" ), BuildDiscordPage() );
 	AddPage( tr( "Advanced" ), BuildAdvancedPage() );
 	for ( const auto &[ szTitle, pfnMake ] : LocalPages() )
 	{
@@ -622,6 +624,57 @@ QWidget *CPreferencesDialog::BuildMapsPage()
 	pRow->addWidget( pReset );
 	pLayout->addLayout( pRow );
 	m_pMapsPage = pPage;
+	return pPage;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Discord's Rich Presence: on or off, the application, and what the profile shows.
+//          Each field is kept when it is left.
+//-----------------------------------------------------------------------------
+QWidget *CPreferencesDialog::BuildDiscordPage()
+{
+	auto *pPage = new QWidget;
+	auto *pLayout = PageLayout( pPage );
+	pLayout->addWidget( Hint( tr( "Shows what you are doing on your Discord profile, through the Discord app running on this computer (Vesktop's arRPC too). It needs the ID of an application you made at discord.com/developers: its name is the title shown, its Rich Presence art the picture." ) ) );
+	const DiscordSettings_t settings = DiscordSettings_t::Load();
+	auto *pEnabled = new QCheckBox( tr( "Show my activity on Discord" ) );
+	pEnabled->setObjectName( QStringLiteral( "discordEnabled" ) );
+	pEnabled->setChecked( settings.m_bEnabled );
+	pLayout->addWidget( pEnabled );
+	auto *pForm = new QFormLayout;
+	auto field = [ & ]( const char *pszName, const QString &szValue, const QString &szPlaceholder ) {
+		auto *pEdit = new QLineEdit( szValue );
+		pEdit->setObjectName( QLatin1String( pszName ) );
+		pEdit->setPlaceholderText( szPlaceholder );
+		return pEdit;
+	};
+	auto *pId = field( "discordClientId", settings.m_szClientId, tr( "Off until given" ) );
+	auto *pDetails = field( "discordDetails", settings.m_szDetails, QString{} );
+	auto *pImage = field( "discordImage", settings.m_szImage, tr( "An art asset's key, or an https address" ) );
+	auto *pLabel = field( "discordButtonLabel", settings.m_szButtonLabel, tr( "No button" ) );
+	auto *pUrl = field( "discordButtonUrl", settings.m_szButtonUrl, QStringLiteral( "https://" ) );
+	pForm->addRow( tr( "Application ID" ), pId );
+	pForm->addRow( tr( "Details" ), pDetails );
+	pForm->addRow( tr( "Picture" ), pImage );
+	pForm->addRow( tr( "Button" ), pLabel );
+	pForm->addRow( tr( "Button opens" ), pUrl );
+	pLayout->addLayout( pForm );
+	pLayout->addWidget( Hint( tr( "Under the details: what you are doing and the tab's file (Mapping dr_dust.vmf), and the time since the app started. Only others see the button." ) ) );
+	auto save = [ = ] {
+		DiscordSettings_t changed;
+		changed.m_bEnabled = pEnabled->isChecked();
+		changed.m_szClientId = pId->text().trimmed();
+		changed.m_szDetails = pDetails->text();
+		changed.m_szImage = pImage->text().trimmed();
+		changed.m_szButtonLabel = pLabel->text();
+		changed.m_szButtonUrl = pUrl->text().trimmed();
+		changed.Save();
+		CPreferences::Instance().NotifyDiscordChanged();
+	};
+	connect( pEnabled, &QCheckBox::toggled, pPage, save );
+	for ( QLineEdit *pEdit : { pId, pDetails, pImage, pLabel, pUrl } )
+		connect( pEdit, &QLineEdit::editingFinished, pPage, save );
+	pLayout->addStretch( 1 );
 	return pPage;
 }
 

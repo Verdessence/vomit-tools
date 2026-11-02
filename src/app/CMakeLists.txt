@@ -13,6 +13,8 @@ add_library(vomit_tools_ui STATIC
         DetailDocument.cpp
         DetailDocument.h
         DetailEditor.cpp
+        DiscordPresence.cpp
+        DiscordPresence.h
         DetailEditor.h
         DetailPreview.cpp
         DetailPreview.h

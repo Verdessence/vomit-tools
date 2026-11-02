@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+### Everywhere
+- Discord Rich Presence (Preferences > Discord): what you are doing and the tab's file
+  ("Mapping dr_dust.vmf"), the time since the start, a picture and a button, through the
+  Discord app on the computer (Vesktop's arRPC too). Off until an application ID is given.
+
 ### Hammer maps (new)
 - Materials draw their `$detail` texture: its blend mode, factor, scale and transform, scrolling
   and animating with the material's proxies (the first 64 frames).

@@ -231,11 +231,16 @@ public:
 	[[nodiscard]] bool IsMaterialLive() const { return m_bMaterialLive; }
 	void SetMaterialLive( bool bLive );
 
+	// Says that Preferences > Discord changed.
+	void NotifyDiscordChanged() { emit DiscordChanged(); }
+
 signals:
 	void GridAnimationChanged( bool bAll );
 	void MaterialEditingChanged();
 	void MapPreferencesChanged();
 	void TabGroupsChanged( bool bGroups );
+	// Preferences > Discord changed (they live in QSettings under discord/).
+	void DiscordChanged();
 
 private:
 	CPreferences();

@@ -38,6 +38,7 @@ private:
 	[[nodiscard]] QWidget *BuildMapsPage();
 	[[nodiscard]] QWidget *BuildAdvancedPage();
 	QWidget *BuildSourceToolsPage();
+	[[nodiscard]] QWidget *BuildDiscordPage();
 
 	QListWidget *m_pPages = nullptr;
 	QWidget *m_pMapsPage = nullptr; // made again when its settings are restored

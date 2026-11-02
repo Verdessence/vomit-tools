@@ -25,6 +25,7 @@
 #include "vfs/Steam.h"
 #include "vfs/Vfs.h"
 
+class CDiscordPresence;
 class CMapEditor;
 class CModelBrowser;
 class CModelEditor;
@@ -145,6 +146,7 @@ public:
 	void OfferNewMapAutosaves();
 	// The tabs' groups (the strip over them).
 	[[nodiscard]] CTabGroups &GetTabGroups() const { return *m_pTabGroups; }
+	[[nodiscard]] CDiscordPresence &GetDiscord() const { return *m_pDiscord; }
 
 protected:
 	void closeEvent( QCloseEvent *pEvent ) override;
@@ -269,6 +271,7 @@ private:
 	[[nodiscard]] QString GamePathForDisk( const std::filesystem::path &file ) const;
 	void ShowMounts();
 	void UpdateTitle();
+	void UpdateDiscord();
 	void UpdateGameLabel();
 	[[nodiscard]] CSoundEditor *GetCurrentEditor() const;
 	[[nodiscard]] CSkyEditor *GetCurrentSky() const;
@@ -298,6 +301,8 @@ private:
 	CFolderBrowser *m_pFolders = nullptr;
 	CEditorTabWidget *m_pTabs = nullptr;
 	CTabGroups *m_pTabGroups = nullptr;
+	CDiscordPresence *m_pDiscord = nullptr;
+	qint64 m_nStartedAt = 0; // for Discord's timer
 	QWidget *m_pPreviewHost = nullptr;
 	QTableWidget *m_pMounts = nullptr;
 	QLabel *m_pGameLabel = nullptr;

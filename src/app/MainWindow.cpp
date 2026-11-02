@@ -11,6 +11,8 @@
 #include <set>
 
 #include <QApplication>
+#include <QDateTime>
+#include <QTimer>
 #include <QCloseEvent>
 #include <QCryptographicHash>
 #include <QDesktopServices>
@@ -72,6 +74,7 @@
 #include "ParticleSearch.h"
 #include "Preferences.h"
 #include "TabGroups.h"
+#include "DiscordPresence.h"
 #include "map/MapAutosave.h"
 #include "map/MapEditor.h"
 #include "map/Write.h"
@@ -509,6 +512,16 @@ CMainWindow::CMainWindow( QWidget *pParent, xv::audio::CEngine::Output_t nAudio 
 	m_pTabGroups->SetKeyFunction( [ this ]( QWidget *pTab ) { return SessionEntryFor( m_pTabs->indexOf( pTab ) ); } );
 	m_pTabGroups->SetEnabled( CPreferences::Instance().IsTabGroups() );
 	connect( &CPreferences::Instance(), &CPreferences::TabGroupsChanged, m_pTabGroups, &CTabGroups::SetEnabled );
+
+	// Discord's Rich Presence: the current tab's kind and file, the time since the start. Tabs
+	// are renamed as files are saved, so it is looked at again now and then too.
+	m_pDiscord = new CDiscordPresence( this );
+	m_nStartedAt = QDateTime::currentSecsSinceEpoch();
+	connect( &CPreferences::Instance(), &CPreferences::DiscordChanged, m_pDiscord, &CDiscordPresence::Reload );
+	connect( m_pTabs, &QTabWidget::currentChanged, this, &CMainWindow::UpdateDiscord );
+	auto *pDiscordTimer = new QTimer( this );
+	connect( pDiscordTimer, &QTimer::timeout, this, &CMainWindow::UpdateDiscord );
+	pDiscordTimer->start( 5000 );
 	auto *pTabArea = new QWidget;
 	auto *pTabLayout = new QVBoxLayout( pTabArea );
 	pTabLayout->setContentsMargins( 0, 0, 0, 0 );
@@ -1144,6 +1157,31 @@ CVpkEditor *CMainWindow::OpenPackage( const QString &szPath )
 	m_pTabs->setTabToolTip( nIndex, ToQString( pEditor->GetPackage().GetFile() ) );
 	m_pTabs->setCurrentIndex( nIndex );
 	return pEditor;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: What Discord shows: the verb for the tab's kind and its file (as the tab names it,
+//          without the unsaved mark), or the file browser's.
+//-----------------------------------------------------------------------------
+void CMainWindow::UpdateDiscord()
+{
+	const int nIndex = m_pTabs->currentIndex();
+	DiscordActivity_t activity;
+	activity.m_nStart = m_nStartedAt;
+	activity.m_szImageText = QStringLiteral( "vomit-tools " ) + QCoreApplication::applicationVersion();
+	if ( nIndex <= 0 )
+	{
+		activity.m_szState = tr( "Viewing the game's files" );
+	}
+	else
+	{
+		QString szFile = m_pTabs->tabText( nIndex );
+		szFile.remove( u'&' );
+		szFile.remove( u'*' );
+		szFile = szFile.trimmed();
+		activity.m_szState = DiscordVerb( CTabGroups::KindOf( m_pTabs->widget( nIndex ) ), szFile ) + u' ' + szFile;
+	}
+	m_pDiscord->SetActivity( activity );
 }
 
 //-----------------------------------------------------------------------------
