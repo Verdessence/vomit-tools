@@ -261,9 +261,11 @@ void CTabGroups::SetEnabled( bool bEnabled )
 //-----------------------------------------------------------------------------
 void CTabGroups::ShowGroup( const QString &szGroup )
 {
+	// Taken before Refresh(): hiding the current tab makes Qt pick the nearest one still shown,
+	// which isn't the group's last tab.
+	QWidget *pCurrent = m_pTabs->currentWidget();
 	m_szCurrent = szGroup;
 	Refresh();
-	QWidget *pCurrent = m_pTabs->currentWidget();
 	const bool bAll = szGroup == QLatin1String( ALL );
 	if ( pCurrent && m_pTabs->indexOf( pCurrent ) > 0 && ( bAll || GroupOf( pCurrent ) == szGroup ) )
 		return;
