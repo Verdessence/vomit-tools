@@ -67,6 +67,9 @@ public:
 	// What the lighting preview needs of the materials read so far, by the same places.
 	[[nodiscard]] std::shared_ptr<const std::vector<xv::map::LightMaterial_t>> GetLightMaterials() const { return m_pLightMaterials; }
 	[[nodiscard]] std::shared_ptr<const xv::sky::CCube> GetSky() const { return m_pSky; }
+	// What reflections of env_cubemap show (ShadeOptions_t::m_pEnvMap); null until read, or when
+	// the game has none.
+	[[nodiscard]] std::shared_ptr<const xv::sky::CCube> GetEnvMap() const { return m_pEnvMap; }
 	// The props placed in the world, once their models and materials are read, and the
 	// entities they draw (which then show no box).
 	[[nodiscard]] std::shared_ptr<const xv::map::CMapMesh> GetProps() const { return m_pProps; }
@@ -103,8 +106,11 @@ private:
 		std::shared_ptr<xv::map::RasterTexture_t> m_pBase;
 		std::shared_ptr<xv::map::RasterTexture_t> m_pBase2;
 		std::vector<std::shared_ptr<xv::map::RasterTexture_t>> m_Frames; // an animated material's base texture, every frame (the first is m_pBase)
+		std::shared_ptr<xv::map::RasterTexture_t> m_pDetail;
+		std::vector<std::shared_ptr<xv::map::RasterTexture_t>> m_DetailFrames; // and its $detail's (the first is m_pDetail)
 		bool m_bMissing = false;
 		bool m_bTool = false;
+		bool m_bNodraw = false;
 		bool m_bSprite = false; // drawn unlit, tinted by its entity, blended
 		bool m_bAdditive = false; // a sprite added rather than blended by its alpha
 		bool m_bOverlay = false;  // an overlay's or a decal's: blended by its alpha
@@ -161,6 +167,7 @@ private:
 		std::uint32_t m_nMaterial = 0;
 		std::shared_ptr<const xv::material::CProxies> m_pProxies;
 		std::vector<std::shared_ptr<xv::map::RasterTexture_t>> m_Frames;
+		std::vector<std::shared_ptr<xv::map::RasterTexture_t>> m_DetailFrames;
 		xv::map::RasterMaterial_t m_Still;
 	};
 	std::vector<Animated_t> m_Animated;
@@ -169,6 +176,7 @@ private:
 	std::vector<xv::map::LightMaterial_t> m_LightCurrent;
 	std::shared_ptr<const std::vector<xv::map::LightMaterial_t>> m_pLightMaterials;
 	std::shared_ptr<const xv::sky::CCube> m_pSky;
+	std::shared_ptr<const xv::sky::CCube> m_pEnvMap;
 	std::shared_ptr<const xv::map::CMapMesh> m_pProps;
 	std::vector<std::uint32_t> m_PropObjects;
 	std::shared_ptr<const std::vector<xv::map::SpritePlacement_t>> m_pSprites;

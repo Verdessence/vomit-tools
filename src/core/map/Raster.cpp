@@ -247,7 +247,7 @@ void CRasterizer::Gather()
 				continue;
 			}
 			const RasterMaterial_t *pMaterial = MaterialOf( batch.m_nMaterial );
-			if ( pMaterial && pMaterial->m_bTool && !m_Options.m_bToolTextures )
+			if ( pMaterial && IsToggledOff( *pMaterial, m_Options.m_bToolTextures, m_Options.m_bNodraw ) )
 			{
 				continue;
 			}

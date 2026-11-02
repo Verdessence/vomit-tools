@@ -56,9 +56,12 @@ struct MaterialUniforms_t
 	float m_SelfIllum[ 4 ];
 	float m_UvTransform[ 4 ]; // a b c d
 	float m_UvOffset[ 4 ];    // tx ty
-	float m_Refract[ 4 ];     // 1: Refract or Water; 1: this is the reflection's pass; 1: reflects
+	float m_Refract[ 4 ];     // 1: Refract or Water; 1: this is the reflection's pass; 1: reflects; 1: reflects the sky
 	float m_RefractTint[ 4 ];
 	float m_EnvTint[ 4 ];
+	float m_Detail[ 4 ];          // $detailblendmode (-1: no detail), $detailblendfactor, $detailscale u v
+	float m_DetailTransform[ 4 ]; // a b c d
+	float m_DetailOffset[ 4 ];    // tx ty, and the detail texture's size
 };
 
 // map.frag's sky block, as sky.frag's.
@@ -113,12 +116,24 @@ MaterialUniforms_t MaterialUniforms( const xv::map::RasterMaterial_t *pMaterial,
 	u.m_Refract[ 0 ] = shade.m_bRefract ? 1.0f : 0.0f;
 	u.m_Refract[ 1 ] = bReflection ? 1.0f : 0.0f;
 	u.m_Refract[ 2 ] = shade.m_bEnvMap ? 1.0f : 0.0f;
+	u.m_Refract[ 3 ] = shade.m_bReflectsSky ? 1.0f : 0.0f;
 	u.m_RefractTint[ 0 ] = shade.m_vecRefractTint.m_flX;
 	u.m_RefractTint[ 1 ] = shade.m_vecRefractTint.m_flY;
 	u.m_RefractTint[ 2 ] = shade.m_vecRefractTint.m_flZ;
 	u.m_EnvTint[ 0 ] = shade.m_vecEnvTint.m_flX;
 	u.m_EnvTint[ 1 ] = shade.m_vecEnvTint.m_flY;
 	u.m_EnvTint[ 2 ] = shade.m_vecEnvTint.m_flZ;
+	const bool bDetail = shade.m_pDetail && shade.m_pDetail->GetMipCount() > 0 && !shade.m_bMissing;
+	u.m_Detail[ 0 ] = bDetail ? static_cast<float>( shade.m_nDetailMode ) : -1.0f;
+	u.m_Detail[ 1 ] = shade.m_flDetailBlend;
+	u.m_Detail[ 2 ] = shade.m_DetailScale[ 0 ];
+	u.m_Detail[ 3 ] = shade.m_DetailScale[ 1 ];
+	for ( std::size_t i = 0; i < 4; i++ )
+		u.m_DetailTransform[ i ] = shade.m_DetailTransform[ i ];
+	u.m_DetailOffset[ 0 ] = shade.m_DetailTransform[ 4 ];
+	u.m_DetailOffset[ 1 ] = shade.m_DetailTransform[ 5 ];
+	u.m_DetailOffset[ 2 ] = static_cast<float>( bDetail ? shade.m_pDetail->m_nWidth : 1 );
+	u.m_DetailOffset[ 3 ] = static_cast<float>( bDetail ? shade.m_pDetail->m_nHeight : 1 );
 	return u;
 }
 
@@ -174,6 +189,8 @@ void CMapRenderer::Release()
 		pFace.reset();
 	}
 	m_pSkyFor = nullptr;
+	m_pEnvAtlas.reset();
+	m_pEnvFor.reset();
 	m_pLightmap.reset();
 	m_pLightmapFor.reset();
 	m_pLightSampler.reset();
@@ -480,8 +497,10 @@ QRhiSampler *CMapRenderer::SamplerFor( const xv::map::RasterTexture_t *pTexture 
 //-----------------------------------------------------------------------------
 // Purpose: Every binding every pipeline declares, so one pipeline draws with any material's.
 //-----------------------------------------------------------------------------
-void CMapRenderer::MakeBindings( Material_t &material, QRhiTexture *pBase, QRhiTexture *pBase2, const xv::map::RasterTexture_t *pBaseTexture, const xv::map::RasterTexture_t *pBase2Texture )
+void CMapRenderer::MakeBindings( Material_t &material, QRhiTexture *pBase, QRhiTexture *pBase2, const xv::map::RasterTexture_t *pBaseTexture, const xv::map::RasterTexture_t *pBase2Texture, QRhiTexture *pDetail, const xv::map::RasterTexture_t *pDetailTexture )
 {
+	if ( !pDetail )
+		pDetail = m_pWhite.get();
 	const auto both = QRhiShaderResourceBinding::VertexStage | QRhiShaderResourceBinding::FragmentStage;
 	auto make = [ & ]( QRhiBuffer *pUniforms ) {
 		std::unique_ptr<QRhiShaderResourceBindings> pBindings( m_pRhi->newShaderResourceBindings() );
@@ -500,6 +519,8 @@ void CMapRenderer::MakeBindings( Material_t &material, QRhiTexture *pBase, QRhiT
 			QRhiShaderResourceBinding::sampledTexture( 11, QRhiShaderResourceBinding::FragmentStage, SkyFace( 4 ), SkySampler( 4 ) ),
 			QRhiShaderResourceBinding::sampledTexture( 12, QRhiShaderResourceBinding::FragmentStage, SkyFace( 5 ), SkySampler( 5 ) ),
 			QRhiShaderResourceBinding::sampledTexture( 13, QRhiShaderResourceBinding::FragmentStage, m_pLightmap ? m_pLightmap.get() : m_pWhite.get(), m_pLightSampler.get() ),
+			QRhiShaderResourceBinding::sampledTexture( 14, QRhiShaderResourceBinding::FragmentStage, m_pEnvAtlas ? m_pEnvAtlas.get() : m_pWhite.get(), m_TopSamplers[ 3 ].get() ),
+			QRhiShaderResourceBinding::sampledTexture( 15, QRhiShaderResourceBinding::FragmentStage, pDetail, SamplerFor( pDetailTexture ) ),
 		} );
 		pBindings->create();
 		return pBindings;
@@ -532,11 +553,36 @@ QRhiSampler *CMapRenderer::SkySampler( std::size_t nFace ) const
 //-----------------------------------------------------------------------------
 bool CMapRenderer::UploadSky( const MapFrame_t &frame, QRhiResourceUpdateBatch *pUpdates )
 {
-	if ( m_pSkyUniforms && frame.m_pSky.get() == m_pSkyFor )
+	if ( m_pSkyUniforms && frame.m_pSky.get() == m_pSkyFor && frame.m_pEnvMap == m_pEnvFor )
 	{
 		return false;
 	}
 	m_pSkyFor = frame.m_pSky.get();
+	if ( frame.m_pEnvMap != m_pEnvFor )
+	{
+		m_pEnvFor = frame.m_pEnvMap;
+		m_pEnvAtlas.reset();
+		// Faces of another size than the first are left black, as a missing face is.
+		const int nSize = m_pEnvFor ? m_pEnvFor->m_Faces[ 0 ].m_nWidth : 0;
+		if ( nSize > 0 )
+		{
+			QImage atlas( nSize * 3, nSize * 2, QImage::Format_RGBA8888 );
+			atlas.fill( Qt::black );
+			for ( std::size_t i = 0; i < 6; i++ )
+			{
+				const xv::texture::CImage &face = m_pEnvFor->m_Faces[ i ];
+				if ( face.m_nWidth != nSize || face.m_nHeight != nSize )
+					continue;
+				const int nX = static_cast<int>( i % 3 ) * nSize;
+				const int nY = static_cast<int>( i / 3 ) * nSize;
+				for ( int y = 0; y < nSize; y++ )
+					std::memcpy( atlas.scanLine( nY + y ) + nX * 4, face.m_Pixels.data() + static_cast<std::size_t>( y ) * nSize * 4, static_cast<std::size_t>( nSize ) * 4 );
+			}
+			m_pEnvAtlas.reset( m_pRhi->newTexture( QRhiTexture::RGBA8, atlas.size() ) );
+			m_pEnvAtlas->create();
+			pUpdates->uploadTexture( m_pEnvAtlas.get(), atlas );
+		}
+	}
 	if ( !m_pSkyUniforms )
 	{
 		m_pSkyUniforms.reset( m_pRhi->newBuffer( QRhiBuffer::Dynamic, QRhiBuffer::UniformBuffer, sizeof( SkyUniforms_t ) ) );
@@ -571,6 +617,7 @@ bool CMapRenderer::UploadSky( const MapFrame_t &frame, QRhiResourceUpdateBatch *
 		}
 	}
 	uniforms.m_Translate[ 0 ][ 3 ] = m_pSkyFor ? 1.0f : 0.0f;
+	uniforms.m_Translate[ 1 ][ 3 ] = m_pEnvAtlas ? 1.0f : 0.0f;
 	pUpdates->updateDynamicBuffer( m_pSkyUniforms.get(), 0, sizeof uniforms, &uniforms );
 	return true;
 }
@@ -661,7 +708,18 @@ void CMapRenderer::UploadMaterials( const MapFrame_t &frame, QRhiResourceUpdateB
 		// Textures that are the same as last time stay; new ones go up.
 		QRhiTexture *pBase = m_pWhite.get();
 		QRhiTexture *pBase2 = m_pWhite.get();
-		if ( source.m_Shade.m_pBase && source.m_bAnimated )
+		QRhiTexture *pDetail = m_pWhite.get();
+		// An animated material's frames (base and detail alike) are kept on the card by texture.
+		auto frame = [ & ]( const xv::map::RasterTexture_t *pTexture ) {
+			auto found = std::ranges::find( material.m_Frames, pTexture, &std::pair<const xv::map::RasterTexture_t *, std::unique_ptr<QRhiTexture>>::first );
+			if ( found == material.m_Frames.end() )
+			{
+				material.m_Frames.emplace_back( pTexture, nullptr );
+				return Upload( *pTexture, material.m_Frames.back().second, pUpdates );
+			}
+			return found->second ? found->second.get() : m_pWhite.get();
+		};
+		if ( source.m_bAnimated )
 		{
 			// Frames of another reading (the textures read again) are let go.
 			if ( material.m_pFramesFor != source.m_pFrames )
@@ -669,22 +727,26 @@ void CMapRenderer::UploadMaterials( const MapFrame_t &frame, QRhiResourceUpdateB
 				material.m_Frames.clear();
 				material.m_pFramesFor = source.m_pFrames;
 			}
-			auto found = std::ranges::find( material.m_Frames, source.m_Shade.m_pBase, &std::pair<const xv::map::RasterTexture_t *, std::unique_ptr<QRhiTexture>>::first );
-			if ( found == material.m_Frames.end() )
-			{
-				material.m_Frames.emplace_back( source.m_Shade.m_pBase, nullptr );
-				found = std::prev( material.m_Frames.end() );
-				pBase = Upload( *source.m_Shade.m_pBase, found->second, pUpdates );
-			}
-			else
-			{
-				pBase = found->second ? found->second.get() : m_pWhite.get();
-			}
+		}
+		else
+		{
+			material.m_Frames.clear();
+		}
+		if ( source.m_Shade.m_pBase && source.m_bAnimated )
+		{
+			pBase = frame( source.m_Shade.m_pBase );
 		}
 		else if ( source.m_Shade.m_pBase )
 		{
-			material.m_Frames.clear();
 			pBase = material.m_pBaseFor == source.m_Shade.m_pBase && material.m_pBase ? material.m_pBase.get() : Upload( *source.m_Shade.m_pBase, material.m_pBase, pUpdates );
+		}
+		if ( source.m_Shade.m_pDetail && source.m_bAnimated )
+		{
+			pDetail = frame( source.m_Shade.m_pDetail );
+		}
+		else if ( source.m_Shade.m_pDetail )
+		{
+			pDetail = material.m_pDetailFor == source.m_Shade.m_pDetail && material.m_pDetail ? material.m_pDetail.get() : Upload( *source.m_Shade.m_pDetail, material.m_pDetail, pUpdates );
 		}
 		if ( source.m_Shade.m_pBase2 )
 		{
@@ -695,7 +757,11 @@ void CMapRenderer::UploadMaterials( const MapFrame_t &frame, QRhiResourceUpdateB
 			material.m_pBaseFor = source.m_Shade.m_pBase;
 		}
 		material.m_pBase2For = source.m_Shade.m_pBase2;
-		MakeBindings( material, pBase, pBase2, source.m_Shade.m_pBase, source.m_Shade.m_pBase2 );
+		if ( !source.m_bAnimated )
+		{
+			material.m_pDetailFor = source.m_Shade.m_pDetail;
+		}
+		MakeBindings( material, pBase, pBase2, source.m_Shade.m_pBase, source.m_Shade.m_pBase2, pDetail, source.m_Shade.m_pDetail );
 		material.m_Source = source;
 		material.m_bMade = true;
 	}
@@ -1086,7 +1152,7 @@ void CMapRenderer::Render( QRhiCommandBuffer *pCommands, QRhiRenderTarget *pTarg
 					continue;
 				}
 				const xv::map::RasterMaterial_t *pMaterial = materialOf( batch.m_nMaterial );
-				if ( pMaterial && pMaterial->m_bTool && !frame.m_Options.m_bToolTextures )
+				if ( pMaterial && IsToggledOff( *pMaterial, frame.m_Options.m_bToolTextures, frame.m_Options.m_bNodraw ) )
 				{
 					continue;
 				}

@@ -24,7 +24,8 @@ struct TraceHit_t
 };
 
 // The objects along the ray (dir a unit vector) within flMax, each once at its nearest hit,
-// nearest first. Hidden objects, and tool textures when they're hidden, are passed through.
-[[nodiscard]] std::vector<TraceHit_t> TraceScene( const RasterScene_t &scene, bool bToolTextures, Point_t from, Point_t dir, double flMax );
+// nearest first. Hidden objects, and tool textures and nodraw when they're toggled off, are passed
+// through.
+[[nodiscard]] std::vector<TraceHit_t> TraceScene( const RasterScene_t &scene, bool bToolTextures, bool bNodraw, Point_t from, Point_t dir, double flMax );
 
 } // namespace xv::map

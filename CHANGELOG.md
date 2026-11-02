@@ -3,6 +3,13 @@
 ## Unreleased
 
 ### Hammer maps (new)
+- Materials draw their `$detail` texture: its blend mode, factor, scale and transform, scrolling
+  and animating with the material's proxies (the first 64 frames).
+- Refract and Water reflections of `env_cubemap` show the game's default cube map, as a map does
+  before buildcubemaps, rather than the map's sky; Water without `$envmap` still reflects the sky.
+- A Nodraw toggle on the Show bar hides `tools/toolsnodraw` on its own; Tool Textures no longer
+  hides it.
+- Fixed: switching tab groups showed the tab nearest the old one instead of the group's last.
 - Entity drags preview without refreshing assets or property panels. Props, sprites, decals and
   overlays retain independent meshes, so only changed entities need new GPU buffers; the 2D
   backgrounds stay cached during drags. The event-loop timing includes handler work and reports

@@ -73,7 +73,15 @@ struct MaterialInfo_t
 	bool m_bRefract = false;
 	CVec3 m_vecRefractTint{ 1, 1, 1 };
 	bool m_bEnvMap = false;
+	bool m_bReflectsSky = false; // water with no $envmap: its reflection shows the sky, not a cube map
 	CVec3 m_vecEnvTint{ 1, 1, 1 };
+	// $detail over the base texture, combined by $detailblendmode, $detailblendfactor of it, at
+	// $detailscale times the base's coordinates (through $detailtexturetransform).
+	std::string m_szDetail;
+	int m_nDetailMode = 0;
+	float m_flDetailBlend = 1.0f;
+	std::array<float, 2> m_DetailScale{ 4.0f, 4.0f };
+	std::array<float, 6> m_DetailTransform{ 1, 0, 0, 1, 0, 0 };
 	// Its proxies that change it over time (AnimatedTexture, TextureScroll, Sine...); null when
 	// none does.
 	std::shared_ptr<const material::CProxies> m_pProxies;
@@ -84,18 +92,20 @@ struct MaterialInfo_t
 };
 
 // szMaterial is a map's name for it ("brick/brickwall001a", any case).
-// What a material's proxies make of it at a time: its base texture's frame (of nFrames), its
-// $basetexturetransform, $color and $alpha.
+// What a material's proxies make of it at a time: its base texture's frame (of nFrames) and its
+// detail texture's (of nDetailFrames), their transforms, $color and $alpha.
 struct MaterialMotion_t
 {
 	int m_nFrame = 0;
 	std::array<float, 6> m_UvTransform{ 1, 0, 0, 1, 0, 0 }; // u' = a*u + b*v + tx, v' = c*u + d*v + ty
+	int m_nDetailFrame = 0;
+	std::array<float, 6> m_DetailTransform{ 1, 0, 0, 1, 0, 0 };
 	CVec3 m_vecColor{ 1, 1, 1 };
 	float m_flAlpha = 1.0f;
 
 	friend bool operator==( const MaterialMotion_t &, const MaterialMotion_t & ) = default;
 };
-[[nodiscard]] MaterialMotion_t MoveMaterial( const material::CProxies &proxies, float flTime, int nFrames );
+[[nodiscard]] MaterialMotion_t MoveMaterial( const material::CProxies &proxies, float flTime, int nFrames, int nDetailFrames = 0 );
 
 [[nodiscard]] MaterialInfo_t ReadMaterialInfo( std::string_view szMaterial, const material::Reader_t &pfnRead );
 [[nodiscard]] MaterialInfo_t DescribeMaterial( const material::CMaterial &material );

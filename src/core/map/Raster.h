@@ -43,12 +43,19 @@ struct RasterMaterial_t
 {
 	ShadeMaterial_t m_Shade;
 	bool m_bTool = false;        // hidden when tool textures are toggled off
+	bool m_bNodraw = false;      // tools/toolsnodraw: hidden by a toggle of its own, not the tool textures'
 	bool m_bNoCull = false;      // both sides drawn
 	bool m_bObjectColor = false; // entity boxes: the object's colour, shaded, in every mode
 	bool m_bAnimated = false;    // its proxies change it over time (its base texture's frames come and go)
 	const void *m_pFrames = nullptr; // and the frames it moves through, as one (their first): what the card keeps them by
 	friend bool operator==( const RasterMaterial_t &, const RasterMaterial_t & ) = default;
 };
+
+// Whether the Tool Textures and Nodraw toggles (off: false) hide a material's faces.
+[[nodiscard]] inline bool IsToggledOff( const RasterMaterial_t &material, bool bToolTextures, bool bNodraw )
+{
+	return material.m_bNodraw ? !bNodraw : material.m_bTool && !bToolTextures;
+}
 
 struct RasterLine_t
 {
@@ -81,6 +88,7 @@ struct RasterOptions_t
 	std::array<std::uint8_t, 3> m_Background{ 30, 30, 30 };
 	bool m_bTransparent = false; // the background left see-through (alpha 0), to draw over something else
 	bool m_bToolTextures = true;
+	bool m_bNodraw = true;
 	bool m_bSelectionEdges = true;
 	std::array<std::uint8_t, 3> m_SelectionEdge{ 255, 255, 0 };
 	std::array<std::uint8_t, 3> m_InvalidEdge{ 255, 0, 0 }; // broken solids' edges, over everything

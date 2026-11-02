@@ -40,6 +40,7 @@ enum class MapAction_t
 	MAP_ACTION_TOGGLE_MODELS_2D,     // Shift+M
 	MAP_ACTION_TOGGLE_NAMES,         // Ctrl+Shift+N
 	MAP_ACTION_TOGGLE_TOOL_TEXTURES, // Ctrl+Shift+F2
+	MAP_ACTION_TOGGLE_NODRAW,        // the tool bar: tools/toolsnodraw's faces, apart from the other tool textures
 	MAP_ACTION_TOGGLE_SKYBOX_3D,     // Alt+V
 	MAP_ACTION_TOGGLE_WALKABLE,      // the tool bar: Hammer's Display walkable area, on the selected displacements
 	MAP_ACTION_TOGGLE_PARTICLES,     // the tool bar: particle systems playing in the 3D views

@@ -84,8 +84,10 @@ private:
 	{
 		const xv::map::RasterTexture_t *m_pBaseFor = nullptr;
 		const xv::map::RasterTexture_t *m_pBase2For = nullptr;
+		const xv::map::RasterTexture_t *m_pDetailFor = nullptr;
 		std::unique_ptr<QRhiTexture> m_pBase;
 		std::unique_ptr<QRhiTexture> m_pBase2;
+		std::unique_ptr<QRhiTexture> m_pDetail;
 		std::unique_ptr<QRhiBuffer> m_pUniforms;
 		std::unique_ptr<QRhiShaderResourceBindings> m_pBindings;
 		// Refract and Water: the reflection's pass (added over the tint's multiply).
@@ -104,7 +106,7 @@ private:
 	void UploadMaterials( const MapFrame_t &frame, QRhiResourceUpdateBatch *pUpdates );
 	[[nodiscard]] QRhiTexture *Upload( const xv::map::RasterTexture_t &texture, std::unique_ptr<QRhiTexture> &pTexture, QRhiResourceUpdateBatch *pUpdates );
 	[[nodiscard]] QRhiSampler *SamplerFor( const xv::map::RasterTexture_t *pTexture ) const;
-	void MakeBindings( Material_t &material, QRhiTexture *pBase, QRhiTexture *pBase2, const xv::map::RasterTexture_t *pBaseTexture, const xv::map::RasterTexture_t *pBase2Texture );
+	void MakeBindings( Material_t &material, QRhiTexture *pBase, QRhiTexture *pBase2, const xv::map::RasterTexture_t *pBaseTexture, const xv::map::RasterTexture_t *pBase2Texture, QRhiTexture *pDetail = nullptr, const xv::map::RasterTexture_t *pDetailTexture = nullptr );
 	void MakePipelines( QRhiRenderTarget *pTarget );
 	bool UploadSky( const MapFrame_t &frame, QRhiResourceUpdateBatch *pUpdates );
 	// The lighting preview's atlas, when another bake arrives. Returns whether it changed (the
@@ -130,6 +132,10 @@ private:
 	std::unique_ptr<QRhiBuffer> m_pSkyUniforms;
 	std::array<std::unique_ptr<QRhiTexture>, 6> m_SkyFaces;
 	const xv::sky::CCube *m_pSkyFor = nullptr;
+	// env_cubemap's stand-in: its six faces side by side, rt bk lf over ft up dn (one sampler,
+	// where six would pass OpenGL's sixteen).
+	std::unique_ptr<QRhiTexture> m_pEnvAtlas;
+	std::shared_ptr<const xv::sky::CCube> m_pEnvFor; // held, so its address stays its own
 	std::unique_ptr<QRhiTexture> m_pLightmap;
 	std::shared_ptr<const xv::map::CLighting> m_pLightmapFor; // held, so its address stays its own
 	std::unique_ptr<QRhiSampler> m_pLightSampler;

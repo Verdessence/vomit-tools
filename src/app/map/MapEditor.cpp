@@ -926,6 +926,7 @@ void CMapEditor::BuildToolBars()
 	toggle( MapIcon_t::MAP_ICON_NAMES, tr( "Entity Names" ), MapAction_t::MAP_ACTION_TOGGLE_NAMES, "mapToggleNames", m_Settings.m_bNames );
 	toggle( MapIcon_t::MAP_ICON_HELPERS, tr( "Helpers" ), MapAction_t::MAP_ACTION_TOGGLE_HELPERS, "mapToggleHelpers", m_Settings.m_bHelpers );
 	toggle( MapIcon_t::MAP_ICON_TOOL_TEXTURES, tr( "Tool Textures" ), MapAction_t::MAP_ACTION_TOGGLE_TOOL_TEXTURES, "mapToggleToolTextures", m_Settings.m_bToolTextures );
+	toggle( MapIcon_t::MAP_ICON_NODRAW, tr( "Nodraw" ), MapAction_t::MAP_ACTION_TOGGLE_NODRAW, "mapToggleNodraw", m_Settings.m_bNodraw );
 	toggle( MapIcon_t::MAP_ICON_SKYBOX, tr( "3D Skybox" ), MapAction_t::MAP_ACTION_TOGGLE_SKYBOX_3D, "mapToggleSkybox3D", m_Settings.m_bSkybox3D );
 	toggle( MapIcon_t::MAP_ICON_WALKABLE, tr( "Walkable" ), MapAction_t::MAP_ACTION_TOGGLE_WALKABLE, "mapToggleWalkable", m_Settings.m_bWalkable );
 	toggle( MapIcon_t::MAP_ICON_PARTICLES, tr( "Particles" ), MapAction_t::MAP_ACTION_TOGGLE_PARTICLES, "mapToggleParticles", m_Settings.m_bParticles );
@@ -2185,6 +2186,7 @@ bool CMapEditor::RunAction( MapAction_t nAction, CMapView *pFrom )
 		case MapAction_t::MAP_ACTION_TOGGLE_MODELS_2D: return toggle( m_Settings.m_bModels2D );
 		case MapAction_t::MAP_ACTION_TOGGLE_NAMES: return toggle( m_Settings.m_bNames );
 		case MapAction_t::MAP_ACTION_TOGGLE_TOOL_TEXTURES: return toggle( m_Settings.m_bToolTextures );
+		case MapAction_t::MAP_ACTION_TOGGLE_NODRAW: return toggle( m_Settings.m_bNodraw );
 		case MapAction_t::MAP_ACTION_TOGGLE_SKYBOX_3D: return toggle( m_Settings.m_bSkybox3D );
 		case MapAction_t::MAP_ACTION_TOGGLE_WALKABLE: return toggle( m_Settings.m_bWalkable );
 		case MapAction_t::MAP_ACTION_TOGGLE_PARTICLES: return toggle( m_Settings.m_bParticles );
@@ -4087,6 +4089,7 @@ void CMapEditor::ResourcesArrived()
 	}
 	m_pRenderData->SetMaterials( m_pResources->GetMaterials(), m_pResources->GetTextures(), m_pResources->GetEntityMaterial() );
 	m_pRenderData->SetSky( m_pResources->GetSky() );
+	m_pRenderData->SetEnvMap( m_pResources->GetEnvMap() );
 	m_pRenderData->SetProps( m_pResources->GetProps(), m_pResources->GetPropObjects(), m_pResources->GetPropParts() );
 	m_pRenderData->SetSprites( m_pResources->GetSprites() );
 	m_pRenderData->SetOverlays( m_pResources->GetOverlays(), m_pResources->GetOverlayParts() );

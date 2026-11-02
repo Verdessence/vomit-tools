@@ -86,7 +86,7 @@ std::optional<double> HitsTriangle( Point_t a, Point_t b, Point_t c, Point_t fro
 //-----------------------------------------------------------------------------
 // Purpose:
 //-----------------------------------------------------------------------------
-std::vector<TraceHit_t> TraceScene( const RasterScene_t &scene, bool bToolTextures, Point_t from, Point_t dir, double flMax )
+std::vector<TraceHit_t> TraceScene( const RasterScene_t &scene, bool bToolTextures, bool bNodraw, Point_t from, Point_t dir, double flMax )
 {
 	std::unordered_map<std::uint32_t, TraceHit_t> nearest;
 	for ( std::uint32_t nMesh = 0; nMesh < scene.m_Meshes.size(); nMesh++ )
@@ -107,7 +107,7 @@ std::vector<TraceHit_t> TraceScene( const RasterScene_t &scene, bool bToolTextur
 					continue;
 				}
 			}
-			if ( !bToolTextures && batch.m_nMaterial < scene.m_Materials.size() && scene.m_Materials[ batch.m_nMaterial ].m_bTool )
+			if ( batch.m_nMaterial < scene.m_Materials.size() && IsToggledOff( scene.m_Materials[ batch.m_nMaterial ], bToolTextures, bNodraw ) )
 			{
 				continue;
 			}

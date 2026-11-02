@@ -1360,7 +1360,7 @@ std::vector<xv::map::TraceHit_t> CMapView3D::HitsAt( QPointF at )
 		return {};
 	}
 	const auto [ from, dir ] = frame.m_Camera.Ray( at.x(), at.y() );
-	return xv::map::TraceScene( frame.MakeScene(), m_Editor.GetSettings().m_bToolTextures, from, dir, m_Camera.m_flFar );
+	return xv::map::TraceScene( frame.MakeScene(), m_Editor.GetSettings().m_bToolTextures, m_Editor.GetSettings().m_bNodraw, from, dir, m_Camera.m_flFar );
 }
 
 //-----------------------------------------------------------------------------
@@ -1375,7 +1375,7 @@ std::optional<xv::map::FaceRef_t> CMapView3D::FaceAt( QPointF at, bool bThroughO
 	}
 	const xv::map::RasterScene_t scene = frame.MakeScene();
 	const auto [ from, dir ] = frame.m_Camera.Ray( at.x(), at.y() );
-	const std::vector<xv::map::TraceHit_t> hits = xv::map::TraceScene( scene, m_Editor.GetSettings().m_bToolTextures, from, dir, m_Camera.m_flFar );
+	const std::vector<xv::map::TraceHit_t> hits = xv::map::TraceScene( scene, m_Editor.GetSettings().m_bToolTextures, m_Editor.GetSettings().m_bNodraw, from, dir, m_Camera.m_flFar );
 	if ( hits.empty() )
 	{
 		return std::nullopt;
@@ -1411,7 +1411,7 @@ std::optional<std::pair<xv::map::Point_t, xv::map::Point_t>> CMapView3D::Surface
 	}
 	const xv::map::RasterScene_t scene = frame.MakeScene();
 	const auto [ from, dir ] = frame.m_Camera.Ray( at.x(), at.y() );
-	const std::vector<xv::map::TraceHit_t> hits = xv::map::TraceScene( scene, m_Editor.GetSettings().m_bToolTextures, from, dir, m_Camera.m_flFar );
+	const std::vector<xv::map::TraceHit_t> hits = xv::map::TraceScene( scene, m_Editor.GetSettings().m_bToolTextures, m_Editor.GetSettings().m_bNodraw, from, dir, m_Camera.m_flFar );
 	if ( hits.empty() )
 	{
 		return std::nullopt;
@@ -1553,7 +1553,7 @@ void CMapView3D::BeginSprinkle( QPointF at, Qt::KeyboardModifiers modifiers )
 		if ( !m_SprinkleFrame || !m_SprinkleFrame->m_pScene )
 			return std::nullopt;
 		const xv::map::RasterScene_t &scene = m_SprinkleRaster;
-		for ( const xv::map::TraceHit_t &hit : xv::map::TraceScene( scene, m_Editor.GetSettings().m_bToolTextures, from, dir, flMax ) )
+		for ( const xv::map::TraceHit_t &hit : xv::map::TraceScene( scene, m_Editor.GetSettings().m_bToolTextures, m_Editor.GetSettings().m_bNodraw, from, dir, flMax ) )
 		{
 			if ( !m_SprinkleFrame->m_pScene->IsSolidObject( hit.m_nObject ) )
 				continue;

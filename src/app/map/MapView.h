@@ -81,7 +81,8 @@ struct MapViewSettings_t
 	bool m_bModels2D = true;      // Shift+M
 	bool m_bNames = true;         // Ctrl+Shift+N
 	bool m_bHelpers = true;       // Ctrl+Shift+H
-	bool m_bToolTextures = true;  // Ctrl+Shift+F2
+	bool m_bToolTextures = true;  // Ctrl+Shift+F2 (not nodraw, which has a toggle of its own)
+	bool m_bNodraw = true;
 	bool m_bSkybox3D = true;      // Alt+V
 	bool m_bWalkable = false;     // the selected displacements' steep triangles tinted (Hammer's Display walkable area)
 	bool m_bParticles = true;     // info_particle_system playing in the 3D views

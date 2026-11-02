@@ -316,8 +316,10 @@ void CMapRenderData::Rebuild()
 	m_LineColorsFor = {};
 	m_nGeneration++;
 	std::shared_ptr<const xv::sky::CCube> pSky = std::move( m_Frame.m_pSky );
+	std::shared_ptr<const xv::sky::CCube> pEnvMap = std::move( m_Frame.m_pEnvMap );
 	m_Frame = {};
 	m_Frame.m_pSky = std::move( pSky );
+	m_Frame.m_pEnvMap = std::move( pEnvMap );
 	if ( !pScene )
 	{
 		return;
@@ -696,6 +698,18 @@ void CMapRenderData::SetSky( std::shared_ptr<const xv::sky::CCube> pSky )
 //-----------------------------------------------------------------------------
 // Purpose:
 //-----------------------------------------------------------------------------
+void CMapRenderData::SetEnvMap( std::shared_ptr<const xv::sky::CCube> pEnvMap )
+{
+	if ( pEnvMap != m_Frame.m_pEnvMap )
+	{
+		m_Frame.m_pEnvMap = std::move( pEnvMap );
+		m_nGeneration++;
+	}
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
 MapFrame_t CMapRenderData::GetShared()
 {
 	if ( m_Document.GetScene() != m_pBuiltFor )
@@ -845,7 +859,9 @@ MapFrame_t CMapRenderData::Snapshot( const xv::map::CViewCamera &camera, const x
 	frame.m_Camera = camera;
 	frame.m_Options = options;
 	frame.m_Options.m_bToolTextures = settings.m_bToolTextures;
+	frame.m_Options.m_bNodraw = settings.m_bNodraw;
 	frame.m_Options.m_Shade.m_pSky = frame.m_pSky.get();
+	frame.m_Options.m_Shade.m_pEnvMap = frame.m_pEnvMap.get();
 	const MapPreferences_t &preferences = CPreferences::Instance().GetMapPreferences();
 	frame.m_Options.m_Shade.m_flLightScale = static_cast<float>( preferences.m_flLightBrightness );
 	frame.m_Options.m_Shade.m_bLightHdr = preferences.m_bLightHdr;

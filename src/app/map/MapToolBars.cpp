@@ -317,6 +317,14 @@ QIcon MakeMapIcon( MapIcon_t nIcon, const QColor &color )
 				painter.drawLine( QPointF{ 5.0 + i * 7, 27 }, QPointF{ 27.0 + i * 7, 5 } );
 			painter.setClipping( false );
 			break;
+		case MapIcon_t::MAP_ICON_NODRAW:
+			// A face that isn't drawn: dashed, crossed out.
+			painter.setPen( QPen{ color, 2.0, Qt::DashLine } );
+			painter.drawRect( QRectF{ 5, 5, 22, 22 } );
+			painter.setPen( QPen{ color, 2.0 } );
+			painter.drawLine( QPointF{ 9, 9 }, QPointF{ 23, 23 } );
+			painter.drawLine( QPointF{ 23, 9 }, QPointF{ 9, 23 } );
+			break;
 		case MapIcon_t::MAP_ICON_SKYBOX:
 			// Hills under a sky, in a box.
 			painter.drawRect( QRectF{ 4, 6, 24, 20 } );

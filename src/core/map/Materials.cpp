@@ -20,6 +20,21 @@
 namespace xv::map
 {
 
+namespace
+{
+
+//-----------------------------------------------------------------------------
+// Purpose: A texture transform's value ("center .5 .5 scale 1 1 rotate 0 translate 0 0") as
+//          u' = a*u + b*v + tx, v' = c*u + d*v + ty.
+//-----------------------------------------------------------------------------
+std::array<float, 6> TransformOf( std::string_view szValue )
+{
+	const sky::CUvTransform transform = sky::CUvTransform::Parse( szValue );
+	return { transform.m_flA, transform.m_flB, transform.m_flC, transform.m_flD, transform.m_flTx, transform.m_flTy };
+}
+
+} // namespace
+
 //-----------------------------------------------------------------------------
 // Purpose:
 //-----------------------------------------------------------------------------
@@ -98,7 +113,24 @@ MaterialInfo_t DescribeMaterial( const material::CMaterial &material )
 		}
 		const std::string szEnvMap = material.Value( "$envmap" );
 		info.m_bEnvMap = bWater || ( !szEnvMap.empty() && szEnvMap != "0" );
+		info.m_bReflectsSky = bWater && szEnvMap.empty();
 		info.m_vecEnvTint = material.Color( "$envmaptint" );
+	}
+	if ( const std::string szDetail = material.Value( "$detail" ); !szDetail.empty() && !info.m_bRefract )
+	{
+		info.m_szDetail = szDetail;
+		info.m_nDetailMode = static_cast<int>( material.Number( "$detailblendmode", 0.0f ) );
+		info.m_flDetailBlend = material.Number( "$detailblendfactor", 1.0f );
+		// One number scales both ways.
+		const std::vector<float> scale = material.Numbers( "$detailscale" );
+		if ( !scale.empty() )
+		{
+			info.m_DetailScale = { scale[ 0 ], scale.size() > 1 ? scale[ 1 ] : scale[ 0 ] };
+		}
+		if ( const material::Parameter_t *pTransform = material.Find( "$detailtexturetransform" ) )
+		{
+			info.m_DetailTransform = TransformOf( pTransform->m_szValue );
+		}
 	}
 	info.m_bTranslucent = material.Flag( "$translucent" );
 	info.m_bAdditive = material.Flag( "$additive" );
@@ -119,14 +151,28 @@ MaterialInfo_t DescribeMaterial( const material::CMaterial &material )
 // Purpose: The proxies run at the time as the material editor's preview runs them; what the
 //          map's views draw is read back from the parameters they write.
 //-----------------------------------------------------------------------------
-MaterialMotion_t MoveMaterial( const material::CProxies &proxies, float flTime, int nFrames )
+MaterialMotion_t MoveMaterial( const material::CProxies &proxies, float flTime, int nFrames, int nDetailFrames )
 {
-	const material::CMaterial moved = proxies.At( flTime, [ nFrames ]( std::string_view szParameter ) { return kv1::EqualsIgnoreCase( szParameter, "$basetexture" ) ? nFrames : 0; } );
+	const material::CMaterial moved = proxies.At( flTime, [ nFrames, nDetailFrames ]( std::string_view szParameter ) {
+		return kv1::EqualsIgnoreCase( szParameter, "$basetexture" ) ? nFrames : kv1::EqualsIgnoreCase( szParameter, "$detail" ) ? nDetailFrames
+																																: 0;
+	} );
 	MaterialMotion_t motion;
+	const auto frameOf = []( float flFrame, int nCount ) {
+		const int nFrame = static_cast<int>( std::floor( flFrame ) );
+		return ( ( nFrame % nCount ) + nCount ) % nCount;
+	};
 	if ( nFrames > 0 )
 	{
-		const int nFrame = static_cast<int>( std::floor( moved.Number( "$frame", 0.0f ) ) );
-		motion.m_nFrame = ( ( nFrame % nFrames ) + nFrames ) % nFrames;
+		motion.m_nFrame = frameOf( moved.Number( "$frame", 0.0f ), nFrames );
+	}
+	if ( nDetailFrames > 0 )
+	{
+		motion.m_nDetailFrame = frameOf( moved.Number( "$detailframe", 0.0f ), nDetailFrames );
+	}
+	if ( const material::Parameter_t *pDetail = moved.Find( "$detailtexturetransform" ) )
+	{
+		motion.m_DetailTransform = TransformOf( pDetail->m_szValue );
 	}
 	// Water and Refract scroll their normal map ($bumptransform) instead.
 	const material::Parameter_t *pTransform = moved.Find( "$basetexturetransform" );
@@ -134,8 +180,7 @@ MaterialMotion_t MoveMaterial( const material::CProxies &proxies, float flTime, 
 		pTransform = moved.Find( "$bumptransform" );
 	if ( pTransform )
 	{
-		const sky::CUvTransform transform = sky::CUvTransform::Parse( pTransform->m_szValue );
-		motion.m_UvTransform = { transform.m_flA, transform.m_flB, transform.m_flC, transform.m_flD, transform.m_flTx, transform.m_flTy };
+		motion.m_UvTransform = TransformOf( pTransform->m_szValue );
 	}
 	motion.m_vecColor = moved.Color( "$color" );
 	motion.m_flAlpha = moved.Number( "$alpha", 1.0f );

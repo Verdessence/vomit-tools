@@ -343,6 +343,77 @@ std::vector<float> ShownLuminance( const std::uint8_t *pRgba, int nWidth, int nH
 }
 
 //-----------------------------------------------------------------------------
+// Purpose: The detail texture where the base's (unmoved) texel is, its footprint carried over
+//          so it picks its own mip.
+//-----------------------------------------------------------------------------
+std::array<float, 4> SampleDetail( const ShadeMaterial_t &material, const ShadeInput_t &input, float flBaseWidth, float flBaseHeight, const ShadeOptions_t &options )
+{
+	const RasterTexture_t &detail = *material.m_pDetail;
+	const auto &t = material.m_DetailTransform;
+	const float flWidth = static_cast<float>( std::max( detail.m_nWidth, 1 ) );
+	const float flHeight = static_cast<float>( std::max( detail.m_nHeight, 1 ) );
+	const float flScaleU = material.m_DetailScale[ 0 ] * flWidth;
+	const float flScaleV = material.m_DetailScale[ 1 ] * flHeight;
+	const float u = input.m_Texel[ 0 ] / flBaseWidth;
+	const float v = input.m_Texel[ 1 ] / flBaseHeight;
+	ShadeInput_t at = input;
+	at.m_Texel = { ( t[ 0 ] * u + t[ 1 ] * v + t[ 4 ] ) * flScaleU, ( t[ 2 ] * u + t[ 3 ] * v + t[ 5 ] ) * flScaleV };
+	const auto turn = [ & ]( float flU, float flV ) {
+		const float flUvU = flU / flBaseWidth;
+		const float flUvV = flV / flBaseHeight;
+		return std::array<float, 2>{ ( t[ 0 ] * flUvU + t[ 1 ] * flUvV ) * flScaleU, ( t[ 2 ] * flUvU + t[ 3 ] * flUvV ) * flScaleV };
+	};
+	const std::array<float, 2> across = turn( input.m_Gradient[ 0 ], input.m_Gradient[ 1 ] );
+	const std::array<float, 2> down = turn( input.m_Gradient[ 2 ], input.m_Gradient[ 3 ] );
+	at.m_Gradient = { across[ 0 ], across[ 1 ], down[ 0 ], down[ 1 ] };
+	const float flRho = std::max( std::hypot( across[ 0 ], across[ 1 ] ), std::hypot( down[ 0 ], down[ 1 ] ) );
+	at.m_flLod = flRho > 1.0f ? std::log2( flRho ) : 0.0f;
+	return SampleFiltered( detail, at.m_Texel, at, options );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: $detailblendmode's combinations before light (5 and 6 add after it, in
+//          ShadeFragment). 7 (two patterns) is taken as 0; 10 and up (self-shadowed bump maps,
+//          none) change nothing here.
+//-----------------------------------------------------------------------------
+void CombineDetail( std::array<float, 4> &color, const std::array<float, 4> &detail, int nMode, float flBlend )
+{
+	switch ( nMode )
+	{
+		case 0:
+		case 7:
+			for ( std::size_t i = 0; i < 3; i++ )
+				color[ i ] *= 1.0f + ( 2.0f * detail[ i ] - 1.0f ) * flBlend;
+			break;
+		case 1:
+			for ( std::size_t i = 0; i < 3; i++ )
+				color[ i ] += detail[ i ] * flBlend;
+			break;
+		case 2:
+			for ( std::size_t i = 0; i < 3; i++ )
+				color[ i ] += ( detail[ i ] - color[ i ] ) * flBlend * detail[ 3 ];
+			break;
+		case 3:
+			for ( std::size_t i = 0; i < 4; i++ )
+				color[ i ] += ( detail[ i ] - color[ i ] ) * flBlend;
+			break;
+		case 4:
+			for ( std::size_t i = 0; i < 3; i++ )
+				color[ i ] = detail[ i ] + ( color[ i ] - detail[ i ] ) * color[ 3 ];
+			break;
+		case 8:
+			for ( std::size_t i = 0; i < 3; i++ )
+				color[ i ] += ( color[ i ] * detail[ i ] - color[ i ] ) * flBlend;
+			break;
+		case 9:
+			color[ 3 ] += ( color[ 3 ] * detail[ 3 ] - color[ 3 ] ) * flBlend;
+			break;
+		default:
+			break;
+	}
+}
+
+//-----------------------------------------------------------------------------
 // Purpose:
 //-----------------------------------------------------------------------------
 std::optional<std::array<float, 4>> ShadeFragment( const ShadeMaterial_t &material, const ShadeInput_t &input, const ShadeOptions_t &options )
@@ -350,6 +421,7 @@ std::optional<std::array<float, 4>> ShadeFragment( const ShadeMaterial_t &materi
 	std::array<float, 4> color{ input.m_vecObjectColor.m_flX, input.m_vecObjectColor.m_flY, input.m_vecObjectColor.m_flZ, 1.0f };
 	float flGlow = 0.0f;           // $selfillum's mask: the base texture's alpha
 	std::array<float, 3> albedo{}; // the texture's colour, before light
+	std::array<float, 4> detail{}; // $detail where the point is
 	const bool bTextured = options.m_nMode != RasterMode_t::RASTER_MODE_FLAT && options.m_nMode != RasterMode_t::RASTER_MODE_WIREFRAME;
 	if ( bTextured && material.m_bSky && options.m_pSky )
 	{
@@ -396,6 +468,11 @@ std::optional<std::array<float, 4>> ShadeFragment( const ShadeMaterial_t &materi
 		else
 		{
 			color = { 1.0f, 1.0f, 1.0f, 1.0f };
+		}
+		if ( material.m_pDetail && !material.m_bMissing )
+		{
+			detail = SampleDetail( material, input, static_cast<float>( std::max( nWidth, 1 ) ), static_cast<float>( std::max( nHeight, 1 ) ), options );
+			CombineDetail( color, detail, material.m_nDetailMode, material.m_flDetailBlend );
 		}
 		if ( material.m_bAlphaTest && color[ 3 ] < material.m_flAlphaReference )
 		{
@@ -470,6 +547,12 @@ std::optional<std::array<float, 4>> ShadeFragment( const ShadeMaterial_t &materi
 			color[ 1 ] *= flShade;
 			color[ 2 ] *= flShade;
 		}
+	}
+	if ( bTextured && material.m_pDetail && !material.m_bMissing && ( material.m_nDetailMode == 5 || material.m_nDetailMode == 6 ) )
+	{
+		// Added after the light, so the detail glows (6's fade by threshold taken as 5's add).
+		for ( std::size_t i = 0; i < 3; i++ )
+			color[ i ] += detail[ i ] * material.m_flDetailBlend;
 	}
 	if ( options.m_nMode == RasterMode_t::RASTER_MODE_LIGHTING && options.m_pFog && !( material.m_bSky && options.m_pSky ) )
 	{
@@ -579,9 +662,10 @@ RefractColor_t ShadeRefract( const ShadeMaterial_t &material, const ShadeInput_t
 		const float flFresnel = 0.1f + 0.9f * std::pow( 1.0f - flFacing, 5.0f );
 		const CVec3 vecReflected = vecView - vecNormal * ( 2.0f * Dot( vecView, vecNormal ) );
 		CVec3 vecEnv{ 0.25f, 0.25f, 0.25f };
-		if ( options.m_pSky )
+		const sky::CCube *pCube = material.m_bReflectsSky || !options.m_pEnvMap ? options.m_pSky : options.m_pEnvMap;
+		if ( pCube )
 		{
-			const std::array<float, 3> sky = sky::Sample( *options.m_pSky, vecReflected );
+			const std::array<float, 3> sky = sky::Sample( *pCube, vecReflected );
 			vecEnv = CVec3{ sky[ 0 ] / 255.0f, sky[ 1 ] / 255.0f, sky[ 2 ] / 255.0f };
 		}
 		out.m_vecReflection = CVec3{ vecEnv.m_flX * material.m_vecEnvTint.m_flX, vecEnv.m_flY * material.m_vecEnvTint.m_flY, vecEnv.m_flZ * material.m_vecEnvTint.m_flZ } * flFresnel;

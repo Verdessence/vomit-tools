@@ -93,13 +93,22 @@ struct ShadeMaterial_t
 	// m_pBase2 the tint texture ($refracttinttexture).
 	bool m_bRefract = false;
 	CVec3 m_vecRefractTint{ 1, 1, 1 };
-	bool m_bEnvMap = false;                    // reflects (water always): the map's sky stands in for env_cubemap
+	bool m_bEnvMap = false;                    // reflects (water always)
+	bool m_bReflectsSky = false;               // the reflection shows the sky (water without $envmap), not the cube map
 	CVec3 m_vecEnvTint{ 1, 1, 1 };
 	int m_nWidth = 128;                        // what texels divide by when there's no texture
 	int m_nHeight = 128;
 	// $basetexturetransform (a proxy's TextureScroll, often): u' = a*u + b*v + tx, v' = c*u + d*v + ty,
 	// in the base texture's 0-1 coordinates.
 	std::array<float, 6> m_UvTransform{ 1, 0, 0, 1, 0, 0 };
+	// $detail: combined with the base by m_nDetailMode ($detailblendmode), m_flDetailBlend of it.
+	// Its coordinates are the base's 0-1 ones (before the base's transform) through
+	// m_DetailTransform, times m_DetailScale.
+	const RasterTexture_t *m_pDetail = nullptr;
+	int m_nDetailMode = 0;
+	float m_flDetailBlend = 1.0f;
+	std::array<float, 2> m_DetailScale{ 4.0f, 4.0f };
+	std::array<float, 6> m_DetailTransform{ 1, 0, 0, 1, 0, 0 };
 	friend bool operator==( const ShadeMaterial_t &, const ShadeMaterial_t & ) = default;
 
 	[[nodiscard]] bool HasUvTransform() const { return m_UvTransform != std::array<float, 6>{ 1, 0, 0, 1, 0, 0 }; }
@@ -136,6 +145,9 @@ struct ShadeOptions_t
 	CVec3 m_vecFaceShade{ 0.65f, 0.8f, 1.0f }; // brightness of faces facing along x, y and z
 	float m_flLuxelShade = 0.75f;              // the lightmap grid's darker squares
 	const sky::CCube *m_pSky = nullptr;        // Hammer++'s 2D skybox on sky faces; null: none
+	// What stands in for env_cubemap in reflections: the game's default cube map, as a map shows
+	// before buildcubemaps. Null: the sky does.
+	const sky::CCube *m_pEnvMap = nullptr;
 	const CLighting *m_pLighting = nullptr;    // the lighting preview's atlas; null: not baked yet
 	float m_flLightScale = 1.0f;               // the lighting preview's brightness (times HDR's exposure)
 	bool m_bLightHdr = false;                  // shown as the game with HDR: no overbright

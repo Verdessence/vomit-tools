@@ -42,9 +42,12 @@ layout(std140, binding = 1) uniform Material {
 	vec4 selfIllum; // $selfillumtint, and 1 when it glows by its base texture's alpha
 	vec4 uvTransform; // $basetexturetransform: u' = a*u + b*v + tx, v' = c*u + d*v + ty (a b c d)
 	vec4 uvOffset;    // tx ty
-	vec4 refraction;  // 1: Refract or Water (base is its normal map, base2 its tint texture); 1: the reflection's pass, else the tint's; 1: reflects
+	vec4 refraction;  // 1: Refract or Water (base is its normal map, base2 its tint texture); 1: the reflection's pass, else the tint's; 1: reflects; 1: reflects the sky, not env_cubemap
 	vec4 refractTint; // rgb
 	vec4 envTint;     // rgb
+	vec4 detail;          // $detailblendmode (below 0: no detail), $detailblendfactor, $detailscale u v
+	vec4 detailTransform; // $detailtexturetransform: a b c d
+	vec4 detailOffset;    // tx ty, and the detail texture's size
 } material;
 
 layout(binding = 2) uniform sampler2D base;
@@ -55,7 +58,7 @@ layout(std140, binding = 6) uniform Sky {
 	vec4 faceRight[6];  // each face's image right edge direction (sky::Basis)
 	vec4 faceUp[6];     // and its top
 	vec4 transform[6];  // a b c d: u' = a*u + b*v + tx, v' = c*u + d*v + ty
-	vec4 translate[6];  // tx, ty; 1 when the face has an image; [0].w: 1 when there's a sky
+	vec4 translate[6];  // tx, ty; 1 when the face has an image; [0].w: 1 when there's a sky; [1].w: 1 when envAtlas holds env_cubemap's stand-in
 } sky;
 
 layout(binding = 7) uniform sampler2D skyFace0;
@@ -65,6 +68,8 @@ layout(binding = 10) uniform sampler2D skyFace3;
 layout(binding = 11) uniform sampler2D skyFace4;
 layout(binding = 12) uniform sampler2D skyFace5;
 layout(binding = 13) uniform sampler2D lightmap; // the lighting preview's atlas: linear light, 1 fully lit
+layout(binding = 14) uniform sampler2D envAtlas; // env_cubemap's stand-in, faces rt bk lf over ft up dn
+layout(binding = 15) uniform sampler2D detailTexture; // $detail
 
 const float MODE_WIREFRAME = 0.0;
 const float MODE_FLAT = 1.0;
@@ -106,6 +111,22 @@ vec3 skyColour(vec3 d) {
 	return textureLod(skyFace5, shown, 0.0).rgb;
 }
 
+// env_cubemap's stand-in in a direction, as sky::Sample reads a cube with no transforms.
+vec3 envColour(vec3 d) {
+	float major;
+	int f = skyFaceOf(d, major);
+	if (major <= 0.0) {
+		return vec3(0.0);
+	}
+	float s = dot(d, sky.faceRight[f].xyz) / major;
+	float t = dot(d, sky.faceUp[f].xyz) / major;
+	// Kept half a texel inside its face, so the filter doesn't reach the next one over.
+	vec2 inset = 0.5 / vec2(textureSize(envAtlas, 0)) * vec2(3.0, 2.0);
+	vec2 uv = clamp(vec2((s + 1.0) * 0.5, (1.0 - t) * 0.5), inset, vec2(1.0) - inset);
+	vec2 cell = vec2(float(f % 3), float(f / 3));
+	return textureLod(envAtlas, (cell + uv) / vec2(3.0, 2.0), 0.0).rgb;
+}
+
 // A texture at a texel position (in its full-size texels) as xv::map::SampleFiltered samples it:
 // once at the gradient's mip level, or with anisotropy up to that many times along the pixel's
 // footprint at a finer level, averaged.
@@ -135,6 +156,38 @@ vec4 sampleFiltered(sampler2D tex, vec2 texel, vec2 size, vec2 across, vec2 down
 	return sum / count;
 }
 
+// $detail where the base's (unmoved) coordinates are, as xv::map::SampleDetail.
+vec4 sampleDetail(vec2 uv, vec2 across, vec2 down) {
+	vec2 full = max(material.size.xy, vec2(1.0));
+	vec2 size = max(material.detailOffset.zw, vec2(1.0));
+	vec2 scale = material.detail.zw * size;
+	mat2 turn = mat2(material.detailTransform.x, material.detailTransform.z, material.detailTransform.y, material.detailTransform.w);
+	vec2 texel = (turn * uv + material.detailOffset.xy) * scale;
+	vec2 detailAcross = (turn * (across / full)) * scale;
+	vec2 detailDown = (turn * (down / full)) * scale;
+	return sampleFiltered(detailTexture, texel, size, detailAcross, detailDown);
+}
+
+// $detailblendmode's combinations before light, as xv::map::CombineDetail.
+vec4 combineDetail(vec4 color, vec4 detail, int mode, float amount) {
+	if (mode == 0 || mode == 7) {
+		color.rgb *= vec3(1.0) + (2.0 * detail.rgb - vec3(1.0)) * amount;
+	} else if (mode == 1) {
+		color.rgb += detail.rgb * amount;
+	} else if (mode == 2) {
+		color.rgb += (detail.rgb - color.rgb) * amount * detail.a;
+	} else if (mode == 3) {
+		color += (detail - color) * amount;
+	} else if (mode == 4) {
+		color.rgb = detail.rgb + (color.rgb - detail.rgb) * color.a;
+	} else if (mode == 8) {
+		color.rgb += (color.rgb * detail.rgb - color.rgb) * amount;
+	} else if (mode == 9) {
+		color.a += (color.a * detail.a - color.a) * amount;
+	}
+	return color;
+}
+
 // What a Refract or Water face does to what is behind it, as xv::map::ShadeRefract: the tint
 // (drawn as a multiply) or, in the reflection's pass, the reflection (added).
 vec4 shadeRefract(vec2 across, vec2 down, vec3 face) {
@@ -161,7 +214,8 @@ vec4 shadeRefract(vec2 across, vec2 down, vec3 face) {
 		float facing = max(0.0, -dot(view, normal));
 		float fresnel = 0.1 + 0.9 * pow(1.0 - facing, 5.0);
 		vec3 reflected = view - normal * (2.0 * dot(view, normal));
-		vec3 env = sky.translate[0].w > 0.5 ? skyColour(reflected) : vec3(0.25);
+		bool fromSky = material.refraction.w > 0.5 || sky.translate[1].w < 0.5;
+		vec3 env = !fromSky ? envColour(reflected) : sky.translate[0].w > 0.5 ? skyColour(reflected) : vec3(0.25);
 		reflection = env * material.envTint.rgb * fresnel;
 	}
 	int flags = int(v_state.a * 255.0 + 0.5);
@@ -184,6 +238,9 @@ void main() {
 	vec4 color = vec4(v_state.rgb, 1.0);
 	float glow = 0.0;    // $selfillum's mask: the base texture's alpha
 	vec3 albedo = vec3(0.0); // the texture's colour, before light
+	vec4 detail = vec4(0.0); // $detail where the point is
+	int detailMode = int(floor(material.detail.x + 0.5));
+	bool hasDetail = material.detail.x > -0.5;
 	vec3 n = normalize(v_normal);
 	bool textured = mode != MODE_FLAT && mode != MODE_WIREFRAME;
 	if (textured && material.refraction.x > 0.5) {
@@ -214,6 +271,10 @@ void main() {
 			}
 		} else {
 			color = vec4(1.0);
+		}
+		if (hasDetail) {
+			detail = sampleDetail(uv, across, down);
+			color = combineDetail(color, detail, detailMode, material.detail.y);
 		}
 		if (material.options.x >= 0.0 && color.a < material.options.x) {
 			discard;
@@ -266,6 +327,10 @@ void main() {
 			// Not baked (yet): the shaded look. Fullbright faces (tool textures) stay as they are.
 			color.rgb *= faceShade(n);
 		}
+	}
+	if (textured && hasDetail && (detailMode == 5 || detailMode == 6)) {
+		// Added after the light, so the detail glows (6's fade by threshold taken as 5's add).
+		color.rgb += detail.rgb * material.detail.y;
 	}
 	if (mode == MODE_LIGHTING && frame.fogRange.z > 0.5 && !(material.extra.x > 0.5 && sky.translate[0].w > 0.5)) {
 		// env_fog_controller's fog, as xv::map::ShadeFragment adds it.

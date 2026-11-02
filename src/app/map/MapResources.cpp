@@ -12,6 +12,7 @@
 #include <numeric>
 #include <utility>
 
+#include "kv1/Kv1.h"
 #include "map/Instance.h"
 #include "map/Materials.h"
 #include "map/Overlay.h"
@@ -33,6 +34,14 @@ constexpr std::size_t BATCH = 16;
 bool IsToolMaterial( const xv::map::MaterialInfo_t &info, std::string_view szName )
 {
 	return info.IsTool() || ( szName.starts_with( "tools/" ) && !info.IsSky() );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: tools/toolsnodraw, which the Nodraw toggle hides instead of the tool textures'.
+//-----------------------------------------------------------------------------
+bool IsNodrawMaterial( std::string_view szName )
+{
+	return xv::kv1::EqualsIgnoreCase( szName, "tools/toolsnodraw" );
 }
 
 //-----------------------------------------------------------------------------
@@ -190,6 +199,7 @@ void CMapResources::Start( std::shared_ptr<const xv::map::CScene> pScene, std::o
 	m_Game = game;
 	m_nMaxSize = nMaxSize;
 	m_pSky.reset();
+	m_pEnvMap.reset();
 	m_pProps.reset();
 	m_PropObjects.clear();
 	m_pSprites.reset();
@@ -242,6 +252,27 @@ void CMapResources::Run( std::shared_ptr<const xv::map::CScene> pScene, xv::vfs:
 			m_pSky = pCube;
 			emit Arrived();
 		} );
+	}
+	// env_cubemap's cube maps are only made by buildcubemaps in the game; until then the game
+	// shows its default one, as the views do.
+	if ( const auto bytes = fileSystem.Read( "materials/engine/defaultcubemap.vtf" ) )
+	{
+		if ( const auto vtf = xv::texture::ReadVtf( *bytes ); vtf && xv::sky::IsCubeMap( *vtf ) )
+		{
+			xv::sky::CCube cube;
+			for ( const xv::sky::Face_t nFace : xv::sky::FACES )
+			{
+				if ( auto image = xv::sky::CubeMapFace( *vtf, nFace ) )
+				{
+					cube.Face( nFace ) = std::move( *image );
+				}
+			}
+			auto pCube = std::make_shared<const xv::sky::CCube>( std::move( cube ) );
+			post( [ this, pCube ] {
+				m_pEnvMap = pCube;
+				emit Arrived();
+			} );
+		}
 	}
 
 	// Each material's base texture size, for placing models' texture coordinates.
@@ -802,6 +833,7 @@ std::vector<CMapResources::Loaded_t> CMapResources::ReadMaterials( const std::ve
 	std::vector<Loaded_t> batch( todo.size() );
 	std::vector<std::optional<std::vector<std::byte>>> base( batch.size() );
 	std::vector<std::optional<std::vector<std::byte>>> base2( batch.size() );
+	std::vector<std::optional<std::vector<std::byte>>> details( batch.size() );
 	for ( std::size_t i = 0; i < batch.size(); i++ )
 	{
 		Loaded_t &loaded = batch[ i ];
@@ -811,7 +843,8 @@ std::vector<CMapResources::Loaded_t> CMapResources::ReadMaterials( const std::ve
 		loaded.m_bOverlay = nUse == MaterialUse_t::MATERIAL_USE_OVERLAYS;
 		loaded.m_bAdditive = bSprites && nMaterial < additive.size() && additive[ nMaterial ];
 		loaded.m_Info = xv::map::ReadMaterialInfo( szName, read );
-		loaded.m_bTool = IsToolMaterial( loaded.m_Info, szName );
+		loaded.m_bNodraw = IsNodrawMaterial( szName );
+		loaded.m_bTool = !loaded.m_bNodraw && IsToolMaterial( loaded.m_Info, szName );
 		if ( !loaded.m_Info.m_szTexture.empty() )
 		{
 			base[ i ] = read( xv::material::TexturePath( loaded.m_Info.m_szTexture ) );
@@ -819,6 +852,10 @@ std::vector<CMapResources::Loaded_t> CMapResources::ReadMaterials( const std::ve
 		if ( ( loaded.m_Info.m_bBlend || loaded.m_Info.m_bRefract ) && !loaded.m_Info.m_szTexture2.empty() )
 		{
 			base2[ i ] = read( xv::material::TexturePath( loaded.m_Info.m_szTexture2 ) );
+		}
+		if ( !loaded.m_Info.m_szDetail.empty() )
+		{
+			details[ i ] = read( xv::material::TexturePath( loaded.m_Info.m_szDetail ) );
 		}
 	}
 	xv::ParallelFor( batch.size(), 1, [ & ]( std::size_t nBegin, std::size_t nFinish ) {
@@ -840,6 +877,18 @@ std::vector<CMapResources::Loaded_t> CMapResources::ReadMaterials( const std::ve
 			if ( base2[ i ] )
 			{
 				batch[ i ].m_pBase2 = ReadMapTexture( *base2[ i ], nMaxSize, bDecoded );
+			}
+			if ( details[ i ] )
+			{
+				batch[ i ].m_pDetail = ReadMapTexture( *details[ i ], nMaxSize, bDecoded );
+				if ( batch[ i ].m_pDetail && batch[ i ].m_Info.m_pProxies )
+				{
+					const int nFrames = std::min( MapTextureFrames( *details[ i ] ), MAX_ANIMATED_FRAMES );
+					batch[ i ].m_DetailFrames.push_back( batch[ i ].m_pDetail );
+					for ( int nFrame = 1; nFrame < nFrames; nFrame++ )
+						if ( auto pFrame = ReadMapTexture( *details[ i ], nMaxSize, bDecoded, nFrame ) )
+							batch[ i ].m_DetailFrames.push_back( std::move( pFrame ) );
+				}
 			}
 			// Source draws its checker for a material, or a texture, it can't find.
 			batch[ i ].m_bMissing = !batch[ i ].m_Info.m_bFound || ( !batch[ i ].m_Info.m_szTexture.empty() && !batch[ i ].m_pBase );
@@ -900,12 +949,16 @@ bool CMapResources::Animate( float flTime )
 	{
 		if ( animated.m_nMaterial >= m_Current.size() )
 			continue;
-		const xv::map::MaterialMotion_t motion = xv::map::MoveMaterial( *animated.m_pProxies, flTime, static_cast<int>( animated.m_Frames.size() ) );
+		const xv::map::MaterialMotion_t motion = xv::map::MoveMaterial( *animated.m_pProxies, flTime, static_cast<int>( animated.m_Frames.size() ), static_cast<int>( animated.m_DetailFrames.size() ) );
 		xv::map::RasterMaterial_t material = animated.m_Still;
 		xv::map::ShadeMaterial_t &shade = material.m_Shade;
 		if ( !animated.m_Frames.empty() )
 			shade.m_pBase = animated.m_Frames[ static_cast<std::size_t>( motion.m_nFrame ) % animated.m_Frames.size() ].get();
+		if ( !animated.m_DetailFrames.empty() )
+			shade.m_pDetail = animated.m_DetailFrames[ static_cast<std::size_t>( motion.m_nDetailFrame ) % animated.m_DetailFrames.size() ].get();
 		shade.m_UvTransform = motion.m_UvTransform;
+		if ( shade.m_pDetail )
+			shade.m_DetailTransform = motion.m_DetailTransform;
 		shade.m_vecColor = motion.m_vecColor;
 		shade.m_flAlpha = motion.m_flAlpha;
 		if ( m_Current[ animated.m_nMaterial ] != material )
@@ -950,7 +1003,13 @@ void CMapResources::Take( std::vector<Loaded_t> batch )
 		shade.m_bRefract = info.m_bRefract;
 		shade.m_vecRefractTint = info.m_vecRefractTint;
 		shade.m_bEnvMap = info.m_bEnvMap;
+		shade.m_bReflectsSky = info.m_bReflectsSky;
 		shade.m_vecEnvTint = info.m_vecEnvTint;
+		shade.m_pDetail = loaded.m_pDetail.get();
+		shade.m_nDetailMode = info.m_nDetailMode;
+		shade.m_flDetailBlend = info.m_flDetailBlend;
+		shade.m_DetailScale = info.m_DetailScale;
+		shade.m_DetailTransform = info.m_DetailTransform;
 		material.m_bNoCull = info.m_bNoCull;
 		shade.m_bSky = info.IsSky();
 		shade.m_bTinted = loaded.m_bSprite;
@@ -968,14 +1027,18 @@ void CMapResources::Take( std::vector<Loaded_t> batch )
 			shade.m_bAlphaTest = false;
 		}
 		material.m_bTool = loaded.m_bTool;
+		material.m_bNodraw = loaded.m_bNodraw;
 		std::erase_if( m_Animated, [ & ]( const Animated_t &animated ) { return animated.m_nMaterial == loaded.m_nMaterial; } );
 		if ( info.m_pProxies )
 		{
 			material.m_bAnimated = true;
-			material.m_pFrames = loaded.m_Frames.empty() ? nullptr : loaded.m_Frames.front().get();
-			m_Animated.push_back( { loaded.m_nMaterial, info.m_pProxies, loaded.m_Frames, material } );
+			material.m_pFrames = !loaded.m_Frames.empty() ? static_cast<const void *>( loaded.m_Frames.front().get() ) : !loaded.m_DetailFrames.empty() ? loaded.m_DetailFrames.front().get()
+																																						: nullptr;
+			m_Animated.push_back( { loaded.m_nMaterial, info.m_pProxies, loaded.m_Frames, loaded.m_DetailFrames, material } );
 			for ( std::size_t nFrame = 1; nFrame < loaded.m_Frames.size(); nFrame++ )
 				m_Keep.push_back( loaded.m_Frames[ nFrame ] );
+			for ( std::size_t nFrame = 1; nFrame < loaded.m_DetailFrames.size(); nFrame++ )
+				m_Keep.push_back( loaded.m_DetailFrames[ nFrame ] );
 		}
 		m_Current[ loaded.m_nMaterial ] = material;
 		if ( loaded.m_nMaterial >= m_LightCurrent.size() )
@@ -993,6 +1056,10 @@ void CMapResources::Take( std::vector<Loaded_t> batch )
 		if ( loaded.m_pBase2 )
 		{
 			m_Keep.push_back( loaded.m_pBase2 );
+		}
+		if ( loaded.m_pDetail )
+		{
+			m_Keep.push_back( loaded.m_pDetail );
 		}
 		m_nLoaded++;
 	}
