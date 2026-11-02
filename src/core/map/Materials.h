@@ -78,6 +78,7 @@ struct MaterialInfo_t
 	// $detail over the base texture, combined by $detailblendmode, $detailblendfactor of it, at
 	// $detailscale times the base's coordinates (through $detailtexturetransform).
 	std::string m_szDetail;
+	std::string m_szDetailType; // %detailtype: the detail.vbsp type vbsp scatters on its faces
 	int m_nDetailMode = 0;
 	float m_flDetailBlend = 1.0f;
 	std::array<float, 2> m_DetailScale{ 4.0f, 4.0f };

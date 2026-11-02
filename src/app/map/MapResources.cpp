@@ -190,6 +190,8 @@ void CMapResources::Start( std::shared_ptr<const xv::map::CScene> pScene, std::o
 	m_nEntityMaterial = static_cast<std::uint32_t>( nMaterials ) + MAP_MATERIAL_RESERVE;
 	m_Current.assign( m_nEntityMaterial + 1, {} ); // the map's, the places kept for new ones, the entity boxes'
 	m_LightCurrent.clear();
+	m_DetailTypes.clear();
+	m_pDetailTypes = std::make_shared<const std::vector<std::string>>();
 	m_Keep.clear();
 	m_Animated.clear();
 	m_Placing = {};
@@ -979,6 +981,7 @@ bool CMapResources::Animate( float flTime )
 //-----------------------------------------------------------------------------
 void CMapResources::Take( std::vector<Loaded_t> batch )
 {
+	bool bDetailTypes = false;
 	for ( Loaded_t &loaded : batch )
 	{
 		if ( loaded.m_nMaterial >= m_Current.size() )
@@ -1048,6 +1051,15 @@ void CMapResources::Take( std::vector<Loaded_t> batch )
 		// Refract and water have no $basetexture for vrad to read the reflectivity of (theirs is the
 		// normal map): its default.
 		const bool bReflectivity = loaded.m_pBase && !info.m_bRefract;
+		if ( loaded.m_nMaterial >= m_DetailTypes.size() )
+		{
+			m_DetailTypes.resize( loaded.m_nMaterial + 1 );
+		}
+		if ( m_DetailTypes[ loaded.m_nMaterial ] != info.m_szDetailType )
+		{
+			m_DetailTypes[ loaded.m_nMaterial ] = info.m_szDetailType;
+			bDetailTypes = true;
+		}
 		m_LightCurrent[ loaded.m_nMaterial ] = xv::map::DescribeLightMaterial( info, bReflectivity ? loaded.m_pBase->m_Reflectivity : std::array<float, 3>{}, loaded.m_pBase ? std::array<int, 2>{ loaded.m_pBase->m_nWidth, loaded.m_pBase->m_nHeight } : std::array<int, 2>{} );
 		if ( loaded.m_pBase )
 		{
@@ -1066,5 +1078,9 @@ void CMapResources::Take( std::vector<Loaded_t> batch )
 	m_pMaterials = std::make_shared<const std::vector<xv::map::RasterMaterial_t>>( m_Current );
 	m_pTextures = std::make_shared<const std::vector<std::shared_ptr<xv::map::RasterTexture_t>>>( m_Keep );
 	m_pLightMaterials = std::make_shared<const std::vector<xv::map::LightMaterial_t>>( m_LightCurrent );
+	if ( bDetailTypes )
+	{
+		m_pDetailTypes = std::make_shared<const std::vector<std::string>>( m_DetailTypes );
+	}
 	emit Arrived();
 }

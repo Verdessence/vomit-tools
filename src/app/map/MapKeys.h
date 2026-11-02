@@ -46,6 +46,7 @@ enum class MapAction_t
 	MAP_ACTION_TOGGLE_WALKABLE,      // the tool bar: Hammer's Display walkable area, on the selected displacements
 	MAP_ACTION_TOGGLE_PARTICLES,     // the tool bar: particle systems playing in the 3D views
 	MAP_ACTION_TOGGLE_PARTICLES_SELECTED, // the tool bar: only the selected ones
+	MAP_ACTION_TOGGLE_DETAIL_PROPS,  // the tool bar: the detail props vbsp would scatter
 	MAP_ACTION_PROPERTIES,           // Alt+Enter
 	MAP_ACTION_GO_TO_BRUSH,          // Ctrl+Shift+G
 	MAP_ACTION_TOOL_SELECT,          // Shift+S

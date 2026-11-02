@@ -89,6 +89,7 @@ struct MapViewSettings_t
 	bool m_bWalkable = false;     // the selected displacements' steep triangles tinted (Hammer's Display walkable area)
 	bool m_bParticles = true;     // info_particle_system playing in the 3D views
 	bool m_bParticlesSelected = false; // and only the selected ones
+	bool m_bDetailProps = true;   // the detail props vbsp would scatter, in the textured 3D views
 	bool m_bUseGroupColors = true;
 	bool m_bDrawVertices = false;
 	bool m_bCenterHandles = true;

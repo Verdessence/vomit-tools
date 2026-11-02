@@ -331,6 +331,14 @@ QIcon MakeMapIcon( MapIcon_t nIcon, const QColor &color )
 			painter.drawPolyline( QPolygonF{ { QPointF{ 4, 22 }, QPointF{ 12, 14 }, QPointF{ 17, 19 }, QPointF{ 21, 15 }, QPointF{ 28, 21 } } } );
 			painter.drawEllipse( QPointF{ 22, 10.5 }, 1.8, 1.8 );
 			break;
+		case MapIcon_t::MAP_ICON_DETAIL_PROPS:
+			// Blades of grass on the ground.
+			painter.drawLine( QPointF{ 4, 27 }, QPointF{ 28, 27 } );
+			painter.drawLine( QPointF{ 10, 27 }, QPointF{ 7, 12 } );
+			painter.drawLine( QPointF{ 14, 27 }, QPointF{ 15, 7 } );
+			painter.drawLine( QPointF{ 18, 27 }, QPointF{ 22, 10 } );
+			painter.drawLine( QPointF{ 23, 27 }, QPointF{ 27, 17 } );
+			break;
 		case MapIcon_t::MAP_ICON_FOG:
 			// Wavy bands of mist, fading off.
 			for ( int i = 0; i < 4; i++ )

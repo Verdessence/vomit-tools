@@ -7,6 +7,9 @@
   and animating with the material's proxies (the first 64 frames).
 - Refract and Water reflections of `env_cubemap` show the game's default cube map, as a map does
   before buildcubemaps, rather than the map's sky; Water without `$envmap` still reflects the sky.
+- Detail props: the sprites vbsp would scatter from detail.vbsp over faces whose material has
+  a %detailtype show in the textured 3D views (Show bar: Detail Props), fading with distance as
+  the game's. Detail models aren't drawn yet.
 - func_dustmotes and func_dustcloud play in the 3D views with the particles (and their
   toggles): motes of particle/sparkles drifting inside the brushes as the game's do, even when
   they start disabled.

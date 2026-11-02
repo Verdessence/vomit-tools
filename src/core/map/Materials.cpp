@@ -132,6 +132,7 @@ MaterialInfo_t DescribeMaterial( const material::CMaterial &material )
 			info.m_DetailTransform = TransformOf( pTransform->m_szValue );
 		}
 	}
+	info.m_szDetailType = material.Value( "%detailtype" );
 	info.m_bTranslucent = material.Flag( "$translucent" );
 	info.m_bAdditive = material.Flag( "$additive" );
 	info.m_bAlphaTest = material.Flag( "$alphatest" );

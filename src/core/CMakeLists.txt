@@ -20,6 +20,8 @@ add_library(vomit_tools_core STATIC
         map/Displacement.cpp
         map/DispEdit.cpp
         map/Displacement.h
+        map/DetailProps.cpp
+        map/DetailProps.h
         map/Dust.cpp
         map/Dust.h
         map/Edit.cpp

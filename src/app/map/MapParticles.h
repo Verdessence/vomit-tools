@@ -5,7 +5,8 @@
 //          game's particle files (those its manifest lists, and the map's own manifest), each
 //          entity's simulated from its control points (its origin, then the entities its
 //          cpoint keys name) with the particle editor's simulation, and drawn as a mesh of quads
-//          facing the camera. func_dustmotes and func_dustcloud play alongside (map/Dust).
+//          facing the camera. func_dustmotes and func_dustcloud play alongside (map/Dust), and
+//          the detail props vbsp would scatter are drawn with them (map/DetailProps).
 //
 //===========================================================================//
 #pragma once
@@ -21,6 +22,7 @@
 
 #include <QObject>
 
+#include "map/DetailProps.h"
 #include "map/Dust.h"
 #include "map/Raster.h"
 #include "map/Scene.h"
@@ -50,15 +52,19 @@ public:
 	[[nodiscard]] bool IsPlaying() const { return !m_Playing.empty() || !m_Dust.empty(); }
 	[[nodiscard]] std::size_t GetPlayingCount() const { return m_Playing.size(); }
 	[[nodiscard]] std::size_t GetDustCount() const { return m_Dust.size(); }
+	// Each material's %detailtype (by the map's material index): the detail props are placed
+	// again with them.
+	void SetDetailTypes( std::shared_ptr<const std::vector<std::string>> pTypes );
+	[[nodiscard]] std::size_t GetDetailPropCount() const { return m_pDetailProps ? m_pDetailProps->GetProps().size() : 0; }
 	[[nodiscard]] std::size_t GetParticleCount() const;
 	// The effect names the scene asks for that the game doesn't have.
 	[[nodiscard]] const std::vector<std::string> &GetMissing() const { return m_Missing; }
 	// Their materials, one per system's definition drawn, and what keeps their textures alive.
 	[[nodiscard]] const std::shared_ptr<const std::vector<xv::map::RasterMaterial_t>> &GetMaterials() const { return m_pMaterials; }
-	// The particles seen from an eye (right and up of unit length), their materials numbered from
-	// nFirstMaterial on; with pOnly (sorted object numbers), only those systems'. Null when there
-	// are none.
-	[[nodiscard]] std::shared_ptr<const xv::map::CMapMesh> BuildMesh( xv::map::Point_t eye, xv::map::Point_t right, xv::map::Point_t up, std::uint32_t nFirstMaterial, const std::vector<std::uint32_t> *pOnly = nullptr ) const;
+	// The particles (and dust), and the detail props, seen from an eye (right and up of unit
+	// length), their materials numbered from nFirstMaterial on; with pOnly (sorted object
+	// numbers), only those systems' and dust's. Null when there are none.
+	[[nodiscard]] std::shared_ptr<const xv::map::CMapMesh> BuildMesh( xv::map::Point_t eye, xv::map::Point_t right, xv::map::Point_t up, std::uint32_t nFirstMaterial, const std::vector<std::uint32_t> *pOnly = nullptr, bool bParticles = true, bool bDetail = true ) const;
 
 signals:
 	void Ready();
@@ -84,6 +90,10 @@ private:
 	void MakeMaterial( Sprite_t &sprite );
 	// The dust's sprite (particle/sparkles), read the first time it is drawn.
 	const Sprite_t &DustSprite();
+	// The detail material's sheet, read the first time it is drawn.
+	const Sprite_t &DetailSprite();
+	// detail.vbsp read again when the map names another; the props placed again.
+	void UpdateDetail();
 
 	std::thread m_Worker;
 	std::atomic<bool> m_bStop{ false };
@@ -110,5 +120,11 @@ private:
 	};
 	std::vector<Dust_t> m_Dust;
 	std::optional<Sprite_t> m_DustSprite;
+	std::shared_ptr<const std::vector<std::string>> m_pDetailTypes;
+	std::string m_szDetailFile;     // the detail.vbsp m_pDetailDefinitions came from
+	std::string m_szDetailMaterial; // the sheet m_DetailSprite is
+	std::shared_ptr<const xv::map::DetailTypes_t> m_pDetailDefinitions;
+	std::unique_ptr<xv::map::CDetailProps> m_pDetailProps;
+	std::optional<Sprite_t> m_DetailSprite;
 	std::shared_ptr<const std::vector<xv::map::RasterMaterial_t>> m_pMaterials = std::make_shared<const std::vector<xv::map::RasterMaterial_t>>();
 };

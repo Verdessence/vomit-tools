@@ -70,6 +70,8 @@ public:
 	// What reflections of env_cubemap show (ShadeOptions_t::m_pEnvMap); null until read, or when
 	// the game has none.
 	[[nodiscard]] std::shared_ptr<const xv::sky::CCube> GetEnvMap() const { return m_pEnvMap; }
+	// Each material's %detailtype (by the map's material index; empty for none), as read so far.
+	[[nodiscard]] std::shared_ptr<const std::vector<std::string>> GetDetailTypes() const { return m_pDetailTypes; }
 	// The props placed in the world, once their models and materials are read, and the
 	// entities they draw (which then show no box).
 	[[nodiscard]] std::shared_ptr<const xv::map::CMapMesh> GetProps() const { return m_pProps; }
@@ -175,6 +177,8 @@ private:
 	std::shared_ptr<const void> m_pTextures;
 	std::vector<xv::map::LightMaterial_t> m_LightCurrent;
 	std::shared_ptr<const std::vector<xv::map::LightMaterial_t>> m_pLightMaterials;
+	std::vector<std::string> m_DetailTypes;
+	std::shared_ptr<const std::vector<std::string>> m_pDetailTypes = std::make_shared<const std::vector<std::string>>();
 	std::shared_ptr<const xv::sky::CCube> m_pSky;
 	std::shared_ptr<const xv::sky::CCube> m_pEnvMap;
 	std::shared_ptr<const xv::map::CMapMesh> m_pProps;

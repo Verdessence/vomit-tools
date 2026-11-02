@@ -937,6 +937,7 @@ void CMapEditor::BuildToolBars()
 	toggle( MapIcon_t::MAP_ICON_WALKABLE, tr( "Walkable" ), MapAction_t::MAP_ACTION_TOGGLE_WALKABLE, "mapToggleWalkable", m_Settings.m_bWalkable );
 	toggle( MapIcon_t::MAP_ICON_PARTICLES, tr( "Particles" ), MapAction_t::MAP_ACTION_TOGGLE_PARTICLES, "mapToggleParticles", m_Settings.m_bParticles );
 	toggle( MapIcon_t::MAP_ICON_PARTICLES_SELECTED, tr( "Selected Particles Only" ), MapAction_t::MAP_ACTION_TOGGLE_PARTICLES_SELECTED, "mapToggleParticlesSelected", m_Settings.m_bParticlesSelected );
+	toggle( MapIcon_t::MAP_ICON_DETAIL_PROPS, tr( "Detail Props" ), MapAction_t::MAP_ACTION_TOGGLE_DETAIL_PROPS, "mapToggleDetailProps", m_Settings.m_bDetailProps );
 
 	bar( "mapObjectBar", tr( "Objects" ) );
 	command( MapIcon_t::MAP_ICON_CARVE, tr( "Carve" ), MapAction_t::MAP_ACTION_CARVE, "mapCarve" );
@@ -2211,6 +2212,7 @@ bool CMapEditor::RunAction( MapAction_t nAction, CMapView *pFrom )
 		case MapAction_t::MAP_ACTION_TOGGLE_WALKABLE: return toggle( m_Settings.m_bWalkable );
 		case MapAction_t::MAP_ACTION_TOGGLE_PARTICLES: return toggle( m_Settings.m_bParticles );
 		case MapAction_t::MAP_ACTION_TOGGLE_PARTICLES_SELECTED: return toggle( m_Settings.m_bParticlesSelected );
+		case MapAction_t::MAP_ACTION_TOGGLE_DETAIL_PROPS: return toggle( m_Settings.m_bDetailProps );
 		case MapAction_t::MAP_ACTION_GO_TO_BRUSH:
 			GoToBrush();
 			return true;
@@ -4110,6 +4112,7 @@ void CMapEditor::ResourcesArrived()
 	m_pRenderData->SetMaterials( m_pResources->GetMaterials(), m_pResources->GetTextures(), m_pResources->GetEntityMaterial() );
 	m_pRenderData->SetSky( m_pResources->GetSky() );
 	m_pRenderData->SetEnvMap( m_pResources->GetEnvMap() );
+	m_pParticles->SetDetailTypes( m_pResources->GetDetailTypes() );
 	m_pRenderData->SetProps( m_pResources->GetProps(), m_pResources->GetPropObjects(), m_pResources->GetPropParts() );
 	m_pRenderData->SetSprites( m_pResources->GetSprites() );
 	m_pRenderData->SetOverlays( m_pResources->GetOverlays(), m_pResources->GetOverlayParts() );

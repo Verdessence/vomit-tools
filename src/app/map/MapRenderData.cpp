@@ -837,10 +837,10 @@ MapFrame_t CMapRenderData::Snapshot( const xv::map::CViewCamera &camera, const x
 	// The particles face this camera; their materials follow everything else's.
 	std::shared_ptr<const xv::map::CMapMesh> pParticles;
 	const bool bTextured = options.m_Shade.m_nMode != xv::map::RasterMode_t::RASTER_MODE_WIREFRAME && options.m_Shade.m_nMode != xv::map::RasterMode_t::RASTER_MODE_FLAT;
-	if ( m_pParticles && settings.m_bParticles && bTextured && pScene )
+	if ( m_pParticles && ( settings.m_bParticles || settings.m_bDetailProps ) && bTextured && pScene )
 	{
 		const std::uint32_t nFirst = m_Frame.m_pMaterials ? static_cast<std::uint32_t>( m_Frame.m_pMaterials->size() ) : 0;
-		pParticles = m_pParticles->BuildMesh( camera.m_Eye, camera.GetRight(), camera.GetUp(), nFirst, settings.m_bParticlesSelected ? &m_Document.GetSelection() : nullptr );
+		pParticles = m_pParticles->BuildMesh( camera.m_Eye, camera.GetRight(), camera.GetUp(), nFirst, settings.m_bParticlesSelected ? &m_Document.GetSelection() : nullptr, settings.m_bParticles, settings.m_bDetailProps );
 		const auto &pOwn = m_pParticles->GetMaterials();
 		if ( pParticles && std::pair<const void *, const void *>{ m_Frame.m_pMaterials.get(), pOwn.get() } != m_WithParticlesFor )
 		{

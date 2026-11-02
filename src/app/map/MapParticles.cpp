@@ -112,6 +112,12 @@ void CMapParticles::Start( std::optional<xv::vfs::CGameInfo> game, std::string s
 	m_Sprites.clear();
 	m_Dust.clear();
 	m_DustSprite.reset();
+	m_pDetailTypes.reset();
+	m_szDetailFile.clear();
+	m_szDetailMaterial.clear();
+	m_pDetailDefinitions.reset();
+	m_pDetailProps.reset();
+	m_DetailSprite.reset();
 	m_Missing.clear();
 	m_pFileSystem.reset();
 	m_pMaterials = std::make_shared<const std::vector<xv::map::RasterMaterial_t>>();
@@ -243,6 +249,50 @@ void CMapParticles::SetScene( std::shared_ptr<const xv::map::CScene> pScene )
 	}
 	m_Playing = std::move( playing );
 	m_Dust = std::move( dust );
+	UpdateDetail();
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+void CMapParticles::SetDetailTypes( std::shared_ptr<const std::vector<std::string>> pTypes )
+{
+	if ( pTypes == m_pDetailTypes )
+		return;
+	m_pDetailTypes = std::move( pTypes );
+	UpdateDetail();
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: The worldspawn's detailvbsp and detailmaterial (vbsp's defaults without them) say
+//          which file and sheet; the props are placed again from the scene as it is now.
+//-----------------------------------------------------------------------------
+void CMapParticles::UpdateDetail()
+{
+	if ( !m_bReady || !m_pScene )
+		return;
+	const xv::map::Entity_t &world = m_pScene->m_Map.m_World;
+	std::string szFile{ world.GetValue( "detailvbsp" ) };
+	if ( szFile.empty() )
+		szFile = "detail.vbsp";
+	std::string szMaterial{ world.GetValue( "detailmaterial" ) };
+	if ( szMaterial.empty() )
+		szMaterial = "detail/detailsprites";
+	if ( !m_pDetailDefinitions || szFile != m_szDetailFile )
+	{
+		m_szDetailFile = szFile;
+		const std::optional<std::string> text = m_pFileSystem ? m_pFileSystem->ReadText( szFile ) : std::nullopt;
+		m_pDetailDefinitions = std::make_shared<const xv::map::DetailTypes_t>( text ? xv::map::ReadDetailTypes( xv::kv1::Parse( *text ).m_Document ) : xv::map::DetailTypes_t{} );
+	}
+	if ( szMaterial != m_szDetailMaterial )
+	{
+		m_szDetailMaterial = szMaterial;
+		m_DetailSprite.reset();
+	}
+	const std::shared_ptr<const std::vector<std::string>> pTypes = m_pDetailTypes;
+	m_pDetailProps = std::make_unique<xv::map::CDetailProps>( m_pDetailDefinitions, *m_pScene, [ &pTypes ]( std::uint32_t nMaterial ) {
+		return pTypes && nMaterial < pTypes->size() ? ( *pTypes )[ nMaterial ] : std::string{};
+	} );
 }
 
 //-----------------------------------------------------------------------------
@@ -310,6 +360,22 @@ const CMapParticles::Sprite_t &CMapParticles::DustSprite()
 }
 
 //-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+const CMapParticles::Sprite_t &CMapParticles::DetailSprite()
+{
+	if ( !m_DetailSprite )
+	{
+		const xv::vfs::CFileSystem *pFileSystem = m_pFileSystem.get();
+		const xv::particles::FileReader_t read = [ pFileSystem ]( std::string_view szPath ) { return pFileSystem ? pFileSystem->Read( szPath ) : std::nullopt; };
+		m_DetailSprite.emplace();
+		m_DetailSprite->m_pSprite = std::make_unique<xv::particles::Sprite_t>( xv::particles::LoadSprite( m_szDetailMaterial, read ) );
+		MakeMaterial( *m_DetailSprite );
+	}
+	return *m_DetailSprite;
+}
+
+//-----------------------------------------------------------------------------
 // Purpose: The sprite's texture, and a material of the map's kind for it: unlit, blended or
 //          added, coloured by each particle.
 //-----------------------------------------------------------------------------
@@ -343,14 +409,25 @@ void CMapParticles::MakeMaterial( Sprite_t &sprite )
 //-----------------------------------------------------------------------------
 // Purpose:
 //-----------------------------------------------------------------------------
-std::shared_ptr<const xv::map::CMapMesh> CMapParticles::BuildMesh( xv::map::Point_t eye, xv::map::Point_t right, xv::map::Point_t up, std::uint32_t nFirstMaterial, const std::vector<std::uint32_t> *pOnly ) const
+std::shared_ptr<const xv::map::CMapMesh> CMapParticles::BuildMesh( xv::map::Point_t eye, xv::map::Point_t right, xv::map::Point_t up, std::uint32_t nFirstMaterial, const std::vector<std::uint32_t> *pOnly, bool bParticles, bool bDetail ) const
 {
-	if ( !IsPlaying() )
+	const bool bDetailProps = bDetail && GetDetailPropCount() > 0;
+	if ( !( bParticles && IsPlaying() ) && !bDetailProps )
 	{
 		return nullptr;
 	}
 	auto *pSelf = const_cast<CMapParticles *>( this ); // sprites are read when first drawn
 	std::vector<xv::map::ParticleSprite_t> sprites;
+	if ( bDetailProps )
+	{
+		const Sprite_t &sheet = pSelf->DetailSprite();
+		const std::array<int, 2> size{ std::max( 1, sheet.m_pTexture->m_nWidth ), std::max( 1, sheet.m_pTexture->m_nHeight ) };
+		m_pDetailProps->Layout( eye, right, up, xv::map::DetailView_t{}, nFirstMaterial + sheet.m_nMaterial, size, sprites );
+	}
+	if ( !bParticles )
+	{
+		return sprites.empty() ? nullptr : std::make_shared<const xv::map::CMapMesh>( xv::map::BuildParticleMesh( sprites ) );
+	}
 	if ( !m_Dust.empty() )
 	{
 		const Sprite_t &dust = pSelf->DustSprite();
