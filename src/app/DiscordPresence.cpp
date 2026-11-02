@@ -6,7 +6,12 @@
 //===========================================================================//
 #include "DiscordPresence.h"
 
+#include <QCheckBox>
 #include <QCoreApplication>
+#include <QFormLayout>
+#include <QLabel>
+#include <QLineEdit>
+#include <QVBoxLayout>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QLocalSocket>
@@ -15,6 +20,7 @@
 #include <QtEndian>
 
 #include "DebugLog.h"
+#include "Preferences.h"
 
 namespace
 {
@@ -328,4 +334,59 @@ void CDiscordPresence::SendActivity()
 	activity.m_szButtonUrl = m_Settings.m_szButtonUrl;
 	const QJsonObject args{ { QStringLiteral( "pid" ), static_cast<qint64>( QCoreApplication::applicationPid() ) }, { QStringLiteral( "activity" ), DiscordActivityJson( activity ) } };
 	m_pSocket->write( DiscordFrame( OPCODE_FRAME, QJsonObject{ { QStringLiteral( "cmd" ), QStringLiteral( "SET_ACTIVITY" ) }, { QStringLiteral( "args" ), args }, { QStringLiteral( "nonce" ), QString::number( ++m_nNonce ) } } ) );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Each field is kept when it is left; the presence reloads.
+//-----------------------------------------------------------------------------
+QWidget *MakeDiscordSettings()
+{
+	auto *pPage = new QWidget;
+	auto *pLayout = new QVBoxLayout( pPage );
+	pLayout->setContentsMargins( 0, 0, 0, 0 );
+	auto hint = []( const QString &szText ) {
+		auto *pLabel = new QLabel( szText );
+		pLabel->setWordWrap( true );
+		return pLabel;
+	};
+	pLayout->addWidget( hint( QCoreApplication::translate( "CDiscordPresence", "Shows what you are doing on your Discord profile, through the Discord app running on this computer (Vesktop's arRPC too). It needs the ID of an application you made at discord.com/developers: its name is the title shown, its Rich Presence art the picture." ) ) );
+	const DiscordSettings_t settings = DiscordSettings_t::Load();
+	auto *pEnabled = new QCheckBox( QCoreApplication::translate( "CDiscordPresence", "Show my activity on Discord" ) );
+	pEnabled->setObjectName( QStringLiteral( "discordEnabled" ) );
+	pEnabled->setChecked( settings.m_bEnabled );
+	pLayout->addWidget( pEnabled );
+	auto *pForm = new QFormLayout;
+	auto field = [ & ]( const char *pszName, const QString &szValue, const QString &szPlaceholder ) {
+		auto *pEdit = new QLineEdit( szValue );
+		pEdit->setObjectName( QLatin1String( pszName ) );
+		pEdit->setPlaceholderText( szPlaceholder );
+		return pEdit;
+	};
+	auto *pId = field( "discordClientId", settings.m_szClientId, QCoreApplication::translate( "CDiscordPresence", "Off until given" ) );
+	auto *pDetails = field( "discordDetails", settings.m_szDetails, QString{} );
+	auto *pImage = field( "discordImage", settings.m_szImage, QCoreApplication::translate( "CDiscordPresence", "An art asset's key, or an https address" ) );
+	auto *pLabel = field( "discordButtonLabel", settings.m_szButtonLabel, QCoreApplication::translate( "CDiscordPresence", "No button" ) );
+	auto *pUrl = field( "discordButtonUrl", settings.m_szButtonUrl, QStringLiteral( "https://" ) );
+	pForm->addRow( QCoreApplication::translate( "CDiscordPresence", "Application ID" ), pId );
+	pForm->addRow( QCoreApplication::translate( "CDiscordPresence", "Details" ), pDetails );
+	pForm->addRow( QCoreApplication::translate( "CDiscordPresence", "Picture" ), pImage );
+	pForm->addRow( QCoreApplication::translate( "CDiscordPresence", "Button" ), pLabel );
+	pForm->addRow( QCoreApplication::translate( "CDiscordPresence", "Button opens" ), pUrl );
+	pLayout->addLayout( pForm );
+	pLayout->addWidget( hint( QCoreApplication::translate( "CDiscordPresence", "Under the details: what you are doing and the tab's file (Mapping dr_dust.vmf), and the time since the app started. Only others see the button." ) ) );
+	auto save = [ = ] {
+		DiscordSettings_t changed;
+		changed.m_bEnabled = pEnabled->isChecked();
+		changed.m_szClientId = pId->text().trimmed();
+		changed.m_szDetails = pDetails->text();
+		changed.m_szImage = pImage->text().trimmed();
+		changed.m_szButtonLabel = pLabel->text();
+		changed.m_szButtonUrl = pUrl->text().trimmed();
+		changed.Save();
+		CPreferences::Instance().NotifyDiscordChanged();
+	};
+	QObject::connect( pEnabled, &QCheckBox::toggled, pPage, save );
+	for ( QLineEdit *pEdit : { pId, pDetails, pImage, pLabel, pUrl } )
+		QObject::connect( pEdit, &QLineEdit::editingFinished, pPage, save );
+	return pPage;
 }

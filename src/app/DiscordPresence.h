@@ -3,9 +3,9 @@
 //
 // Purpose: Discord's Rich Presence: what the app is doing shown on the user's Discord profile,
 //          over Discord's local connection (the discord-ipc socket the desktop app, Vesktop's
-//          arRPC and the like listen on; a named pipe on Windows). Off until the user gives
-//          an application ID (Preferences > Discord); nothing leaves the machine but to the
-//          Discord client.
+//          arRPC and the like listen on; a named pipe on Windows). Off until an application ID
+//          is set (MakeDiscordSettings' fields); nothing leaves the machine but to the Discord
+//          client.
 //
 //===========================================================================//
 #pragma once
@@ -18,6 +18,7 @@
 
 class QLocalSocket;
 class QTimer;
+class QWidget;
 
 // What the profile shows: the application's name (from Discord's side), then the details,
 // the state, and the time since the start; a picture and a button.
@@ -34,7 +35,7 @@ struct DiscordActivity_t
 	friend bool operator==( const DiscordActivity_t &, const DiscordActivity_t & ) = default;
 };
 
-// What the user set (Preferences > Discord), read from QSettings.
+// What was set (MakeDiscordSettings' fields), read from QSettings.
 struct DiscordSettings_t
 {
 	bool m_bEnabled = true;
@@ -57,6 +58,9 @@ struct DiscordSettings_t
 [[nodiscard]] QStringList DiscordSocketPaths();
 // The verb for an editor's kind ("Maps" is "Mapping"...), from CTabGroups::KindOf.
 [[nodiscard]] QString DiscordVerb( const QString &szKind, const QString &szFile );
+// The settings' fields (on or off, the application ID, details, picture, button), each saved
+// as it is left. Not in Preferences: a local build puts it on its Dev page.
+[[nodiscard]] QWidget *MakeDiscordSettings();
 
 class CDiscordPresence : public QObject
 {
