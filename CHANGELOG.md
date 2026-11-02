@@ -10,6 +10,8 @@
 - func_dustmotes and func_dustcloud play in the 3D views with the particles (and their
   toggles): motes of particle/sparkles drifting inside the brushes as the game's do, even when
   they start disabled.
+- A Fog panel in the side lists the map's env_fog_controllers (those off at the start too)
+  and picks the one the 3D views show; Select picks its entity.
 - Fog has its own toggle on the Show bar and shows in the textured 3D views as well as the
   lighting preview; Preferences → Maps says whether maps start with it.
 - A Nodraw toggle on the Show bar hides `tools/toolsnodraw` on its own; Tool Textures no longer

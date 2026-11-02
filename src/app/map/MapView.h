@@ -85,6 +85,7 @@ struct MapViewSettings_t
 	bool m_bNodraw = true;
 	bool m_bSkybox3D = true;      // Alt+V
 	bool m_bFog = true;           // env_fog_controller's fog in the textured 3D views
+	int m_nFogController = 0;     // the one shown (its entity id); 0: the first that starts on
 	bool m_bWalkable = false;     // the selected displacements' steep triangles tinted (Hammer's Display walkable area)
 	bool m_bParticles = true;     // info_particle_system playing in the 3D views
 	bool m_bParticlesSelected = false; // and only the selected ones

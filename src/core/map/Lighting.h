@@ -123,8 +123,20 @@ struct Fog_t
 	bool m_bRadial = false;        // by the distance from the eye, else along the view
 };
 
-// The first env_fog_controller that starts with fog on.
-[[nodiscard]] std::optional<Fog_t> ReadFog( const CMap &map );
+// An env_fog_controller: its fog, whether it starts on (fogenable), and what names it.
+struct FogController_t
+{
+	std::size_t m_nEntity = 0; // in map.m_Entities
+	int m_nId = 0;             // the entity's id
+	std::string m_szName;      // its targetname; empty when it has none
+	bool m_bEnabled = false;
+	Fog_t m_Fog;
+};
+// Every env_fog_controller, on at the start or not, in the map's order.
+[[nodiscard]] std::vector<FogController_t> ReadFogControllers( const CMap &map );
+// The fog of the controller with that entity id; with nId 0 (or none such), the first that
+// starts with fog on.
+[[nodiscard]] std::optional<Fog_t> ReadFog( const CMap &map, int nId = 0 );
 
 // What lighting needs of a material.
 struct LightMaterial_t

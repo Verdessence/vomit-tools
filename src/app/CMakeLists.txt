@@ -172,6 +172,8 @@ add_library(vomit_tools_ui STATIC
         map/MapGizmo.h
         map/MapLighting.cpp
         map/MapLighting.h
+        map/MapFogPanel.cpp
+        map/MapFogPanel.h
         map/MapLightingPanel.cpp
         map/MapLightingPanel.h
         map/MapModalTransform.cpp

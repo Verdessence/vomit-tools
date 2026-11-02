@@ -162,6 +162,7 @@ private:
 	std::vector<std::shared_ptr<const xv::map::CMapMesh>> m_MeshLightsKeep;
 	std::shared_ptr<const xv::map::Fog_t> m_pFog;
 	const xv::map::CScene *m_pFogFor = nullptr;
+	int m_nFogControllerFor = 0;
 	std::uint64_t m_nFogRevision = 0; // the meshes m_pMeshLights names, held so their addresses stay theirs
 	xv::map::Point_t m_SpritesRight{};          // the camera the sprite mesh faces
 	xv::map::Point_t m_SpritesUp{};

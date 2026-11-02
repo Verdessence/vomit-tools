@@ -3131,15 +3131,22 @@ void ParseRadFile( std::string_view szText, RadRules_t &rules )
 //-----------------------------------------------------------------------------
 // Purpose:
 //-----------------------------------------------------------------------------
-std::optional<Fog_t> ReadFog( const CMap &map )
+std::vector<FogController_t> ReadFogControllers( const CMap &map )
 {
-	for ( const Entity_t &entity : std::as_const( map.m_Entities ) )
+	std::vector<FogController_t> controllers;
+	for ( std::size_t e = 0; e < map.m_Entities.size(); e++ )
 	{
-		if ( entity.m_bDeleted || entity.GetClassname() != "env_fog_controller" || KeyNumber( entity, "fogenable" ) == 0.0 )
+		const Entity_t &entity = map.m_Entities[ e ];
+		if ( entity.m_bDeleted || entity.GetClassname() != "env_fog_controller" )
 		{
 			continue;
 		}
-		Fog_t fog;
+		FogController_t controller;
+		controller.m_nEntity = e;
+		controller.m_nId = entity.m_nId;
+		controller.m_szName = entity.GetValue( "targetname" );
+		controller.m_bEnabled = KeyNumber( entity, "fogenable" ) != 0.0;
+		Fog_t &fog = controller.m_Fog;
 		const auto color = []( std::string_view szValue ) {
 			const auto rgb = ParseTriple( szValue ).value_or( std::array<double, 3>{ 255, 255, 255 } );
 			return CVec3{ static_cast<float>( rgb[ 0 ] / 255.0 ), static_cast<float>( rgb[ 1 ] / 255.0 ), static_cast<float>( rgb[ 2 ] / 255.0 ) };
@@ -3153,8 +3160,24 @@ std::optional<Fog_t> ReadFog( const CMap &map )
 		fog.m_flEnd = KeyNumber( entity, "fogend", 1.0 );
 		fog.m_flMaxDensity = entity.HasKey( "fogmaxdensity" ) ? KeyNumber( entity, "fogmaxdensity" ) : 1.0;
 		fog.m_bRadial = KeyNumber( entity, "fogradial" ) != 0.0;
-		return fog;
+		controllers.push_back( std::move( controller ) );
 	}
+	return controllers;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+std::optional<Fog_t> ReadFog( const CMap &map, int nId )
+{
+	const std::vector<FogController_t> controllers = ReadFogControllers( map );
+	if ( nId != 0 )
+	{
+		if ( const auto found = std::ranges::find( controllers, nId, &FogController_t::m_nId ); found != controllers.end() )
+			return found->m_Fog;
+	}
+	if ( const auto found = std::ranges::find_if( controllers, &FogController_t::m_bEnabled ); found != controllers.end() )
+		return found->m_Fog;
 	return std::nullopt;
 }
 

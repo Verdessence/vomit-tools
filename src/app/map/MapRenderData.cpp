@@ -880,11 +880,12 @@ MapFrame_t CMapRenderData::Snapshot( const xv::map::CViewCamera &camera, const x
 	{
 		// The fog as the game draws it, in the textured views (the Fog toggle).
 		// (A scene's address can be another's later: its revision tells them apart.)
-		if ( pScene != m_pFogFor || pScene->m_nRevision != m_nFogRevision )
+		if ( pScene != m_pFogFor || pScene->m_nRevision != m_nFogRevision || settings.m_nFogController != m_nFogControllerFor )
 		{
 			m_pFogFor = pScene;
 			m_nFogRevision = pScene->m_nRevision;
-			const auto fog = xv::map::ReadFog( pScene->m_Map );
+			m_nFogControllerFor = settings.m_nFogController;
+			const auto fog = xv::map::ReadFog( pScene->m_Map, settings.m_nFogController );
 			m_pFog = fog ? std::make_shared<const xv::map::Fog_t>( *fog ) : nullptr;
 		}
 		frame.m_pFog = m_pFog;

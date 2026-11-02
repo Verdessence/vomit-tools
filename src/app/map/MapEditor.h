@@ -73,6 +73,8 @@ public:
 	[[nodiscard]] const CMapDocument &GetDocument() const { return *m_pDocument; }
 	[[nodiscard]] const QString &GetPath() const { return m_szPath; }
 	[[nodiscard]] const MapViewSettings_t &GetSettings() const { return m_Settings; }
+	// The env_fog_controller the views show (its entity id; 0: the first that starts on).
+	void SetFogController( int nId );
 	[[nodiscard]] MapTool_t GetTool() const { return m_nTool; }
 	void SetTool( MapTool_t nTool );
 	[[nodiscard]] MapEditMode_t GetEditMode() const { return m_nEditMode; }
@@ -323,6 +325,7 @@ signals:
 	void TitleChanged();
 	void CurrentMaterialChanged( const QString &szMaterial );
 	void TextureGameChanged();
+	void FogControllerChanged();
 
 private:
 	void BuildToolBars();

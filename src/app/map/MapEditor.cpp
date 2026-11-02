@@ -85,6 +85,7 @@
 #include "map/MapProperties.h"
 #include "map/MapLighting.h"
 #include "map/MapParticles.h"
+#include "map/MapFogPanel.h"
 #include "map/MapLightingPanel.h"
 #include "map/MapResources.h"
 #include "map/MapView2D.h"
@@ -324,8 +325,12 @@ CMapEditor::CMapEditor( const QString &szPath, bool bFromGame, QWidget *pParent 
 	pLighting->layout()->setContentsMargins( 0, 0, 0, 0 );
 	pLighting->setMinimumHeight( 320 );
 	m_pPanels->AddPanel( QStringLiteral( "lighting" ), tr( "Lighting" ), MakeMapIcon( MapIcon_t::MAP_ICON_LIGHT, panelIconColor ), pLighting, true );
-	// Lighting starts folded: its header is there, its settings out of the way until wanted.
-	m_pPanels->SetState( QSettings{}.value( QLatin1String( SIDE_PANELS_SETTING ), QVariantMap{ { QStringLiteral( "folded" ), QStringList{ QStringLiteral( "lighting" ) } } } ).toMap() );
+	auto *pFog = new CMapFogPanel( *this );
+	pFog->setObjectName( QStringLiteral( "mapFogPanel" ) );
+	pFog->layout()->setContentsMargins( 0, 0, 0, 0 );
+	m_pPanels->AddPanel( QStringLiteral( "fog" ), tr( "Fog" ), MakeMapIcon( MapIcon_t::MAP_ICON_FOG, panelIconColor ), pFog );
+	// Lighting and Fog start folded: their headers are there, their settings out of the way until wanted.
+	m_pPanels->SetState( QSettings{}.value( QLatin1String( SIDE_PANELS_SETTING ), QVariantMap{ { QStringLiteral( "folded" ), QStringList{ QStringLiteral( "lighting" ), QStringLiteral( "fog" ) } } } ).toMap() );
 	m_pPanels->SetOnePanel( CPreferences::Instance().GetMapPreferences().m_bOnePanel );
 	PlaceFaceEdit();
 	connect( m_pPanels, &CPanelColumn::StateChanged, this, [ this ] { QSettings{}.setValue( QLatin1String( SIDE_PANELS_SETTING ), m_pPanels->GetState() ); } );
@@ -1302,6 +1307,18 @@ void CMapEditor::UpdateStatus()
 		const xv::map::Point_t size = bounds.GetSize();
 		m_pStatusSize->setText( QStringLiteral( "%1w %2l %3h" ).arg( std::lround( size[ 0 ] ) ).arg( std::lround( size[ 1 ] ) ).arg( std::lround( size[ 2 ] ) ) );
 	}
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+void CMapEditor::SetFogController( int nId )
+{
+	if ( m_Settings.m_nFogController == nId )
+		return;
+	m_Settings.m_nFogController = nId;
+	SettingsChanged();
+	emit FogControllerChanged();
 }
 
 //-----------------------------------------------------------------------------
