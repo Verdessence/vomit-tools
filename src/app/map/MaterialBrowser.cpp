@@ -10,14 +10,17 @@
 #include <chrono>
 
 #include <QCheckBox>
+#include <QClipboard>
 #include <QComboBox>
 #include <QCryptographicHash>
 #include <QDialogButtonBox>
 #include <QDir>
+#include <QGuiApplication>
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QLineEdit>
 #include <QListView>
+#include <QMenu>
 #include <QPainter>
 #include <QPixmap>
 #include <QSettings>
@@ -282,6 +285,24 @@ CMaterialBrowser::CMaterialBrowser( const xv::vfs::CGameInfo &game, QStringList 
 	connect( m_pView, &QListView::doubleClicked, this, [ this ] {
 		PickCurrent();
 		accept();
+	} );
+	// A material's right-click menu: use it, or copy its name or its file's path.
+	m_pView->setContextMenuPolicy( Qt::CustomContextMenu );
+	connect( m_pView, &QListView::customContextMenuRequested, this, [ this ]( const QPoint &at ) {
+		const QModelIndex index = m_pView->indexAt( at );
+		if ( !index.isValid() )
+			return;
+		m_pView->setCurrentIndex( index );
+		const QString szName = index.data( CMaterialList::ROLE_NAME ).toString();
+		QMenu menu( this );
+		menu.setObjectName( QStringLiteral( "materialMenu" ) );
+		menu.addAction( tr( "Use" ), this, [ this ] {
+			PickCurrent();
+			accept();
+		} );
+		menu.addAction( tr( "Copy Name" ), this, [ szName ] { QGuiApplication::clipboard()->setText( szName ); } )->setObjectName( QStringLiteral( "materialCopyName" ) );
+		menu.addAction( tr( "Copy Path" ), this, [ szName ] { QGuiApplication::clipboard()->setText( QStringLiteral( "materials/%1.vmt" ).arg( szName.toLower() ) ); } );
+		menu.exec( m_pView->viewport()->mapToGlobal( at ) );
 	} );
 	connect( pButtons, &QDialogButtonBox::accepted, this, [ this ] {
 		PickCurrent();

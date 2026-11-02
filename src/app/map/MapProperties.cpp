@@ -9,7 +9,10 @@
 #include <algorithm>
 #include <cmath>
 
+#include <QClipboard>
 #include <QComboBox>
+#include <QGuiApplication>
+#include <QMenu>
 #include <QCompleter>
 #include <QEvent>
 #include <QHBoxLayout>
@@ -27,6 +30,7 @@
 #include <QVBoxLayout>
 
 #include "kv1/Kv1.h"
+#include "map/MapNamePicker.h"
 #include "map/DispEdit.h"
 #include "map/Instance.h"
 #include "FileDialogs.h"
@@ -230,6 +234,15 @@ CMapProperties::CMapProperties( CMapDocument &document, QWidget *pParent )
 	m_pBrowseInstance->hide();
 	pKeyButtons->addWidget( m_pBrowseInstance );
 	connect( m_pBrowseInstance, &QPushButton::clicked, this, &CMapProperties::BrowseInstanceFile );
+	m_pBrowseKey = new QPushButton( tr( "Browse…" ) );
+	m_pBrowseKey->setObjectName( QStringLiteral( "mapPropertiesBrowseKey" ) );
+	m_pBrowseKey->setToolTip( tr( "Pick a sound, particle system, model, sprite or material for the key" ) );
+	m_pBrowseKey->hide();
+	pKeyButtons->addWidget( m_pBrowseKey );
+	connect( m_pBrowseKey, &QPushButton::clicked, this, [ this ] {
+		if ( const QTreeWidgetItem *pItem = m_pKeys->currentItem() )
+			BrowseKey( pItem->data( 0, ROLE_ROW ).toULongLong() );
+	} );
 	m_pPickFaces = new QPushButton( tr( "Pick..." ) );
 	m_pPickFaces->setObjectName( QStringLiteral( "mapPropertiesPickFaces" ) );
 	m_pPickFaces->setCheckable( true );
@@ -290,6 +303,13 @@ CMapProperties::CMapProperties( CMapDocument &document, QWidget *pParent )
 
 	connect( m_pSmartEdit, &QToolButton::toggled, this, &CMapProperties::Refresh );
 	connect( m_pKeys, &QTreeWidget::currentItemChanged, this, &CMapProperties::ShowHelp );
+	m_pKeys->setContextMenuPolicy( Qt::CustomContextMenu );
+	connect( m_pKeys, &QTreeWidget::customContextMenuRequested, this, [ this ]( const QPoint &at ) {
+		QTreeWidgetItem *pItem = m_pKeys->itemAt( at );
+		if ( pItem )
+			m_pKeys->setCurrentItem( pItem );
+		ShowKeyMenu( pItem ? std::optional<std::size_t>{ pItem->data( 0, ROLE_ROW ).toULongLong() } : std::nullopt, m_pKeys->viewport()->mapToGlobal( at ) );
+	} );
 	connect( m_pClass, &QLineEdit::editingFinished, this, [ this ] { CommitClass( m_pClass->text().trimmed().toStdString() ); } );
 	connect( m_pAddKey, &QPushButton::clicked, this, &CMapProperties::AddKey );
 	connect( m_pRemoveKey, &QPushButton::clicked, this, &CMapProperties::RemoveKey );
@@ -476,6 +496,40 @@ void CMapProperties::Refresh()
 }
 
 //-----------------------------------------------------------------------------
+// Purpose: The FGD types Browse picks for.
+//-----------------------------------------------------------------------------
+bool CMapProperties::IsBrowsable( const std::string &szType )
+{
+	return szType == "sound" || szType == "particlesystem" || szType == "studio" || szType == "sprite" || szType == "material" || szType == "decal";
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: A key's value picked by its type: materials and decals from the texture browser,
+//          the rest from the names the editor lists; the pick is one step to undo.
+//-----------------------------------------------------------------------------
+void CMapProperties::BrowseKey( std::size_t nRow )
+{
+	if ( nRow >= m_Sheet.m_Rows.size() )
+		return;
+	const xv::map::PropertyRow_t &row = m_Sheet.m_Rows[ nRow ];
+	const QString szCurrent = FromStd( row.m_szValue );
+	std::optional<QString> picked;
+	if ( ( row.m_szType == "material" || row.m_szType == "decal" ) && m_pfnPickMaterial )
+	{
+		picked = m_pfnPickMaterial( szCurrent );
+	}
+	else if ( m_pfnNames )
+	{
+		const QString szTitle = row.m_szType == "sound" ? tr( "Sounds" ) : row.m_szType == "particlesystem" ? tr( "Particle Systems" )
+			: row.m_szType == "studio"                                                                      ? tr( "Models" )
+																											: tr( "Sprites" );
+		picked = CMapNamePicker::Pick( this, szTitle, m_pfnNames( row.m_szType ), szCurrent );
+	}
+	if ( picked && *picked != szCurrent )
+		CommitKey( nRow, picked->toStdString() );
+}
+
+//-----------------------------------------------------------------------------
 // Purpose: The selected key's help, or the class's when no key is picked.
 //-----------------------------------------------------------------------------
 void CMapProperties::ShowHelp()
@@ -488,6 +542,7 @@ void CMapProperties::ShowHelp()
 	{
 		const xv::map::PropertyRow_t &row = m_Sheet.m_Rows[ i ];
 		m_pBrowseInstance->setVisible( row.m_szKey == "file" && m_Sheet.m_szClass == "func_instance" );
+		m_pBrowseKey->setVisible( IsBrowsable( row.m_szType ) && ( m_pfnNames || m_pfnPickMaterial ) );
 		const bool bSides = ( row.m_szKey == "sides" || row.m_szKey == "sides2" ) && ( m_Sheet.m_szClass == "info_overlay" || m_Sheet.m_szClass == "info_overlay_transition" );
 		m_pPickFaces->setVisible( bSides );
 		PreviewSides( i, FromStd( row.m_szValue ) );
@@ -500,6 +555,7 @@ void CMapProperties::ShowHelp()
 	emit FacesHighlighted( {}, {} );
 	m_pPickFaces->hide();
 	m_pBrowseInstance->hide();
+	m_pBrowseKey->hide();
 	if ( !m_szFacePickKey.isEmpty() )
 		emit FacePickRequested( {} );
 	m_pHelp->setText( FromStd( m_Sheet.m_szClassHelp ) );
@@ -756,8 +812,72 @@ void CMapProperties::AddKey()
 //-----------------------------------------------------------------------------
 void CMapProperties::RemoveKey()
 {
-	const QTreeWidgetItem *pItem = m_pKeys->currentItem();
-	const std::size_t nRow = pItem ? pItem->data( 0, ROLE_ROW ).toULongLong() : m_Sheet.m_Rows.size();
+	RemoveKeyAt( m_pKeys->currentItem() ? std::optional<std::size_t>{ m_pKeys->currentItem()->data( 0, ROLE_ROW ).toULongLong() } : std::nullopt );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+std::optional<std::string> CMapProperties::GetKeyDefault( std::size_t nRow ) const
+{
+	const xv::map::CScene *pScene = m_Document.GetScene();
+	if ( !pScene || !pScene->m_pFgd || nRow >= m_Sheet.m_Rows.size() || m_Sheet.m_szClass.empty() )
+		return std::nullopt;
+	const xv::map::FgdClass_t *pClass = pScene->m_pFgd->Find( m_Sheet.m_szClass );
+	const xv::map::FgdKey_t *pKey = pClass ? pClass->FindKey( m_Sheet.m_Rows[ nRow ].m_szKey ) : nullptr;
+	if ( !pKey )
+		return std::nullopt;
+	return pKey->m_szDefault;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: A key's row: its FGD default put back, its value copied or pasted over, the key
+//          taken off; and every key copied as "key" "value" lines (a block's insides).
+//-----------------------------------------------------------------------------
+void CMapProperties::ShowKeyMenu( std::optional<std::size_t> nRow, const QPoint &globalAt )
+{
+	if ( m_Sheet.m_nEntities == 0 && !m_bWorld )
+		return;
+	if ( nRow && *nRow >= m_Sheet.m_Rows.size() )
+		nRow.reset();
+	QMenu menu( this );
+	menu.setObjectName( QStringLiteral( "mapKeyMenu" ) );
+	if ( nRow )
+	{
+		const xv::map::PropertyRow_t &row = m_Sheet.m_Rows[ *nRow ];
+		const std::optional<std::string> szDefault = GetKeyDefault( *nRow );
+		const std::size_t n = *nRow;
+		QAction *pReset = menu.addAction( szDefault ? tr( "Reset to Default (%1)" ).arg( FromStd( szDefault->empty() ? std::string{ "empty" } : *szDefault ) ) : tr( "Reset to Default" ), this, [ this, n, szDefault ] { CommitKey( n, *szDefault ); } );
+		pReset->setObjectName( QStringLiteral( "mapKeyReset" ) );
+		pReset->setEnabled( szDefault.has_value() && ( row.m_bDiffers || row.m_szValue != *szDefault || row.m_bDefault ) );
+		menu.addAction( tr( "Copy Value" ), this, [ szValue = row.m_szValue ] { QGuiApplication::clipboard()->setText( FromStd( szValue ) ); } )->setObjectName( QStringLiteral( "mapKeyCopy" ) );
+		const QString szClip = QGuiApplication::clipboard()->text();
+		QAction *pPaste = menu.addAction( tr( "Paste Value" ), this, [ this, n, szClip ] { CommitKey( n, szClip.toStdString() ); } );
+		pPaste->setObjectName( QStringLiteral( "mapKeyPaste" ) );
+		pPaste->setEnabled( !szClip.isEmpty() && !szClip.contains( u'\n' ) && !szClip.contains( u'"' ) );
+		menu.addAction( tr( "Remove Key" ), this, [ this, n ] { RemoveKeyAt( n ); } )->setEnabled( !row.m_bDefault );
+		menu.addSeparator();
+	}
+	menu.addAction( tr( "Copy All Keys" ), this, [ this ] {
+			QString szText;
+			for ( const xv::map::PropertyRow_t &row : m_Sheet.m_Rows )
+			{
+				if ( !row.m_bDefault && !row.m_bDiffers )
+					szText += QStringLiteral( "\"%1\" \"%2\"\n" ).arg( FromStd( row.m_szKey ), FromStd( row.m_szValue ) );
+			}
+			QGuiApplication::clipboard()->setText( szText );
+		} )
+		->setObjectName( QStringLiteral( "mapKeyCopyAll" ) );
+	menu.addAction( tr( "Add Key" ), this, &CMapProperties::AddKey );
+	menu.exec( globalAt );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+void CMapProperties::RemoveKeyAt( std::optional<std::size_t> nRowAt )
+{
+	const std::size_t nRow = nRowAt.value_or( m_Sheet.m_Rows.size() );
 	if ( nRow >= m_Sheet.m_Rows.size() )
 	{
 		return;

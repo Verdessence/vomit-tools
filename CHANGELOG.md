@@ -3,6 +3,13 @@
 ## Unreleased
 
 ### Hammer maps (new)
+- Right-click menus: in the 2D and 3D views (the object under the cursor, or the selection:
+  cut, copy, paste, delete, group, hide, carve, select all of a class, properties; in 3D, a
+  face's material), Object Properties' keys (reset to the FGD's default, copy and paste a
+  value), the Filter Control's visgroups (select, show, add and remove the selection, new,
+  rename, delete), the texture browser and the Lighting panel's lights. In 3D a right click on
+  the gizmo still goes round its modes.
+- Browse beside sound, particle system, model, sprite and material keys in Object Properties.
 - Materials draw their `$detail` texture: its blend mode, factor, scale and transform, scrolling
   and animating with the material's proxies (the first 64 frames).
 - Refract and Water reflections of `env_cubemap` show the game's default cube map, as a map does

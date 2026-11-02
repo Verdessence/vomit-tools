@@ -1664,6 +1664,11 @@ void CMapView2D::mousePressEvent( QMouseEvent *pEvent )
 		}
 		return;
 	}
+	if ( nTool == MapTool_t::MAP_TOOL_SELECT && pEvent->button() == Qt::RightButton )
+	{
+		m_Editor.ShowObjectMenu( this, pEvent->globalPosition().toPoint(), HitAt( at ) );
+		return;
+	}
 	if ( pEvent->button() == Qt::LeftButton )
 	{
 		m_PressAt = pEvent->position().toPoint();

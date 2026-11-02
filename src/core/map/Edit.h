@@ -103,6 +103,18 @@ struct ObjectSet_t
 // MakePointEntity keep it). pAdded as for CopyObjects.
 [[nodiscard]] MapEdit_t AddObjects( const CScene &scene, std::vector<Solid_t> solids, std::vector<Entity_t> entities, std::vector<std::uint32_t> *pAdded );
 
+// The user's visgroups (the Filter Control's User tab; in map/Visgroups.cpp).
+// Objects (solids and entities, by object number) put in the visgroup with that id, or taken
+// out of it; those already so are left alone.
+[[nodiscard]] MapEdit_t JoinVisgroup( const CScene &scene, const std::vector<std::uint32_t> &objects, int nId );
+[[nodiscard]] MapEdit_t LeaveVisgroup( const CScene &scene, const std::vector<std::uint32_t> &objects, int nId );
+// A visgroup at the top with the next free id and a colour of its own, the objects in it;
+// its id into pId.
+[[nodiscard]] MapEdit_t NewVisgroup( const CScene &scene, std::string_view szName, const std::vector<std::uint32_t> &objects, int *pId = nullptr );
+[[nodiscard]] MapEdit_t RenameVisgroup( const CScene &scene, int nId, std::string_view szName );
+// The visgroup gone, its members out of it and its own visgroups moved up to its parent.
+[[nodiscard]] MapEdit_t DeleteVisgroup( const CScene &scene, int nId );
+
 // The objects as VMF text, for the clipboard: the world's solids in a world block, entities with
 // theirs. What other editors (and Hammer) read too.
 [[nodiscard]] std::string ObjectsToText( const CScene &scene, const std::vector<std::uint32_t> &objects );

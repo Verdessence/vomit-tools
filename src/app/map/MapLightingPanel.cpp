@@ -16,6 +16,7 @@
 #include <QHBoxLayout>
 #include <QHeaderView>
 #include <QLabel>
+#include <QMenu>
 #include <QPushButton>
 #include <QSpinBox>
 #include <QTableWidget>
@@ -212,6 +213,26 @@ CMapLightingPanel::CMapLightingPanel( CMapEditor &editor, QWidget *pParent )
 			return;
 		}
 		m_Editor.GetDocument().SetSelection( { m_Editor.GetDocument().GetScene()->EntityObject( m_Rows[ static_cast<std::size_t>( nRow ) ].m_nEntity ) } );
+	} );
+	// A light's right-click menu: pick it in the views, look at it, open its properties.
+	m_pTable->setContextMenuPolicy( Qt::CustomContextMenu );
+	connect( m_pTable, &QTableWidget::customContextMenuRequested, this, [ this ]( const QPoint &at ) {
+		const int nRow = m_pTable->rowAt( at.y() );
+		if ( nRow < 0 || static_cast<std::size_t>( nRow ) >= m_Rows.size() )
+			return;
+		m_pTable->setCurrentCell( nRow, m_pTable->columnAt( at.x() ) );
+		QMenu menu( this );
+		menu.setObjectName( QStringLiteral( "mapLightMenu" ) );
+		menu.addAction( tr( "Select" ), this, [ this, nRow ] {
+			if ( const xv::map::CScene *pScene = m_Editor.GetDocument().GetScene() )
+				m_Editor.GetDocument().SetSelection( { pScene->EntityObject( m_Rows[ static_cast<std::size_t>( nRow ) ].m_nEntity ) } );
+		} );
+		menu.addAction( tr( "Centre 3D View on It" ), this, [ this ] { m_Editor.RunAction( MapAction_t::MAP_ACTION_CENTER_3D, nullptr ); } );
+		menu.addAction( tr( "Centre 2D Views on It" ), this, [ this ] { m_Editor.RunAction( MapAction_t::MAP_ACTION_CENTER_2D, nullptr ); } );
+		menu.addAction( tr( "Change Colour…" ), this, [ this, nRow ] { PickColour( nRow ); } );
+		menu.addSeparator();
+		menu.addAction( tr( "Properties" ), this, [ this ] { m_Editor.RunAction( MapAction_t::MAP_ACTION_PROPERTIES, nullptr ); } );
+		menu.exec( m_pTable->viewport()->mapToGlobal( at ) );
 	} );
 	pLayout->addWidget( new QLabel( tr( "Lights (double-click a colour to change it):" ) ) );
 	pLayout->addWidget( m_pTable, 1 );

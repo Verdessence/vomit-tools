@@ -255,6 +255,18 @@ void CMapParticles::SetScene( std::shared_ptr<const xv::map::CScene> pScene )
 //-----------------------------------------------------------------------------
 // Purpose:
 //-----------------------------------------------------------------------------
+std::vector<std::string> CMapParticles::GetSystemNames() const
+{
+	std::vector<std::string> names;
+	names.reserve( m_Systems.size() );
+	for ( const auto &[ szName, found ] : m_Systems )
+		names.push_back( szName );
+	return names;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
 void CMapParticles::SetDetailTypes( std::shared_ptr<const std::vector<std::string>> pTypes )
 {
 	if ( pTypes == m_pDetailTypes )

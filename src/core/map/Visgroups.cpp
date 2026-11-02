@@ -11,10 +11,12 @@
 #include <algorithm>
 #include <array>
 #include <cctype>
+#include <functional>
 #include <map>
 #include <string_view>
 
 #include "kv1/Kv1.h"
+#include "map/Edit.h"
 #include "map/Scene.h"
 
 namespace xv::map
@@ -296,6 +298,150 @@ std::vector<std::uint32_t> AutoVisgroupMembers( const AutoVisgroup_t &group )
 	const auto [ first, last ] = std::ranges::unique( members );
 	members.erase( first, last );
 	return members;
+}
+
+namespace
+{
+
+//-----------------------------------------------------------------------------
+// Purpose: Each object's editor notes changed by pfnChange (which says whether it changed
+//          them): a solid's own, an entity's (a brush entity's solids keep theirs).
+//-----------------------------------------------------------------------------
+MapEdit_t ChangeEditors( const CScene &scene, const std::vector<std::uint32_t> &objects, const std::function<bool( EditorInfo_t & )> &pfnChange )
+{
+	MapEdit_t edit;
+	for ( const std::uint32_t nObject : objects )
+	{
+		if ( nObject >= scene.GetObjectCount() || scene.IsDeleted( nObject ) )
+			continue;
+		const std::uint32_t nIndex = scene.GetIndex( nObject );
+		if ( scene.IsSolidObject( nObject ) )
+		{
+			Solid_t solid = scene.m_Map.m_Solids[ nIndex ];
+			if ( !pfnChange( solid.m_Editor ) )
+				continue;
+			solid.m_Editor.m_bChanged = true;
+			solid.m_bChanged = true;
+			edit.m_Solids.emplace_back( nIndex, std::move( solid ) );
+		}
+		else
+		{
+			Entity_t entity = scene.m_Map.m_Entities[ nIndex ];
+			if ( !pfnChange( entity.m_Editor ) )
+				continue;
+			entity.m_Editor.m_bChanged = true;
+			edit.m_Entities.emplace_back( nIndex, std::move( entity ) );
+		}
+	}
+	return edit;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Every object that is in the visgroup.
+//-----------------------------------------------------------------------------
+std::vector<std::uint32_t> MembersOf( const CScene &scene, int nId )
+{
+	std::vector<std::uint32_t> members;
+	const auto in = [ nId ]( const EditorInfo_t &editor ) { return std::ranges::find( editor.m_Visgroups, nId ) != editor.m_Visgroups.end(); };
+	for ( std::size_t s = 0; s < scene.m_Map.m_Solids.size(); s++ )
+	{
+		if ( !scene.m_Map.m_Solids[ s ].m_bDeleted && in( scene.m_Map.m_Solids[ s ].m_Editor ) )
+			members.push_back( scene.SolidObject( s ) );
+	}
+	for ( std::size_t e = 0; e < scene.m_Map.m_Entities.size(); e++ )
+	{
+		if ( !scene.m_Map.m_Entities[ e ].m_bDeleted && in( scene.m_Map.m_Entities[ e ].m_Editor ) )
+			members.push_back( scene.EntityObject( e ) );
+	}
+	return members;
+}
+
+} // namespace
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+MapEdit_t JoinVisgroup( const CScene &scene, const std::vector<std::uint32_t> &objects, int nId )
+{
+	return ChangeEditors( scene, objects, [ nId ]( EditorInfo_t &editor ) {
+		if ( std::ranges::find( editor.m_Visgroups, nId ) != editor.m_Visgroups.end() )
+			return false;
+		editor.m_Visgroups.push_back( nId );
+		return true;
+	} );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+MapEdit_t LeaveVisgroup( const CScene &scene, const std::vector<std::uint32_t> &objects, int nId )
+{
+	return ChangeEditors( scene, objects, [ nId ]( EditorInfo_t &editor ) { return std::erase( editor.m_Visgroups, nId ) > 0; } );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: A colour from the id, bright enough to read in the lists (Hammer picks at random).
+//-----------------------------------------------------------------------------
+MapEdit_t NewVisgroup( const CScene &scene, std::string_view szName, const std::vector<std::uint32_t> &objects, int *pId )
+{
+	std::vector<Visgroup_t> visgroups = scene.m_Map.m_Visgroups;
+	int nId = 0;
+	for ( const Visgroup_t &group : visgroups )
+		nId = std::max( nId, group.m_nId );
+	nId++;
+	Visgroup_t group;
+	group.m_szName = scene.m_Map.Store( std::string{ szName } );
+	group.m_nId = nId;
+	const std::uint32_t nHash = static_cast<std::uint32_t>( nId ) * 2654435761u;
+	group.m_Color = { static_cast<std::uint8_t>( 96 + ( nHash >> 8 ) % 160 ), static_cast<std::uint8_t>( 96 + ( nHash >> 16 ) % 160 ), static_cast<std::uint8_t>( 96 + ( nHash >> 24 ) % 160 ) };
+	visgroups.push_back( group );
+	MapEdit_t edit = JoinVisgroup( scene, objects, nId );
+	edit.m_Visgroups = std::move( visgroups );
+	if ( pId )
+		*pId = nId;
+	return edit;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+MapEdit_t RenameVisgroup( const CScene &scene, int nId, std::string_view szName )
+{
+	MapEdit_t edit;
+	std::vector<Visgroup_t> visgroups = scene.m_Map.m_Visgroups;
+	const auto found = std::ranges::find( visgroups, nId, &Visgroup_t::m_nId );
+	if ( found == visgroups.end() || found->m_szName == szName )
+		return edit;
+	found->m_szName = scene.m_Map.Store( std::string{ szName } );
+	edit.m_Visgroups = std::move( visgroups );
+	return edit;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+MapEdit_t DeleteVisgroup( const CScene &scene, int nId )
+{
+	const auto &groups = scene.m_Map.m_Visgroups;
+	const auto found = std::ranges::find( groups, nId, &Visgroup_t::m_nId );
+	if ( found == groups.end() )
+		return {};
+	const int nGone = static_cast<int>( found - groups.begin() );
+	MapEdit_t edit = LeaveVisgroup( scene, MembersOf( scene, nId ), nId );
+	std::vector<Visgroup_t> visgroups;
+	for ( int i = 0; i < static_cast<int>( groups.size() ); i++ )
+	{
+		if ( i == nGone )
+			continue;
+		Visgroup_t group = groups[ static_cast<std::size_t>( i ) ];
+		if ( group.m_nParent == nGone )
+			group.m_nParent = found->m_nParent;
+		if ( group.m_nParent > nGone )
+			group.m_nParent--;
+		visgroups.push_back( group );
+	}
+	edit.m_Visgroups = std::move( visgroups );
+	return edit;
 }
 
 } // namespace xv::map

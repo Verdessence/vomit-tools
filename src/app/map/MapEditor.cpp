@@ -42,7 +42,9 @@
 #include <QActionGroup>
 #include <QFileInfo>
 #include <QHBoxLayout>
+#include <QApplication>
 #include <QInputDialog>
+#include <QMenu>
 #include <QLabel>
 #include <QLocale>
 #include <QLockFile>
@@ -310,6 +312,20 @@ CMapEditor::CMapEditor( const QString &szPath, bool bFromGame, QWidget *pParent 
 	m_pWorldProperties = new CMapProperties( *m_pDocument );
 	m_pWorldProperties->setObjectName( QStringLiteral( "mapWorldProperties" ) );
 	m_pWorldProperties->SetWorld( true );
+	// Browse beside sound, particle, model, sprite and material keys.
+	for ( CMapProperties *pSheet : { m_pProperties, m_pWorldProperties } )
+	{
+		pSheet->SetNameSource( [ this ]( const std::string &szType ) { return KeyNames( szType ); } );
+		pSheet->SetMaterialPicker( [ this ]( const QString &szCurrent ) -> std::optional<QString> {
+			const std::optional<xv::vfs::CGameInfo> &game = m_pDocument->GetGame();
+			if ( !game )
+				return std::nullopt;
+			QStringList used;
+			for ( const std::string &szMaterial : m_pDocument->GetScene() ? m_pDocument->GetScene()->m_Materials : std::vector<std::string>{} )
+				used << QString::fromStdString( szMaterial );
+			return CMaterialBrowser::Pick( this, *game, used, szCurrent );
+		} );
+	}
 	m_pPanels->AddPanel( QStringLiteral( "mapProperties" ), tr( "Map Properties" ), MakeMapIcon( MapIcon_t::MAP_ICON_PROPERTIES, panelIconColor ), m_pWorldProperties );
 	m_pPanels->SetHiddenByDefault( QStringLiteral( "mapProperties" ) );
 	m_pPanels->SetPinned( QStringLiteral( "mapProperties" ) ); // its tab apart, at the top
@@ -1977,6 +1993,162 @@ void CMapEditor::GoToLeak()
 		return;
 	}
 	CenterViewsOn( points->back() );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Hammer's commands at the cursor, each the editor's own action (with its key shown).
+//          A right click on something not selected selects it (with its group) first, as a
+//          left click would; on nothing, the selection stays.
+//-----------------------------------------------------------------------------
+void CMapEditor::ShowObjectMenu( CMapView *pView, QPoint globalAt, std::optional<std::uint32_t> nObject, std::optional<xv::map::FaceRef_t> face )
+{
+	const xv::map::CScene *pScene = m_pDocument->GetScene();
+	if ( !pScene )
+		return;
+	if ( nObject && !std::ranges::binary_search( m_pDocument->GetSelection(), *nObject ) )
+		m_pDocument->SetSelection( m_pDocument->Expand( *nObject ) );
+	const bool bSelection = !m_pDocument->GetSelection().empty();
+	QMenu menu( pView );
+	menu.setObjectName( QStringLiteral( "mapObjectMenu" ) );
+	const auto add = [ & ]( const QString &szText, MapAction_t nAction, bool bEnabled = true ) {
+		QAction *pAction = menu.addAction( szText, this, [ this, nAction, pView ] { RunAction( nAction, pView ); } );
+		pAction->setShortcut( MapActionKey( nAction ) );
+		pAction->setShortcutVisibleInContextMenu( true );
+		pAction->setEnabled( bEnabled );
+		return pAction;
+	};
+	add( tr( "Cut" ), MapAction_t::MAP_ACTION_CUT, bSelection );
+	add( tr( "Copy" ), MapAction_t::MAP_ACTION_COPY, bSelection );
+	add( tr( "Paste" ), MapAction_t::MAP_ACTION_PASTE );
+	add( tr( "Paste Special…" ), MapAction_t::MAP_ACTION_PASTE_SPECIAL );
+	add( tr( "Delete" ), MapAction_t::MAP_ACTION_DELETE, bSelection );
+	if ( bSelection )
+	{
+		menu.addSeparator();
+		add( tr( "Group" ), MapAction_t::MAP_ACTION_GROUP );
+		add( tr( "Ungroup" ), MapAction_t::MAP_ACTION_UNGROUP );
+		add( tr( "Tie to Entity" ), MapAction_t::MAP_ACTION_TIE_TO_ENTITY );
+		add( tr( "Move to World" ), MapAction_t::MAP_ACTION_MOVE_TO_WORLD );
+		menu.addSeparator();
+		add( tr( "Carve" ), MapAction_t::MAP_ACTION_CARVE );
+		add( tr( "Hollow" ), MapAction_t::MAP_ACTION_HOLLOW );
+		add( tr( "Transform…" ), MapAction_t::MAP_ACTION_TRANSFORM );
+		menu.addSeparator();
+		add( tr( "Hide" ), MapAction_t::MAP_ACTION_QUICK_HIDE );
+		add( tr( "Hide Others" ), MapAction_t::MAP_ACTION_QUICK_HIDE_OTHERS );
+	}
+	add( tr( "Unhide All" ), MapAction_t::MAP_ACTION_QUICK_UNHIDE );
+	if ( bSelection )
+	{
+		menu.addSeparator();
+		add( tr( "Centre 2D Views on Selection" ), MapAction_t::MAP_ACTION_CENTER_2D );
+		add( tr( "Centre 3D View on Selection" ), MapAction_t::MAP_ACTION_CENTER_3D );
+		// The class of the entity clicked (or of the one selected entity).
+		std::optional<std::uint32_t> nOne = nObject;
+		if ( !nOne && m_pDocument->GetSelection().size() == 1 )
+			nOne = m_pDocument->GetSelection().front();
+		const int nEntity = nOne ? pScene->GetObjectEntity( *nOne ) : -1;
+		if ( nEntity >= 0 )
+		{
+			const QString szClass = QString::fromUtf8( pScene->m_Map.m_Entities[ static_cast<std::size_t>( nEntity ) ].GetClassname() );
+			menu.addAction( tr( "Select All %1" ).arg( szClass ), this, [ this, szClass ] { SelectClass( szClass ); } );
+		}
+		add( tr( "Clear Selection" ), MapAction_t::MAP_ACTION_CLEAR_SELECTION );
+	}
+	if ( face && face->m_nSolid < pScene->m_Map.m_Solids.size() && face->m_nSide < pScene->m_Map.m_Solids[ face->m_nSolid ].m_Sides.size() )
+	{
+		menu.addSeparator();
+		const QString szMaterial = QString::fromUtf8( pScene->m_Map.m_Solids[ face->m_nSolid ].m_Sides[ face->m_nSide ].m_szMaterial );
+		const xv::map::FaceRef_t at = *face;
+		menu.addAction( tr( "Apply Current Texture to Face" ), this, [ this, at ] { ApplyToFace( at, false ); } );
+		menu.addAction( tr( "Use %1" ).arg( szMaterial ), this, [ this, szMaterial ] { SetCurrentMaterial( szMaterial ); } )->setObjectName( QStringLiteral( "mapPickMaterial" ) );
+	}
+	if ( bSelection )
+	{
+		menu.addSeparator();
+		add( tr( "Properties" ), MapAction_t::MAP_ACTION_PROPERTIES );
+	}
+	menu.exec( globalAt );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: The names Browse offers for a key type, read once from the game as the particles
+//          mounted it: soundscripts' entries and the sound files (as sound/ keys write them),
+//          the particle systems, models/*.mdl, and materials/sprites (as sprite keys write them).
+//-----------------------------------------------------------------------------
+QStringList CMapEditor::KeyNames( const std::string &szType )
+{
+	const std::shared_ptr<const xv::vfs::CFileSystem> pFileSystem = m_pParticles->GetFileSystem();
+	if ( pFileSystem.get() != m_pKeyNamesFor )
+	{
+		m_KeyNames.clear();
+		m_pKeyNamesFor = pFileSystem.get();
+	}
+	if ( const auto found = m_KeyNames.find( szType ); found != m_KeyNames.end() )
+		return found->second;
+	QStringList names;
+	const auto add = [ & ]( const std::vector<std::string> &paths, int nPrefix ) {
+		for ( const std::string &szPath : paths )
+			names << QString::fromStdString( szPath ).mid( nPrefix );
+	};
+	if ( szType == "particlesystem" )
+	{
+		for ( const std::string &szName : m_pParticles->GetSystemNames() )
+			names << QString::fromStdString( szName );
+	}
+	else if ( pFileSystem && szType == "studio" )
+	{
+		add( pFileSystem->Find( "models", ".mdl", true ), 0 );
+	}
+	else if ( pFileSystem && szType == "sprite" )
+	{
+		add( pFileSystem->Find( "materials/sprites", ".vmt", true ), static_cast<int>( std::string_view{ "materials/" }.size() ) );
+	}
+	else if ( pFileSystem && szType == "sound" )
+	{
+		QApplication::setOverrideCursor( Qt::WaitCursor );
+		if ( const std::optional<std::string> manifest = pFileSystem->ReadText( "scripts/game_sounds_manifest.txt" ) )
+		{
+			for ( const xv::kv1::CNode &root : xv::kv1::Parse( *manifest ).m_Document.m_Roots )
+			{
+				for ( const xv::kv1::CNode &file : root.IsBlock() ? root.GetChildren() : std::vector<xv::kv1::CNode>{} )
+				{
+					const std::optional<std::string> script = file.IsPair() ? pFileSystem->ReadText( file.GetValue() ) : std::nullopt;
+					for ( const xv::kv1::CNode &entry : script ? xv::kv1::Parse( *script ).m_Document.m_Roots : std::vector<xv::kv1::CNode>{} )
+					{
+						if ( entry.IsBlock() )
+							names << QString::fromStdString( std::string{ entry.GetKey() } );
+					}
+				}
+			}
+		}
+		for ( const char *pszExtension : { ".wav", ".mp3" } )
+			add( pFileSystem->Find( "sound", pszExtension, true ), static_cast<int>( std::string_view{ "sound/" }.size() ) );
+		QApplication::restoreOverrideCursor();
+	}
+	m_KeyNames[ szType ] = names;
+	return names;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+void CMapEditor::SelectClass( const QString &szClass )
+{
+	const xv::map::CScene *pScene = m_pDocument->GetScene();
+	if ( !pScene )
+		return;
+	const std::string szWanted = szClass.toStdString();
+	std::vector<std::uint32_t> objects;
+	for ( std::size_t e = 0; e < pScene->m_Map.m_Entities.size(); e++ )
+	{
+		const xv::map::Entity_t &entity = pScene->m_Map.m_Entities[ e ];
+		const std::uint32_t nObject = pScene->EntityObject( e );
+		if ( !entity.m_bDeleted && m_pDocument->IsShown( nObject ) && xv::kv1::EqualsIgnoreCase( entity.GetClassname(), szWanted ) )
+			objects.push_back( nObject );
+	}
+	std::ranges::sort( objects );
+	m_pDocument->SetSelection( std::move( objects ) );
 }
 
 //-----------------------------------------------------------------------------

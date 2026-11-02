@@ -9,6 +9,7 @@
 #pragma once
 
 #include <array>
+#include <map>
 #include <memory>
 #include <optional>
 #include <utility>
@@ -16,6 +17,7 @@
 
 #include <QDialog>
 #include <QElapsedTimer>
+#include <QStringList>
 #include <QPointer>
 #include <QWidget>
 
@@ -251,6 +253,14 @@ public:
 	// A click on a face with the texture tool, in the sheet's mode (Lift, Select, Apply...).
 	void ClickFace( const xv::map::FaceRef_t &face, Qt::KeyboardModifiers modifiers );
 	void ApplyToFace( const xv::map::FaceRef_t &face, bool bValues );
+	// The select tool's right-click menu in a view, at a screen point: the object under the
+	// cursor (selected first when it isn't) or the selection, and in 3D the face hit.
+	void ShowObjectMenu( CMapView *pView, QPoint globalAt, std::optional<std::uint32_t> nObject, std::optional<xv::map::FaceRef_t> face = std::nullopt );
+	// Every shown entity of a class, selected.
+	void SelectClass( const QString &szClass );
+	// What Object Properties' Browse offers for a key type ("sound", "particlesystem", "studio",
+	// "sprite").
+	[[nodiscard]] QStringList KeyNames( const std::string &szType );
 	[[nodiscard]] CMapFaceEdit &GetFaceEdit() { return *m_pFaceEdit; }
 	// Tools > Building Generator: its panel, with the block tool's box (else the selection's
 	// bounds); Create adds the template's brushes as one group in one undo step.
@@ -484,4 +494,6 @@ private:
 	QLabel *m_pStatusZoom = nullptr;
 	QLabel *m_pStatusGrid = nullptr;
 	QLabel *m_pStatusGame = nullptr;
+	std::map<std::string, QStringList> m_KeyNames; // KeyNames' lists, for the mount they came from
+	const void *m_pKeyNamesFor = nullptr;
 };

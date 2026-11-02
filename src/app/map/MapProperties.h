@@ -11,9 +11,11 @@
 
 #include <cstdint>
 #include <functional>
+#include <optional>
 #include <string>
 #include <vector>
 
+#include <QStringList>
 #include <QStyledItemDelegate>
 #include <QWidget>
 
@@ -82,12 +84,24 @@ public:
 	void RemoveKey();
 	void AddOutput();
 	void RemoveOutput();
+	// A key's row's right-click menu (nullopt: below the rows), and what it uses.
+	void ShowKeyMenu( std::optional<std::size_t> nRow, const QPoint &globalAt );
+	void RemoveKeyAt( std::optional<std::size_t> nRow );
+	// The FGD's default for a row's key, for the selection's class; nullopt when it has none.
+	[[nodiscard]] std::optional<std::string> GetKeyDefault( std::size_t nRow ) const;
 	// What an editor for a key or an output's column may choose from (value and name), if it
 	// is a choice; the first is empty for a free field.
 	[[nodiscard]] std::vector<std::pair<std::string, std::string>> GetKeyChoices( std::size_t nRow ) const;
 	[[nodiscard]] std::vector<std::pair<std::string, std::string>> GetOutputChoices( std::size_t nRow, int nColumn ) const;
 
 	void PreviewSides( std::size_t nRow, const QString &szValue );
+
+	// What Browse picks from: the names of a key type ("sound", "particlesystem", "studio",
+	// "sprite"), and the texture browser for materials and decals (the name picked, if one was).
+	void SetNameSource( std::function<QStringList( const std::string &szType )> pfnNames ) { m_pfnNames = std::move( pfnNames ); }
+	void SetMaterialPicker( std::function<std::optional<QString>( const QString &szCurrent )> pfnPick ) { m_pfnPickMaterial = std::move( pfnPick ); }
+	void BrowseKey( std::size_t nRow );
+	[[nodiscard]] static bool IsBrowsable( const std::string &szType );
 
 signals:
 	void FacesHighlighted( const QString &szKey, const QString &szValue );
@@ -118,6 +132,9 @@ private:
 	QTreeWidget *m_pKeys = nullptr;
 	QPushButton *m_pBrowseInstance = nullptr;
 	QPushButton *m_pPickFaces = nullptr;
+	QPushButton *m_pBrowseKey = nullptr;
+	std::function<QStringList( const std::string &szType )> m_pfnNames;
+	std::function<std::optional<QString>( const QString &szCurrent )> m_pfnPickMaterial;
 	QString m_szFacePickKey;
 	QPushButton *m_pAddKey = nullptr;
 	QPushButton *m_pRemoveKey = nullptr;

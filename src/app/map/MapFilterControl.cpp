@@ -13,6 +13,9 @@
 
 #include <QCheckBox>
 #include <QHBoxLayout>
+#include <QInputDialog>
+#include <QLineEdit>
+#include <QMenu>
 #include <QPainter>
 #include <QPushButton>
 #include <QStackedWidget>
@@ -185,6 +188,13 @@ CMapFilterControl::CMapFilterControl( CMapDocument &document, QWidget *pParent )
 	connect( pMark, &QPushButton::clicked, this, &CMapFilterControl::Mark );
 	connect( pShowAll, &QPushButton::clicked, this, [ this ] { m_Document.ShowAll(); } );
 	connect( m_pUser, &QTreeWidget::itemChanged, this, &CMapFilterControl::ItemChanged );
+	m_pUser->setContextMenuPolicy( Qt::CustomContextMenu );
+	connect( m_pUser, &QTreeWidget::customContextMenuRequested, this, [ this ]( const QPoint &at ) {
+		QTreeWidgetItem *pItem = m_pUser->itemAt( at );
+		if ( pItem )
+			m_pUser->setCurrentItem( pItem );
+		ShowVisgroupMenu( pItem, m_pUser->viewport()->mapToGlobal( at ) );
+	} );
 	connect( m_pAuto, &QTreeWidget::itemChanged, this, &CMapFilterControl::ItemChanged );
 	connect( &m_Document, &CMapDocument::Loaded, this, &CMapFilterControl::Rebuild );
 	// An edit makes a new scene with automatic visgroups of its own: the old ones the items
@@ -522,6 +532,64 @@ void CMapFilterControl::ItemChanged( QTreeWidgetItem *pItem )
 	{
 		m_Document.SetAutoShown( MembersOf( pItem ), bShown );
 	}
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: A visgroup's objects selected, shown or hidden, the selection put in or taken out,
+//          the group renamed or deleted; anywhere, a new group made of the selection. Each
+//          change is one step to undo.
+//-----------------------------------------------------------------------------
+void CMapFilterControl::ShowVisgroupMenu( QTreeWidgetItem *pItem, const QPoint &globalAt )
+{
+	const xv::map::CScene *pScene = m_Document.GetScene();
+	if ( !pScene )
+		return;
+	const std::vector<std::uint32_t> selection = m_Document.GetSelection();
+	QMenu menu( this );
+	menu.setObjectName( QStringLiteral( "mapVisgroupMenu" ) );
+	if ( pItem )
+	{
+		const int nId = pItem->data( 0, Qt::UserRole ).toInt();
+		const QString szName = pItem->text( 0 );
+		menu.addAction( tr( "Select Objects" ), this, &CMapFilterControl::Mark );
+		const bool bShown = pItem->checkState( 0 ) != Qt::Unchecked;
+		menu.addAction( bShown ? tr( "Hide" ) : tr( "Show" ), this, [ pItem, bShown ] { pItem->setCheckState( 0, bShown ? Qt::Unchecked : Qt::Checked ); } );
+		menu.addSeparator();
+		QAction *pAdd = menu.addAction( tr( "Add Selection to %1" ).arg( szName ), this, [ this, nId, selection, szName ] {
+			if ( const xv::map::CScene *p = m_Document.GetScene() )
+				m_Document.Edit( xv::map::JoinVisgroup( *p, selection, nId ), tr( "Add to %1" ).arg( szName ) );
+		} );
+		pAdd->setObjectName( QStringLiteral( "mapVisgroupAdd" ) );
+		pAdd->setEnabled( !selection.empty() );
+		QAction *pRemove = menu.addAction( tr( "Remove Selection from %1" ).arg( szName ), this, [ this, nId, selection, szName ] {
+			if ( const xv::map::CScene *p = m_Document.GetScene() )
+				m_Document.Edit( xv::map::LeaveVisgroup( *p, selection, nId ), tr( "Remove from %1" ).arg( szName ) );
+		} );
+		pRemove->setEnabled( !selection.empty() );
+		menu.addSeparator();
+		menu.addAction( tr( "Rename…" ), this, [ this, nId, szName ] {
+			bool bOk = false;
+			const QString szNew = QInputDialog::getText( this, tr( "Rename Visgroup" ), tr( "Name:" ), QLineEdit::Normal, szName, &bOk ).trimmed();
+			if ( bOk && !szNew.isEmpty() )
+				if ( const xv::map::CScene *p = m_Document.GetScene() )
+					m_Document.Edit( xv::map::RenameVisgroup( *p, nId, szNew.toStdString() ), tr( "Rename Visgroup" ) );
+		} );
+		menu.addAction( tr( "Delete" ), this, [ this, nId, szName ] {
+				if ( const xv::map::CScene *p = m_Document.GetScene() )
+					m_Document.Edit( xv::map::DeleteVisgroup( *p, nId ), tr( "Delete %1" ).arg( szName ) );
+			} )
+			->setObjectName( QStringLiteral( "mapVisgroupDelete" ) );
+		menu.addSeparator();
+	}
+	QAction *pNew = menu.addAction( tr( "New Visgroup from Selection…" ), this, [ this, selection ] {
+		bool bOk = false;
+		const QString szName = QInputDialog::getText( this, tr( "New Visgroup" ), tr( "Name:" ), QLineEdit::Normal, tr( "Visgroup" ), &bOk ).trimmed();
+		if ( bOk && !szName.isEmpty() )
+			if ( const xv::map::CScene *p = m_Document.GetScene() )
+				m_Document.Edit( xv::map::NewVisgroup( *p, szName.toStdString(), selection ), tr( "New Visgroup" ) );
+	} );
+	pNew->setObjectName( QStringLiteral( "mapVisgroupNew" ) );
+	menu.exec( globalAt );
 }
 
 //-----------------------------------------------------------------------------

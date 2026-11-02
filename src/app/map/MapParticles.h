@@ -56,6 +56,10 @@ public:
 	// again with them.
 	void SetDetailTypes( std::shared_ptr<const std::vector<std::string>> pTypes );
 	[[nodiscard]] std::size_t GetDetailPropCount() const { return m_pDetailProps ? m_pDetailProps->GetProps().size() : 0; }
+	// The game as mounted for the particles (null until ready, or without a game), and the
+	// particle systems' names it has.
+	[[nodiscard]] std::shared_ptr<const xv::vfs::CFileSystem> GetFileSystem() const { return m_pFileSystem; }
+	[[nodiscard]] std::vector<std::string> GetSystemNames() const;
 	[[nodiscard]] std::size_t GetParticleCount() const;
 	// The effect names the scene asks for that the game doesn't have.
 	[[nodiscard]] const std::vector<std::string> &GetMissing() const { return m_Missing; }

@@ -4,12 +4,14 @@
 // Purpose: Hammer's automatic visgroups (the Filter Control's Auto tab): the map's objects
 //          sorted by kind, from their classes and tool textures, plus the groups the FGDs add
 //          with @AutoVisGroup. None of it is saved in the map; it is worked out on opening.
+//          (The user's visgroups are changed by edits declared in map/Edit.h.)
 //
 //===========================================================================//
 #pragma once
 
 #include <cstdint>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace xv::map

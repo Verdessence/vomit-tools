@@ -831,7 +831,14 @@ void CMapView3D::mousePressEvent( QMouseEvent *pEvent )
 			m_Editor.ApplyToFace( *face, pEvent->modifiers().testFlag( Qt::AltModifier ) );
 		}
 	}
-	// Hammer++'s right click goes round the gizmo's modes.
+	// Hammer++'s right click on the gizmo goes round its modes; anywhere else, the menu of what
+	// is under the cursor.
+	if ( pEvent->button() == Qt::RightButton && m_Editor.GetTool() == MapTool_t::MAP_TOOL_SELECT && !m_bMouselook && !( GetGizmo() && m_nGizmoHover >= 0 ) )
+	{
+		const std::vector<xv::map::TraceHit_t> hits = HitsAt( pEvent->position() );
+		m_Editor.ShowObjectMenu( this, pEvent->globalPosition().toPoint(), hits.empty() ? std::nullopt : std::optional<std::uint32_t>{ hits.front().m_nObject }, FaceAt( pEvent->position() ) );
+		return;
+	}
 	if ( pEvent->button() == Qt::RightButton && m_Editor.GetTool() == MapTool_t::MAP_TOOL_SELECT && GetGizmo() )
 	{
 		const MapGizmoMode_t nMode = m_Editor.GetGizmoMode();

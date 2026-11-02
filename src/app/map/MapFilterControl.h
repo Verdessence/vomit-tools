@@ -44,6 +44,8 @@ public:
 	[[nodiscard]] std::vector<std::uint32_t> MembersOf( const QTreeWidgetItem *pItem ) const;
 	// Selects the current item's objects.
 	void Mark();
+	// The User tab's right-click menu: on a visgroup (pItem) or below them.
+	void ShowVisgroupMenu( QTreeWidgetItem *pItem, const QPoint &globalAt );
 
 	// The Cordons tab: the tree, and the cordon (and its box) picked in it. A new cordon or box
 	// gets the box pfnNewBox gives (the selection's, say).
