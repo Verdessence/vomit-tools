@@ -7,6 +7,9 @@
   and animating with the material's proxies (the first 64 frames).
 - Refract and Water reflections of `env_cubemap` show the game's default cube map, as a map does
   before buildcubemaps, rather than the map's sky; Water without `$envmap` still reflects the sky.
+- func_dustmotes and func_dustcloud play in the 3D views with the particles (and their
+  toggles): motes of particle/sparkles drifting inside the brushes as the game's do, even when
+  they start disabled.
 - Fog has its own toggle on the Show bar and shows in the textured 3D views as well as the
   lighting preview; Preferences → Maps says whether maps start with it.
 - A Nodraw toggle on the Show bar hides `tools/toolsnodraw` on its own; Tool Textures no longer

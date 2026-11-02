@@ -5,7 +5,7 @@
 //          game's particle files (those its manifest lists, and the map's own manifest), each
 //          entity's simulated from its control points (its origin, then the entities its
 //          cpoint keys name) with the particle editor's simulation, and drawn as a mesh of quads
-//          facing the camera.
+//          facing the camera. func_dustmotes and func_dustcloud play alongside (map/Dust).
 //
 //===========================================================================//
 #pragma once
@@ -21,6 +21,7 @@
 
 #include <QObject>
 
+#include "map/Dust.h"
 #include "map/Raster.h"
 #include "map/Scene.h"
 #include "particles/Render.h"
@@ -40,12 +41,15 @@ public:
 	void Start( std::optional<xv::vfs::CGameInfo> game, std::string szMapName );
 	void Stop();
 	[[nodiscard]] bool IsReady() const { return m_bReady; }
-	// The scene's info_particle_systems: those new or moved start over, the others play on.
+	// The scene's info_particle_systems and dust: those new or changed start over, the others
+	// play on.
 	void SetScene( std::shared_ptr<const xv::map::CScene> pScene );
-	// Every system on by seconds (one that has finished starts again); false when none plays.
+	// Every system and dust on by seconds (a system that has finished starts again); false when
+	// none plays.
 	bool Advance( float flSeconds );
-	[[nodiscard]] bool IsPlaying() const { return !m_Playing.empty(); }
+	[[nodiscard]] bool IsPlaying() const { return !m_Playing.empty() || !m_Dust.empty(); }
 	[[nodiscard]] std::size_t GetPlayingCount() const { return m_Playing.size(); }
+	[[nodiscard]] std::size_t GetDustCount() const { return m_Dust.size(); }
 	[[nodiscard]] std::size_t GetParticleCount() const;
 	// The effect names the scene asks for that the game doesn't have.
 	[[nodiscard]] const std::vector<std::string> &GetMissing() const { return m_Missing; }
@@ -75,6 +79,11 @@ private:
 
 	// The sprite (and material) of a library's definition, read the first time it is asked for.
 	[[nodiscard]] const xv::particles::Sprite_t *SpriteFor( const xv::particles::CLibrary &library, std::size_t nDefinition );
+	struct Sprite_t;
+	// A sprite's texture and a material of the map's kind for it.
+	void MakeMaterial( Sprite_t &sprite );
+	// The dust's sprite (particle/sparkles), read the first time it is drawn.
+	const Sprite_t &DustSprite();
 
 	std::thread m_Worker;
 	std::atomic<bool> m_bStop{ false };
@@ -93,5 +102,13 @@ private:
 		std::uint32_t m_nMaterial = 0;
 	};
 	std::map<std::pair<const xv::particles::CLibrary *, std::size_t>, Sprite_t> m_Sprites;
+	struct Dust_t
+	{
+		std::uint32_t m_nObject = 0;
+		std::string m_szKey; // its keys and brushes, as it was started
+		std::unique_ptr<xv::map::CDust> m_pDust;
+	};
+	std::vector<Dust_t> m_Dust;
+	std::optional<Sprite_t> m_DustSprite;
 	std::shared_ptr<const std::vector<xv::map::RasterMaterial_t>> m_pMaterials = std::make_shared<const std::vector<xv::map::RasterMaterial_t>>();
 };

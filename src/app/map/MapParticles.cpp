@@ -52,6 +52,21 @@ std::vector<std::optional<xv::CVec3>> ControlPointsOf( const xv::map::CScene &sc
 	return points;
 }
 
+//-----------------------------------------------------------------------------
+// Purpose: What starts dust over when it changes: its keys and the bounds of its brushes.
+//-----------------------------------------------------------------------------
+std::string DustKey( const xv::map::Entity_t &entity, const xv::map::DustEmitter_t &emitter )
+{
+	std::string szKey;
+	for ( const xv::map::EntityKey_t &key : entity.m_Keys )
+	{
+		if ( !key.m_bDeleted )
+			szKey += std::format( "{}={}|", key.m_szKey, key.m_szValue );
+	}
+	szKey += std::format( "{} {} {} {} {} {} {}", emitter.m_Bounds.m_Mins[ 0 ], emitter.m_Bounds.m_Mins[ 1 ], emitter.m_Bounds.m_Mins[ 2 ], emitter.m_Bounds.m_Maxs[ 0 ], emitter.m_Bounds.m_Maxs[ 1 ], emitter.m_Bounds.m_Maxs[ 2 ], emitter.m_Brushes.size() );
+	return szKey;
+}
+
 } // namespace
 
 //-----------------------------------------------------------------------------
@@ -95,6 +110,8 @@ void CMapParticles::Start( std::optional<xv::vfs::CGameInfo> game, std::string s
 	m_Systems.clear();
 	m_Playing.clear();
 	m_Sprites.clear();
+	m_Dust.clear();
+	m_DustSprite.reset();
 	m_Missing.clear();
 	m_pFileSystem.reset();
 	m_pMaterials = std::make_shared<const std::vector<xv::map::RasterMaterial_t>>();
@@ -156,11 +173,31 @@ void CMapParticles::SetScene( std::shared_ptr<const xv::map::CScene> pScene )
 		return;
 	}
 	std::vector<Playing_t> playing;
+	std::vector<Dust_t> dust;
 	m_Missing.clear();
 	const auto &entities = m_pScene->m_Map.m_Entities;
 	for ( std::size_t e = 0; e < entities.size() && playing.size() < MAX_PLAYING; e++ )
 	{
 		const xv::map::Entity_t &entity = entities[ e ];
+		if ( dust.size() < MAX_PLAYING )
+		{
+			if ( std::optional<xv::map::DustEmitter_t> emitter = xv::map::ReadDustEmitter( *m_pScene, e ) )
+			{
+				const std::uint32_t nObject = m_pScene->EntityObject( e );
+				std::string szKey = DustKey( entity, *emitter );
+				const auto old = std::ranges::find_if( m_Dust, [ & ]( const Dust_t &d ) { return d.m_nObject == nObject && d.m_szKey == szKey; } );
+				if ( old != m_Dust.end() )
+				{
+					dust.push_back( std::move( *old ) );
+					continue;
+				}
+				const float flWarm = std::min( emitter->m_flLifetimeMax, 10.0f );
+				auto pDust = std::make_unique<xv::map::CDust>( std::move( *emitter ), static_cast<std::uint32_t>( entity.m_nId ) );
+				pDust->Advance( flWarm ); // filled, as it looks once going
+				dust.push_back( { nObject, std::move( szKey ), std::move( pDust ) } );
+				continue;
+			}
+		}
 		if ( entity.m_bDeleted || !xv::kv1::EqualsIgnoreCase( entity.GetClassname(), "info_particle_system" ) )
 			continue;
 		const std::string szEffect{ entity.GetValue( "effect_name" ) };
@@ -205,6 +242,7 @@ void CMapParticles::SetScene( std::shared_ptr<const xv::map::CScene> pScene )
 		playing.push_back( std::move( system ) );
 	}
 	m_Playing = std::move( playing );
+	m_Dust = std::move( dust );
 }
 
 //-----------------------------------------------------------------------------
@@ -219,7 +257,9 @@ bool CMapParticles::Advance( float flSeconds )
 		if ( system.m_pSimulation->GetFinished() )
 			system.m_pSimulation->Restart();
 	}
-	return !m_Playing.empty();
+	for ( Dust_t &dust : m_Dust )
+		dust.m_pDust->Advance( flSeconds );
+	return IsPlaying();
 }
 
 //-----------------------------------------------------------------------------
@@ -230,13 +270,13 @@ std::size_t CMapParticles::GetParticleCount() const
 	std::size_t nCount = 0;
 	for ( const Playing_t &system : m_Playing )
 		nCount += system.m_pSimulation->GetParticleCount();
+	for ( const Dust_t &dust : m_Dust )
+		nCount += dust.m_pDust->GetCount();
 	return nCount;
 }
 
 //-----------------------------------------------------------------------------
-// Purpose: The sprite as the particle editor reads it (a soft dot when its material can't be),
-//          and a material of the map's kind for it: unlit, blended or added, coloured by each
-//          particle.
+// Purpose: The sprite as the particle editor reads it (a soft dot when its material can't be).
 //-----------------------------------------------------------------------------
 const xv::particles::Sprite_t *CMapParticles::SpriteFor( const xv::particles::CLibrary &library, std::size_t nDefinition )
 {
@@ -249,6 +289,32 @@ const xv::particles::Sprite_t *CMapParticles::SpriteFor( const xv::particles::CL
 	const xv::particles::FileReader_t read = [ pFileSystem ]( std::string_view szPath ) { return pFileSystem ? pFileSystem->Read( szPath ) : std::nullopt; };
 	Sprite_t &sprite = m_Sprites[ key ];
 	sprite.m_pSprite = std::make_unique<xv::particles::Sprite_t>( xv::particles::LoadSprite( library.m_Definitions[ nDefinition ].m_szMaterial, read ) );
+	MakeMaterial( sprite );
+	return sprite.m_pSprite.get();
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+const CMapParticles::Sprite_t &CMapParticles::DustSprite()
+{
+	if ( !m_DustSprite )
+	{
+		const xv::vfs::CFileSystem *pFileSystem = m_pFileSystem.get();
+		const xv::particles::FileReader_t read = [ pFileSystem ]( std::string_view szPath ) { return pFileSystem ? pFileSystem->Read( szPath ) : std::nullopt; };
+		m_DustSprite.emplace();
+		m_DustSprite->m_pSprite = std::make_unique<xv::particles::Sprite_t>( xv::particles::LoadSprite( xv::map::DUST_MATERIAL, read ) );
+		MakeMaterial( *m_DustSprite );
+	}
+	return *m_DustSprite;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: The sprite's texture, and a material of the map's kind for it: unlit, blended or
+//          added, coloured by each particle.
+//-----------------------------------------------------------------------------
+void CMapParticles::MakeMaterial( Sprite_t &sprite )
+{
 	sprite.m_pTexture = std::make_shared<xv::map::RasterTexture_t>();
 	sprite.m_pTexture->m_Mips = sprite.m_pSprite->m_Mips;
 	if ( !sprite.m_pTexture->m_Mips.empty() )
@@ -272,7 +338,6 @@ const xv::particles::Sprite_t *CMapParticles::SpriteFor( const xv::particles::CL
 	sprite.m_nMaterial = static_cast<std::uint32_t>( pMaterials->size() );
 	pMaterials->push_back( material );
 	m_pMaterials = std::move( pMaterials );
-	return sprite.m_pSprite.get();
 }
 
 //-----------------------------------------------------------------------------
@@ -280,12 +345,23 @@ const xv::particles::Sprite_t *CMapParticles::SpriteFor( const xv::particles::CL
 //-----------------------------------------------------------------------------
 std::shared_ptr<const xv::map::CMapMesh> CMapParticles::BuildMesh( xv::map::Point_t eye, xv::map::Point_t right, xv::map::Point_t up, std::uint32_t nFirstMaterial, const std::vector<std::uint32_t> *pOnly ) const
 {
-	if ( m_Playing.empty() )
+	if ( !IsPlaying() )
 	{
 		return nullptr;
 	}
 	auto *pSelf = const_cast<CMapParticles *>( this ); // sprites are read when first drawn
 	std::vector<xv::map::ParticleSprite_t> sprites;
+	if ( !m_Dust.empty() )
+	{
+		const Sprite_t &dust = pSelf->DustSprite();
+		const std::array<int, 2> size{ std::max( 1, dust.m_pTexture->m_nWidth ), std::max( 1, dust.m_pTexture->m_nHeight ) };
+		for ( const Dust_t &emitter : m_Dust )
+		{
+			if ( pOnly && !std::ranges::binary_search( *pOnly, emitter.m_nObject ) )
+				continue;
+			emitter.m_pDust->Layout( eye, right, up, nFirstMaterial + dust.m_nMaterial, size, emitter.m_nObject, sprites );
+		}
+	}
 	for ( const Playing_t &system : m_Playing )
 	{
 		// The others play on unseen, so they are warm when shown again.
