@@ -554,7 +554,7 @@ std::optional<std::array<float, 4>> ShadeFragment( const ShadeMaterial_t &materi
 		for ( std::size_t i = 0; i < 3; i++ )
 			color[ i ] += detail[ i ] * material.m_flDetailBlend;
 	}
-	if ( options.m_nMode == RasterMode_t::RASTER_MODE_LIGHTING && options.m_pFog && !( material.m_bSky && options.m_pSky ) )
+	if ( bTextured && options.m_pFog && !( material.m_bSky && options.m_pSky ) )
 	{
 		// env_fog_controller's fog: toward its colour from fogstart to fogend, at most
 		// fogmaxdensity; with fogblend, between its two colours by the way the view looks.

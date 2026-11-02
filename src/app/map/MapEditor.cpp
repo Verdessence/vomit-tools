@@ -928,6 +928,7 @@ void CMapEditor::BuildToolBars()
 	toggle( MapIcon_t::MAP_ICON_TOOL_TEXTURES, tr( "Tool Textures" ), MapAction_t::MAP_ACTION_TOGGLE_TOOL_TEXTURES, "mapToggleToolTextures", m_Settings.m_bToolTextures );
 	toggle( MapIcon_t::MAP_ICON_NODRAW, tr( "Nodraw" ), MapAction_t::MAP_ACTION_TOGGLE_NODRAW, "mapToggleNodraw", m_Settings.m_bNodraw );
 	toggle( MapIcon_t::MAP_ICON_SKYBOX, tr( "3D Skybox" ), MapAction_t::MAP_ACTION_TOGGLE_SKYBOX_3D, "mapToggleSkybox3D", m_Settings.m_bSkybox3D );
+	toggle( MapIcon_t::MAP_ICON_FOG, tr( "Fog" ), MapAction_t::MAP_ACTION_TOGGLE_FOG, "mapToggleFog", m_Settings.m_bFog );
 	toggle( MapIcon_t::MAP_ICON_WALKABLE, tr( "Walkable" ), MapAction_t::MAP_ACTION_TOGGLE_WALKABLE, "mapToggleWalkable", m_Settings.m_bWalkable );
 	toggle( MapIcon_t::MAP_ICON_PARTICLES, tr( "Particles" ), MapAction_t::MAP_ACTION_TOGGLE_PARTICLES, "mapToggleParticles", m_Settings.m_bParticles );
 	toggle( MapIcon_t::MAP_ICON_PARTICLES_SELECTED, tr( "Selected Particles Only" ), MapAction_t::MAP_ACTION_TOGGLE_PARTICLES_SELECTED, "mapToggleParticlesSelected", m_Settings.m_bParticlesSelected );
@@ -1338,6 +1339,7 @@ void CMapEditor::TakePreferences()
 	m_Settings.m_bModels2D = preferences.m_bModels2D;
 	m_Settings.m_bUseGroupColors = preferences.m_bGroupColors;
 	m_Settings.m_bSkybox3D = preferences.m_bSkybox3D;
+	m_Settings.m_bFog = preferences.m_bFog;
 	m_Settings.m_bHideSmallGrid = preferences.m_bHideSmallGrid;
 	m_Settings.m_nHighlightEvery = preferences.m_nHighlightEvery;
 	m_nTextureSize = preferences.m_nTextureSize;
@@ -2188,6 +2190,7 @@ bool CMapEditor::RunAction( MapAction_t nAction, CMapView *pFrom )
 		case MapAction_t::MAP_ACTION_TOGGLE_TOOL_TEXTURES: return toggle( m_Settings.m_bToolTextures );
 		case MapAction_t::MAP_ACTION_TOGGLE_NODRAW: return toggle( m_Settings.m_bNodraw );
 		case MapAction_t::MAP_ACTION_TOGGLE_SKYBOX_3D: return toggle( m_Settings.m_bSkybox3D );
+		case MapAction_t::MAP_ACTION_TOGGLE_FOG: return toggle( m_Settings.m_bFog );
 		case MapAction_t::MAP_ACTION_TOGGLE_WALKABLE: return toggle( m_Settings.m_bWalkable );
 		case MapAction_t::MAP_ACTION_TOGGLE_PARTICLES: return toggle( m_Settings.m_bParticles );
 		case MapAction_t::MAP_ACTION_TOGGLE_PARTICLES_SELECTED: return toggle( m_Settings.m_bParticlesSelected );

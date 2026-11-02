@@ -112,7 +112,7 @@ struct MapPreferences_t
 	int m_nLightBounces = 3;           // passes of light bounced between faces
 	int m_nLightLuxels = 4;            // millions of luxels at most, else every other one (and so on)
 	bool m_bLightHdr = true;           // as the game with HDR: the lights' HDR values, no overbright, auto exposure
-	bool m_bLightFog = true;           // env_fog_controller's fog, as the game draws it
+	bool m_bFog = true;                // env_fog_controller's fog in the textured 3D views, as the game draws it (the Fog toggle's start)
 	bool m_bLightOnly = false;         // the light alone, textures a plain grey (mat_fullbright 2)
 	bool m_bLightPropShadows = true;   // prop_static's models cast shadows, as vrad's do
 	bool m_bLightSmoothShadows = true; // shadow edges smoothed across their luxels, as vrad's -final

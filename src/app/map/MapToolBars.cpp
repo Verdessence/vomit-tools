@@ -331,6 +331,21 @@ QIcon MakeMapIcon( MapIcon_t nIcon, const QColor &color )
 			painter.drawPolyline( QPolygonF{ { QPointF{ 4, 22 }, QPointF{ 12, 14 }, QPointF{ 17, 19 }, QPointF{ 21, 15 }, QPointF{ 28, 21 } } } );
 			painter.drawEllipse( QPointF{ 22, 10.5 }, 1.8, 1.8 );
 			break;
+		case MapIcon_t::MAP_ICON_FOG:
+			// Wavy bands of mist, fading off.
+			for ( int i = 0; i < 4; i++ )
+			{
+				QPainterPath path;
+				const double y = 8.0 + i * 6.0;
+				path.moveTo( 4, y );
+				path.cubicTo( 10, y - 3, 14, y + 3, 20, y );
+				path.cubicTo( 23, y - 1.5, 26, y - 1.5, 28, y );
+				QColor faded = color;
+				faded.setAlphaF( 1.0 - i * 0.2 );
+				painter.setPen( QPen{ faded, 2.0, Qt::SolidLine, Qt::RoundCap } );
+				painter.drawPath( path );
+			}
+			break;
 		case MapIcon_t::MAP_ICON_WALKABLE:
 			// Steps a player can walk up.
 			painter.drawPolyline( QPolygonF{ { QPointF{ 4, 27 }, QPointF{ 4, 22 }, QPointF{ 12, 22 }, QPointF{ 12, 16 }, QPointF{ 20, 16 }, QPointF{ 20, 10 }, QPointF{ 28, 10 }, QPointF{ 28, 27 } } } );

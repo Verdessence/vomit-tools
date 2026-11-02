@@ -166,9 +166,6 @@ CMapLightingPanel::CMapLightingPanel( CMapEditor &editor, QWidget *pParent )
 	m_pHdr->setObjectName( QStringLiteral( "mapLightingHdr" ) );
 	m_pHdr->setToolTip( tr( "Off: as the game without HDR (mat_hdr_level 0 or 1), lightmaps doubled as Source draws them" ) );
 	pLayout->addWidget( m_pHdr );
-	m_pFog = new QCheckBox( tr( "Fog (env_fog_controller)" ) );
-	m_pFog->setObjectName( QStringLiteral( "mapLightingFog" ) );
-	pLayout->addWidget( m_pFog );
 	m_pLightOnly = new QCheckBox( tr( "The light alone, textures grey (mat_fullbright 2)" ) );
 	m_pLightOnly->setObjectName( QStringLiteral( "mapLightingOnly" ) );
 	pLayout->addWidget( m_pLightOnly );
@@ -227,7 +224,7 @@ CMapLightingPanel::CMapLightingPanel( CMapEditor &editor, QWidget *pParent )
 	connect( m_pBrightness, &QDoubleSpinBox::valueChanged, this, &CMapLightingPanel::StorePreferences );
 	connect( m_pMonitorGamma, &QDoubleSpinBox::valueChanged, this, &CMapLightingPanel::StorePreferences );
 	connect( m_pRadius, &QDoubleSpinBox::valueChanged, this, &CMapLightingPanel::StorePreferences );
-	for ( QCheckBox *pCheck : { m_pHdr, m_pFog, m_pLightOnly, m_pPropShadows, m_pSmoothShadows, m_pAutoBake, m_pInRadius } )
+	for ( QCheckBox *pCheck : { m_pHdr, m_pLightOnly, m_pPropShadows, m_pSmoothShadows, m_pAutoBake, m_pInRadius } )
 	{
 		connect( pCheck, &QCheckBox::toggled, this, &CMapLightingPanel::StorePreferences );
 	}
@@ -247,9 +244,8 @@ void CMapLightingPanel::LoadPreferences()
 {
 	const MapPreferences_t &preferences = CPreferences::Instance().GetMapPreferences();
 	const QSignalBlocker blockBrightness( m_pBrightness ), blockBounces( m_pBounces ), blockLuxels( m_pLuxels ), blockHdr( m_pHdr ), blockShadows( m_pPropShadows ), blockSmooth( m_pSmoothShadows ), blockAuto( m_pAutoBake );
-	const QSignalBlocker blockFog( m_pFog ), blockOnly( m_pLightOnly ), blockGamma( m_pMonitorGamma );
+	const QSignalBlocker blockOnly( m_pLightOnly ), blockGamma( m_pMonitorGamma );
 	m_pMonitorGamma->setValue( preferences.m_flLightMonitorGamma );
-	m_pFog->setChecked( preferences.m_bLightFog );
 	m_pLightOnly->setChecked( preferences.m_bLightOnly );
 	const QSignalBlocker blockInRadius( m_pInRadius ), blockRadius( m_pRadius ), blockDelay( m_pDelay ), blockSky( m_pSkySamples );
 	m_pInRadius->setChecked( preferences.m_bLightInRadius );
@@ -276,7 +272,6 @@ void CMapLightingPanel::StorePreferences()
 	preferences.m_nLightBounces = m_pBounces->value();
 	preferences.m_nLightLuxels = m_pLuxels->value();
 	preferences.m_bLightHdr = m_pHdr->isChecked();
-	preferences.m_bLightFog = m_pFog->isChecked();
 	preferences.m_bLightOnly = m_pLightOnly->isChecked();
 	preferences.m_bLightPropShadows = m_pPropShadows->isChecked();
 	preferences.m_bLightSmoothShadows = m_pSmoothShadows->isChecked();

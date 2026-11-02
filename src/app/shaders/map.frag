@@ -332,7 +332,7 @@ void main() {
 		// Added after the light, so the detail glows (6's fade by threshold taken as 5's add).
 		color.rgb += detail.rgb * material.detail.y;
 	}
-	if (mode == MODE_LIGHTING && frame.fogRange.z > 0.5 && !(material.extra.x > 0.5 && sky.translate[0].w > 0.5)) {
+	if (textured && mode != MODE_LIGHTMAP_GRID && frame.fogRange.z > 0.5 && !(material.extra.x > 0.5 && sky.translate[0].w > 0.5)) {
 		// env_fog_controller's fog, as xv::map::ShadeFragment adds it.
 		vec3 dir = v_world - frame.eye.xyz - frame.eyeLow.xyz;
 		float distance = frame.fogDirection.w > 0.5 ? length(dir) : dot(dir, frame.viewForward.xyz);

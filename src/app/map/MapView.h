@@ -84,6 +84,7 @@ struct MapViewSettings_t
 	bool m_bToolTextures = true;  // Ctrl+Shift+F2 (not nodraw, which has a toggle of its own)
 	bool m_bNodraw = true;
 	bool m_bSkybox3D = true;      // Alt+V
+	bool m_bFog = true;           // env_fog_controller's fog in the textured 3D views
 	bool m_bWalkable = false;     // the selected displacements' steep triangles tinted (Hammer's Display walkable area)
 	bool m_bParticles = true;     // info_particle_system playing in the 3D views
 	bool m_bParticlesSelected = false; // and only the selected ones

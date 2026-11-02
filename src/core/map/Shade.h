@@ -151,7 +151,7 @@ struct ShadeOptions_t
 	const CLighting *m_pLighting = nullptr;    // the lighting preview's atlas; null: not baked yet
 	float m_flLightScale = 1.0f;               // the lighting preview's brightness (times HDR's exposure)
 	bool m_bLightHdr = false;                  // shown as the game with HDR: no overbright
-	const Fog_t *m_pFog = nullptr;             // the map's fog, in the lighting preview; null: none
+	const Fog_t *m_pFog = nullptr;             // the map's fog, in the textured views; null: none
 	bool m_bLightOnly = false;                 // the lighting preview's light alone (mat_fullbright 2): textures a plain grey
 	CVec3 m_vecViewForward{ 1, 0, 0 };         // for fog measured along the view
 	float m_flMonitorGamma = 2.2f;             // the lighting preview's mat_monitorgamma (the game's brightness setting): 2.2 changes nothing
