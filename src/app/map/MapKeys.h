@@ -17,6 +17,7 @@ class QKeyEvent;
 
 enum class MapAction_t
 {
+	MAP_ACTION_TOOL_BRUSH_EDIT,
 	// Anywhere in the map's views.
 	MAP_ACTION_VIEW_TOP,             // F2: 2D x/y
 	MAP_ACTION_VIEW_SIDE,            // F3: 2D x/z

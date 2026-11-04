@@ -5,6 +5,7 @@
 //
 //===========================================================================//
 #include "MapEditor.h"
+#include "MapBrushEdit.h"
 
 #include "kv1/Kv1.h"
 #include "map/Check.h"
@@ -302,6 +303,9 @@ CMapEditor::CMapEditor( const QString &szPath, bool bFromGame, QWidget *pParent 
 	m_pPanels->AddPanel( QStringLiteral( "properties" ), tr( "Object Properties" ), MakeMapIcon( MapIcon_t::MAP_ICON_PROPERTIES, panelIconColor ), m_pProperties, true );
 	m_pPanels->AddPanel( QStringLiteral( "faceEdit" ), tr( "Face Edit" ), MakeMapIcon( MapIcon_t::MAP_ICON_TEXTURE, panelIconColor ), m_pFaceEditHolder );
 	m_pPanels->SetAvailable( QStringLiteral( "faceEdit" ), false ); // the texture tool's, there only with it
+	m_pBrushEdit = new CMapBrushEdit( *this );
+	m_pPanels->AddPanel( QStringLiteral( "brushEdit" ), tr( "Brush Edit" ), MakeMapIcon( MapIcon_t::MAP_ICON_VERTEX, panelIconColor ), m_pBrushEdit );
+	m_pPanels->SetAvailable( QStringLiteral( "brushEdit" ), false );
 	m_pSprinkle = new CMapSprinklePanel;
 	m_pPanels->AddPanel( QStringLiteral( "sprinkle" ), tr( "Sprinkle" ), MakeMapIcon( MapIcon_t::MAP_ICON_SPRINKLE, panelIconColor ), m_pSprinkle );
 	m_pPanels->SetAvailable( QStringLiteral( "sprinkle" ), false );
@@ -386,6 +390,7 @@ CMapEditor::CMapEditor( const QString &szPath, bool bFromGame, QWidget *pParent 
 		{ MapTool_t::MAP_TOOL_DECAL, MapIcon_t::MAP_ICON_DECAL, tr( "Apply Decals" ), MapAction_t::MAP_ACTION_TOOL_DECAL },
 		{ MapTool_t::MAP_TOOL_CLIP, MapIcon_t::MAP_ICON_CLIP, tr( "Clipping Tool" ), MapAction_t::MAP_ACTION_TOOL_CLIP },
 		{ MapTool_t::MAP_TOOL_VERTEX, MapIcon_t::MAP_ICON_VERTEX, tr( "Vertex Tool" ), MapAction_t::MAP_ACTION_TOOL_VERTEX },
+		{ MapTool_t::MAP_TOOL_BRUSH_EDIT, MapIcon_t::MAP_ICON_VERTEX, tr( "Brush Edit" ), MapAction_t::MAP_ACTION_TOOL_BRUSH_EDIT },
 		{ MapTool_t::MAP_TOOL_SPRINKLE, MapIcon_t::MAP_ICON_SPRINKLE, tr( "Sprinkle Tool" ), MapAction_t::MAP_ACTION_TOOL_SPRINKLE },
 		{ MapTool_t::MAP_TOOL_CORDON, MapIcon_t::MAP_ICON_CORDON, tr( "Edit Cordon Bounds" ), MapAction_t::MAP_ACTION_TOOL_CORDON },
 	};
@@ -1048,6 +1053,11 @@ void CMapEditor::Loaded()
 //-----------------------------------------------------------------------------
 void CMapEditor::SetTool( MapTool_t nTool )
 {
+	if ( m_nTool == MapTool_t::MAP_TOOL_BRUSH_EDIT && nTool != m_nTool )
+		m_pBrushEdit->Cancel();
+	m_pPanels->SetAvailable( QStringLiteral( "brushEdit" ), nTool == MapTool_t::MAP_TOOL_BRUSH_EDIT );
+	if ( nTool == MapTool_t::MAP_TOOL_BRUSH_EDIT )
+		m_pPanels->ScrollTo( QStringLiteral( "brushEdit" ) );
 	// A box the block tool was drawing waits while another tool is used, and comes back with it.
 	const bool bLeavingBlock = m_nTool == MapTool_t::MAP_TOOL_BLOCK && nTool != MapTool_t::MAP_TOOL_BLOCK;
 	const bool bEnteringBlock = m_nTool != MapTool_t::MAP_TOOL_BLOCK && nTool == MapTool_t::MAP_TOOL_BLOCK;
@@ -1070,7 +1080,7 @@ void CMapEditor::SetTool( MapTool_t nTool )
 	}
 	const bool bTexture = nTool == MapTool_t::MAP_TOOL_TEXTURE;
 	PlaceFaceEdit();
-	if ( !bTexture && !m_SelectedFaces.empty() )
+	if ( !bTexture && nTool != MapTool_t::MAP_TOOL_BRUSH_EDIT && !m_SelectedFaces.empty() )
 	{
 		SetSelectedFaces( {} );
 	}
@@ -2440,6 +2450,9 @@ bool CMapEditor::RunAction( MapAction_t nAction, CMapView *pFrom )
 			return true;
 		case MapAction_t::MAP_ACTION_TOOL_CORDON:
 			SetTool( MapTool_t::MAP_TOOL_CORDON );
+			return true;
+		case MapAction_t::MAP_ACTION_TOOL_BRUSH_EDIT:
+			SetTool( MapTool_t::MAP_TOOL_BRUSH_EDIT );
 			return true;
 		case MapAction_t::MAP_ACTION_TOOL_VERTEX:
 			// Shift+V again goes round Hammer's handle modes.

@@ -26,6 +26,7 @@ enum SolidProblem_t : std::uint32_t
 	SOLID_PROBLEM_OPEN = 1u << 4,             // the sides don't enclose anything finite
 	SOLID_PROBLEM_EMPTY = 1u << 5,            // nothing lies behind every side
 	SOLID_PROBLEM_TOO_FEW_SIDES = 1u << 6,
+	SOLID_PROBLEM_INVALID_VERTICES = 1u << 8, // edited precise polygon disagrees with the brush planes
 	SOLID_PROBLEM_OUT_OF_BOUNDS = 1u << 7,    // beyond +/-16384 units (drawn, but vbsp refuses it)
 };
 

@@ -82,23 +82,6 @@ Plane_t Shifted( const Plane_t &plane, double flBy )
 	return { plane.m_Normal, plane.m_flDistance + flBy };
 }
 
-//-----------------------------------------------------------------------------
-// Purpose: A new solid for the map: ids of its own, no span, no old owner.
-//-----------------------------------------------------------------------------
-Solid_t AsNew( Solid_t solid, int &nNextId, int &nNextSide )
-{
-	solid.m_Span = {};
-	solid.m_nId = nNextId++;
-	solid.m_nReadEntity = -2;
-	solid.m_bChanged = false;
-	solid.m_bDeleted = false;
-	for ( Side_t &side : solid.m_Sides )
-	{
-		side.m_Span = {};
-		side.m_nId = nNextSide++;
-	}
-	return solid;
-}
 
 //-----------------------------------------------------------------------------
 // Purpose: Whether a carver is a block: six faces, each square to an axis.
@@ -209,6 +192,24 @@ std::vector<Plane_t> CarvingPlanes( const SolidGeometry_t &carver, CarveStyle_t 
 }
 
 } // namespace
+
+//-----------------------------------------------------------------------------
+// Purpose: A new solid for the map: ids of its own, no span, no old owner.
+//-----------------------------------------------------------------------------
+Solid_t AsNew( Solid_t solid, int &nNextId, int &nNextSide )
+{
+	solid.m_Span = {};
+	solid.m_nId = nNextId++;
+	solid.m_nReadEntity = -2;
+	solid.m_bChanged = false;
+	solid.m_bDeleted = false;
+	for ( Side_t &side : solid.m_Sides )
+	{
+		side.m_Span = {};
+		side.m_nId = nNextSide++;
+	}
+	return solid;
+}
 
 //-----------------------------------------------------------------------------
 // Purpose: The plane's own axes give the three points; the texture is world-aligned on the new

@@ -86,6 +86,7 @@ void ForEachMapPreference( Preferences_t &map, Visit_t &&pfnVisit )
 	pfnVisit( "maps/hideGridBelow", map.m_flHideGridBelow );
 	pfnVisit( "maps/highlightEvery", map.m_nHighlightEvery );
 	pfnVisit( "maps/drawVertices", map.m_bDrawVertices );
+	pfnVisit( "maps/brushKeepConcave", map.m_bBrushKeepConcave );
 	pfnVisit( "maps/vertexSize", map.m_nVertexSize );
 	pfnVisit( "maps/verticesFrom", map.m_nVerticesFromPixels );
 	pfnVisit( "maps/centerHandles", map.m_bCenterHandles );

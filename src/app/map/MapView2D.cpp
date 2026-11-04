@@ -5,6 +5,7 @@
 //
 //===========================================================================//
 #include "MapView2D.h"
+#include "MapBrushEdit.h"
 #include <QHideEvent>
 #include "map/Edit.h"
 
@@ -1112,6 +1113,7 @@ void CMapView2D::PaintSelection( QPainter &painter ) const
 //-----------------------------------------------------------------------------
 void CMapView2D::PaintTools( QPainter &painter ) const
 {
+	m_Editor.GetBrushEdit().Paint( *const_cast<CMapView2D *>( this ), painter );
 	const QColor &color = Look().m_Colors.m_ToolBlock;
 	if ( const std::optional<std::vector<xv::map::Point_t>> &pointfile = GetDocument().GetPointfile(); pointfile && pointfile->size() >= 2 )
 	{
@@ -1597,6 +1599,11 @@ std::vector<std::uint32_t> CMapView2D::ObjectsIn( const QRectF &box ) const
 //-----------------------------------------------------------------------------
 void CMapView2D::mousePressEvent( QMouseEvent *pEvent )
 {
+	if ( m_Editor.GetBrushEdit().HandleEvent( *this, pEvent ) )
+	{
+		pEvent->accept();
+		return;
+	}
 	setFocus( Qt::MouseFocusReason );
 	const QPointF at = pEvent->position();
 	if ( pEvent->button() == Qt::MiddleButton || ( pEvent->button() == Qt::LeftButton && m_bSpaceHeld ) )
@@ -2419,6 +2426,11 @@ void CMapView2D::UpdateCursor( QPointF at )
 //-----------------------------------------------------------------------------
 void CMapView2D::mouseMoveEvent( QMouseEvent *pEvent )
 {
+	if ( m_Editor.GetBrushEdit().HandleEvent( *this, pEvent ) )
+	{
+		pEvent->accept();
+		return;
+	}
 	ReportCursor( pEvent->position() );
 	if ( m_pCameraDragBase )
 	{
@@ -2493,6 +2505,11 @@ void CMapView2D::mouseMoveEvent( QMouseEvent *pEvent )
 //-----------------------------------------------------------------------------
 void CMapView2D::mouseReleaseEvent( QMouseEvent *pEvent )
 {
+	if ( m_Editor.GetBrushEdit().HandleEvent( *this, pEvent ) )
+	{
+		pEvent->accept();
+		return;
+	}
 	if ( m_pCameraDragBase && pEvent->button() == Qt::LeftButton )
 	{
 		DragCamera( pEvent->position(), pEvent->modifiers() );
@@ -2634,6 +2651,11 @@ void CMapView2D::wheelEvent( QWheelEvent *pEvent )
 //-----------------------------------------------------------------------------
 void CMapView2D::keyPressEvent( QKeyEvent *pEvent )
 {
+	if ( m_Editor.GetBrushEdit().HandleEvent( *this, pEvent ) )
+	{
+		pEvent->accept();
+		return;
+	}
 	if ( pEvent->key() == Qt::Key_Space && pEvent->modifiers() == Qt::NoModifier )
 	{
 		if ( !pEvent->isAutoRepeat() )

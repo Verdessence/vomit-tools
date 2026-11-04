@@ -151,6 +151,7 @@ struct MapPreferences_t
 	double m_flHideGridBelow = mapstyle::HIDE_GRID_BELOW_PIXELS;
 	int m_nHighlightEvery = mapstyle::GRID_HIGHLIGHT_EVERY;
 	bool m_bDrawVertices = false;
+	bool m_bBrushKeepConcave = false;
 	int m_nVertexSize = mapstyle::VERTEX_SIZE;
 	int m_nVerticesFromPixels = mapstyle::VERTICES_FROM_PIXELS;
 	bool m_bCenterHandles = true;

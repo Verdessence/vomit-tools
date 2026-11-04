@@ -25,6 +25,8 @@ namespace xv::map
 // A side on plane, as a VMF writes one: three points with (p0 - p1) x (p2 - p1) along the
 // normal, the material and alignment taken from szLike (a side of the solid being cut).
 [[nodiscard]] Side_t SideOnPlane( const CMap &map, const Plane_t &plane, const Side_t &like );
+// solid as a new one for the map: ids of its own (from the counters), no span, no old owner.
+[[nodiscard]] Solid_t AsNew( Solid_t solid, int &nNextId, int &nNextSide );
 
 // The parts of solid in front of plane (where Distance is above zero) and behind it; nullopt
 // where there is nothing. Sides the cut leaves without a face are dropped; Hammer++'s exact

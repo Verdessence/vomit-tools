@@ -6,6 +6,7 @@
 //
 //===========================================================================//
 #include "MapView3D.h"
+#include "MapBrushEdit.h"
 #include "MapEventClock.h"
 #include <QThread>
 
@@ -550,6 +551,7 @@ void CMapView3D::RedrawLabels()
 //-----------------------------------------------------------------------------
 void CMapView3D::PaintLabels( QPainter &painter )
 {
+	m_Editor.GetBrushEdit().Paint( *this, painter );
 	if ( m_bStatistics )
 	{
 		// Hammer++'s statistics, with where each frame's time goes: the overlay and the debug
@@ -708,6 +710,11 @@ void CMapView3D::Look( QPointF delta )
 //-----------------------------------------------------------------------------
 void CMapView3D::mousePressEvent( QMouseEvent *pEvent )
 {
+	if ( m_Editor.GetBrushEdit().HandleEvent( *this, pEvent ) )
+	{
+		pEvent->accept();
+		return;
+	}
 	setFocus( Qt::MouseFocusReason );
 	if ( m_ModalTransform && ( pEvent->button() == Qt::LeftButton || pEvent->button() == Qt::RightButton ) )
 	{
@@ -1115,6 +1122,11 @@ void CMapView3D::EndGizmo( bool bCommit, QPointF at, Qt::KeyboardModifiers modif
 //-----------------------------------------------------------------------------
 void CMapView3D::mouseMoveEvent( QMouseEvent *pEvent )
 {
+	if ( m_Editor.GetBrushEdit().HandleEvent( *this, pEvent ) )
+	{
+		pEvent->accept();
+		return;
+	}
 	if ( m_ModalTransform )
 	{
 		m_LastMouse = pEvent->position().toPoint();
@@ -1241,6 +1253,11 @@ void CMapView3D::mouseMoveEvent( QMouseEvent *pEvent )
 //-----------------------------------------------------------------------------
 void CMapView3D::mouseReleaseEvent( QMouseEvent *pEvent )
 {
+	if ( m_Editor.GetBrushEdit().HandleEvent( *this, pEvent ) )
+	{
+		pEvent->accept();
+		return;
+	}
 	if ( m_bConsumeModalRelease )
 	{
 		m_bConsumeModalRelease = false;
@@ -2289,6 +2306,11 @@ void CMapView3D::wheelEvent( QWheelEvent *pEvent )
 //-----------------------------------------------------------------------------
 void CMapView3D::keyPressEvent( QKeyEvent *pEvent )
 {
+	if ( m_Editor.GetBrushEdit().HandleEvent( *this, pEvent ) )
+	{
+		pEvent->accept();
+		return;
+	}
 	if ( m_ModalTransform )
 	{
 		const int nKey = pEvent->key();

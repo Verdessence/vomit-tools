@@ -5,6 +5,7 @@
 //
 //===========================================================================//
 #include "Vertex.h"
+#include "BrushMesh.h"
 
 #include <algorithm>
 #include <cmath>
@@ -154,40 +155,11 @@ Solid_t MoveVertices( const Solid_t &solid, const SolidGeometry_t &shape, const 
 //-----------------------------------------------------------------------------
 MapEdit_t MoveHandles( const CScene &scene, const std::vector<VertexRef_t> &handles, const Point_t &offset )
 {
-	MapEdit_t edit;
-	std::map<std::uint32_t, std::vector<std::uint32_t>> bySolid;
+	std::vector<BrushPart_t> parts;
+	parts.reserve( handles.size() );
 	for ( const VertexRef_t &handle : handles )
-	{
-		if ( handle.m_nObject >= scene.GetObjectCount() || !scene.IsSolidObject( handle.m_nObject ) || scene.IsDeleted( handle.m_nObject ) )
-		{
-			continue;
-		}
-		const std::uint32_t nSolid = scene.GetIndex( handle.m_nObject );
-		const SolidVertices_t corners = VerticesOf( scene.m_Solids[ nSolid ] );
-		std::vector<std::uint32_t> &list = bySolid[ nSolid ];
-		if ( handle.m_bEdge )
-		{
-			if ( handle.m_nIndex < corners.m_Edges.size() )
-			{
-				list.push_back( corners.m_Edges[ handle.m_nIndex ].first );
-				list.push_back( corners.m_Edges[ handle.m_nIndex ].second );
-			}
-		}
-		else if ( handle.m_nIndex < corners.m_Vertices.size() )
-		{
-			list.push_back( handle.m_nIndex );
-		}
-	}
-	for ( auto &[ nSolid, list ] : bySolid )
-	{
-		std::ranges::sort( list );
-		list.erase( std::ranges::unique( list ).begin(), list.end() );
-		if ( !list.empty() )
-		{
-			edit.m_Solids.emplace_back( nSolid, MoveVertices( scene.m_Map.m_Solids[ nSolid ], scene.m_Solids[ nSolid ], list, offset ) );
-		}
-	}
-	return edit;
+		parts.push_back( { handle.m_nObject, handle.m_bEdge ? BrushPartKind_t::BRUSH_PART_EDGE : BrushPartKind_t::BRUSH_PART_VERTEX, handle.m_nIndex } );
+	return MoveParts( scene, parts, Transform_t::Translation( offset ), BrushConcave_t::BRUSH_CONCAVE_KEEP );
 }
 
 } // namespace xv::map

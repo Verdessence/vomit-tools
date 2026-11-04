@@ -34,6 +34,7 @@
 #include "map/MapToolBars.h"
 #include "map/MapView.h"
 
+class CMapBrushEdit;
 class CMapCheckDialog;
 class CMapEntityReport;
 class CMapFaceEdit;
@@ -77,6 +78,7 @@ public:
 	[[nodiscard]] const MapViewSettings_t &GetSettings() const { return m_Settings; }
 	// The env_fog_controller the views show (its entity id; 0: the first that starts on).
 	void SetFogController( int nId );
+	[[nodiscard]] CMapBrushEdit &GetBrushEdit() { return *m_pBrushEdit; }
 	[[nodiscard]] MapTool_t GetTool() const { return m_nTool; }
 	void SetTool( MapTool_t nTool );
 	[[nodiscard]] MapEditMode_t GetEditMode() const { return m_nEditMode; }
@@ -475,6 +477,7 @@ private:
 	CMapFilterControl *m_pFilter = nullptr;
 	CMapProperties *m_pProperties = nullptr;
 	CMapFaceEdit *m_pFaceEdit = nullptr;
+	CMapBrushEdit *m_pBrushEdit = nullptr;
 	CMapSprinklePanel *m_pSprinkle = nullptr;
 	CMapBuildingPanel *m_pBuilding = nullptr;
 	CMapProperties *m_pWorldProperties = nullptr; // Map Properties: the world's keys

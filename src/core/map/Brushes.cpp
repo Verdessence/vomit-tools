@@ -111,6 +111,37 @@ bool UsablePlusVertices( const std::vector<Point_t> &plus, std::size_t nSide, co
 }
 
 //-----------------------------------------------------------------------------
+// Purpose: Coplanar subdivisions must be convex polygons whose interiors do not overlap.
+//          A shared boundary is allowed, unlike two copies of the same face.
+//-----------------------------------------------------------------------------
+bool SeparateSubdivisions( const std::vector<Point_t> &a, const std::vector<Point_t> &b, const Point_t &normal, double flEpsilon )
+{
+	auto convex = [ & ]( const std::vector<Point_t> &polygon ) {
+		for ( std::size_t i = 0; i < polygon.size(); i++ )
+		{
+			const Point_t edge = Subtract( polygon[ ( i + 1 ) % polygon.size() ], polygon[ i ] );
+			const Point_t axis = Normalized( Cross( normal, edge ) );
+			for ( const Point_t &p : polygon )
+				if ( Dot( axis, Subtract( p, polygon[ i ] ) ) > flEpsilon )
+					return false;
+		}
+		return true;
+	};
+	if ( !convex( a ) || !convex( b ) )
+		return false;
+	auto separated = [ & ]( const std::vector<Point_t> &first, const std::vector<Point_t> &second ) {
+		for ( std::size_t i = 0; i < first.size(); i++ )
+		{
+			const Point_t axis = Normalized( Cross( normal, Subtract( first[ ( i + 1 ) % first.size() ], first[ i ] ) ) );
+			if ( std::ranges::all_of( second, [ & ]( const Point_t &p ) { return Dot( axis, Subtract( p, first[ i ] ) ) >= -flEpsilon; } ) )
+				return true;
+		}
+		return false;
+	};
+	return separated( a, b ) || separated( b, a );
+}
+
+//-----------------------------------------------------------------------------
 // Purpose: Drops corners that sit on the one before them (where several planes meet at a
 //          point, cutting can leave the same corner twice).
 //-----------------------------------------------------------------------------
@@ -171,14 +202,23 @@ SolidGeometry_t BuildSolid( const Solid_t &solid, const BrushOptions_t &options 
 			geometry.m_nProblems |= SOLID_PROBLEM_DEGENERATE_PLANE;
 			continue;
 		}
+	}
+	for ( std::size_t i = 0; i < planes.size(); i++ )
+	{
+		if ( !planes[ i ] )
+			continue;
 		for ( std::size_t j = 0; j < i; j++ )
 		{
-			if ( planes[ j ] && IsSamePlane( *planes[ i ], *planes[ j ], options.m_flEpsilon ) )
-			{
-				geometry.m_nProblems |= SOLID_PROBLEM_DUPLICATE_PLANE;
-				planes[ i ].reset();
-				break;
-			}
+			if ( !planes[ j ] || !IsSamePlane( *planes[ i ], *planes[ j ], options.m_flEpsilon ) )
+				continue;
+			std::vector<Point_t> a, b;
+			if ( UsablePlusVertices( solid.m_Sides[ i ].m_PlusVertices, i, planes, options.m_flEpsilon, a ) &&
+				UsablePlusVertices( solid.m_Sides[ j ].m_PlusVertices, j, planes, options.m_flEpsilon, b ) &&
+				SeparateSubdivisions( a, b, planes[ i ]->m_Normal, options.m_flEpsilon ) )
+				continue;
+			geometry.m_nProblems |= SOLID_PROBLEM_DUPLICATE_PLANE;
+			planes[ i ].reset();
+			break;
 		}
 	}
 	if ( std::ranges::count_if( planes, []( const auto &plane ) { return plane.has_value(); } ) < 4 )
@@ -212,6 +252,12 @@ SolidGeometry_t BuildSolid( const Solid_t &solid, const BrushOptions_t &options 
 		face.m_nSide = static_cast<std::uint32_t>( i );
 		face.m_Plane = *planes[ i ];
 		face.m_bPlusVertices = UsablePlusVertices( solid.m_Sides[ i ].m_PlusVertices, i, planes, options.m_flPlusTolerance, scratch.m_Plus );
+		if ( solid.m_bChanged && !face.m_bPlusVertices && solid.m_Sides[ i ].m_PlusVertices.size() >= 3 )
+		{
+			geometry.m_nProblems |= SOLID_PROBLEM_INVALID_VERTICES;
+			scratch.m_Plus = solid.m_Sides[ i ].m_PlusVertices;
+			face.m_bPlusVertices = true;
+		}
 		const std::vector<Point_t> &corners = face.m_bPlusVertices ? scratch.m_Plus : points;
 		face.m_Points.assign( corners.begin(), corners.end() );
 		for ( const Point_t &p : face.m_Points )
