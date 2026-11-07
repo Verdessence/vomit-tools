@@ -9,9 +9,11 @@
 #include <array>
 #include <cctype>
 #include <cmath>
+#include <limits>
 #include <QAction>
 #include <QApplication>
 #include <QButtonGroup>
+#include <QKeyEvent>
 #include <QMouseEvent>
 #include <QMimeData>
 #include <QDrag>
@@ -132,7 +134,10 @@ public:
 	{
 		setObjectName( QStringLiteral( "detailSheet" ) );
 		setMouseTracking( true );
-		setToolTip( tr( "Click a rectangle to select its entry. Drag inside the selected one to move it, or its handles to resize it; "
+		// Focus for Shift during a resize.
+		setFocusPolicy( Qt::ClickFocus );
+		setToolTip( tr( "Click a rectangle to select its entry. Drag inside the selected one to move it, or its handles to resize it "
+						"(Shift: in proportion; Alt: from its centre); "
 						"with a group or type selected, drag any of its sprites to move them all. Ctrl-drag (or Ctrl+D) duplicates "
 						"the selection; drag elsewhere to draw the entry's rectangle anew. (Sprites can't be turned: the file has no "
 						"angle for them.) Middle-drag pans; the wheel zooms." ) );
@@ -280,29 +285,128 @@ protected:
 		}
 		else if ( m_nMode == MODE_RESIZE )
 		{
-			// Handles go round from the top left: 0 1 2 / 7 . 3 / 6 5 4.
-			double flLeft = m_Start.left(), flTop = m_Start.top(), flRight = m_Start.right(), flBottom = m_Start.bottom();
-			const double x = std::clamp( std::round( m_To.x() ), 0.0, bounds.width() );
-			const double y = std::clamp( std::round( m_To.y() ), 0.0, bounds.height() );
-			if ( m_nHandle == 0 || m_nHandle == 6 || m_nHandle == 7 )
-			{
-				flLeft = std::min( x, flRight - 1.0 );
-			}
-			if ( m_nHandle >= 2 && m_nHandle <= 4 )
-			{
-				flRight = std::max( x, flLeft + 1.0 );
-			}
-			if ( m_nHandle <= 2 )
-			{
-				flTop = std::min( y, flBottom - 1.0 );
-			}
-			if ( m_nHandle >= 4 && m_nHandle <= 6 )
-			{
-				flBottom = std::max( y, flTop + 1.0 );
-			}
-			m_Live = QRectF( QPointF( flLeft, flTop ), QPointF( flRight, flBottom ) );
+			m_Live = Resized( m_To, pEvent->modifiers() );
 		}
 		update();
+	}
+	//-----------------------------------------------------------------------------
+	// Purpose: The selected rectangle with the dragged handle at a point, in whole texels and on
+	//          the sheet. The modifiers are an image editor's: Shift keeps its proportions, Alt
+	//          keeps its centre where it was (the opposite side moves the other way).
+	//-----------------------------------------------------------------------------
+	[[nodiscard]] QRectF Resized( QPointF to, Qt::KeyboardModifiers nModifiers ) const
+	{
+		const bool bCentred = nModifiers & Qt::AltModifier;
+		const bool bProportional = nModifiers & Qt::ShiftModifier;
+		// Handles go round from the top left: 0 1 2 / 7 . 3 / 6 5 4.
+		const QRectF bounds( GetImage().rect() );
+		const bool bLeft = m_nHandle == 0 || m_nHandle == 6 || m_nHandle == 7;
+		const bool bRight = m_nHandle >= 2 && m_nHandle <= 4;
+		const bool bTop = m_nHandle <= 2;
+		const bool bBottom = m_nHandle >= 4 && m_nHandle <= 6;
+		// One side of the rectangle: its low and high edges, the side the handle drags (if any),
+		// and the sheet's length that way.
+		struct Axis_t
+		{
+			double m_flLow, m_flHigh;
+			bool m_bLow, m_bHigh;
+			double m_flPointer, m_flSheet;
+			bool m_bCentred; // grows both ways (Alt, or the side a proportional edge handle doesn't drag)
+		};
+		Axis_t axes[ 2 ] = {
+			{ m_Start.left(), m_Start.right(), bLeft, bRight, std::clamp( std::round( to.x() ), 0.0, bounds.width() ), bounds.width(), bCentred },
+			{ m_Start.top(), m_Start.bottom(), bTop, bBottom, std::clamp( std::round( to.y() ), 0.0, bounds.height() ), bounds.height(), bCentred },
+		};
+		const auto dragged = []( const Axis_t &axis ) { return axis.m_bLow || axis.m_bHigh; };
+		// The low edge of a span of flSize on an axis, kept where its anchor (or middle) is. Both
+		// edges are whole texels: a centred span keeps the original's odd or even length.
+		const auto place = []( const Axis_t &axis, double flSize ) {
+			return axis.m_bCentred ? ( axis.m_flLow + axis.m_flHigh - flSize ) / 2 : axis.m_bLow ? axis.m_flHigh - flSize
+																								 : axis.m_flLow;
+		};
+		// The longest span the sheet has room for, and the shortest a span may be.
+		const auto room = []( const Axis_t &axis ) {
+			return axis.m_bCentred ? std::min( axis.m_flLow + axis.m_flHigh, 2 * axis.m_flSheet - axis.m_flLow - axis.m_flHigh ) : axis.m_bLow ? axis.m_flHigh
+																																			   : axis.m_flSheet - axis.m_flLow;
+		};
+		const auto shortest = []( const Axis_t &axis ) { return axis.m_bCentred ? 2.0 - std::fmod( axis.m_flHigh - axis.m_flLow, 2.0 ) : 1.0; };
+		// The span the pointer asks for on a dragged axis.
+		const auto wanted = []( const Axis_t &axis ) {
+			// Centred, past the middle asks for less than nothing, as past the anchor does.
+			const double flMiddle = ( axis.m_flLow + axis.m_flHigh ) / 2;
+			return axis.m_bCentred ? 2 * ( axis.m_bLow ? flMiddle - axis.m_flPointer : axis.m_flPointer - flMiddle ) : axis.m_bLow ? axis.m_flHigh - axis.m_flPointer
+																																   : axis.m_flPointer - axis.m_flLow;
+		};
+		// A length on an axis, whole (and of the right parity when centred), within its limits.
+		const auto fit = [ & ]( const Axis_t &axis, double flSize ) {
+			const double flStart = axis.m_flHigh - axis.m_flLow;
+			flSize = axis.m_bCentred ? flStart + 2 * std::round( ( flSize - flStart ) / 2 ) : std::round( flSize );
+			return std::clamp( flSize, shortest( axis ), std::max( shortest( axis ), room( axis ) ) );
+		};
+		double flSizes[ 2 ];
+		if ( bProportional )
+		{
+			// An edge handle grows the other side both ways, as image editors do.
+			for ( Axis_t &axis : axes )
+			{
+				axis.m_bCentred |= !dragged( axis );
+			}
+			// The scale the pointer asks for: on a corner, whichever side asks for more.
+			double flScale = 0;
+			double flLimit = std::numeric_limits<double>::max();
+			for ( const Axis_t &axis : axes )
+			{
+				const double flStart = axis.m_flHigh - axis.m_flLow;
+				if ( dragged( axis ) )
+				{
+					flScale = std::max( flScale, wanted( axis ) / flStart );
+				}
+				flLimit = std::min( flLimit, room( axis ) / flStart );
+			}
+			flScale = std::min( flScale, flLimit );
+			for ( int i = 0; i < 2; ++i )
+			{
+				flSizes[ i ] = fit( axes[ i ], ( axes[ i ].m_flHigh - axes[ i ].m_flLow ) * flScale );
+			}
+		}
+		else
+		{
+			for ( int i = 0; i < 2; ++i )
+			{
+				flSizes[ i ] = dragged( axes[ i ] ) ? fit( axes[ i ], wanted( axes[ i ] ) ) : axes[ i ].m_flHigh - axes[ i ].m_flLow;
+			}
+		}
+		return QRectF( place( axes[ 0 ], flSizes[ 0 ] ), place( axes[ 1 ], flSizes[ 1 ] ), flSizes[ 0 ], flSizes[ 1 ] );
+	}
+	//-----------------------------------------------------------------------------
+	// Purpose: Pressing or letting go of Shift or Alt mid-resize changes it at once, without a move.
+	//-----------------------------------------------------------------------------
+	bool ResizeModifierKey( QKeyEvent *pEvent, bool bDown )
+	{
+		const Qt::KeyboardModifier nModifier = pEvent->key() == Qt::Key_Shift ? Qt::ShiftModifier : pEvent->key() == Qt::Key_Alt ? Qt::AltModifier
+																																 : Qt::NoModifier;
+		if ( nModifier == Qt::NoModifier || m_nMode != MODE_RESIZE )
+		{
+			return false;
+		}
+		// Whether the key's own modifier is in the event differs between platforms.
+		m_Live = Resized( m_To, bDown ? pEvent->modifiers() | nModifier : pEvent->modifiers() & ~nModifier );
+		update();
+		return true;
+	}
+	void keyPressEvent( QKeyEvent *pEvent ) override
+	{
+		if ( !ResizeModifierKey( pEvent, true ) )
+		{
+			CTextureCanvas::keyPressEvent( pEvent );
+		}
+	}
+	void keyReleaseEvent( QKeyEvent *pEvent ) override
+	{
+		if ( !ResizeModifierKey( pEvent, false ) )
+		{
+			CTextureCanvas::keyReleaseEvent( pEvent );
+		}
 	}
 	//-----------------------------------------------------------------------------
 	// Purpose: Commit a move, resize or copy, select a hit rectangle, or commit a drawn one.
@@ -318,6 +422,10 @@ protected:
 		m_nMode = MODE_NONE;
 		m_bCopying = false;
 		m_To = ImagePoint( pEvent->position() );
+		if ( nMode == MODE_RESIZE )
+		{
+			m_Live = Resized( m_To, pEvent->modifiers() );
+		}
 		const bool bClick = QLineF( m_From, m_To ).length() * GetScale() < 4;
 		const QPointF delta = m_Live.topLeft() - m_Start.topLeft();
 		if ( ( nMode == MODE_MOVE || nMode == MODE_RESIZE ) && !bClick )
@@ -1122,13 +1230,48 @@ QWidget *CDetailEditor::BuildCard( const NodePath_t &path )
 			pRowLayout->addWidget( pText );
 		}
 
+		auto field = path;
+		field.push_back( i );
+		// An entry's world size, both sides at once: a percentage, back to 100 once applied.
+		if ( pDef && pDef->m_szKind == "size" && numbers.size() == 4 )
+		{
+			auto *pScale = new CFloatSpin;
+			pScale->setObjectName( FieldName( path, QStringLiteral( "scale" ) ) );
+			pScale->setDecimals( 2 );
+			pScale->setRange( 1, 10000 );
+			pScale->setValue( 100 );
+			pScale->setSingleStep( 10 );
+			pScale->setPrefix( tr( "Scale " ) );
+			pScale->setSuffix( QStringLiteral( " %" ) );
+			pScale->setKeyboardTracking( false );
+			pScale->setMaximumWidth( 130 );
+			pScale->setToolTip( tr( "Scale the sprite's world width and height together (its sheet rectangle stays)" ) );
+			connect( pScale, &QDoubleSpinBox::editingFinished, this, [ this, path, pScale ] {
+				if ( pScale->value() != 100 )
+				{
+					// The edit makes the cards again, this box too: after it has finished.
+					QTimer::singleShot( 0, this, [ this, path, flFactor = pScale->value() / 100 ] { ScaleSprite( path, flFactor ); } );
+				}
+			} );
+			pRowLayout->addWidget( pScale );
+		}
 		auto *pRemove = new QToolButton;
 		pRemove->setText( QStringLiteral( "×" ) );
 		pRemove->setToolTip( tr( "Remove field" ) );
-		connect( pRemove, &QToolButton::clicked, this, [ this, path, i ] { auto child = path; child.push_back(i); RemoveNode(child); } );
+		connect( pRemove, &QToolButton::clicked, this, [ this, field ] { RemoveNode( field ); } );
 		pRowLayout->addWidget( pRemove );
-		pRow->setToolTip( szKey + ( pDef && !pDef->m_szUnits.empty() ? QStringLiteral( " — " ) + QString::fromStdString( pDef->m_szUnits ) : QString{} ) );
-		pForm->addRow( pDef && CInterfaceMode::Instance().IsSimple() ? QString::fromStdString( pDef->m_szLabel ) : szKey, pRow );
+		const QString szTip = szKey + ( pDef && !pDef->m_szUnits.empty() ? QStringLiteral( " — " ) + QString::fromStdString( pDef->m_szUnits ) : QString{} );
+		pRow->setToolTip( szTip );
+		// The name's right-click: copy and paste fields, or set this one on the blocks beside.
+		auto *pLabel = new QLabel( pDef && CInterfaceMode::Instance().IsSimple() ? QString::fromStdString( pDef->m_szLabel ) : szKey );
+		pLabel->setObjectName( FieldName( path, szKey ) + QStringLiteral( "/label" ) );
+		pLabel->setToolTip( szTip + QStringLiteral( "\n" ) + tr( "Right-click to copy the field, or set it on the other entries" ) );
+		for ( QWidget *pMenuOn : { static_cast<QWidget *>( pLabel ), pRow } )
+		{
+			pMenuOn->setContextMenuPolicy( Qt::CustomContextMenu );
+			connect( pMenuOn, &QWidget::customContextMenuRequested, this, [ this, pMenuOn, field ]( const QPoint &at ) { ShowFieldMenu( field, pMenuOn->mapToGlobal( at ) ); } );
+		}
+		pForm->addRow( pLabel, pRow );
 	}
 	// An entry's sprite (or model) beside its fields.
 	if ( path.size() == 4 )
@@ -1361,6 +1504,113 @@ void CDetailEditor::CopySelection()
 void CDetailEditor::PasteAtSelection()
 {
 	InsertNodes( PastedNodes(), m_Selected, true );
+}
+//-----------------------------------------------------------------------------
+// Purpose: One field, or all of its block's, as KeyValues text that pastes onto any card.
+//-----------------------------------------------------------------------------
+void CDetailEditor::CopyField( const NodePath_t &field, bool bAll )
+{
+	const auto &document = m_pDocument->GetDocument();
+	const auto *pField = field.size() >= 3 ? Node( document, field ) : nullptr;
+	if ( !pField || !pField->IsPair() )
+	{
+		return;
+	}
+	if ( !bAll )
+	{
+		CopyNodes( { *pField } );
+		return;
+	}
+	std::vector<CNode> fields;
+	for ( const CNode &child : Node( document, NodePath_t( field.begin(), field.end() - 1 ) )->GetChildren() )
+	{
+		if ( child.IsPair() )
+		{
+			fields.push_back( child );
+		}
+	}
+	CopyNodes( fields );
+}
+//-----------------------------------------------------------------------------
+// Purpose: The blocks a field is spread to: its block's siblings, or every entry of its type.
+//-----------------------------------------------------------------------------
+namespace
+{
+std::vector<NodePath_t> SpreadTargets( const xv::kv1::CDocument &document, const NodePath_t &block, bool bWholeType )
+{
+	const auto inside = [ & ]( const NodePath_t &path, std::size_t nDepth ) { return std::equal( block.begin(), block.begin() + static_cast<std::ptrdiff_t>( nDepth ), path.begin() ); };
+	std::vector<NodePath_t> targets;
+	for ( const auto &type : Types( document ) )
+	{
+		if ( block.size() == 2 )
+		{
+			targets.push_back( type.m_Path );
+			continue;
+		}
+		if ( !inside( type.m_Path, 2 ) )
+		{
+			continue;
+		}
+		for ( const auto &group : type.m_Groups )
+		{
+			if ( block.size() == 3 )
+			{
+				targets.push_back( group.m_Path );
+				continue;
+			}
+			for ( const auto &entry : group.m_Entries )
+			{
+				if ( bWholeType || inside( entry.m_Path, 3 ) )
+				{
+					targets.push_back( entry.m_Path );
+				}
+			}
+		}
+	}
+	std::erase( targets, block );
+	return targets;
+}
+} // namespace
+//-----------------------------------------------------------------------------
+// Purpose: Set a field on the blocks beside its own, as one undo step.
+//-----------------------------------------------------------------------------
+void CDetailEditor::SpreadField( const NodePath_t &field, bool bWholeType )
+{
+	const auto &document = m_pDocument->GetDocument();
+	const auto *pField = field.size() >= 3 ? Node( document, field ) : nullptr;
+	if ( !pField || !pField->IsPair() )
+	{
+		return;
+	}
+	const auto targets = SpreadTargets( document, NodePath_t( field.begin(), field.end() - 1 ), bWholeType );
+	if ( targets.empty() )
+	{
+		return;
+	}
+	const std::string szKey = pField->GetKey(), szValue = pField->GetValue();
+	m_pDocument->Edit( tr( "Set %1 on %n block(s)", nullptr, static_cast<int>( targets.size() ) ).arg( QString::fromStdString( szKey ) ), [ & ]( auto &edited ) {
+		for ( const auto &target : targets )
+		{
+			Set( edited, target, szKey, szValue );
+		}
+	} );
+}
+//-----------------------------------------------------------------------------
+// Purpose: Scale an entry's world size about its origin; the sheet rectangle is left alone.
+//-----------------------------------------------------------------------------
+void CDetailEditor::ScaleSprite( const NodePath_t &path, double flFactor )
+{
+	const auto *pEntry = Node( m_pDocument->GetDocument(), path );
+	const auto *pSize = pEntry ? pEntry->Find( "spritesize" ) : nullptr;
+	auto size = pSize && pSize->IsPair() ? Numbers( pSize->GetValue() ) : std::vector<double>{};
+	if ( size.size() != 4 || !( flFactor > 0 ) || flFactor == 1 )
+	{
+		return;
+	}
+	size[ 2 ] *= flFactor;
+	size[ 3 ] *= flFactor;
+	const QString szSize = QStringLiteral( "%1 %2 %3 %4" ).arg( size[ 0 ], 0, 'g', 12 ).arg( size[ 1 ], 0, 'g', 12 ).arg( size[ 2 ], 0, 'g', 12 ).arg( size[ 3 ], 0, 'g', 12 );
+	m_pDocument->Edit( tr( "Scale sprite" ), [ & ]( auto &document ) { Set( document, path, "spritesize", szSize.toStdString() ); } );
 }
 //-----------------------------------------------------------------------------
 // Purpose: Apply one field edit to the original KeyValues tokens.
@@ -2219,6 +2469,49 @@ void CDetailEditor::ShowCardMenu( const NodePath_t &path, const QPoint &globalAt
 	menu.addAction( tr( "Rename…" ), this, [ this, path ] { RenameNode( path ); } );
 	menu.addSeparator();
 	menu.addAction( tr( "Delete \"%1\"" ).arg( szName ), this, [ this, path ] { RemoveNode( path ); } );
+	menu.exec( globalAt );
+}
+//-----------------------------------------------------------------------------
+// Purpose: A field's right-click: copy it (or all of its block's), paste, set it on the blocks
+//          beside, remove it.
+//-----------------------------------------------------------------------------
+void CDetailEditor::ShowFieldMenu( const NodePath_t &field, const QPoint &globalAt )
+{
+	const auto &document = m_pDocument->GetDocument();
+	const auto *pField = Node( document, field );
+	if ( !pField || !pField->IsPair() )
+	{
+		return;
+	}
+	const NodePath_t block( field.begin(), field.end() - 1 );
+	const QString szKey = QString::fromStdString( pField->GetKey() );
+	QMenu menu( this );
+	menu.addAction( tr( "Copy \"%1\"" ).arg( szKey ), this, [ this, field ] { CopyField( field ); } );
+	menu.addAction( tr( "Copy All Fields" ), this, [ this, field ] { CopyField( field, true ); } );
+	auto *pPaste = menu.addAction( tr( "Paste" ), this, [ this, block ] { InsertNodes( PastedNodes(), block, true ); } );
+	pPaste->setEnabled( CanPasteNodes() );
+	menu.addSeparator();
+	// Where it can go: entries beside it and in the whole type; groups or types beside it.
+	const auto spread = [ & ]( const QString &szText, bool bWholeType ) {
+		const auto nCount = SpreadTargets( document, block, bWholeType ).size();
+		menu.addAction( szText.arg( nCount ), this, [ this, field, bWholeType ] { SpreadField( field, bWholeType ); } )->setEnabled( nCount > 0 );
+	};
+	const auto name = [ & ]( std::size_t nDepth ) { return QString::fromStdString( Node( document, NodePath_t( block.begin(), block.begin() + static_cast<std::ptrdiff_t>( nDepth ) ) )->GetKey() ); };
+	if ( block.size() == 4 )
+	{
+		spread( tr( "Set on Other Entries in \"%2\" (%1)" ).arg( QStringLiteral( "%1" ), name( 3 ) ), false );
+		spread( tr( "Set on Every Entry in \"%2\" (%1)" ).arg( QStringLiteral( "%1" ), name( 2 ) ), true );
+	}
+	else if ( block.size() == 3 )
+	{
+		spread( tr( "Set on Other Groups in \"%2\" (%1)" ).arg( QStringLiteral( "%1" ), name( 2 ) ), false );
+	}
+	else
+	{
+		spread( tr( "Set on Other Types (%1)" ), false );
+	}
+	menu.addSeparator();
+	menu.addAction( tr( "Remove \"%1\"" ).arg( szKey ), this, [ this, field ] { RemoveNode( field ); } );
 	menu.exec( globalAt );
 }
 //-----------------------------------------------------------------------------

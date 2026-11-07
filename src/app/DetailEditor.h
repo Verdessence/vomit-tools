@@ -51,6 +51,14 @@ public:
 	// Ctrl+C and Ctrl+V on the selection.
 	void CopySelection();
 	void PasteAtSelection();
+	// The field at path (its block's path, then its index) on the clipboard; with bAll, every field
+	// of its block (not the blocks inside it).
+	void CopyField( const xv::detail::NodePath_t &field, bool bAll = false );
+	// The field at path set on the blocks beside its own (the other entries of its group, groups of
+	// its type...), or with bWholeType on every entry of its type, as one step.
+	void SpreadField( const xv::detail::NodePath_t &field, bool bWholeType = false );
+	// An entry's world width and height times flFactor, its origin kept.
+	void ScaleSprite( const xv::detail::NodePath_t &path, double flFactor );
 	bool PackPictures( const xv::detail::NodePath_t &group, const std::map<std::string, xv::texture::CImage> &pictures, const QString &szMaterial, QString *pError = nullptr );
 	[[nodiscard]] const auto &GetIssues() const { return m_Issues; }
 	[[nodiscard]] QString GetSpriteMaterial() const;
@@ -76,6 +84,7 @@ private:
 	void RenameNode( const xv::detail::NodePath_t &path );
 	void ShowCardMenu( const xv::detail::NodePath_t &path, const QPoint &globalAt );
 	void ShowTypesMenu( const QPoint &at );
+	void ShowFieldMenu( const xv::detail::NodePath_t &field, const QPoint &globalAt );
 	// Where a block of nDepth (0: a field) goes when put at target; nullopt where it can't.
 	struct Placement_t
 	{
