@@ -156,6 +156,7 @@ add_library(vomit_tools_core STATIC
         texture/Image.cpp
         texture/Image.h
         texture/Sheet.cpp
+        texture/Exr.h
         texture/Sheet.h
         texture/Vtf.cpp
         texture/Vtf.h
@@ -177,7 +178,7 @@ add_library(vomit_tools_core STATIC
 add_library(vomit_tools::core ALIAS vomit_tools_core)
 
 target_include_directories(vomit_tools_core PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
-target_link_libraries(vomit_tools_core PRIVATE sourcepp::vpkpp MINIZIP::minizip liblzma vomit_tools_miniaudio vomit_tools_stb Threads::Threads)
+target_link_libraries(vomit_tools_core PRIVATE sourcepp::vpkpp MINIZIP::minizip liblzma vomit_tools_miniaudio vomit_tools_stb vomit_tools_tinyexr Threads::Threads)
 # liblzma comes from minizip-ng's fetch of xz, whose target keeps its headers private. Without
 # this, lzma.h is only found on machines that have xz's development package installed.
 FetchContent_GetProperties(liblzma)
@@ -190,3 +191,10 @@ vomit_tools_set_warnings(vomit_tools_core)
 # warning flags.
 add_library(vomit_tools_stb STATIC texture/StbImplementation.c)
 target_include_directories(vomit_tools_stb SYSTEM PUBLIC "${stb_SOURCE_DIR}")
+
+# tinyexr's implementation (fetched in cmake/Dependencies.cmake), built once and without our
+# warning flags; it inflates with stb's zlib, from vomit_tools_stb.
+add_library(vomit_tools_tinyexr STATIC texture/ExrImplementation.cpp)
+target_include_directories(vomit_tools_tinyexr SYSTEM PRIVATE "${tinyexr_SOURCE_DIR}")
+target_include_directories(vomit_tools_tinyexr PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
+target_link_libraries(vomit_tools_tinyexr PRIVATE vomit_tools_stb)

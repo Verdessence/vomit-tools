@@ -159,6 +159,13 @@ struct CVtf
 // The next mipmap level of light values: each pixel the average of up to four.
 [[nodiscard]] CFloatImage HalfSize( const CFloatImage &image );
 
+// Light values as Valve's compressed HDR ($hdrcompressedtexture, BGRA8888): each pixel's colour
+// is RGB times alpha times 8, read without sRGB, so up to 8 is kept, in 8 bits a channel. Values
+// above 8 are clipped.
+inline constexpr float COMPRESSED_HDR_RANGE = 8.0f;
+[[nodiscard]] CImage ToCompressedHdr( const CFloatImage &image );
+[[nodiscard]] CFloatImage FromCompressedHdr( const CImage &image );
+
 // The alpha flags Valve's tools set: ONEBITALPHA when every pixel is clear or solid and some are
 // clear, EIGHTBITALPHA when some are in between, none when all are solid.
 [[nodiscard]] std::uint32_t AlphaFlags( std::span<const CImage> images );
@@ -204,6 +211,7 @@ struct VtfWriteOptions_t
 	int m_nDepth = 1;         // slices of a volume texture (7.2+): each face's pictures, in order
 	bool m_bNormalMap = false; // mipmaps average directions and make them one long again
 	MipFilter_t m_nMipFilter = MipFilter_t::MIP_FILTER_BOX; // wraps unless CLAMPS / CLAMPT
+	bool m_bCompressedHdr = false; // light values written as ToCompressedHdr does, each mipmap made in light first (BGRA8888 or RGBA8888)
 };
 
 // The image's width and height don't have to be powers of two, but the game expects them to be.

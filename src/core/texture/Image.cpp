@@ -5,6 +5,7 @@
 //
 //===========================================================================//
 #include "Image.h"
+#include "Exr.h"
 
 #include <algorithm>
 #include <array>
@@ -58,7 +59,7 @@ CImage::CImage( int nWidth, int nHeight )
 //-----------------------------------------------------------------------------
 bool IsImageExtension( std::string_view szExtension )
 {
-	static constexpr std::string_view EXTENSIONS[] = { "png", "apng", "jpg", "jpeg", "tga", "bmp", "psd", "gif", "hdr", "pnm", "ppm", "pgm", "qoi", "pfm" };
+	static constexpr std::string_view EXTENSIONS[] = { "png", "apng", "jpg", "jpeg", "tga", "bmp", "psd", "gif", "hdr", "pnm", "ppm", "pgm", "qoi", "pfm", "exr" };
 	return std::ranges::find( EXTENSIONS, szExtension ) != std::end( EXTENSIONS );
 }
 
@@ -520,9 +521,8 @@ std::vector<CImage> LoadApng( std::span<const std::byte> data )
 } // namespace
 
 //-----------------------------------------------------------------------------
-// Purpose: PNG, JPEG, TGA, BMP, PSD (composited), GIF (first frame), PNM, and Radiance HDR (gamma-
-//          mapped to
-//          8 bits), recognised by content. Input is untrusted.
+// Purpose: PNG, JPEG, TGA, BMP, PSD (composited), GIF (first frame), PNM, QOI, and Radiance HDR,
+//          PFM and OpenEXR (mapped to 8 bits), recognised by content. Input is untrusted.
 //-----------------------------------------------------------------------------
 std::optional<CImage> LoadImage( std::span<const std::byte> data, std::string *pError )
 {
@@ -540,6 +540,20 @@ std::optional<CImage> LoadImage( std::span<const std::byte> data, std::string *p
 	if ( auto qoi = LoadQoi( data ) )
 	{
 		return qoi;
+	}
+	if ( IsExr( data ) )
+	{
+		auto exr = LoadExr( data, pError );
+		if ( !exr )
+		{
+			return std::nullopt;
+		}
+		CImage image{ exr->m_nWidth, exr->m_nHeight };
+		for ( std::size_t i = 0; i < image.m_Pixels.size(); i++ )
+		{
+			image.m_Pixels[ i ] = i % 4 == 3 ? static_cast<std::uint8_t>( std::lround( std::clamp( exr->m_Pixels[ i ], 0.0f, 1.0f ) * 255.0f ) ) : FromLinear( exr->m_Pixels[ i ] );
+		}
+		return image;
 	}
 	if ( auto pfm = LoadPfm( data ) )
 	{
@@ -706,13 +720,17 @@ std::vector<std::byte> SaveFloatImage( const CFloatImage &image, ImageFileType_t
 }
 
 //-----------------------------------------------------------------------------
-// Purpose: A Radiance HDR file as its light values; nullopt for other files.
+// Purpose: A Radiance HDR, PFM or OpenEXR file as its light values; nullopt for other files.
 //-----------------------------------------------------------------------------
 std::optional<CFloatImage> LoadFloatImage( std::span<const std::byte> data )
 {
 	if ( data.empty() || data.size() > static_cast<std::size_t>( INT_MAX ) )
 	{
 		return std::nullopt;
+	}
+	if ( IsExr( data ) )
+	{
+		return LoadExr( data );
 	}
 	if ( auto pfm = LoadPfm( data ) )
 	{

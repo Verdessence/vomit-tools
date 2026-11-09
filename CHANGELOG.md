@@ -245,6 +245,16 @@
   out is kept but hidden, each kind in a visgroup under "Stripper: <config>" (Added, Modified,
   Removed). Visgroups made here are saved in the map.
 
+### Skyboxes
+- Import Panorama: an equirectangular panorama becomes all six faces, with a face size, a turn,
+  and a preview to look around in. An HDRI (.hdr, or OpenEXR .exr) also gives the HDR set the
+  game draws with HDR on (`<name>_hdr<f>`, shader `sky`, as Valve's skies are): compressed
+  (BGRA8888, `$hdrcompressedtexture`) or float (RGBA16161616F, `$hdrbasetexture`). It is brought
+  to a stock day sky's brightness, adjustable in stops, and the LDR faces are tone mapped from
+  it (filmic, Reinhard or clip, with an exposure).
+- The sky list leaves out a sky's HDR set (`train_hdr` beside `train`).
+- OpenEXR files open wherever images do (through tinyexr).
+
 ### Also
 - The main window's tabs are grouped under a strip by kind (maps, textures, sounds...); a tab's
   right-click moves it into a group of your own, kept across starts. Preferences → General turns

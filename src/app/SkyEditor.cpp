@@ -18,6 +18,7 @@
 #include <QDir>
 #include <QDragEnterEvent>
 #include <QDropEvent>
+#include <QFile>
 #include <QFileInfo>
 #include <QGridLayout>
 #include <QHBoxLayout>
@@ -43,10 +44,14 @@
 #include "ImageFiles.h"
 #include "QtPaths.h"
 #include "SkyDocument.h"
+#include "SkyPanoramaDialog.h"
 #include "SkyTestPattern.h"
 #include "SkyView.h"
+#include "texture/Exr.h"
+#include "texture/Vtf.h"
 
 using xv::sky::Face_t;
+using xv::sky::HdrFormat_t;
 using xv::texture::COrientation;
 using Severity_t = CSkyEditor::Issue_t::Severity_t;
 
@@ -351,23 +356,38 @@ CSkyEditor::CSkyEditor( CSkyDocument *pDocument, QWidget *pParent )
 	m_pMipmaps->setChecked( m_pDocument->GetMipmaps() );
 	m_pMipmaps->setToolTip( tr( "Smaller copies for distant viewing. Valve's newer skies go without (NOMIP), as a sky is never far away" ) );
 	connect( m_pMipmaps, &QCheckBox::toggled, this, [ this ]( bool bOn ) { m_pDocument->SetMipmaps( bOn ); } );
+	pToolbar->addWidget( m_pMipmaps );
+
+	m_pHdr = new QComboBox;
+	m_pHdr->setObjectName( QStringLiteral( "skyHdr" ) );
+	m_pHdr->addItem( tr( "No HDR set" ), static_cast<int>( HdrFormat_t::HDR_FORMAT_NONE ) );
+	m_pHdr->addItem( tr( "HDR: compressed (BGRA8888)" ), static_cast<int>( HdrFormat_t::HDR_FORMAT_COMPRESSED ) );
+	m_pHdr->addItem( tr( "HDR: float (RGBA16161616F)" ), static_cast<int>( HdrFormat_t::HDR_FORMAT_FLOAT ) );
+	m_pHdr->setToolTip( tr( "The textures the game draws with HDR on (<name>_hdr…), from an imported HDRI's light values. Compressed keeps up to 8 "
+							"times white in a quarter of float's size, as most of Valve's skies do; float keeps any brightness" ) );
+	m_pHdr->setCurrentIndex( std::max( 0, m_pHdr->findData( static_cast<int>( m_pDocument->GetHdrFormat() ) ) ) );
+	connect( m_pHdr, &QComboBox::currentIndexChanged, this, [ this ] { m_pDocument->SetHdrFormat( static_cast<HdrFormat_t>( m_pHdr->currentData().toInt() ) ); } );
+	pToolbar->addWidget( m_pHdr );
+
 	connect( m_pDocument, &CSkyDocument::OptionsChanged, this, [ this ] {
 		const QSignalBlocker formatBlocker{ m_pFormat };
 		const QSignalBlocker sizeBlocker{ m_pSize };
 		const QSignalBlocker mipmapsBlocker{ m_pMipmaps };
+		const QSignalBlocker hdrBlocker{ m_pHdr };
 		m_pFormat->setCurrentIndex( m_pFormat->findData( static_cast<int>( m_pDocument->GetFormat() ) ) );
 		m_pSize->setCurrentIndex( std::max( 0, m_pSize->findData( m_pDocument->size() ) ) );
 		m_pMipmaps->setChecked( m_pDocument->GetMipmaps() );
+		m_pHdr->setCurrentIndex( std::max( 0, m_pHdr->findData( static_cast<int>( m_pDocument->GetHdrFormat() ) ) ) );
 		Relint();
 		UpdateSizeEstimate();
 	} );
-	pToolbar->addWidget( m_pMipmaps );
 	m_pEstimate = new QLabel;
 	m_pEstimate->setContentsMargins( 8, 0, 8, 0 );
 	m_pEstimate->setEnabled( false );
 	pToolbar->addWidget( m_pEstimate );
 	pToolbar->addSeparator();
 	pToolbar->addAction( tr( "Load Faces…" ), this, &CSkyEditor::BrowseFiles )->setToolTip( tr( "Choose up to six images named …rt, …bk, …lf, …ft, …up and …dn" ) );
+	pToolbar->addAction( tr( "Import Panorama…" ), this, [ this ] { ImportPanorama(); } )->setToolTip( tr( "Make all six faces from an equirectangular panorama: an HDRI (.hdr, .exr) gives the HDR set too" ) );
 	pToolbar->addAction( tr( "Test Pattern" ), this, [ this ] { UseTestPattern(); } )->setToolTip( tr( "Labelled faces for checking a sky's orientation in game" ) );
 	pToolbar->addSeparator();
 	QAction *pExportAction = pToolbar->addAction( tr( "Export" ), this, &CSkyEditor::ExportRequested );
@@ -468,6 +488,7 @@ CSkyEditor::CSkyEditor( CSkyDocument *pDocument, QWidget *pParent )
 void CSkyEditor::FacesChanged()
 {
 	m_pView->SetCube( &m_pDocument->GetCube() );
+	m_pHdr->setVisible( m_pDocument->GetCube().HasHdr() );
 	for ( QWidget *pSlot : m_Slots )
 	{
 		static_cast<CFaceSlot *>( pSlot )->Refresh();
@@ -524,7 +545,7 @@ QStringList CSkyEditor::LoadFiles( const QStringList &given )
 			problems << tr( "%1: %2" ).arg( szName, szError );
 			continue;
 		}
-		changes[ xv::sky::IndexOf( *face ) ] = CSkyDocument::Slot_t{ std::make_shared<const xv::texture::CImage>( std::move( *image ) ), szPath, {}, {}, {} };
+		changes[ xv::sky::IndexOf( *face ) ] = CSkyDocument::Slot_t{ std::make_shared<const xv::texture::CImage>( std::move( *image ) ), szPath, {}, {}, {}, {} };
 	}
 	if ( std::ranges::any_of( changes, []( const auto &change ) { return change.has_value(); } ) )
 	{
@@ -549,7 +570,7 @@ bool CSkyEditor::LoadFace( Face_t nFace, const QString &szPath )
 		QMessageBox::warning( this, tr( "Load Image" ), tr( "Could not read %1:\n%2" ).arg( QDir::toNativeSeparators( szPath ), szError ) );
 		return false;
 	}
-	m_pDocument->SetSlot( nFace, { std::make_shared<const xv::texture::CImage>( std::move( *image ) ), szPath, {}, {}, {} }, tr( "Set %1" ).arg( FaceName( nFace ) ) );
+	m_pDocument->SetSlot( nFace, { std::make_shared<const xv::texture::CImage>( std::move( *image ) ), szPath, {}, {}, {}, {} }, tr( "Set %1" ).arg( FaceName( nFace ) ) );
 	return true;
 }
 
@@ -561,13 +582,120 @@ void CSkyEditor::UseTestPattern( int nSize )
 	std::array<std::optional<CSkyDocument::Slot_t>, 6> changes;
 	for ( Face_t nFace : xv::sky::FACES )
 	{
-		changes[ xv::sky::IndexOf( nFace ) ] = CSkyDocument::Slot_t{ std::make_shared<const xv::texture::CImage>( SkyTestPattern( nFace, nSize ) ), TestPatternSource(), {}, {}, {} };
+		changes[ xv::sky::IndexOf( nFace ) ] = CSkyDocument::Slot_t{ std::make_shared<const xv::texture::CImage>( SkyTestPattern( nFace, nSize ) ), TestPatternSource(), {}, {}, {}, {} };
 	}
 	m_pDocument->SetSlots( changes, tr( "Test Pattern" ) );
 	if ( m_pDocument->GetName().isEmpty() )
 	{
 		m_pDocument->SetName( QStringLiteral( "vomit_test" ) );
 	}
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Makes all six faces from a panorama, as one undo step. Light values (.hdr, .exr, .pfm)
+//          are kept with each face for the HDR set; 8-bit pictures give the faces only.
+//-----------------------------------------------------------------------------
+bool CSkyEditor::ImportPanorama( const QString &szGiven, const xv::sky::PanoramaImport_t *pOptions )
+{
+	QString szPath = szGiven;
+	if ( szPath.isEmpty() )
+	{
+		QSettings settings;
+		szPath = AskOpenFile( this, tr( "Import Panorama (equirectangular, twice as wide as tall)" ), settings.value( IMAGE_FOLDER_KEY ).toString(),
+			tr( "Panoramas (*.hdr *.exr *.pfm *.png *.jpg *.jpeg *.tga *.bmp *.psd);;All files (*)" ) );
+		if ( szPath.isEmpty() )
+		{
+			return false;
+		}
+		settings.setValue( IMAGE_FOLDER_KEY, QFileInfo{ szPath }.absolutePath() );
+	}
+	const QString szFileName = QFileInfo{ szPath }.fileName();
+	QFile file{ szPath };
+	if ( !file.open( QIODevice::ReadOnly ) )
+	{
+		QMessageBox::warning( this, tr( "Import Panorama" ), tr( "Could not read %1:\n%2" ).arg( QDir::toNativeSeparators( szPath ), file.errorString() ) );
+		return false;
+	}
+	QApplication::setOverrideCursor( Qt::WaitCursor );
+	const QByteArray data = file.readAll();
+	const std::span<const std::byte> bytes{ reinterpret_cast<const std::byte *>( data.constData() ), static_cast<std::size_t>( data.size() ) };
+	std::string szError;
+	std::optional<xv::texture::CFloatImage> panorama = xv::texture::IsExr( bytes ) ? xv::texture::LoadExr( bytes, &szError ) : xv::texture::LoadFloatImage( bytes );
+	const bool bHdr = panorama.has_value();
+	if ( !panorama && szError.empty() )
+	{
+		if ( auto image = xv::texture::LoadImage( bytes, &szError ) )
+		{
+			panorama = xv::texture::ToFloat( *image );
+		}
+	}
+	QApplication::restoreOverrideCursor();
+	if ( !panorama || panorama->Empty() )
+	{
+		QMessageBox::warning( this, tr( "Import Panorama" ), tr( "Could not read %1:\n%2" ).arg( QDir::toNativeSeparators( szPath ), QString::fromStdString( szError.empty() ? std::string{ "not an image" } : szError ) ) );
+		return false;
+	}
+	// An equirectangular panorama is twice as wide as tall; anything else would come out
+	// stretched.
+	const double flAspect = static_cast<double>( panorama->m_nWidth ) / static_cast<double>( panorama->m_nHeight );
+	if ( !pOptions && std::abs( flAspect - 2.0 ) > 0.05 &&
+		QMessageBox::question( this, tr( "Import Panorama" ), tr( "%1 is %2×%3, not twice as wide as tall, so it may not be an equirectangular panorama and would come out stretched.\n\nImport anyway?" ).arg( szFileName ).arg( panorama->m_nWidth ).arg( panorama->m_nHeight ) ) != QMessageBox::Yes )
+	{
+		return false;
+	}
+
+	xv::sky::PanoramaSky_t sky;
+	if ( pOptions )
+	{
+		sky = xv::sky::SkyFromPanorama( *panorama, *pOptions, bHdr );
+	}
+	else
+	{
+		CSkyPanoramaDialog dialog( std::move( *panorama ), bHdr, szFileName, this );
+		if ( dialog.exec() != QDialog::Accepted )
+		{
+			return false;
+		}
+		QApplication::setOverrideCursor( Qt::WaitCursor );
+		sky = dialog.MakeSky();
+		QApplication::restoreOverrideCursor();
+	}
+	if ( sky.m_Faces[ 0 ].Empty() )
+	{
+		QMessageBox::warning( this, tr( "Import Panorama" ), tr( "%1 could not be made into faces." ).arg( szFileName ) );
+		return false;
+	}
+
+	std::array<std::optional<CSkyDocument::Slot_t>, 6> changes;
+	for ( Face_t nFace : xv::sky::FACES )
+	{
+		const std::size_t i = xv::sky::IndexOf( nFace );
+		CSkyDocument::Slot_t slot{ std::make_shared<const xv::texture::CImage>( std::move( sky.m_Faces[ i ] ) ), szPath, {}, {}, {}, {} };
+		if ( bHdr )
+		{
+			slot.m_pHdr = std::make_shared<const xv::texture::CFloatImage>( std::move( sky.m_HdrFaces[ i ] ) );
+		}
+		changes[ i ] = std::move( slot );
+	}
+	m_pDocument->SetSlots( changes, tr( "Import Panorama" ) );
+	if ( m_pDocument->GetName().isEmpty() )
+	{
+		// The file's name as a sky name: lowercase, other characters as '_'.
+		QString szName = QFileInfo{ szPath }.completeBaseName().toLower();
+		for ( QChar &c : szName )
+		{
+			if ( !( ( c >= u'a' && c <= u'z' ) || ( c >= u'0' && c <= u'9' ) || c == u'_' || c == u'-' || c == u'.' ) )
+			{
+				c = u'_';
+			}
+		}
+		szName.truncate( 60 );
+		if ( xv::sky::IsValidName( szName.toStdString() ) )
+		{
+			m_pDocument->SetName( szName );
+		}
+	}
+	return true;
 }
 
 //-----------------------------------------------------------------------------
@@ -623,7 +751,7 @@ void CSkyEditor::BrowseFace( Face_t nFace )
 {
 	QSettings settings;
 	const QString szPath = AskOpenFile( this, tr( "Image for %1 (%2)" ).arg( FaceName( nFace ), Direction( nFace ) ), settings.value( IMAGE_FOLDER_KEY ).toString(),
-		tr( "Images (*.png *.jpg *.jpeg *.tga *.bmp *.psd *.hdr *.vtf);;All files (*)" ) );
+		tr( "Images (*.png *.jpg *.jpeg *.tga *.bmp *.psd *.hdr *.exr *.vtf);;All files (*)" ) );
 	if ( !szPath.isEmpty() )
 	{
 		settings.setValue( IMAGE_FOLDER_KEY, QFileInfo{ szPath }.absolutePath() );
@@ -638,7 +766,7 @@ void CSkyEditor::BrowseFiles()
 {
 	QSettings settings;
 	const QStringList paths = AskOpenFiles( this, tr( "Load Faces (named …rt, …bk, …lf, …ft, …up, …dn)" ), settings.value( IMAGE_FOLDER_KEY ).toString(),
-		tr( "Images (*.png *.jpg *.jpeg *.tga *.bmp *.psd *.hdr *.vtf);;All files (*)" ) );
+		tr( "Images (*.png *.jpg *.jpeg *.tga *.bmp *.psd *.hdr *.exr *.vtf);;All files (*)" ) );
 	if ( !paths.isEmpty() )
 	{
 		settings.setValue( IMAGE_FOLDER_KEY, QFileInfo{ paths.front() }.absolutePath() );
@@ -708,6 +836,25 @@ void CSkyEditor::Relint()
 		}
 		m_Issues.push_back( { Severity_t::SEVERITY_WARNING, tr( "%1 and %2 don't meet (difference %3). Check that each image is on the right face." ).arg( FaceName( seam.m_nA ), FaceName( seam.m_nB ) ).arg( std::lround( seam.m_flDifference ) ), {} } );
 	}
+	if ( cube.HasHdr() && m_pDocument->GetHdrFormat() != HdrFormat_t::HDR_FORMAT_NONE )
+	{
+		m_Issues.push_back( { Severity_t::SEVERITY_INFO, tr( "The HDR set is written too (materials/skybox/%1_hdrrt.vmt and so on); the game draws it in place of the faces when HDR is on." ).arg( szName.isEmpty() ? QStringLiteral( "<name>" ) : szName ), {} } );
+		if ( m_pDocument->GetHdrFormat() == HdrFormat_t::HDR_FORMAT_COMPRESSED )
+		{
+			float flBrightest = 0.0f;
+			for ( const auto &face : cube.m_HdrFaces )
+			{
+				for ( std::size_t i = 0; i < face.m_Pixels.size(); i++ )
+				{
+					flBrightest = i % 4 == 3 ? flBrightest : std::max( flBrightest, face.m_Pixels[ i ] );
+				}
+			}
+			if ( flBrightest > xv::texture::COMPRESSED_HDR_RANGE )
+			{
+				m_Issues.push_back( { Severity_t::SEVERITY_INFO, tr( "The brightest light values reach %1, over the 8 compressed HDR keeps, and are cut off there (usually just the sun's disc). Float keeps them." ).arg( static_cast<double>( flBrightest ), 0, 'f', 1 ), {} } );
+			}
+		}
+	}
 	if ( flWorstBottom > 0.0f )
 	{
 		m_Issues.push_back( { Severity_t::SEVERITY_INFO, tr( "dn doesn't continue the sides (difference up to %1). That's common, and fine: the bottom of a sky is rarely seen." ).arg( std::lround( flWorstBottom ) ), {} } );
@@ -752,6 +899,9 @@ void CSkyEditor::UpdateSizeEstimate()
 	}
 	const double flPixels = static_cast<double>( nSide ) * nSide * ( m_pDocument->GetMipmaps() ? 4.0 / 3.0 : 1.0 );
 	const double flPerFace = flPixels * ( m_pDocument->GetFormat() == xv::texture::VtfFormat_t::DXT1 ? 0.5 : 3.0 );
-	m_pEstimate->setText( tr( "≈ %1" ).arg( FormatBytes( flPerFace * 6 ) ) );
-	m_pEstimate->setToolTip( tr( "6 faces of %1 each" ).arg( FormatBytes( flPerFace ) ) );
+	const HdrFormat_t nHdr = m_pDocument->GetExportOptions().m_nHdr;
+	const double flHdrPerFace = flPixels * ( nHdr == HdrFormat_t::HDR_FORMAT_FLOAT ? 8.0 : nHdr == HdrFormat_t::HDR_FORMAT_COMPRESSED ? 4.0
+																																	  : 0.0 );
+	m_pEstimate->setText( tr( "≈ %1" ).arg( FormatBytes( ( flPerFace + flHdrPerFace ) * 6 ) ) );
+	m_pEstimate->setToolTip( flHdrPerFace > 0.0 ? tr( "6 faces of %1 each, and 6 HDR faces of %2 each" ).arg( FormatBytes( flPerFace ), FormatBytes( flHdrPerFace ) ) : tr( "6 faces of %1 each" ).arg( FormatBytes( flPerFace ) ) );
 }

@@ -57,6 +57,17 @@ FetchContent_Declare(stb
         SOURCE_SUBDIR do-not-add-subdirectory)
 FetchContent_MakeAvailable(stb)
 
+# tinyexr (BSD-3-Clause): reading OpenEXR panoramas for the sky editor's HDRI import. Only the
+# release's single-header v1 API (tinyexr.h) is used, with stb's zlib in place of miniz; its v3
+# C library (src/, deps/) is not built. The implementation is compiled in src/core
+# (vomit_tools_tinyexr).
+FetchContent_Declare(tinyexr
+        URL https://github.com/syoyo/tinyexr/archive/refs/tags/v3.2.0.tar.gz
+        URL_HASH SHA256=df2bd61124a35d8138f8b0bc22418a1d4fe33622c818e0e022f5522afc0821b0
+        DOWNLOAD_EXTRACT_TIMESTAMP ON
+        SOURCE_SUBDIR do-not-add-subdirectory)
+FetchContent_MakeAvailable(tinyexr)
+
 # CoACD without OpenVDB preprocessing: closed meshes only. Keep its build isolated so its
 # compiler flags, shared library and install rules do not change our packages.
 FetchContent_Declare(coacd

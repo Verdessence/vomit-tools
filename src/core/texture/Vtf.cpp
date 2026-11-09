@@ -1156,6 +1156,51 @@ CImage ToEightBit( const CFloatImage &image )
 }
 
 //-----------------------------------------------------------------------------
+// Purpose: Light values as compressed HDR (RGBS). The scale in alpha is rounded up, so the
+//          brightest channel always fits in its 8 bits and the others keep what precision is
+//          left.
+//-----------------------------------------------------------------------------
+CImage ToCompressedHdr( const CFloatImage &image )
+{
+	CImage out{ image.m_nWidth, image.m_nHeight };
+	for ( std::size_t i = 0; i + 3 < image.m_Pixels.size(); i += 4 )
+	{
+		const float *p = image.m_Pixels.data() + i;
+		const float flBrightest = std::clamp( std::max( { p[ 0 ], p[ 1 ], p[ 2 ] } ), 0.0f, COMPRESSED_HDR_RANGE );
+		const int nScale = static_cast<int>( std::ceil( flBrightest / COMPRESSED_HDR_RANGE * 255.0f - 1e-4f ) );
+		std::uint8_t *d = out.m_Pixels.data() + i;
+		d[ 3 ] = static_cast<std::uint8_t>( std::clamp( nScale, 0, 255 ) );
+		const float flScale = static_cast<float>( d[ 3 ] ) / 255.0f * COMPRESSED_HDR_RANGE;
+		for ( std::size_t c = 0; c < 3; c++ )
+		{
+			d[ c ] = flScale > 0.0f ? static_cast<std::uint8_t>( std::clamp( std::lround( std::clamp( p[ c ], 0.0f, COMPRESSED_HDR_RANGE ) / flScale * 255.0f ), 0L, 255L ) ) : 0;
+		}
+	}
+	return out;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Compressed HDR (RGBS) back to light values, alpha 1.
+//-----------------------------------------------------------------------------
+CFloatImage FromCompressedHdr( const CImage &image )
+{
+	CFloatImage out;
+	out.m_nWidth = image.m_nWidth;
+	out.m_nHeight = image.m_nHeight;
+	out.m_Pixels.resize( image.m_Pixels.size() );
+	for ( std::size_t i = 0; i + 3 < image.m_Pixels.size(); i += 4 )
+	{
+		const float flScale = static_cast<float>( image.m_Pixels[ i + 3 ] ) / 255.0f * COMPRESSED_HDR_RANGE;
+		for ( std::size_t c = 0; c < 3; c++ )
+		{
+			out.m_Pixels[ i + c ] = static_cast<float>( image.m_Pixels[ i + c ] ) / 255.0f * flScale;
+		}
+		out.m_Pixels[ i + 3 ] = 1.0f;
+	}
+	return out;
+}
+
+//-----------------------------------------------------------------------------
 // Purpose: The next mipmap level of light values: each pixel the average of up to four.
 //-----------------------------------------------------------------------------
 CFloatImage HalfSize( const CFloatImage &image )
@@ -1266,17 +1311,21 @@ namespace
 //-----------------------------------------------------------------------------
 // Purpose:
 //-----------------------------------------------------------------------------
-std::vector<std::byte> Encode( const CImage &image, VtfFormat_t nFormat )
+std::vector<std::byte> Encode( const CImage &image, const VtfWriteOptions_t &options )
 {
-	return EncodeImage( image, nFormat );
+	return EncodeImage( image, options.m_nFormat );
 }
 
 //-----------------------------------------------------------------------------
-// Purpose:
+// Purpose: Light values in the file's format, or as compressed HDR when asked.
 //-----------------------------------------------------------------------------
-std::vector<std::byte> Encode( const CFloatImage &image, VtfFormat_t nFormat )
+std::vector<std::byte> Encode( const CFloatImage &image, const VtfWriteOptions_t &options )
 {
-	return EncodeFloat( image, nFormat );
+	if ( options.m_bCompressedHdr && !IsFloatFormat( options.m_nFormat ) )
+	{
+		return EncodeImage( ToCompressedHdr( image ), options.m_nFormat );
+	}
+	return EncodeFloat( image, options.m_nFormat );
 }
 
 //-----------------------------------------------------------------------------
@@ -1831,7 +1880,7 @@ std::vector<std::byte> WriteImages( std::span<const Image_t> images, int nFaces,
 				const auto &slices = levels[ nFrame * static_cast<std::size_t>( nFaces ) + static_cast<std::size_t>( nFace ) ][ static_cast<std::size_t>( nLevel ) ];
 				for ( std::size_t nSlice = 0; nSlice < nSlices && nSlice < slices.size(); nSlice++ )
 				{
-					const auto encoded = Encode( slices[ nSlice ], options.m_nFormat );
+					const auto encoded = Encode( slices[ nSlice ], options );
 					imageData.insert( imageData.end(), encoded.begin(), encoded.end() );
 				}
 			}

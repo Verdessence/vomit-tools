@@ -33,6 +33,7 @@ public:
 		xv::texture::COrientation m_Orientation;            // applied to image
 		xv::sky::CUvTransform m_Transform;                  // from a stock material ($basetexturetransform)
 		QString m_szMaterial;                               // the VMT it came from, if any: a game path, or a file
+		std::shared_ptr<const xv::texture::CFloatImage> m_pHdr; // light values for the HDR set, the same size and orientation as image; null for 8-bit faces
 	};
 
 	explicit CSkyDocument( QObject *pParent = nullptr );
@@ -60,6 +61,10 @@ public:
 	void SetFormat( xv::texture::VtfFormat_t nFormat );
 	void SetSize( int nSize );
 	void SetMipmaps( bool bMipmaps );
+	// How the HDR set is written when every face has light values (an imported HDRI); otherwise
+	// no HDR set is written, whatever this says.
+	[[nodiscard]] xv::sky::HdrFormat_t GetHdrFormat() const { return m_nHdr; }
+	void SetHdrFormat( xv::sky::HdrFormat_t nHdr );
 	[[nodiscard]] xv::sky::ExportOptions_t GetExportOptions() const;
 
 	// Where Export writes when the sky came from a folder on disk: the folder holding its
@@ -81,7 +86,7 @@ public:
 signals:
 	void FacesChanged();
 	void NameChanged();
-	void OptionsChanged(); // format, size or mipmaps
+	void OptionsChanged(); // format, size, mipmaps or HDR format
 	void ModifiedChanged( bool bModified );
 
 private:
@@ -96,6 +101,7 @@ private:
 	xv::texture::VtfFormat_t m_nFormat = xv::texture::VtfFormat_t::BGR888;
 	int m_nSize = 0;
 	bool m_bMipmaps = false;
+	xv::sky::HdrFormat_t m_nHdr = xv::sky::HdrFormat_t::HDR_FORMAT_COMPRESSED;
 	std::filesystem::path m_ExportFolder;
 	std::filesystem::path m_LastExportFolder;
 	QString m_szOrigin;

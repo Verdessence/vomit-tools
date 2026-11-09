@@ -102,6 +102,19 @@ void CSkyDocument::SetMipmaps( bool bMipmaps )
 }
 
 //-----------------------------------------------------------------------------
+// Purpose: How the HDR set is written, when the faces have light values.
+//-----------------------------------------------------------------------------
+void CSkyDocument::SetHdrFormat( xv::sky::HdrFormat_t nHdr )
+{
+	if ( nHdr != m_nHdr )
+	{
+		m_nHdr = nHdr;
+		SettingChanged();
+		emit OptionsChanged();
+	}
+}
+
+//-----------------------------------------------------------------------------
 // Purpose: Undoable. Faces left as nullopt are unchanged; all the changes are one undo step.
 //-----------------------------------------------------------------------------
 void CSkyDocument::SetSlots( const std::array<std::optional<Slot_t>, 6> &changes, const QString &szText )
@@ -177,6 +190,12 @@ const xv::sky::CCube &CSkyDocument::GetCube() const
 			{
 				cube.Face( nFace ) = xv::texture::Oriented( *s.m_pImage, s.m_Orientation.m_nQuarterTurns, s.m_Orientation.m_bMirror );
 				cube.m_Transforms[ xv::sky::IndexOf( nFace ) ] = s.m_Transform;
+				// Light values only stand for a face drawn whole: a stock face's transform shows
+				// part of its texture, which the HDR set wouldn't follow.
+				if ( s.m_pHdr && s.m_Transform.IsIdentity() )
+				{
+					cube.m_HdrFaces[ xv::sky::IndexOf( nFace ) ] = xv::texture::Oriented( *s.m_pHdr, s.m_Orientation.m_nQuarterTurns, s.m_Orientation.m_bMirror );
+				}
 			}
 		}
 		m_Cube = std::move( cube );
@@ -197,7 +216,8 @@ bool CSkyDocument::GetComplete() const
 //-----------------------------------------------------------------------------
 xv::sky::ExportOptions_t CSkyDocument::GetExportOptions() const
 {
-	return { .m_szName = m_szName.toStdString(), .m_nFormat = m_nFormat, .m_nSize = m_nSize, .m_bMipmaps = m_bMipmaps };
+	const xv::sky::HdrFormat_t nHdr = GetCube().HasHdr() ? m_nHdr : xv::sky::HdrFormat_t::HDR_FORMAT_NONE;
+	return { .m_szName = m_szName.toStdString(), .m_nFormat = m_nFormat, .m_nSize = m_nSize, .m_bMipmaps = m_bMipmaps, .m_nHdr = nHdr };
 }
 
 //-----------------------------------------------------------------------------

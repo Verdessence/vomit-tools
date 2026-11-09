@@ -111,6 +111,9 @@ vomit_tools_add_notice(NAME "miniaudio" FETCH miniaudio FILE ./LICENSE
         URL "https://github.com/mackron/miniaudio/archive/refs/tags/0.11.25.tar.gz" LICENSE "Unlicense OR MIT-0")
 vomit_tools_add_notice(NAME "stb" FETCH stb FILE ./LICENSE
         URL "https://github.com/nothings/stb/archive/2c980bb59875b0d32144a71867fbdebb2f77cd20.tar.gz" LICENSE "MIT OR Unlicense")
+vomit_tools_add_notice(NAME "tinyexr" FETCH tinyexr FILE ./LICENSE
+        URL "https://github.com/syoyo/tinyexr/archive/refs/tags/v3.2.0.tar.gz" LICENSE "BSD-3-Clause"
+        NOTE "Only tinyexr.h (the single-header API) is used.")
 
 vomit_tools_add_notice(NAME "CoACD" FETCH coacd FILE ./LICENSE
         URL "https://github.com/SarahWeiii/CoACD/tree/131010c4f03fec375ea88c5c6263f120046cb7f1" LICENSE "MIT")

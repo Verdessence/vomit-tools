@@ -55,6 +55,10 @@ public:
 	bool LoadFace( xv::sky::Face_t nFace, const QString &szPath );
 	// Fills every face with a labelled pattern for checking orientation in game.
 	void UseTestPattern( int nSize = 512 );
+	// Makes all six faces from an equirectangular panorama, as one undo step: an HDRI (.hdr,
+	// .exr, .pfm) gives the HDR set too. Asks for the file when none is given, and asks how
+	// unless pOptions says.
+	bool ImportPanorama( const QString &szPath = {}, const xv::sky::PanoramaImport_t *pOptions = nullptr );
 	void ApplyFix( const xv::sky::OrientationFix_t &fix );
 
 	[[nodiscard]] const std::vector<Issue_t> &GetIssues() const { return m_Issues; }
@@ -87,6 +91,7 @@ private:
 	QComboBox *m_pFormat = nullptr;
 	QComboBox *m_pSize = nullptr;
 	QCheckBox *m_pMipmaps = nullptr;
+	QComboBox *m_pHdr = nullptr;
 	QLabel *m_pEstimate = nullptr;
 	QLabel *m_pExported = nullptr;
 	QListWidget *m_pIssueList = nullptr;

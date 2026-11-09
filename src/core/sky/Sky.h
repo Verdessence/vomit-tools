@@ -117,9 +117,14 @@ struct CCube
 {
 	std::array<texture::CImage, 6> m_Faces;   // by indexOf(Face); a missing face reads as black
 	std::array<CUvTransform, 6> m_Transforms; // HL2's half-height sides are stretched to fill
+	// Light values for the HDR set, by indexOf(Face), oriented as m_Faces; all empty when the sky
+	// has none (it was made from 8-bit pictures).
+	std::array<texture::CFloatImage, 6> m_HdrFaces;
 
 	[[nodiscard]] const texture::CImage &Face( Face_t f ) const { return m_Faces[ IndexOf( f ) ]; }
 	[[nodiscard]] texture::CImage &Face( Face_t f ) { return m_Faces[ IndexOf( f ) ]; }
+	// Every face has light values.
+	[[nodiscard]] bool HasHdr() const;
 };
 
 // The colour seen in a direction, 0-255 per channel: bilinear, clamped at the face edges.
@@ -167,12 +172,21 @@ struct OrientationFix_t
 [[nodiscard]] std::optional<CVec3> BrightestSpot( const CCube &cube );
 
 // Writing skies
+// How the HDR set is written. Under HDR the engine draws skybox/<name>_hdr<f> (shader "sky"),
+// whose $basetexture is the LDR face, kept for when HDR is off.
+enum class HdrFormat_t
+{
+	HDR_FORMAT_NONE,       // the LDR set only
+	HDR_FORMAT_COMPRESSED, // BGRA8888 as $hdrcompressedtexture: RGB times alpha times 8 (texture::ToCompressedHdr); a quarter of float's size
+	HDR_FORMAT_FLOAT,      // RGBA16161616F as $hdrbasetexture: any brightness, at full precision
+};
 struct ExportOptions_t
 {
 	std::string m_szName;                                        // "sky_mysky": materials/skybox/sky_myskyrt.vmt, ...
 	texture::VtfFormat_t m_nFormat = texture::VtfFormat_t::BGR888;  // BGR888 (no compression) or DXT1
 	int m_nSize = 0;                                            // face width and height; 0 keeps each face's own
 	bool m_bMipmaps = false;
+	HdrFormat_t m_nHdr = HdrFormat_t::HDR_FORMAT_NONE;          // needs the cube's light values (CCube::HasHdr)
 };
 struct OutputFile_t
 {
@@ -186,7 +200,11 @@ struct OutputFile_t
 [[nodiscard]] std::uint32_t VtfFlags( bool bMipmaps );
 // The VMT of one face of an LDR sky.
 [[nodiscard]] std::string Material( std::string_view szName, Face_t nFace );
-// The VTF and VMT of every face (12 files). Faces are encoded in parallel. Empty if a face is missing.
+// The VMT of one face of the HDR set (skybox/<name>_hdr<f>), as Valve's are.
+[[nodiscard]] std::string HdrMaterial( std::string_view szName, Face_t nFace, HdrFormat_t nFormat );
+// The VTF and VMT of every face (12 files), and with HDR the _hdr VTF and VMT of each too (24).
+// Faces are encoded in parallel. Empty if a face is missing, or HDR is asked for without light
+// values.
 [[nodiscard]] std::vector<OutputFile_t> ExportSky( const CCube &cube, const ExportOptions_t &options );
 
 // Cube maps (VTFs with the ENVMAP flag, such as a WindowImposter sky's $envmap) hold the six faces
@@ -197,12 +215,58 @@ struct OutputFile_t
 // way it stores them, from an equirectangular panorama (an HDRI): its middle looks along +X (yaw 0),
 // yaw grows to the left, its top row is straight up. flYaw turns it (degrees, to the left).
 [[nodiscard]] std::vector<texture::CFloatImage> CubeMapFromPanorama( const texture::CFloatImage &panorama, int nSize, float flYaw = 0.0f );
+
+// Skies from panoramas (HDRIs)
+// The six sky faces seen in an equirectangular panorama, nSize square, oriented as sky faces are
+// (the panorama's middle along +X, yaw 0; yaw grows to the left; its top row straight up; flYaw
+// turns it, degrees to the left). All empty if the panorama or size is unusable.
+[[nodiscard]] std::array<texture::CFloatImage, 6> SkyFacesFromPanorama( const texture::CFloatImage &panorama, int nSize, float flYaw = 0.0f );
+// The median brightness of the side faces (luminance, linear).
+[[nodiscard]] float SideBrightness( const std::array<texture::CFloatImage, 6> &faces );
+// About where Valve's day skies sit by that measure (their HDR sides' medians run 0.2 to 0.8): an
+// imported HDRI is scaled to it unless told otherwise, as HDRIs come at any brightness.
+inline constexpr float STOCK_SKY_BRIGHTNESS = 0.45f;
+void Scale( texture::CFloatImage &image, float flFactor );
+
+// Light values made into an LDR picture.
+enum class ToneCurve_t
+{
+	TONE_CURVE_CLIP,     // as they are, cut off at 1
+	TONE_CURVE_REINHARD, // x / (1 + x), white at 4
+	TONE_CURVE_FILMIC,   // ACES-like: a toe, and highlights rolled off gently
+};
+struct ToneMap_t
+{
+	float m_flExposure = 0.0f; // stops
+	ToneCurve_t m_nCurve = ToneCurve_t::TONE_CURVE_FILMIC;
+};
+[[nodiscard]] texture::CImage ToneMapped( const texture::CFloatImage &image, const ToneMap_t &toneMap );
+
+// A sky made from a panorama: the faces, and for an HDR panorama their light values, scaled to
+// STOCK_SKY_BRIGHTNESS times 2^m_flBrightness, with the LDR faces tone mapped from those.
+struct PanoramaImport_t
+{
+	int m_nSize = 512;
+	float m_flYaw = 0.0f;        // degrees, to the left
+	float m_flBrightness = 0.0f; // stops over the stock level (HDR only)
+	ToneMap_t m_ToneMap;         // HDR only; an 8-bit panorama's faces are its own colours
+};
+struct PanoramaSky_t
+{
+	std::array<texture::CImage, 6> m_Faces;
+	std::array<texture::CFloatImage, 6> m_HdrFaces; // empty for an 8-bit panorama
+	float m_flScale = 1.0f;                         // what the panorama's light values were multiplied by
+};
+// bHdr: the panorama holds light values (an .hdr or .exr), not an 8-bit picture made linear.
+// All faces empty if the panorama or size is unusable.
+[[nodiscard]] PanoramaSky_t SkyFromPanorama( const texture::CFloatImage &panorama, const PanoramaImport_t &options, bool bHdr );
 // One face of a cube map as a sky face image (the largest mip unless nMip says), or nullopt with
 // error set.
 [[nodiscard]] std::optional<texture::CImage> CubeMapFace( const texture::CVtf &vtf, Face_t nFace, std::string *pError = nullptr, int nMip = 0, int nFrame = 0 );
 
 // Reading skies from a game
-// The sky names the game has materials for (every skybox/<name>rt.vmt), sorted.
+// The sky names the game has materials for (every skybox/<name>rt.vmt), sorted; a sky's HDR set
+// (<name>_hdr, beside <name>) is left out.
 [[nodiscard]] std::vector<std::string> SkyNames( const vfs::CFileSystem &fileSystem );
 struct LoadedSky_t
 {

@@ -526,6 +526,14 @@ CUvTransform CUvTransform::Parse( std::string_view szText )
 //-----------------------------------------------------------------------------
 // Purpose: The colour seen in a direction, 0-255 per channel: bilinear, clamped at the face edges.
 //-----------------------------------------------------------------------------
+// Purpose: Every face has light values.
+//-----------------------------------------------------------------------------
+bool CCube::HasHdr() const
+{
+	return std::ranges::none_of( m_HdrFaces, &texture::CFloatImage::Empty );
+}
+
+//-----------------------------------------------------------------------------
 std::array<float, 3> Sample( const CCube &cube, CVec3 vecDir )
 {
 	return SampleWith( cube, vecDir, Face_t::FACE_RT, nullptr );
@@ -764,16 +772,30 @@ std::string Material( std::string_view szName, Face_t nFace )
 }
 
 //-----------------------------------------------------------------------------
-// Purpose: The VTF and VMT of every face (12 files). Faces are encoded in parallel. Empty if a
-//          face is missing.
+// Purpose: The VMT of one face of the HDR set: the HDR texture, and the LDR face for when HDR is
+//          off.
+//-----------------------------------------------------------------------------
+std::string HdrMaterial( std::string_view szName, Face_t nFace, HdrFormat_t nFormat )
+{
+	const std::string szFace{ Suffix( nFace ) };
+	const char *pszParameter = nFormat == HdrFormat_t::HDR_FORMAT_FLOAT ? "$hdrbasetexture" : "$hdrcompressedtexture";
+	return std::string{ "\"sky\"\n{\n\t\"" } + pszParameter + "\" \"skybox/" + std::string{ szName } + "_hdr" + szFace + "\"\n\t\"$basetexture\" \"skybox/" + std::string{ szName } + szFace +
+		"\"\n\t\"$nofog\" \"1\"\n\t\"$ignorez\" \"1\"\n}\n";
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: The VTF and VMT of every face, and of the HDR set when asked. Faces are encoded in
+//          parallel. Empty if a face is missing.
 //-----------------------------------------------------------------------------
 std::vector<OutputFile_t> ExportSky( const CCube &cube, const ExportOptions_t &options )
 {
-	if ( !IsValidName( options.m_szName ) || std::ranges::any_of( cube.m_Faces, &CImage::Empty ) || !texture::CanEncode( options.m_nFormat ) )
+	const bool bHdr = options.m_nHdr != HdrFormat_t::HDR_FORMAT_NONE;
+	if ( !IsValidName( options.m_szName ) || std::ranges::any_of( cube.m_Faces, &CImage::Empty ) || !texture::CanEncode( options.m_nFormat ) || ( bHdr && !cube.HasHdr() ) )
 	{
 		return {};
 	}
 	std::array<std::vector<std::byte>, 6> textures;
+	std::array<std::vector<std::byte>, 6> hdrTextures;
 	std::vector<std::thread> workers;
 	for ( Face_t nFace : FACES )
 	{
@@ -785,18 +807,42 @@ std::vector<OutputFile_t> ExportSky( const CCube &cube, const ExportOptions_t &o
 			}
 			textures[ IndexOf( nFace ) ] = texture::WriteVtf( image, { .m_nFormat = options.m_nFormat, .m_nFlags = VtfFlags( options.m_bMipmaps ), .m_bMipmaps = options.m_bMipmaps, .m_bLowRes = true, .m_nVersionMinor = 2 } );
 		} );
+		if ( bHdr )
+		{
+			workers.emplace_back( [ &cube, &options, &hdrTextures, nFace ] {
+				texture::CFloatImage image = cube.m_HdrFaces[ IndexOf( nFace ) ];
+				if ( options.m_nSize > 0 && ( image.m_nWidth != options.m_nSize || image.m_nHeight != options.m_nSize ) )
+				{
+					image = texture::Resize( image, options.m_nSize, options.m_nSize );
+				}
+				const bool bCompressed = options.m_nHdr == HdrFormat_t::HDR_FORMAT_COMPRESSED;
+				hdrTextures[ IndexOf( nFace ) ] = texture::WriteVtf( std::span{ &image, 1 }, 1,
+					{ .m_nFormat = bCompressed ? texture::VtfFormat_t::BGRA8888 : texture::VtfFormat_t::RGBA16161616F, .m_nFlags = VtfFlags( options.m_bMipmaps ), .m_bMipmaps = options.m_bMipmaps, .m_bLowRes = true, .m_nVersionMinor = 2, .m_bCompressedHdr = bCompressed } );
+			} );
+		}
 	}
 	for ( std::thread &worker : workers )
 	{
 		worker.join();
 	}
+	const auto bytes = []( const std::string &szText ) {
+		return std::vector<std::byte>{ reinterpret_cast<const std::byte *>( szText.data() ), reinterpret_cast<const std::byte *>( szText.data() + szText.size() ) };
+	};
 	std::vector<OutputFile_t> files;
 	for ( Face_t nFace : FACES )
 	{
 		const std::string szBase = "materials/skybox/" + options.m_szName + std::string{ Suffix( nFace ) };
-		const std::string szVmt = Material( options.m_szName, nFace );
 		files.push_back( { szBase + ".vtf", std::move( textures[ IndexOf( nFace ) ] ) } );
-		files.push_back( { szBase + ".vmt", { reinterpret_cast<const std::byte *>( szVmt.data() ), reinterpret_cast<const std::byte *>( szVmt.data() + szVmt.size() ) } } );
+		files.push_back( { szBase + ".vmt", bytes( Material( options.m_szName, nFace ) ) } );
+	}
+	if ( bHdr )
+	{
+		for ( Face_t nFace : FACES )
+		{
+			const std::string szBase = "materials/skybox/" + options.m_szName + "_hdr" + std::string{ Suffix( nFace ) };
+			files.push_back( { szBase + ".vtf", std::move( hdrTextures[ IndexOf( nFace ) ] ) } );
+			files.push_back( { szBase + ".vmt", bytes( HdrMaterial( options.m_szName, nFace, options.m_nHdr ) ) } );
+		}
 	}
 	return files;
 }
@@ -817,6 +863,8 @@ std::vector<std::string> SkyNames( const vfs::CFileSystem &fileSystem )
 			names.emplace( szFile.substr( 0, szFile.size() - 6 ) );
 		}
 	}
+	// A sky's HDR set (<name>_hdr<f>) is drawn in its place under HDR, not a sky of its own.
+	std::erase_if( names, [ &names ]( const std::string &szName ) { return szName.ends_with( "_hdr" ) && names.contains( szName.substr( 0, szName.size() - 4 ) ); } );
 	return { names.begin(), names.end() };
 }
 
@@ -1014,6 +1062,199 @@ LoadedSky_t LoadSkyFiles( const CSkyFiles &files, const vfs::CFileSystem *pFileS
 //-----------------------------------------------------------------------------
 // Purpose: A VTF with the six faces of a cube.
 //-----------------------------------------------------------------------------
+// Purpose: The six sky faces seen in an equirectangular panorama. Each face pixel averages a
+//          square of samples, as many as the panorama has pixels across it (up to 4×4), so a
+//          large panorama made into small faces doesn't shimmer. Faces are made in parallel.
+//-----------------------------------------------------------------------------
+std::array<texture::CFloatImage, 6> SkyFacesFromPanorama( const texture::CFloatImage &panorama, int nSize, float flYaw )
+{
+	std::array<texture::CFloatImage, 6> faces;
+	if ( panorama.Empty() || nSize <= 0 || nSize > 16384 || panorama.m_Pixels.size() < static_cast<std::size_t>( panorama.m_nWidth ) * static_cast<std::size_t>( panorama.m_nHeight ) * 4 )
+	{
+		return faces;
+	}
+	const float flTurn = flYaw * std::numbers::pi_v<float> / 180.0f;
+	// A face spans a quarter of the panorama's width.
+	const int nSamples = std::clamp( static_cast<int>( std::ceil( static_cast<float>( panorama.m_nWidth ) / 4.0f / static_cast<float>( nSize ) ) ), 1, 4 );
+	// Bilinear, wrapping round the sides, clamped at the poles.
+	const auto sample = [ &panorama ]( float u, float v, float *pSum ) {
+		const float x = u * static_cast<float>( panorama.m_nWidth ) - 0.5f;
+		const float y = std::clamp( v * static_cast<float>( panorama.m_nHeight ) - 0.5f, 0.0f, static_cast<float>( panorama.m_nHeight - 1 ) );
+		const int x0 = static_cast<int>( std::floor( x ) );
+		const int y0 = static_cast<int>( std::floor( y ) );
+		const float fx = x - static_cast<float>( x0 );
+		const float fy = y - static_cast<float>( y0 );
+		const auto at = [ &panorama ]( int px, int py ) {
+			px = ( ( px % panorama.m_nWidth ) + panorama.m_nWidth ) % panorama.m_nWidth;
+			py = std::clamp( py, 0, panorama.m_nHeight - 1 );
+			return panorama.Pixel( px, py );
+		};
+		for ( int c = 0; c < 4; c++ )
+		{
+			const float flTop = at( x0, y0 )[ c ] * ( 1 - fx ) + at( x0 + 1, y0 )[ c ] * fx;
+			const float flBottom = at( x0, y0 + 1 )[ c ] * ( 1 - fx ) + at( x0 + 1, y0 + 1 )[ c ] * fx;
+			pSum[ c ] += flTop * ( 1 - fy ) + flBottom * fy;
+		}
+	};
+	std::vector<std::thread> workers;
+	for ( const Face_t nFace : FACES )
+	{
+		workers.emplace_back( [ &, nFace ] {
+			const FaceBasis_t &basis = Basis( nFace );
+			texture::CFloatImage &face = faces[ IndexOf( nFace ) ];
+			face.m_nWidth = nSize;
+			face.m_nHeight = nSize;
+			face.m_Pixels.assign( static_cast<std::size_t>( nSize ) * static_cast<std::size_t>( nSize ) * 4, 0.0f );
+			const float flWeight = 1.0f / static_cast<float>( nSamples * nSamples );
+			for ( int y = 0; y < nSize; y++ )
+			{
+				for ( int x = 0; x < nSize; x++ )
+				{
+					float *pOut = face.m_Pixels.data() + ( static_cast<std::size_t>( y ) * static_cast<std::size_t>( nSize ) + static_cast<std::size_t>( x ) ) * 4;
+					for ( int sy = 0; sy < nSamples; sy++ )
+					{
+						for ( int sx = 0; sx < nSamples; sx++ )
+						{
+							const float u = ( static_cast<float>( x ) + ( static_cast<float>( sx ) + 0.5f ) / static_cast<float>( nSamples ) ) / static_cast<float>( nSize ) * 2.0f - 1.0f;
+							const float v = 1.0f - ( static_cast<float>( y ) + ( static_cast<float>( sy ) + 0.5f ) / static_cast<float>( nSamples ) ) / static_cast<float>( nSize ) * 2.0f;
+							const CVec3 vecDirection = basis.m_vecNormal + basis.m_vecRight * u + basis.m_vecUp * v;
+							const float flAround = std::atan2( vecDirection.m_flY, vecDirection.m_flX ) + flTurn;
+							const float flUp = std::atan2( vecDirection.m_flZ, std::sqrt( vecDirection.m_flX * vecDirection.m_flX + vecDirection.m_flY * vecDirection.m_flY ) );
+							float flU = 0.5f - flAround / ( 2.0f * std::numbers::pi_v<float> );
+							flU -= std::floor( flU );
+							sample( flU, 0.5f - flUp / std::numbers::pi_v<float>, pOut );
+						}
+					}
+					for ( int c = 0; c < 4; c++ )
+					{
+						pOut[ c ] *= flWeight;
+					}
+				}
+			}
+		} );
+	}
+	for ( std::thread &worker : workers )
+	{
+		worker.join();
+	}
+	return faces;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: The median brightness (luminance) of the four side faces, which is where a sky's
+//          overall level shows; the sun and the ground below don't move it much. 0 without
+//          faces.
+//-----------------------------------------------------------------------------
+float SideBrightness( const std::array<texture::CFloatImage, 6> &faces )
+{
+	std::vector<float> values;
+	for ( const Face_t nFace : { Face_t::FACE_RT, Face_t::FACE_BK, Face_t::FACE_LF, Face_t::FACE_FT } )
+	{
+		const texture::CFloatImage &face = faces[ IndexOf( nFace ) ];
+		// Every pixel of a small face, else a thinned grid: the median doesn't need them all.
+		const std::size_t nPixels = face.m_Pixels.size() / 4;
+		const std::size_t nStep = std::max<std::size_t>( 1, nPixels / 65536 );
+		for ( std::size_t i = 0; i < nPixels; i += nStep )
+		{
+			const float *p = face.m_Pixels.data() + i * 4;
+			values.push_back( 0.2126f * p[ 0 ] + 0.7152f * p[ 1 ] + 0.0722f * p[ 2 ] );
+		}
+	}
+	if ( values.empty() )
+	{
+		return 0.0f;
+	}
+	const auto middle = values.begin() + static_cast<std::ptrdiff_t>( values.size() / 2 );
+	std::ranges::nth_element( values, middle );
+	return std::max( 0.0f, *middle );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Light values times a factor (colour only; alpha stays).
+//-----------------------------------------------------------------------------
+void Scale( texture::CFloatImage &image, float flFactor )
+{
+	for ( std::size_t i = 0; i < image.m_Pixels.size(); i++ )
+	{
+		if ( i % 4 != 3 )
+		{
+			image.m_Pixels[ i ] *= flFactor;
+		}
+	}
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Light values made into a picture the LDR sky can show: brightened by the exposure,
+//          then the curve brings them under 1, then sRGB. Filmic is Krzysztof Narkowicz's
+//          fit of the ACES curve; Reinhard's keeps white at 4.
+//-----------------------------------------------------------------------------
+texture::CImage ToneMapped( const texture::CFloatImage &image, const ToneMap_t &toneMap )
+{
+	const float flGain = std::exp2( toneMap.m_flExposure );
+	const auto curve = [ &toneMap ]( float x ) {
+		x = std::max( 0.0f, x );
+		switch ( toneMap.m_nCurve )
+		{
+			case ToneCurve_t::TONE_CURVE_REINHARD:
+			{
+				constexpr float WHITE = 4.0f;
+				return x * ( 1.0f + x / ( WHITE * WHITE ) ) / ( 1.0f + x );
+			}
+			case ToneCurve_t::TONE_CURVE_FILMIC: return ( x * ( 2.51f * x + 0.03f ) ) / ( x * ( 2.43f * x + 0.59f ) + 0.14f );
+			case ToneCurve_t::TONE_CURVE_CLIP: break;
+		}
+		return x;
+	};
+	texture::CImage out{ image.m_nWidth, image.m_nHeight };
+	for ( std::size_t i = 0; i + 3 < image.m_Pixels.size() && i + 3 < out.m_Pixels.size(); i += 4 )
+	{
+		for ( std::size_t c = 0; c < 3; c++ )
+		{
+			out.m_Pixels[ i + c ] = texture::FromLinear( std::clamp( curve( image.m_Pixels[ i + c ] * flGain ), 0.0f, 1.0f ) );
+		}
+		out.m_Pixels[ i + 3 ] = 255;
+	}
+	return out;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: A sky from a panorama: faces, light values brought to a stock sky's level, and the
+//          LDR faces tone mapped from them.
+//-----------------------------------------------------------------------------
+PanoramaSky_t SkyFromPanorama( const texture::CFloatImage &panorama, const PanoramaImport_t &options, bool bHdr )
+{
+	PanoramaSky_t sky;
+	auto faces = SkyFacesFromPanorama( panorama, options.m_nSize, options.m_flYaw );
+	if ( faces[ 0 ].Empty() )
+	{
+		return sky;
+	}
+	if ( !bHdr )
+	{
+		for ( std::size_t i = 0; i < faces.size(); i++ )
+		{
+			sky.m_Faces[ i ] = texture::ToEightBit( faces[ i ] );
+			for ( std::size_t p = 3; p < sky.m_Faces[ i ].m_Pixels.size(); p += 4 )
+			{
+				sky.m_Faces[ i ].m_Pixels[ p ] = 255; // sky faces are solid, whatever the picture's alpha
+			}
+		}
+		return sky;
+	}
+	const float flMeasured = SideBrightness( faces );
+	sky.m_flScale = ( flMeasured > 1e-6f ? STOCK_SKY_BRIGHTNESS / flMeasured : 1.0f ) * std::exp2( options.m_flBrightness );
+	ParallelFor( faces.size(), 1, [ & ]( std::size_t nBegin, std::size_t nEnd ) {
+		for ( std::size_t i = nBegin; i < nEnd; i++ )
+		{
+			Scale( faces[ i ], sky.m_flScale );
+			sky.m_Faces[ i ] = ToneMapped( faces[ i ], options.m_ToneMap );
+		}
+	} );
+	sky.m_HdrFaces = std::move( faces );
+	return sky;
+}
+
+//-----------------------------------------------------------------------------
 bool IsCubeMap( const texture::CVtf &vtf )
 {
 	return vtf.m_Info.m_nFaces >= 6;
@@ -1052,60 +1293,21 @@ constexpr std::array<Stored_t, 6> STORED{ {
 } // namespace
 
 //-----------------------------------------------------------------------------
-// Purpose: A cube map's faces from an equirectangular panorama, as the VTF stores them.
+// Purpose: A cube map's faces from an equirectangular panorama, as the VTF stores them: the sky
+//          faces, each turned and mirrored back to how the VTF keeps it.
 //-----------------------------------------------------------------------------
 std::vector<texture::CFloatImage> CubeMapFromPanorama( const texture::CFloatImage &panorama, int nSize, float flYaw )
 {
-	std::vector<texture::CFloatImage> stored( 6 );
-	if ( panorama.Empty() || nSize <= 0 )
+	auto faces = SkyFacesFromPanorama( panorama, nSize, flYaw );
+	if ( faces[ 0 ].Empty() )
 	{
 		return {};
 	}
-	const float flTurn = flYaw * std::numbers::pi_v<float> / 180.0f;
-	// Bilinear, wrapping round the sides.
-	const auto sample = [ &panorama ]( float u, float v, float *pOut ) {
-		const float x = u * static_cast<float>( panorama.m_nWidth ) - 0.5f;
-		const float y = std::clamp( v * static_cast<float>( panorama.m_nHeight ) - 0.5f, 0.0f, static_cast<float>( panorama.m_nHeight - 1 ) );
-		const int x0 = static_cast<int>( std::floor( x ) );
-		const int y0 = static_cast<int>( std::floor( y ) );
-		const float fx = x - static_cast<float>( x0 );
-		const float fy = y - static_cast<float>( y0 );
-		const auto at = [ &panorama ]( int px, int py ) {
-			px = ( ( px % panorama.m_nWidth ) + panorama.m_nWidth ) % panorama.m_nWidth;
-			py = std::clamp( py, 0, panorama.m_nHeight - 1 );
-			return panorama.Pixel( px, py );
-		};
-		for ( int c = 0; c < 4; c++ )
-		{
-			const float flTop = at( x0, y0 )[ c ] * ( 1 - fx ) + at( x0 + 1, y0 )[ c ] * fx;
-			const float flBottom = at( x0, y0 + 1 )[ c ] * ( 1 - fx ) + at( x0 + 1, y0 + 1 )[ c ] * fx;
-			pOut[ c ] = flTop * ( 1 - fy ) + flBottom * fy;
-		}
-	};
+	std::vector<texture::CFloatImage> stored( 6 );
 	for ( const Face_t nFace : FACES )
 	{
-		// The face as the sky sees it, then turned and mirrored back to how the VTF stores it.
-		const FaceBasis_t &basis = Basis( nFace );
-		texture::CFloatImage face;
-		face.m_nWidth = nSize;
-		face.m_nHeight = nSize;
-		face.m_Pixels.resize( static_cast<std::size_t>( nSize ) * static_cast<std::size_t>( nSize ) * 4 );
-		for ( int y = 0; y < nSize; y++ )
-		{
-			for ( int x = 0; x < nSize; x++ )
-			{
-				const float u = ( static_cast<float>( x ) + 0.5f ) / static_cast<float>( nSize ) * 2.0f - 1.0f;
-				const float v = 1.0f - ( static_cast<float>( y ) + 0.5f ) / static_cast<float>( nSize ) * 2.0f;
-				const CVec3 vecDirection = basis.m_vecNormal + basis.m_vecRight * u + basis.m_vecUp * v;
-				const float flAround = std::atan2( vecDirection.m_flY, vecDirection.m_flX ) + flTurn;
-				const float flUp = std::atan2( vecDirection.m_flZ, std::sqrt( vecDirection.m_flX * vecDirection.m_flX + vecDirection.m_flY * vecDirection.m_flY ) );
-				float flU = 0.5f - flAround / ( 2.0f * std::numbers::pi_v<float> );
-				flU -= std::floor( flU );
-				sample( flU, 0.5f - flUp / std::numbers::pi_v<float>, face.m_Pixels.data() + ( static_cast<std::size_t>( y ) * static_cast<std::size_t>( nSize ) + static_cast<std::size_t>( x ) ) * 4 );
-			}
-		}
 		const Stored_t &where = STORED[ IndexOf( nFace ) ];
-		stored[ static_cast<std::size_t>( where.m_nIndex ) ] = texture::Oriented( texture::Oriented( face, 0, true ), 4 - where.m_nQuarterTurns, false );
+		stored[ static_cast<std::size_t>( where.m_nIndex ) ] = texture::Oriented( texture::Oriented( faces[ IndexOf( nFace ) ], 0, true ), 4 - where.m_nQuarterTurns, false );
 	}
 	return stored;
 }

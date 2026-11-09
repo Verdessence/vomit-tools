@@ -47,8 +47,8 @@ struct CFloatImage
 // The extensions loadImage reads ("png", "tga", ...), lowercase and without the dot.
 [[nodiscard]] bool IsImageExtension( std::string_view szExtension );
 
-// PNG, JPEG, TGA, BMP, PSD (composited), GIF (first frame), PNM, QOI, and Radiance HDR and PFM
-// (gamma-mapped to 8 bits), recognised by content. Input is untrusted.
+// PNG, JPEG, TGA, BMP, PSD (composited), GIF (first frame), PNM, QOI, and Radiance HDR, PFM and
+// OpenEXR (mapped to 8 bits), recognised by content. Input is untrusted.
 [[nodiscard]] std::optional<CImage> LoadImage( std::span<const std::byte> data, std::string *pError = nullptr );
 // Every frame of an animated GIF or PNG (APNG); other files, their one picture. Input is
 // untrusted.
@@ -73,8 +73,8 @@ enum class ImageFileType_t
 // Light values as a Radiance HDR (or PFM) file, keeping values above 1.
 [[nodiscard]] std::vector<std::byte> SaveFloatImage( const CFloatImage &image, ImageFileType_t nType = ImageFileType_t::IMAGE_FILE_TYPE_HDR );
 
-// A Radiance HDR or PFM file as its light values; nullopt for other files (read those with
-// LoadImage).
+// A Radiance HDR, PFM or OpenEXR file as its light values; nullopt for other files (read those
+// with LoadImage).
 [[nodiscard]] std::optional<CFloatImage> LoadFloatImage( std::span<const std::byte> data );
 
 // Resampled in linear light (the pixels are taken as sRGB), with a Mitchell filter when shrinking

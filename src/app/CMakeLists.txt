@@ -121,6 +121,8 @@ add_library(vomit_tools_ui STATIC
         SkyTestPattern.h
         SkyView.cpp
         SkyView.h
+        SkyPanoramaDialog.cpp
+        SkyPanoramaDialog.h
         SheetDialog.cpp
         SheetDialog.h
         SoundDocument.cpp
