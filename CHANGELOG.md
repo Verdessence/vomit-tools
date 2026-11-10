@@ -276,6 +276,10 @@
   until touched, mass from the model, props only, and drawing the collision models.
 - Runs on Box3D (Erin Catto, MIT).
 
+### Hammer maps
+- The Building Generator is a fold at the bottom of New Objects rather than a panel of its own;
+  Tools > Building Generator opens it there.
+
 ### Settings file (new)
 - Settings live in `vomit-tools.nut` (beside Qt's settings: `~/.config/vomit-tools/` on Linux),
   written as Squirrel (VScript) tables and read as data, never run: `map <- { fov = 90 }`,

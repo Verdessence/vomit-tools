@@ -57,6 +57,7 @@ class QTimer;
 class QAction;
 class QActionGroup;
 class QComboBox;
+class QToolButton;
 class QSpinBox;
 class QLabel;
 class QLockFile;
@@ -509,6 +510,7 @@ private:
 	CMapPhysicsTool *m_pPhysicsTool = nullptr;
 	CMapRecentPanel *m_pRecent = nullptr;
 	CMapBuildingPanel *m_pBuilding = nullptr;
+	QToolButton *m_pBuildingFold = nullptr; // its fold in New Objects
 	CMapProperties *m_pWorldProperties = nullptr; // Map Properties: the world's keys
 	QWidget *m_pFaceEditHolder = nullptr; // Face Edit's panel, when it isn't in its window
 	CPanelColumn *m_pPanels = nullptr;    // the side's panels below the Filter Control

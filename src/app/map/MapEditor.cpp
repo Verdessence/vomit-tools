@@ -327,8 +327,6 @@ CMapEditor::CMapEditor( const QString &szPath, bool bFromGame, QWidget *pParent 
 	m_pPanels->AddPanel( QStringLiteral( "physics" ), tr( "Physics Simulation" ), MakeMapIcon( MapIcon_t::MAP_ICON_PHYSICS, panelIconColor ), m_pPhysicsTool );
 	m_pPanels->SetAvailable( QStringLiteral( "physics" ), false );
 	m_pBuilding = new CMapBuildingPanel;
-	m_pPanels->AddPanel( QStringLiteral( "building" ), tr( "Building Generator" ), MakeMapIcon( MapIcon_t::MAP_ICON_BLOCK, panelIconColor ), m_pBuilding );
-	m_pPanels->SetHiddenByDefault( QStringLiteral( "building" ) );
 	connect( m_pBuilding, &CMapBuildingPanel::CreateRequested, this, &CMapEditor::CreateBuilding );
 	m_pWorldProperties = new CMapProperties( *m_pDocument );
 	m_pWorldProperties->setObjectName( QStringLiteral( "mapWorldProperties" ) );
@@ -364,7 +362,31 @@ CMapEditor::CMapEditor( const QString &szPath, bool bFromGame, QWidget *pParent 
 		if ( m_pWorldProperties->isVisible() )
 			m_pDocument->MeasureEditListener( tr( "Map Properties" ), [ this ] { m_pWorldProperties->Refresh(); } );
 	} );
-	m_pPanels->AddPanel( QStringLiteral( "newObjects" ), tr( "New Objects" ), MakeMapIcon( MapIcon_t::MAP_ICON_BLOCK, panelIconColor ), BuildNewObjects() );
+	{
+		// New Objects with the Building Generator folded under it: both make what the block tool's
+		// box (or the selection) holds.
+		auto *pNewObjects = new QWidget;
+		auto *pNewLayout = new QVBoxLayout( pNewObjects );
+		pNewLayout->setContentsMargins( 0, 0, 0, 0 );
+		pNewLayout->addWidget( BuildNewObjects() );
+		m_pBuildingFold = new QToolButton;
+		m_pBuildingFold->setObjectName( QStringLiteral( "mapBuildingFold" ) );
+		m_pBuildingFold->setText( tr( "Building Generator" ) );
+		m_pBuildingFold->setToolTip( tr( "Rooms, corridors and stairs from the block tool's box (Tools > Building Generator)" ) );
+		m_pBuildingFold->setCheckable( true );
+		m_pBuildingFold->setAutoRaise( true );
+		m_pBuildingFold->setToolButtonStyle( Qt::ToolButtonTextBesideIcon );
+		m_pBuildingFold->setArrowType( Qt::RightArrow );
+		m_pBuildingFold->setSizePolicy( QSizePolicy::Expanding, QSizePolicy::Fixed );
+		connect( m_pBuildingFold, &QToolButton::toggled, this, [ this ]( bool bOpen ) {
+			m_pBuildingFold->setArrowType( bOpen ? Qt::DownArrow : Qt::RightArrow );
+			m_pBuilding->setVisible( bOpen );
+		} );
+		pNewLayout->addWidget( m_pBuildingFold );
+		pNewLayout->addWidget( m_pBuilding );
+		m_pBuilding->hide();
+		m_pPanels->AddPanel( QStringLiteral( "newObjects" ), tr( "New Objects" ), MakeMapIcon( MapIcon_t::MAP_ICON_BLOCK, panelIconColor ), pNewObjects );
+	}
 	m_pPanels->AddPanel( QStringLiteral( "texture" ), tr( "Texture" ), MakeMapIcon( MapIcon_t::MAP_ICON_MATERIAL, panelIconColor ), BuildTexturePanel() );
 	// What was used lately, a click away: the side's spare height goes to its lists.
 	m_pRecent = new CMapRecentPanel;
@@ -942,7 +964,8 @@ void CMapEditor::FillNewObjects()
 }
 
 //-----------------------------------------------------------------------------
-// Purpose: Without a box or a selection, a 256 unit room's worth at the grid's origin.
+// Purpose: New Objects shown with the Building Generator unfolded in it. Without a box or a
+//          selection, a 256 unit room's worth at the grid's origin.
 //-----------------------------------------------------------------------------
 void CMapEditor::ShowBuildingGenerator()
 {
@@ -957,7 +980,8 @@ void CMapEditor::ShowBuildingGenerator()
 	else if ( !m_pDocument->GetSelection().empty() && !m_pDocument->GetSelectionBounds().IsEmpty() )
 		box = m_pDocument->GetSelectionBounds();
 	m_pBuilding->SetBox( box );
-	m_pPanels->Reveal( QStringLiteral( "building" ) );
+	m_pBuildingFold->setChecked( true );
+	m_pPanels->Reveal( QStringLiteral( "newObjects" ) );
 }
 
 //-----------------------------------------------------------------------------
