@@ -1062,9 +1062,16 @@ std::string CWriter::Run()
 			szBlocks += "\t" + Pair( "material", spline.m_szMaterial ) + nl;
 			szBlocks += "\t" + Pair( "scale", FormatNumber( spline.m_flTextureScale ) ) + nl;
 			szBlocks += "\t" + Pair( "pieces", szPieces ) + nl;
+			szBlocks += "\t" + Pair( "group", spline.m_bGroup ? "1" : "0" ) + nl;
+			szBlocks += "\t" + Pair( "groupid", std::to_string( spline.m_nGroup ) ) + nl;
 			for ( const SplinePoint_t &point : spline.m_Points )
 			{
-				szBlocks += "\t" + Pair( "point", FormatPoint( point.m_Position ) + " " + FormatNumber( point.m_flWidth ) ) + nl;
+				std::string szPoint = FormatPoint( point.m_Position ) + " " + FormatNumber( point.m_flWidth );
+				if ( point.m_Handle )
+				{
+					szPoint += " " + FormatNumber( ( *point.m_Handle )[ 0 ] ) + " " + FormatNumber( ( *point.m_Handle )[ 1 ] );
+				}
+				szBlocks += "\t" + Pair( "point", szPoint ) + nl;
 			}
 			szBlocks += "}" + nl;
 		}

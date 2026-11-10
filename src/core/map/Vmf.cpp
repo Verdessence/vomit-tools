@@ -906,13 +906,18 @@ std::size_t CReader::ReadSpline( std::size_t nOpen, int nDepth, Spline_t &spline
 			else if ( Is( szKey, "point" ) )
 			{
 				std::vector<double> numbers;
-				if ( ParseNumbers( szValue, 4, numbers ) || ParseNumbers( szValue, 3, numbers ) )
+				if ( ParseNumbers( szValue, 6, numbers ) || ParseNumbers( szValue, 4, numbers ) || ParseNumbers( szValue, 3, numbers ) )
 				{
-					spline.m_Points.push_back( { { numbers[ 0 ], numbers[ 1 ], numbers[ 2 ] }, numbers.size() > 3 ? numbers[ 3 ] : 0.0 } );
+					SplinePoint_t point{ { numbers[ 0 ], numbers[ 1 ], numbers[ 2 ] }, numbers.size() > 3 ? numbers[ 3 ] : 0.0 };
+					if ( numbers.size() == 6 )
+					{
+						point.m_Handle = Point_t{ numbers[ 4 ], numbers[ 5 ], 0.0 };
+					}
+					spline.m_Points.push_back( point );
 				}
 				else
 				{
-					Report( value.m_nOffset, Severity_t::SEVERITY_WARNING, "a spline point should be \"x y z width\"" );
+					Report( value.m_nOffset, Severity_t::SEVERITY_WARNING, "a spline point should be \"x y z width\" (and \"hx hy\", its handle)" );
 				}
 			}
 			else if ( Is( szKey, "width" ) )
@@ -938,6 +943,14 @@ std::size_t CReader::ReadSpline( std::size_t nOpen, int nDepth, Spline_t &spline
 			else if ( Is( szKey, "material" ) )
 			{
 				spline.m_szMaterial = std::string{ szValue };
+			}
+			else if ( Is( szKey, "group" ) )
+			{
+				spline.m_bGroup = ParseNumber<int>( szValue ).value_or( 1 ) != 0;
+			}
+			else if ( Is( szKey, "groupid" ) )
+			{
+				spline.m_nGroup = ParseNumber<int>( szValue ).value_or( 0 );
 			}
 			else if ( Is( szKey, "scale" ) )
 			{

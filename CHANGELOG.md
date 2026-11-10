@@ -256,6 +256,15 @@
   Choose the tool with a piece selected to take it up; dragging a point, adding one on the curve,
   removing one (right-click) or changing a setting makes the pieces again, one undo step each.
   Hammer keeps the pieces as ordinary displacements and drops the block on its own saves.
+- Points have handles, as Photoshop's: drag the picked point's handle end to set how the curve
+  leaves it; double-click (or Automatic Handle) gives it back to the curve.
+- Shift-click picks several points; Brush Edit's G, R and E move, turn and scale them (X/Y/Z to
+  lock, numbers to type the amount); Ctrl+X removes them. Ctrl+Z and Ctrl+Shift+Z step through
+  a path's points before it is made.
+- The pieces are kept in one group (Group the pieces, on), so a click takes the whole strip.
+- The preview draws each piece's outline in white; Browse picks the material in the texture
+  browser; points clicked on a displacement land on its surface.
+- The 3D views show the world's axes at 0 0 0 (Origin Axes on the Show bar).
 
 ### Settings file (new)
 - Settings live in `vomit-tools.nut` (beside Qt's settings: `~/.config/vomit-tools/` on Linux),

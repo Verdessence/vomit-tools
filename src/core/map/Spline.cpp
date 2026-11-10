@@ -74,6 +74,21 @@ Point_t ControlPoint( const Spline_t &spline, std::ptrdiff_t i )
 }
 
 //-----------------------------------------------------------------------------
+// Purpose: A point's handle, by an index that may run off either end (round the loop when
+//          closed; the ends' virtual neighbours have none).
+//-----------------------------------------------------------------------------
+const std::optional<Point_t> &HandleOf( const Spline_t &spline, std::ptrdiff_t i )
+{
+	static const std::optional<Point_t> NONE;
+	const auto nPoints = static_cast<std::ptrdiff_t>( spline.m_Points.size() );
+	if ( spline.m_bClosed && nPoints >= 3 )
+	{
+		return spline.m_Points[ static_cast<std::size_t>( ( ( i % nPoints ) + nPoints ) % nPoints ) ].m_Handle;
+	}
+	return i >= 0 && i < nPoints ? spline.m_Points[ static_cast<std::size_t>( i ) ].m_Handle : NONE;
+}
+
+//-----------------------------------------------------------------------------
 // Purpose: Across the curve, level: a road on a slope stays flat from side to side. Where the
 //          curve runs straight up, the last good one is kept.
 //-----------------------------------------------------------------------------
@@ -149,6 +164,44 @@ std::vector<std::pair<std::uint32_t, Solid_t>> DeletePieces( const CMap &map, co
 	return deletions;
 }
 
+//-----------------------------------------------------------------------------
+// Purpose: The pieces just added put in the spline's group (made with the next free id, or the
+//          one it has), or the group let go when the spline no longer wants one.
+//-----------------------------------------------------------------------------
+void GroupPieces( const CScene &scene, Spline_t &spline, MapEdit_t &edit )
+{
+	const auto existing = std::ranges::find( scene.m_Map.m_Groups, spline.m_nGroup, &Group_t::m_nId );
+	if ( !spline.m_bGroup )
+	{
+		// A group already in the file stays (empty) until Hammer drops it; a new one goes.
+		if ( spline.m_nGroup != 0 && existing != scene.m_Map.m_Groups.end() )
+		{
+			edit.m_RemovedGroups.push_back( spline.m_nGroup );
+		}
+		spline.m_nGroup = 0;
+		return;
+	}
+	if ( spline.m_nGroup == 0 || existing == scene.m_Map.m_Groups.end() )
+	{
+		int nId = scene.m_nNextObjectId;
+		for ( const auto &[ nIndex, solid ] : edit.m_Solids )
+		{
+			nId = std::max( nId, solid.m_nId + 1 );
+		}
+		Group_t group;
+		group.m_nId = nId;
+		group.m_Editor.m_Color = { 220, 220, 220 };
+		group.m_Editor.m_bHasColor = true;
+		edit.m_Groups.push_back( group );
+		spline.m_nGroup = nId;
+	}
+	for ( auto &[ nIndex, solid ] : edit.m_Solids )
+	{
+		solid.m_Editor.m_nGroup = spline.m_nGroup;
+		solid.m_Editor.m_bChanged = true;
+	}
+}
+
 } // namespace
 
 //-----------------------------------------------------------------------------
@@ -168,14 +221,34 @@ Point_t EvaluateSpline( const Spline_t &spline, std::size_t i, double t )
 	const double t1 = t0 + knot( p0, p1 );
 	const double t2 = t1 + knot( p1, p2 );
 	const double t3 = t2 + knot( p2, p3 );
-	const double u = t1 + ( t2 - t1 ) * t;
-	const auto mix = []( const Point_t &a, const Point_t &b, double ta, double tb, double tu ) { return Lerp( a, b, ( tu - ta ) / ( tb - ta ) ); };
-	const Point_t a1 = mix( p0, p1, t0, t1, u );
-	const Point_t a2 = mix( p1, p2, t1, t2, u );
-	const Point_t a3 = mix( p2, p3, t2, t3, u );
-	const Point_t b1 = mix( a1, a2, t0, t2, u );
-	const Point_t b2 = mix( a2, a3, t1, t3, u );
-	Point_t point = mix( b1, b2, t1, t2, u );
+	const std::optional<Point_t> &start = HandleOf( spline, n );
+	const std::optional<Point_t> &end = HandleOf( spline, n + 1 );
+	Point_t point;
+	if ( !start && !end )
+	{
+		const double u = t1 + ( t2 - t1 ) * t;
+		const auto mix = []( const Point_t &a, const Point_t &b, double ta, double tb, double tu ) { return Lerp( a, b, ( tu - ta ) / ( tb - ta ) ); };
+		const Point_t a1 = mix( p0, p1, t0, t1, u );
+		const Point_t a2 = mix( p1, p2, t1, t2, u );
+		const Point_t a3 = mix( p2, p3, t2, t3, u );
+		const Point_t b1 = mix( a1, a2, t0, t2, u );
+		const Point_t b2 = mix( a2, a3, t1, t3, u );
+		point = mix( b1, b2, t1, t2, u );
+	}
+	else
+	{
+		// A cubic Hermite across the ground: a handle's end is a Bezier control point, so the
+		// tangent there is three times the handle; an end without one keeps the tangent the
+		// centripetal curve has there, so its neighbour segment still meets it smoothly.
+		const auto over = []( const Point_t &a, const Point_t &b, double flSpan ) { return Scale( Subtract( b, a ), 1.0 / flSpan ); };
+		const Point_t autoStart = Scale( Add( Subtract( over( p0, p1, t1 - t0 ), over( p0, p2, t2 - t0 ) ), over( p1, p2, t2 - t1 ) ), t2 - t1 );
+		const Point_t autoEnd = Scale( Add( Subtract( over( p1, p2, t2 - t1 ), over( p1, p3, t3 - t1 ) ), over( p2, p3, t3 - t2 ) ), t2 - t1 );
+		const Point_t m1 = start ? Scale( *start, 3.0 ) : autoStart;
+		const Point_t m2 = end ? Scale( *end, 3.0 ) : autoEnd;
+		const double s2 = t * t;
+		const double s3 = s2 * t;
+		point = Add( Add( Scale( p1, 2 * s3 - 3 * s2 + 1 ), Scale( m1, s3 - 2 * s2 + t ) ), Add( Scale( p2, -2 * s3 + 3 * s2 ), Scale( m2, s3 - s2 ) ) );
+	}
 
 	// Height on its own, as a monotone cubic over the distance between the points seen from
 	// above (Fritsch and Butland's slopes): it never rises past the higher of two points or dips
@@ -448,6 +521,8 @@ std::optional<MapEdit_t> AddSpline( const CScene &scene, Spline_t spline, std::v
 	{
 		spline.m_Pieces.push_back( solid.m_nId );
 	}
+	spline.m_nGroup = 0;
+	GroupPieces( scene, spline, edit );
 	std::vector<Spline_t> splines = scene.m_Map.m_Splines;
 	splines.push_back( std::move( spline ) );
 	edit.m_Splines = std::move( splines );
@@ -480,6 +555,7 @@ std::optional<MapEdit_t> UpdateSpline( const CScene &scene, Spline_t spline, std
 	{
 		spline.m_Pieces.push_back( solid.m_nId );
 	}
+	GroupPieces( scene, spline, edit );
 	auto deletions = DeletePieces( scene.m_Map, found->m_Pieces );
 	edit.m_Solids.insert( edit.m_Solids.begin(), std::make_move_iterator( deletions.begin() ), std::make_move_iterator( deletions.end() ) );
 	*found = std::move( spline );
@@ -500,6 +576,10 @@ MapEdit_t DeleteSpline( const CScene &scene, int nId )
 		return edit;
 	}
 	edit.m_Solids = DeletePieces( scene.m_Map, found->m_Pieces );
+	if ( found->m_nGroup != 0 && std::ranges::find( scene.m_Map.m_Groups, found->m_nGroup, &Group_t::m_nId ) != scene.m_Map.m_Groups.end() )
+	{
+		edit.m_RemovedGroups.push_back( found->m_nGroup );
+	}
 	splines.erase( found );
 	edit.m_Splines = std::move( splines );
 	return edit;

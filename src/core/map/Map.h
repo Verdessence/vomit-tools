@@ -12,6 +12,7 @@
 #pragma once
 
 #include <array>
+#include <optional>
 #include <cstddef>
 #include <cstdint>
 #include <deque>
@@ -214,6 +215,10 @@ struct SplinePoint_t
 {
 	Point_t m_Position{};
 	double m_flWidth = 0.0; // 0: the spline's width
+	// How the curve leaves the point, as Photoshop's handles: a vector across the ground (its z
+	// is 0), the same on both sides of the point. None: the curve's own (centripetal
+	// Catmull-Rom).
+	std::optional<Point_t> m_Handle;
 
 	friend bool operator==( const SplinePoint_t &, const SplinePoint_t & ) = default;
 };
@@ -230,6 +235,8 @@ struct Spline_t
 	std::string m_szMaterial = "DEV/DEV_MEASUREGENERIC01";
 	double m_flTextureScale = 0.25;
 	std::vector<int> m_Pieces;      // the ids of the solids it made, in order along it
+	bool m_bGroup = true;           // the pieces kept in one Hammer group, so a click takes them all
+	int m_nGroup = 0;               // that group's id; 0 for none yet
 
 	friend bool operator==( const Spline_t &, const Spline_t & ) = default;
 };

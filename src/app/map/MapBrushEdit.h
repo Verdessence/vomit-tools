@@ -55,6 +55,8 @@ public:
 	void MergeVertices( bool bAtCenter, double flDistance = 1 );
 	void Paint( CMapView &view, QPainter &painter ) const;
 	bool HandleEvent( CMapView &view, QEvent *pEvent );
+	// The view's camera for typed transforms: a 2D view's as a camera looking along its axis.
+	[[nodiscard]] xv::map::CViewCamera Camera( CMapView &view ) const;
 	void Cancel( bool bKeepTool = false );
 	[[nodiscard]] bool IsTransformArmed( MapGizmoMode_t nMode ) const { return m_ArmedTransform == nMode; }
 	[[nodiscard]] int GetOperation() const { return m_nOperation; }
@@ -125,7 +127,6 @@ private:
 	[[nodiscard]] std::vector<Handle_t> Handles( CMapView &view ) const;
 	void Refresh();
 	[[nodiscard]] std::optional<CMapGizmo> Gizmo() const;
-	[[nodiscard]] xv::map::CViewCamera Camera( CMapView &view ) const;
 	void PreviewTransform( CMapView &view, Qt::KeyboardModifiers modifiers );
 	void Commit( xv::map::MapEdit_t edit, const QString &szName );
 	[[nodiscard]] xv::map::MapEdit_t BuildOperation( int nOperation );

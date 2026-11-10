@@ -14,6 +14,7 @@
 #include <QTextEdit>
 
 #include "map/MapEditor.h"
+#include "map/MapSplineTool.h"
 
 //-----------------------------------------------------------------------------
 // Purpose:
@@ -44,6 +45,12 @@ bool CMapView::event( QEvent *pEvent )
 		auto *pKey = static_cast<QKeyEvent *>( pEvent );
 		const MapTool_t nTool = m_Editor.GetTool();
 		const bool bBrush = nTool == MapTool_t::MAP_TOOL_BRUSH_EDIT || nTool == MapTool_t::MAP_TOOL_VERTEX;
+		// The spline tool's keys (Ctrl+Z on a path not made yet, Ctrl+X, its transforms).
+		if ( nTool == MapTool_t::MAP_TOOL_SPLINE && m_Editor.GetSplineTool().WantsKey( *pKey ) )
+		{
+			pEvent->accept();
+			return true;
+		}
 		if ( MapActionFor( *pKey, GetKeyContext() ) || ( bBrush && MapActionFor( *pKey, MapKeyContext_t::MAP_KEY_CONTEXT_BRUSH ) ) || ( pKey->key() == Qt::Key_Space && pKey->modifiers() == Qt::NoModifier ) )
 		{
 			pEvent->accept();
