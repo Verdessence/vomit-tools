@@ -6,6 +6,7 @@
 //===========================================================================//
 #include "ParticleBrowser.h"
 
+#include <QCoreApplication>
 #include <QDialogButtonBox>
 #include <QElapsedTimer>
 #include <QEvent>
@@ -28,6 +29,41 @@
 
 namespace
 {
+
+//-----------------------------------------------------------------------------
+// Purpose: What a system spawns (its children) and what spawns it, by name, in its own file.
+//-----------------------------------------------------------------------------
+std::pair<QStringList, QStringList> FamilyOf( const CMapParticles::SystemSource_t &source )
+{
+	QStringList children;
+	QStringList parents;
+	const auto &definitions = source.m_pLibrary->m_Definitions;
+	for ( const auto &child : definitions[ source.m_nDefinition ].m_Children )
+	{
+		if ( child.m_nDefinition < definitions.size() )
+			children << QString::fromStdString( definitions[ child.m_nDefinition ].m_szName );
+	}
+	for ( std::size_t i = 0; i < definitions.size(); i++ )
+	{
+		if ( std::ranges::any_of( definitions[ i ].m_Children, [ & ]( const auto &child ) { return child.m_nDefinition == source.m_nDefinition; } ) )
+			parents << QString::fromStdString( definitions[ i ].m_szName );
+	}
+	return { children, parents };
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: "parent", "child" or "parent, child" (empty for neither), as the list marks it.
+//-----------------------------------------------------------------------------
+QString FamilyWords( bool bParent, bool bChild )
+{
+	if ( bParent && bChild )
+		return QCoreApplication::translate( "CParticleBrowser", "parent, child" );
+	if ( bParent )
+		return QCoreApplication::translate( "CParticleBrowser", "parent" );
+	if ( bChild )
+		return QCoreApplication::translate( "CParticleBrowser", "child" );
+	return {};
+}
 
 constexpr char GRID_SETTING[] = "maps/particleBrowserGrid";
 // The grid's pictures: their side, how long the pictures may take a pass (so the browser stays
@@ -106,6 +142,8 @@ CParticleBrowser::CParticleBrowser( const CMapParticles &particles, const QStrin
 		if ( const auto source = particles.GetSystemSource( szName ) )
 		{
 			pItem->setToolTip( source->m_bListed ? QString::fromStdString( source->m_szFile ) : tr( "%1 (no manifest lists it: the game won't load it)" ).arg( QString::fromStdString( source->m_szFile ) ) );
+			const auto [ children, parents ] = FamilyOf( *source );
+			pItem->setData( FamilyWords( !children.isEmpty(), !parents.isEmpty() ), ROLE_FAMILY );
 		}
 		m_pModel->appendRow( pItem );
 	}
@@ -137,6 +175,11 @@ CParticleBrowser::CParticleBrowser( const CMapParticles &particles, const QStrin
 	pSideLayout->addWidget( m_pPreview, 1 );
 	pSideLayout->addWidget( m_pName );
 	pSideLayout->addWidget( m_pFile );
+	m_pFamily = new QLabel;
+	m_pFamily->setObjectName( QStringLiteral( "particleBrowserFamily" ) );
+	m_pFamily->setWordWrap( true );
+	m_pFamily->setTextInteractionFlags( Qt::TextSelectableByMouse );
+	pSideLayout->addWidget( m_pFamily );
 	auto *pSplitter = new QSplitter( Qt::Horizontal );
 	pSplitter->addWidget( m_pView );
 	pSplitter->addWidget( pSide );
@@ -229,7 +272,15 @@ void CParticleBrowser::SetGrid( bool bGrid )
 	{
 		QStandardItem *pItem = m_pModel->item( i );
 		const QString szName = pItem->data( ROLE_NAME ).toString();
-		pItem->setText( bGrid || pItem->toolTip().isEmpty() ? szName : QStringLiteral( "%1    %2" ).arg( szName, pItem->toolTip() ) );
+		// A parent or a child marked after the name: in the list, before its file; in the grid,
+		// under it.
+		const QString szFamily = pItem->data( ROLE_FAMILY ).toString();
+		QString szText = szName;
+		if ( !szFamily.isEmpty() )
+			szText += bGrid ? QStringLiteral( "\n(%1)" ).arg( szFamily ) : QStringLiteral( "  [%1]" ).arg( szFamily );
+		if ( !bGrid && !pItem->toolTip().isEmpty() )
+			szText += QStringLiteral( "    " ) + pItem->toolTip();
+		pItem->setText( szText );
 		const auto picture = m_Pictures.find( szName );
 		pItem->setIcon( !bGrid ? QIcon{} : picture != m_Pictures.end() && !picture->second.isNull() ? picture->second
 																									: waiting );
@@ -310,10 +361,18 @@ void CParticleBrowser::Play( const QString &szName )
 	if ( !source )
 	{
 		m_pFile->setText( szName.isEmpty() ? QString{} : tr( "The game has no system of this name." ) );
+		m_pFamily->clear();
 		m_pPreview->SetLibrary( nullptr );
 		return;
 	}
 	m_pFile->setText( source->m_bListed ? QString::fromStdString( source->m_szFile ) : tr( "%1: no manifest lists this file, so the game won't load it" ).arg( QString::fromStdString( source->m_szFile ) ) );
+	const auto [ children, parents ] = FamilyOf( *source );
+	QStringList family;
+	if ( !children.isEmpty() )
+		family << tr( "Spawns %1" ).arg( children.join( QStringLiteral( ", " ) ) );
+	if ( !parents.isEmpty() )
+		family << tr( "Spawned by %1" ).arg( parents.join( QStringLiteral( ", " ) ) );
+	m_pFamily->setText( family.isEmpty() ? tr( "Neither spawns nor is spawned by another system" ) : family.join( QStringLiteral( "; " ) ) );
 	m_pPreview->SetLibrary( source->m_pLibrary );
 	m_pPreview->SetSystem( source->m_pLibrary->m_Definitions[ source->m_nDefinition ].m_szName );
 	m_pPreview->SetPlaying( true );
