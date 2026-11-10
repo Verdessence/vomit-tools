@@ -130,6 +130,7 @@ void ForEachMapPreference( Visit_t &&pfnVisit, Preferences_t &...maps )
 	pfnVisit( "maps/skybox3D", maps.m_bSkybox3D... );
 	pfnVisit( "maps/sky2D", maps.m_bSky2D... );
 	pfnVisit( "maps/originAxes", maps.m_bOriginAxes... );
+	pfnVisit( "maps/propertiesFollowSelection", maps.m_bPropertiesFollowSelection... );
 	pfnVisit( "maps/physicsDrag", maps.m_flPhysicsDrag... );
 	pfnVisit( "maps/physicsBullet", maps.m_flPhysicsBullet... );
 	pfnVisit( "maps/physicsExplode", maps.m_flPhysicsExplode... );

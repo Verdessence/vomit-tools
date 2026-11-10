@@ -566,6 +566,7 @@ QWidget *CPreferencesDialog::BuildMapsPage()
 		pLayout->addWidget( check( QStringLiteral( "preferencesMapSkybox3D" ), tr( "Draw the 3D skybox" ), current.m_bSkybox3D, []( MapPreferences_t &p, bool b ) { p.m_bSkybox3D = b; } ) );
 		pLayout->addWidget( check( QStringLiteral( "preferencesMapSky2D" ), tr( "Draw the 2D sky behind everything in the 3D view" ), current.m_bSky2D, []( MapPreferences_t &p, bool b ) { p.m_bSky2D = b; } ) );
 		pLayout->addWidget( check( QStringLiteral( "preferencesMapOriginAxes" ), tr( "Draw the world's axes at 0 0 0 in the 3D view" ), current.m_bOriginAxes, []( MapPreferences_t &p, bool b ) { p.m_bOriginAxes = b; } ) );
+		pLayout->addWidget( check( QStringLiteral( "preferencesMapPropertiesFollow" ), tr( "Show Object Properties when an entity is selected" ), current.m_bPropertiesFollowSelection, []( MapPreferences_t &p, bool b ) { p.m_bPropertiesFollowSelection = b; } ) );
 		pLayout->addWidget( check( QStringLiteral( "preferencesMapFog" ), tr( "Draw the map's fog (env_fog_controller)" ), current.m_bFog, []( MapPreferences_t &p, bool b ) { p.m_bFog = b; } ) );
 		pLayout->addWidget( check( QStringLiteral( "preferencesMapSprites" ), tr( "Draw sprites (else entities' boxes)" ), current.m_bSprites, []( MapPreferences_t &p, bool b ) { p.m_bSprites = b; } ) );
 		pLayout->addWidget( check( QStringLiteral( "preferencesMapWireframeModels" ), tr( "Draw models' edges in the wireframe view" ), current.m_bWireframeModels, []( MapPreferences_t &p, bool b ) { p.m_bWireframeModels = b; } ) );

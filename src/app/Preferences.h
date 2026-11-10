@@ -214,6 +214,7 @@ struct MapPreferences_t
 	bool m_bSkybox3D = true;
 	bool m_bSky2D = true;            // the map's 2D sky behind everything in the textured 3D views
 	bool m_bOriginAxes = true;       // the world's axes at 0 0 0 in the 3D views
+	bool m_bPropertiesFollowSelection = true; // an entity newly selected brings Object Properties forward
 	// The physics tool (Hammer++'s Physics Simulation box).
 	double m_flPhysicsDrag = 5.0;      // how hard the left button pulls
 	double m_flPhysicsBullet = 1000.0; // a right click's shot

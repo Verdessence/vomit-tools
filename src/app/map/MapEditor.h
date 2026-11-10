@@ -393,6 +393,8 @@ private:
 	void Paste( CMapView *pFrom );
 	void SnapSelection();
 	void ShowProperties();
+	// Object Properties brought forward when the selection takes an entity it hadn't.
+	void FollowSelectionWithProperties();
 	void TakePreferences();
 	// The faces the Displacement tab works on, and one of its edits applied under a name.
 	[[nodiscard]] std::vector<xv::map::FaceRef_t> GetFaceTargets() const;
@@ -508,6 +510,7 @@ private:
 	CMapSprinklePanel *m_pSprinkle = nullptr;
 	CMapSplineTool *m_pSplineTool = nullptr;
 	CMapPhysicsTool *m_pPhysicsTool = nullptr;
+	std::vector<std::uint32_t> m_FollowedEntities; // the entities the selection held, for Object Properties to follow
 	CMapRecentPanel *m_pRecent = nullptr;
 	CMapBuildingPanel *m_pBuilding = nullptr;
 	QToolButton *m_pBuildingFold = nullptr; // its fold in New Objects

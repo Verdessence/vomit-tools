@@ -282,6 +282,9 @@
 - Check for Problems tells errors (the compile fails or the game breaks) from warnings: each row
   tagged ERROR or WARN with its icon and colour, errors first, a count of each, toggles to show
   either, and a badge on the side tab with the error count (or the warnings', when none).
+- Selecting an entity (a click, Find Entities, the Entity Report) brings Object Properties
+  forward when another tab of its group was showing, without taking the keyboard; not while a
+  tool's own panel is in charge or you're typing elsewhere. Preferences > Maps can turn it off.
 
 ### Settings file (new)
 - Settings live in `vomit-tools.nut` (beside Qt's settings: `~/.config/vomit-tools/` on Linux),

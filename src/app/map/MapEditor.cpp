@@ -70,7 +70,10 @@
 #include <QCompleter>
 #include <QFormLayout>
 #include <QGridLayout>
+#include <QAbstractSpinBox>
 #include <QLineEdit>
+#include <QPlainTextEdit>
+#include <QTextEdit>
 #include <QRandomGenerator>
 #include <QCoreApplication>
 #include <QGuiApplication>
@@ -705,6 +708,7 @@ CMapEditor::CMapEditor( const QString &szPath, bool bFromGame, QWidget *pParent 
 			m_Pivot.reset();
 			m_PivotSelection.clear();
 		}
+		FollowSelectionWithProperties();
 		repaint();
 	} );
 	connect( m_pDocument, &CMapDocument::VisibilityChanged, this, repaint );
@@ -4867,6 +4871,49 @@ void CMapEditor::LightingBaked()
 	{
 		qDebug( "Lighting preview: %zu lights, %d by %d luxels (every %d), in %.0f ms", pLighting->m_nLights, pLighting->m_nWidth, pLighting->m_nHeight, pLighting->m_nStep, m_pLighting->GetBakeMs() );
 	}
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: An entity newly selected brings Object Properties forward, as the panels hidden
+//          until called up come; not while a tool's own panel is in charge, while something is
+//          being typed elsewhere, or when the preference is off.
+//-----------------------------------------------------------------------------
+void CMapEditor::FollowSelectionWithProperties()
+{
+	const xv::map::CScene *pScene = m_pDocument->GetScene();
+	std::vector<std::uint32_t> entities;
+	if ( pScene )
+	{
+		entities = xv::map::ObjectsOf( *pScene, m_pDocument->GetSelection() ).m_Entities;
+		std::ranges::sort( entities );
+	}
+	const bool bNew = !entities.empty() && std::ranges::any_of( entities, [ this ]( std::uint32_t n ) { return !std::ranges::binary_search( m_FollowedEntities, n ); } );
+	m_FollowedEntities = std::move( entities );
+	if ( !bNew || !CPreferences::Instance().GetMapPreferences().m_bPropertiesFollowSelection )
+	{
+		return;
+	}
+	switch ( m_nTool )
+	{
+		case MapTool_t::MAP_TOOL_TEXTURE:
+		case MapTool_t::MAP_TOOL_BRUSH_EDIT:
+		case MapTool_t::MAP_TOOL_VERTEX:
+		case MapTool_t::MAP_TOOL_SPLINE:
+		case MapTool_t::MAP_TOOL_PHYSICS: return;
+		default: break;
+	}
+	QWidget *pFocus = QApplication::focusWidget();
+	const bool bTyping = qobject_cast<QLineEdit *>( pFocus ) || qobject_cast<QTextEdit *>( pFocus ) || qobject_cast<QPlainTextEdit *>( pFocus ) || qobject_cast<QAbstractSpinBox *>( pFocus );
+	if ( bTyping && !m_pProperties->isAncestorOf( pFocus ) )
+	{
+		return;
+	}
+	if ( CPanel *pPanel = m_pPanels->GetPanel( QStringLiteral( "properties" ) ); pPanel && m_pPanels->IsShown( QStringLiteral( "properties" ) ) && !pPanel->IsFolded() && !pPanel->visibleRegion().isEmpty() )
+	{
+		return; // already in view: the side isn't scrolled under the pointer
+	}
+	OpenSide();
+	m_pPanels->Reveal( QStringLiteral( "properties" ) );
 }
 
 //-----------------------------------------------------------------------------
