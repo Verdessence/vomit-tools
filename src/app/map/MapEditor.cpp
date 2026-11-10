@@ -212,6 +212,7 @@ CMapEditor::CMapEditor( const QString &szPath, bool bFromGame, QWidget *pParent 
 	// Proxies (AnimatedTexture, TextureScroll...) move materials as the game does: about twenty
 	// times a second, while there are any and a textured 3D view shows them.
 	m_pAnimationTimer = new QTimer( this );
+	m_pAnimationTimer->setObjectName( QStringLiteral( "mapAnimationTimer" ) );
 	m_pAnimationTimer->setInterval( 50 );
 	connect( m_pAnimationTimer, &QTimer::timeout, this, &CMapEditor::AnimateMaterials );
 	m_AnimationClock.start();

@@ -16,8 +16,10 @@
 #include <vector>
 
 #include <QPointF>
+#include <QImage>
 #include <QPixmap>
 #include <QRectF>
+#include <QRegion>
 #include <QSize>
 
 #include "map/Vertex.h"
@@ -98,7 +100,18 @@ public:
 	[[nodiscard]] double GetLastLayerTime() const { return m_flLayerMs; }
 	[[nodiscard]] double GetLastPaintTime() const { return m_flPaintMs; }
 	[[nodiscard]] int GetPaintCount() const { return m_nPaints; }
+	// The layer's redraws, and of those the ones of only the part that changed.
 	[[nodiscard]] int GetLayerPaintCount() const { return m_nLayerPaints; }
+	[[nodiscard]] int GetPartLayerPaintCount() const { return m_nPartLayers; }
+	// For the tests: the layer as drawn, and the next paint drawing all of it.
+	[[nodiscard]] QImage GetLayerImage() const { return m_Layer.toImage(); }
+	[[nodiscard]] const QImage &GetModelsPicture() const { return m_ModelsPicture; }
+	void RedrawWholeLayer()
+	{
+		m_bLayerWhole = true;
+		m_Layer = {};
+		update();
+	}
 	[[nodiscard]] QString DescribeLayerChanges( bool bAdvance = false );
 
 protected:
@@ -119,10 +132,18 @@ private:
 	void PaintLayer();
 	void PaintGrid( class QPainter &painter, const QRectF &visible ) const;
 	// Props big enough on screen, textured (Preferences > Maps), drawn in software from this axis.
-	void PaintModels( QPainter &painter, const QRectF &visible ) const;
+	// The textured models of the whole view (a part of the layer clips them).
+	void PaintModels( QPainter &painter ) const;
 	// Whether a prop is drawn textured rather than as its edges or box.
 	[[nodiscard]] bool IsTexturedModel( const MapFlatObject_t &object, const QRectF &box ) const;
-	void PaintObjects( QPainter &painter, const QRectF &visible, bool bPreviewOnly = false ) const;
+	// bEverySelected: the selected objects drawn wherever they are (their helpers can reach far
+	// past their boxes); names: where an entity's name may be drawn (it sits above its box).
+	void PaintObjects( QPainter &painter, const QRectF &visible, bool bPreviewOnly = false, bool bEverySelected = false, std::optional<QRectF> names = std::nullopt ) const;
+	// What an object may draw in the layer, in map units: its box, and an entity's helpers.
+	[[nodiscard]] QRectF LooksOf( const MapFlatObject_t &object ) const;
+	// The part of the layer the objects whose looks changed since it was drawn cover, in the
+	// widget's pixels; nullopt when it is easier to draw all of it again.
+	[[nodiscard]] std::optional<QRegion> ChangedPart( bool bPreviewFlipped );
 	// A selected entity's FGD helpers: its radii (with their handles), lines to its targets, cones.
 	void PaintEntityHelpers( QPainter &painter, std::uint32_t nObject ) const;
 	void PaintSelection( QPainter &painter ) const;
@@ -189,6 +210,20 @@ private:
 	const void *m_pBuiltFor = nullptr;
 	const void *m_pBuiltMesh = nullptr;          // the mesh as read of the map built for
 	std::vector<std::uint32_t> m_PendingObjects; // changed by edits since
+	// What the layer has to draw again since it was drawn: where objects the edits changed were
+	// and are (map units), or all of it when the objects were built again.
+	std::vector<std::pair<QRectF, bool>> m_ChangedLooks; // with whether it is a point entity's (a name above it)
+	bool m_bLayerWhole = true;
+	// The selection and what was shown when the layer was drawn, to find what changed since.
+	std::vector<std::uint32_t> m_LayerSelection;
+	std::vector<std::uint8_t> m_LayerShown;
+	std::vector<std::uint32_t> m_LayerPreview; // the objects a drag left out of it
+	std::vector<std::uint32_t> m_PreviewSeen;  // of a drag's objects, those whose first place is kept
+	// What the layer drew past objects' boxes as it was drawn (path lines, the selection's
+	// helpers), by object: an edit can take those away before the view hears of it.
+	std::vector<std::pair<std::uint32_t, QRectF>> m_LayerExtras;
+	void AddLayerExtras( std::uint32_t nObject, std::vector<std::pair<QRectF, bool>> &out ) const;
+	int m_nPartLayers = 0; // of the layer's redraws, those of only a part
 	std::size_t m_nStaleSegments = 0;            // segments no object uses any more
 	std::shared_ptr<const xv::map::CMapMesh> m_pProps; // the props the objects were built with
 	std::shared_ptr<const std::vector<std::array<std::uint8_t, 3>>> m_pLineColors; // each object's, for this paint
@@ -277,4 +312,24 @@ private:
 	};
 	QPixmap m_Layer;
 	LayerKey_t m_LayerKey;
+	// The textured models' picture as last drawn, and what it was drawn for: drawing only part
+	// of the layer takes it again while the same models show the same way.
+	struct ModelsKey_t
+	{
+		std::vector<std::uint8_t> m_Flags;
+		const void *m_pMesh = nullptr;
+		std::uint64_t m_nMaterials = 0; // the props' materials' revision, as the layer's
+		std::shared_ptr<const std::vector<std::array<std::uint8_t, 3>>> m_pColors; // made again by each edit: the same when they say the same
+		QPointF m_Center;
+		double m_flZoom = 0.0;
+		QSize m_Size;
+		qreal m_flRatio = 1.0;
+		friend bool operator==( const ModelsKey_t &a, const ModelsKey_t &b )
+		{
+			const bool bColors = a.m_pColors == b.m_pColors || ( a.m_pColors && b.m_pColors && *a.m_pColors == *b.m_pColors );
+			return bColors && a.m_Flags == b.m_Flags && a.m_pMesh == b.m_pMesh && a.m_nMaterials == b.m_nMaterials && a.m_Center == b.m_Center && a.m_flZoom == b.m_flZoom && a.m_Size == b.m_Size && a.m_flRatio == b.m_flRatio;
+		}
+	};
+	mutable ModelsKey_t m_ModelsKey;
+	mutable QImage m_ModelsPicture;
 };

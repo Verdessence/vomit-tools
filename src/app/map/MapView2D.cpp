@@ -46,6 +46,9 @@ namespace
 constexpr std::uint32_t NO_OBJECT = ~0u;
 constexpr int SCROLLBAR_SIZE = 14;
 constexpr int DRAG_THRESHOLD = 3;
+// The room an entity's name may take above its box and to the right of its left edge, pixels.
+constexpr double NAME_ROOM_UP = 24.0;
+constexpr double NAME_ROOM_RIGHT = 600.0;
 
 //-----------------------------------------------------------------------------
 // Purpose: Whether two rectangles overlap, counting lines and points (zero width or height),
@@ -320,6 +323,27 @@ void CMapView2D::Rebuild()
 		Patch( *pScene );
 		return;
 	}
+	// Built again only to drop stale segments (the same map, the same props): where the edited
+	// objects were and are is all that changed for the layer.
+	const bool bCompacting = pScene && m_pBuiltFor && pProps == m_pProps && pScene->m_pMesh.get() == m_pBuiltMesh;
+	std::vector<std::uint32_t> edited;
+	if ( bCompacting )
+	{
+		edited = std::move( m_PendingObjects );
+		for ( const std::uint32_t n : edited )
+		{
+			if ( n < m_ObjectIndex.size() && m_ObjectIndex[ n ] != NO_OBJECT )
+			{
+				m_ChangedLooks.emplace_back( LooksOf( m_Objects[ m_ObjectIndex[ n ] ] ), m_Objects[ m_ObjectIndex[ n ] ].m_bPointEntity );
+			}
+			AddLayerExtras( n, m_ChangedLooks );
+		}
+	}
+	else
+	{
+		m_ChangedLooks.clear();
+		m_bLayerWhole = true;
+	}
 	m_pBuiltMesh = pScene ? pScene->m_pMesh.get() : nullptr;
 	m_PendingObjects.clear();
 	m_nStaleSegments = 0;
@@ -390,6 +414,13 @@ void CMapView2D::Rebuild()
 		lines( *m_pProps, false );
 	}
 	lines( pScene->GetInstanceMesh(), true );
+	for ( const std::uint32_t n : edited )
+	{
+		if ( n < m_ObjectIndex.size() && m_ObjectIndex[ n ] != NO_OBJECT )
+		{
+			m_ChangedLooks.emplace_back( LooksOf( m_Objects[ m_ObjectIndex[ n ] ] ), m_Objects[ m_ObjectIndex[ n ] ].m_bPointEntity );
+		}
+	}
 	update();
 }
 
@@ -512,6 +543,31 @@ void CMapView2D::Patch( const xv::map::CScene &scene )
 	m_pBuiltFor = &scene;
 	std::ranges::sort( m_PendingObjects );
 	m_PendingObjects.erase( std::unique( m_PendingObjects.begin(), m_PendingObjects.end() ), m_PendingObjects.end() );
+	// Where each was is drawn again, then where it is now. While a drag moves objects the layer
+	// leaves them out: only where each was before it started counts.
+	const CMapDocument &document = GetDocument();
+	const bool bDragging = document.GetGeometryPreviewBase() != nullptr;
+	const auto looks = [ & ]( std::uint32_t n ) {
+		if ( bDragging && std::ranges::binary_search( document.GetPreviewObjects(), n ) )
+		{
+			const auto at = std::ranges::lower_bound( m_PreviewSeen, n );
+			if ( at != m_PreviewSeen.end() && *at == n )
+			{
+				return;
+			}
+			m_PreviewSeen.insert( at, n );
+		}
+		if ( n < m_ObjectIndex.size() && m_ObjectIndex[ n ] != NO_OBJECT )
+		{
+			const MapFlatObject_t &object = m_Objects[ m_ObjectIndex[ n ] ];
+			m_ChangedLooks.emplace_back( LooksOf( object ), object.m_bPointEntity );
+		}
+		AddLayerExtras( n, m_ChangedLooks );
+	};
+	for ( const std::uint32_t n : m_PendingObjects )
+	{
+		looks( n );
+	}
 	for ( const std::uint32_t n : m_PendingObjects )
 	{
 		if ( n >= scene.GetObjectCount() )
@@ -526,8 +582,154 @@ void CMapView2D::Patch( const xv::map::CScene &scene )
 		{
 			PlaceEntity( scene, scene.GetIndex( n ) );
 		}
+		looks( n );
 	}
 	m_PendingObjects.clear();
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Its box, and for an entity the helpers it may draw when selected (radii, lines to
+//          its targets) and the path lines to and from it.
+//-----------------------------------------------------------------------------
+QRectF CMapView2D::LooksOf( const MapFlatObject_t &object ) const
+{
+	QRectF looks = object.m_Bounds.normalized();
+	const xv::map::CScene *pScene = GetDocument().GetScene();
+	if ( !object.m_bPointEntity || !pScene || object.m_nObject >= pScene->GetObjectCount() || pScene->IsSolidObject( object.m_nObject ) )
+	{
+		return looks;
+	}
+	const std::size_t nEntity = pScene->GetIndex( object.m_nObject );
+	// By hand: a rect of no size (a point) is null, and united() leaves those out.
+	const auto add = [ & ]( const xv::map::Point_t &p ) {
+		const QPointF at = Flatten( p );
+		looks.setLeft( std::min( looks.left(), at.x() ) );
+		looks.setRight( std::max( looks.right(), at.x() ) );
+		looks.setTop( std::min( looks.top(), at.y() ) );
+		looks.setBottom( std::max( looks.bottom(), at.y() ) );
+	};
+	if ( nEntity < pScene->m_Entities.size() )
+	{
+		const xv::map::EntityVisual_t &visual = pScene->m_Entities[ nEntity ];
+		for ( const double flRadius : visual.m_Spheres )
+		{
+			if ( flRadius > 0.0 )
+			{
+				const QPointF centre = Flatten( visual.m_Origin );
+				looks = looks.united( QRectF{ centre.x() - flRadius, centre.y() - flRadius, 2.0 * flRadius, 2.0 * flRadius } );
+			}
+		}
+		for ( const xv::map::HelperLine_t &helper : GetDocument().GetHelpers( nEntity ).m_Lines )
+		{
+			add( helper.m_From );
+			add( helper.m_To );
+		}
+	}
+	for ( const xv::map::PathLink_t &link : GetDocument().GetPathLinks() )
+	{
+		if ( link.m_nFrom != nEntity && link.m_nTo != nEntity )
+		{
+			continue;
+		}
+		for ( const xv::map::HelperLine_t &line : link.m_Lines )
+		{
+			add( line.m_From );
+			add( line.m_To );
+		}
+	}
+	return looks;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: What the layer drew for an object past its box, as it was drawn.
+//-----------------------------------------------------------------------------
+void CMapView2D::AddLayerExtras( std::uint32_t nObject, std::vector<std::pair<QRectF, bool>> &out ) const
+{
+	const auto first = std::ranges::lower_bound( m_LayerExtras, nObject, {}, []( const auto &extra ) { return extra.first; } );
+	for ( auto it = first; it != m_LayerExtras.end() && it->first == nObject; ++it )
+	{
+		out.emplace_back( it->second, false );
+	}
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: The edited objects' places, and those of the objects selected or shown since the
+//          layer was drawn, or not any more, as pixels with room for their handles, vertices and
+//          names. All of it when that would be most of the view anyway.
+//-----------------------------------------------------------------------------
+std::optional<QRegion> CMapView2D::ChangedPart( bool bPreviewFlipped )
+{
+	const CMapDocument &document = GetDocument();
+	const xv::map::CScene *pScene = document.GetScene();
+	if ( m_bLayerWhole || !pScene || m_LayerShown.size() > pScene->GetObjectCount() )
+	{
+		return std::nullopt;
+	}
+	std::vector<std::pair<QRectF, bool>> changed = m_ChangedLooks;
+	const auto looks = [ & ]( std::uint32_t n ) {
+		if ( n < m_ObjectIndex.size() && m_ObjectIndex[ n ] != NO_OBJECT )
+		{
+			const MapFlatObject_t &object = m_Objects[ m_ObjectIndex[ n ] ];
+			changed.emplace_back( LooksOf( object ), object.m_bPointEntity );
+		}
+		AddLayerExtras( n, changed );
+	};
+	std::vector<std::uint32_t> selection = document.GetSelection();
+	std::ranges::sort( selection );
+	std::vector<std::uint32_t> flipped;
+	std::ranges::set_symmetric_difference( selection, m_LayerSelection, std::back_inserter( flipped ) );
+	for ( const std::uint32_t n : flipped )
+	{
+		looks( n );
+	}
+	// A drag starting leaves its objects out of the layer (they are drawn over it as they move);
+	// one ending puts them back.
+	if ( bPreviewFlipped )
+	{
+		for ( const std::uint32_t n : m_LayerPreview )
+		{
+			looks( n );
+		}
+		for ( const std::uint32_t n : document.GetPreviewObjects() )
+		{
+			looks( n );
+		}
+	}
+	// Objects new since are among the edited ones.
+	for ( std::uint32_t n = 0; n < m_LayerShown.size(); n++ )
+	{
+		if ( ( document.IsShown( n ) ? 1 : 0 ) != m_LayerShown[ n ] )
+		{
+			looks( n );
+		}
+	}
+	const MapPreferences_t &look = Look();
+	const double flMargin = look.m_nHandleSize + look.m_nVertexSize + 3.0;
+	const bool bNames = m_Editor.GetSettings().m_bNames && m_flZoom * 16.0 >= look.m_nNamesFromPixels;
+	const QRectF view = rect();
+	const double flMost = view.width() * view.height() / 2.0;
+	double flArea = 0.0;
+	QRegion region;
+	for ( const auto &[ box, bPoint ] : changed )
+	{
+		QRectF pixels = QRectF{ ToWidget( box.topLeft() ), ToWidget( box.bottomRight() ) }.normalized().adjusted( -flMargin, -flMargin, flMargin, flMargin );
+		if ( bPoint && bNames )
+		{
+			pixels.adjust( 0.0, -NAME_ROOM_UP, NAME_ROOM_RIGHT, 0.0 );
+		}
+		pixels = pixels.intersected( view );
+		if ( pixels.isEmpty() )
+		{
+			continue;
+		}
+		flArea += pixels.width() * pixels.height();
+		if ( flArea > flMost )
+		{
+			return std::nullopt;
+		}
+		region += pixels.toAlignedRect();
+	}
+	return region;
 }
 
 //-----------------------------------------------------------------------------
@@ -751,7 +953,7 @@ bool CMapView2D::IsTexturedModel( const MapFlatObject_t &object, const QRectF &b
 //          Selected ones are left to PaintObjects, which draws their edges, unless they show
 //          their box instead (MapSelectedModelEdges).
 //-----------------------------------------------------------------------------
-void CMapView2D::PaintModels( QPainter &painter, const QRectF &visible ) const
+void CMapView2D::PaintModels( QPainter &painter ) const
 {
 	const CMapDocument &document = GetDocument();
 	const xv::map::CScene *pScene = document.GetScene();
@@ -764,11 +966,14 @@ void CMapView2D::PaintModels( QPainter &painter, const QRectF &visible ) const
 	{
 		return;
 	}
+	// Which models show is worked out for the whole view, so a part of it drawn again can take
+	// the picture as it was.
+	const QRectF all = GetVisible();
 	std::vector<std::uint8_t> flags( pScene->GetObjectCount(), 0 );
 	bool bAny = false;
 	for ( const MapFlatObject_t &object : m_Objects )
 	{
-		if ( ( document.GetGeometryPreviewBase() && std::ranges::binary_search( document.GetPreviewObjects(), object.m_nObject ) ) || object.m_nModelLineCount == 0 || !Overlaps( object.m_Bounds, visible ) || !document.IsShown( object.m_nObject ) || ( document.IsSelected( object.m_nObject ) && MapSelectedModelEdges( *pScene, object.m_nObject ) ) )
+		if ( ( document.GetGeometryPreviewBase() && std::ranges::binary_search( document.GetPreviewObjects(), object.m_nObject ) ) || object.m_nModelLineCount == 0 || !Overlaps( object.m_Bounds, all ) || !document.IsShown( object.m_nObject ) || ( document.IsSelected( object.m_nObject ) && MapSelectedModelEdges( *pScene, object.m_nObject ) ) )
 		{
 			continue;
 		}
@@ -784,6 +989,20 @@ void CMapView2D::PaintModels( QPainter &painter, const QRectF &visible ) const
 		return;
 	}
 	const qreal flRatio = devicePixelRatioF();
+	ModelsKey_t key;
+	key.m_pMesh = frame.m_pPropMesh.get();
+	key.m_nMaterials = m_Editor.GetRenderData().GetPropMaterialsRevision();
+	key.m_pColors = frame.m_pFlatColors;
+	key.m_Center = m_Center;
+	key.m_flZoom = m_flZoom;
+	key.m_Size = size();
+	key.m_flRatio = flRatio;
+	key.m_Flags = flags;
+	if ( key == m_ModelsKey && !m_ModelsPicture.isNull() )
+	{
+		painter.drawImage( QPointF{ 0, 0 }, m_ModelsPicture );
+		return;
+	}
 	xv::map::Point_t centre{};
 	centre[ static_cast<std::size_t>( GetAxis( 0 ) ) ] = m_Center.x();
 	centre[ static_cast<std::size_t>( GetAxis( 1 ) ) ] = m_Center.y();
@@ -807,16 +1026,18 @@ void CMapView2D::PaintModels( QPainter &painter, const QRectF &visible ) const
 	options.m_bSelectionEdges = false;
 	xv::texture::CImage image;
 	xv::map::RenderView( scene, camera, options, image );
-	QImage picture( image.m_Pixels.data(), image.m_nWidth, image.m_nHeight, image.m_nWidth * 4, QImage::Format_RGBA8888 );
+	QImage picture = QImage( image.m_Pixels.data(), image.m_nWidth, image.m_nHeight, image.m_nWidth * 4, QImage::Format_RGBA8888 ).copy();
 	picture.setDevicePixelRatio( flRatio );
 	painter.drawImage( QPointF{ 0, 0 }, picture );
+	m_ModelsPicture = std::move( picture );
+	m_ModelsKey = std::move( key );
 }
 
 //-----------------------------------------------------------------------------
 // Purpose: Every shown object in view, in batches of one colour; broken solids over the rest
 //          (Hammer++ draws them over everything), and selected ones last, on top.
 //-----------------------------------------------------------------------------
-void CMapView2D::PaintObjects( QPainter &painter, const QRectF &visible, bool bPreviewOnly ) const
+void CMapView2D::PaintObjects( QPainter &painter, const QRectF &visible, bool bPreviewOnly, bool bEverySelected, std::optional<QRectF> names ) const
 {
 	const CMapDocument &document = GetDocument();
 	const xv::map::CScene *pScene = document.GetScene();
@@ -945,13 +1166,21 @@ void CMapView2D::PaintObjects( QPainter &painter, const QRectF &visible, bool bP
 		{
 			continue;
 		}
-		if ( !Overlaps( object.m_Bounds, visible ) || !document.IsShown( object.m_nObject ) )
+		if ( !document.IsShown( object.m_nObject ) )
 		{
 			continue;
 		}
+		const bool bInside = Overlaps( object.m_Bounds, visible );
 		if ( document.IsSelected( object.m_nObject ) )
 		{
-			selected.push_back( &object );
+			if ( bInside || bEverySelected )
+			{
+				selected.push_back( &object );
+			}
+			continue;
+		}
+		if ( !bInside )
+		{
 			continue;
 		}
 		if ( object.m_bInvalid )
@@ -982,6 +1211,9 @@ void CMapView2D::PaintObjects( QPainter &painter, const QRectF &visible, bool bP
 		}
 		handles.clear();
 	};
+	// In an order of their own, not the objects': a part of the layer drawn again (fewer objects)
+	// overlaps them as the whole does.
+	std::ranges::sort( batches, []( const Batch_t &a, const Batch_t &b ) { return a.m_Color.rgba() < b.m_Color.rgba(); } );
 	for ( const Batch_t &batch : batches )
 	{
 		draw( batch );
@@ -1029,7 +1261,7 @@ void CMapView2D::PaintObjects( QPainter &painter, const QRectF &visible, bool bP
 		painter.setFont( font );
 		for ( const MapFlatObject_t &object : m_Objects )
 		{
-			if ( !object.m_bPointEntity || !Overlaps( object.m_Bounds, visible ) || !document.IsShown( object.m_nObject ) )
+			if ( !object.m_bPointEntity || !Overlaps( object.m_Bounds, names.value_or( visible ) ) || !document.IsShown( object.m_nObject ) )
 			{
 				continue;
 			}
@@ -1463,8 +1695,90 @@ void CMapView2D::PaintLayer()
 	if ( key.m_nRevision != m_LayerKey.m_nRevision )
 		reasons << QStringLiteral( "preferences" );
 	m_szLayerReason = reasons.join( QStringLiteral( ", " ) );
+	// Only the objects changed (an edit, the selection, what is hidden): only where they were
+	// and are is drawn again, everything there as a whole redraw would draw it.
+	LayerKey_t same = key;
+	same.m_nState = m_LayerKey.m_nState;
+	same.m_bPreview = m_LayerKey.m_bPreview;
+	const std::optional<QRegion> part = !m_Layer.isNull() && same == m_LayerKey ? ChangedPart( key.m_bPreview != m_LayerKey.m_bPreview ) : std::nullopt;
 	m_LayerKey = key;
 	m_nLayerPaints++;
+	const auto remember = [ this ] {
+		const CMapDocument &document = GetDocument();
+		m_LayerSelection = document.GetSelection();
+		std::ranges::sort( m_LayerSelection );
+		const std::uint32_t nObjects = document.GetScene() ? document.GetScene()->GetObjectCount() : 0;
+		m_LayerShown.resize( nObjects );
+		for ( std::uint32_t n = 0; n < nObjects; n++ )
+		{
+			m_LayerShown[ n ] = document.IsShown( n ) ? 1 : 0;
+		}
+		m_LayerPreview = document.GetGeometryPreviewBase() ? document.GetPreviewObjects() : std::vector<std::uint32_t>{};
+		if ( !document.GetGeometryPreviewBase() )
+		{
+			m_PreviewSeen.clear();
+		}
+		m_LayerExtras.clear();
+		if ( const xv::map::CScene *pScene = document.GetScene(); pScene && m_Editor.GetSettings().m_bHelpers )
+		{
+			for ( const xv::map::PathLink_t &link : document.GetPathLinks() )
+			{
+				QRectF extent;
+				bool bFirst = true;
+				for ( const xv::map::HelperLine_t &line : link.m_Lines )
+				{
+					for ( const xv::map::Point_t &p : { line.m_From, line.m_To } )
+					{
+						const QPointF at = Flatten( p );
+						extent = bFirst ? QRectF{ at, QSizeF{ 0, 0 } } : extent;
+						extent.setLeft( std::min( extent.left(), at.x() ) );
+						extent.setRight( std::max( extent.right(), at.x() ) );
+						extent.setTop( std::min( extent.top(), at.y() ) );
+						extent.setBottom( std::max( extent.bottom(), at.y() ) );
+						bFirst = false;
+					}
+				}
+				if ( !bFirst )
+				{
+					m_LayerExtras.emplace_back( pScene->EntityObject( link.m_nFrom ), extent );
+					m_LayerExtras.emplace_back( pScene->EntityObject( link.m_nTo ), extent );
+				}
+			}
+			for ( const std::uint32_t n : m_LayerSelection )
+			{
+				if ( n < m_ObjectIndex.size() && m_ObjectIndex[ n ] != NO_OBJECT && m_Objects[ m_ObjectIndex[ n ] ].m_bPointEntity )
+				{
+					m_LayerExtras.emplace_back( n, LooksOf( m_Objects[ m_ObjectIndex[ n ] ] ) );
+				}
+			}
+			std::ranges::sort( m_LayerExtras, []( const auto &a, const auto &b ) { return a.first < b.first; } );
+		}
+		m_ChangedLooks.clear();
+		m_bLayerWhole = false;
+	};
+	if ( part )
+	{
+		m_nPartLayers++;
+		m_szLayerReason += QStringLiteral( " (part)" );
+		if ( !part->isEmpty() )
+		{
+			QPainter painter( &m_Layer );
+			painter.setClipRegion( *part );
+			const QRect bounds = part->boundingRect();
+			painter.fillRect( bounds, Look().m_Colors.m_Background );
+			// A little wider than the part: a line just outside an object's box can round into
+			// the pixels at its edge.
+			const double flSlack = 2.0 / m_flZoom;
+			const QRectF area = QRectF{ ToMap( bounds.topLeft() ), ToMap( bounds.bottomRight() ) }.normalized().adjusted( -flSlack, -flSlack, flSlack, flSlack );
+			// Names to the left of the part and below it can reach into it.
+			const QRectF names = area.adjusted( -NAME_ROOM_RIGHT / m_flZoom, -NAME_ROOM_UP / m_flZoom, 0.0, 0.0 );
+			PaintGrid( painter, GetVisible() );
+			PaintModels( painter );
+			PaintObjects( painter, area, false, true, names );
+		}
+		remember();
+		return;
+	}
 	if ( m_Layer.size() != size() * key.m_flRatio )
 	{
 		m_Layer = QPixmap( size() * key.m_flRatio );
@@ -1474,8 +1788,9 @@ void CMapView2D::PaintLayer()
 	QPainter painter( &m_Layer );
 	const QRectF visible = GetVisible();
 	PaintGrid( painter, visible );
-	PaintModels( painter, visible );
+	PaintModels( painter );
 	PaintObjects( painter, visible );
+	remember();
 }
 
 //-----------------------------------------------------------------------------
