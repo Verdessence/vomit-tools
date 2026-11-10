@@ -28,11 +28,14 @@
 #include <QThread>
 #include "MaterialPictures.h"
 #include <QSortFilterProxyModel>
+#include <QSplitter>
 #include <QStandardPaths>
 #include <QVBoxLayout>
 
 #include "ImageFiles.h"
 #include "kv1/Kv1.h"
+#include "material/Material.h"
+#include "material/Preview.h"
 #include "map/MapResources.h"
 #include "map/Materials.h"
 
@@ -44,6 +47,13 @@ constexpr int LARGE_PICTURE = 512; // made only for those shown at 256 or 512
 // The pictures' size and the used-only tick, kept between openings.
 constexpr char SIZE_SETTING[] = "maps/textureBrowserSize";
 constexpr char ONLY_USED_SETTING[] = "maps/textureBrowserOnlyUsed";
+constexpr char PREVIEW_SHAPE_SETTING[] = "maps/textureBrowserPreviewShape";
+// The preview pane: its picture's side, the biggest texture it reads (a smaller mip past it), how
+// long a hover rests before it is read, and its frames while a proxy animates (twenty a second).
+constexpr int PREVIEW_SIZE = 256;
+constexpr int PREVIEW_TEXTURE_SIZE = 512;
+constexpr int PREVIEW_WAIT_MS = 60;
+constexpr int PREVIEW_FRAME_MS = 50;
 
 //-----------------------------------------------------------------------------
 // Purpose: Hammer's name for a material file: "materials/brick/wall.vmt" is BRICK/WALL.
@@ -275,7 +285,7 @@ CMaterialBrowser::CMaterialBrowser( const xv::vfs::CGameInfo &game, QStringList 
 {
 	setObjectName( QStringLiteral( "materialBrowser" ) );
 	setWindowTitle( bSprites ? tr( "Sprites" ) : tr( "Textures" ) );
-	resize( 760, 560 );
+	resize( 1040, 600 ); // the grid, and the preview beside it
 	for ( QString &szName : m_Used )
 	{
 		szName = szName.toUpper();
@@ -326,7 +336,22 @@ CMaterialBrowser::CMaterialBrowser( const xv::vfs::CGameInfo &game, QStringList 
 	m_pView->setIconSize( QSize( 64, 64 ) );
 	m_pView->setSpacing( 4 );
 	m_pView->setWordWrap( true );
-	pLayout->addWidget( m_pView, 1 );
+	// Beside the grid, the material under the mouse drawn live (or the one picked, away from it).
+	m_pPreview = new CMaterialPreview( game, this );
+	auto *pSplitter = new QSplitter( Qt::Horizontal );
+	pSplitter->addWidget( m_pView );
+	pSplitter->addWidget( m_pPreview );
+	pSplitter->setStretchFactor( 0, 1 );
+	pSplitter->setStretchFactor( 1, 0 );
+	pLayout->addWidget( pSplitter, 1 );
+	m_pView->setMouseTracking( true );
+	m_pView->viewport()->installEventFilter( this );
+	connect( m_pView, &QListView::entered, this, [ this ]( const QModelIndex &index ) { m_pPreview->Show( index.data( CMaterialList::ROLE_NAME ).toString() ); } );
+	connect( m_pView->selectionModel(), &QItemSelectionModel::currentChanged, this, [ this ]( const QModelIndex &current ) {
+		if ( !m_pView->viewport()->underMouse() && current.isValid() )
+			m_pPreview->Show( current.data( CMaterialList::ROLE_NAME ).toString() );
+	} );
+	m_pPreview->Show( szCurrent.toUpper() );
 	auto *pButtons = new QDialogButtonBox( QDialogButtonBox::Ok | QDialogButtonBox::Cancel );
 	pLayout->addWidget( pButtons );
 
@@ -373,6 +398,226 @@ CMaterialBrowser::CMaterialBrowser( const xv::vfs::CGameInfo &game, QStringList 
 	} );
 	connect( pButtons, &QDialogButtonBox::rejected, this, &QDialog::reject );
 	m_Worker = std::thread( [ this ] { Run(); } );
+}
+
+//-----------------------------------------------------------------------------
+// What the preview pane read of a material: what to draw it with.
+//-----------------------------------------------------------------------------
+struct CMaterialPreview::Loaded_t
+{
+	QString m_szName;
+	std::optional<xv::material::CMaterial> m_Material;
+	xv::material::CTextureSet m_Textures;
+	std::unique_ptr<xv::material::CProxies> m_pProxies;
+	QString m_szProblem;
+};
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+CMaterialPreview::CMaterialPreview( const xv::vfs::CGameInfo &game, QWidget *pParent )
+	: QWidget( pParent ),
+	  m_Game( game )
+{
+	setObjectName( QStringLiteral( "materialPreview" ) );
+	auto *pLayout = new QVBoxLayout( this );
+	pLayout->setContentsMargins( 0, 0, 0, 0 );
+	m_pPicture = new QLabel;
+	m_pPicture->setObjectName( QStringLiteral( "materialPreviewPicture" ) );
+	m_pPicture->setAlignment( Qt::AlignCenter );
+	m_pPicture->setMinimumSize( PREVIEW_SIZE, PREVIEW_SIZE );
+	m_pName = new QLabel;
+	m_pName->setObjectName( QStringLiteral( "materialPreviewName" ) );
+	m_pName->setWordWrap( true );
+	m_pName->setTextInteractionFlags( Qt::TextSelectableByMouse );
+	m_pAbout = new QLabel;
+	m_pAbout->setObjectName( QStringLiteral( "materialPreviewAbout" ) );
+	m_pAbout->setWordWrap( true );
+	m_pShape = new QComboBox;
+	m_pShape->setObjectName( QStringLiteral( "materialPreviewShape" ) );
+	m_pShape->addItems( { tr( "Flat" ), tr( "Ball" ) } );
+	m_pShape->setToolTip( tr( "Show the material on a flat square or a ball" ) );
+	m_pShape->setCurrentIndex( QSettings{}.value( QLatin1String( PREVIEW_SHAPE_SETTING ), 0 ).toInt() == 1 ? 1 : 0 );
+	pLayout->addWidget( m_pPicture );
+	pLayout->addWidget( m_pName );
+	pLayout->addWidget( m_pAbout );
+	pLayout->addWidget( m_pShape );
+	pLayout->addStretch();
+	connect( m_pShape, &QComboBox::currentIndexChanged, this, [ this ]( int nShape ) {
+		QSettings{}.setValue( QLatin1String( PREVIEW_SHAPE_SETTING ), nShape );
+		Render();
+	} );
+	m_pWait = new QTimer( this );
+	m_pWait->setSingleShot( true );
+	m_pWait->setInterval( PREVIEW_WAIT_MS );
+	connect( m_pWait, &QTimer::timeout, this, &CMaterialPreview::Load );
+	m_pAnimate = new QTimer( this );
+	m_pAnimate->setInterval( PREVIEW_FRAME_MS );
+	connect( m_pAnimate, &QTimer::timeout, this, &CMaterialPreview::Render );
+	m_Clock.start();
+	m_Worker = std::thread( [ this ] {
+		std::unique_ptr<xv::vfs::CFileSystem> pFileSystem;
+		for ( ;; )
+		{
+			QString szName;
+			int nGeneration = 0;
+			{
+				std::unique_lock lock( m_Mutex );
+				m_Wake.wait( lock, [ this ] { return m_bStop || !m_szQueued.isEmpty(); } );
+				if ( m_bStop )
+					return;
+				szName = std::exchange( m_szQueued, QString{} );
+				nGeneration = m_nGeneration;
+			}
+			if ( !pFileSystem )
+			{
+				pFileSystem = std::make_unique<xv::vfs::CFileSystem>();
+				pFileSystem->Mount( m_Game );
+			}
+			const xv::material::Reader_t read = [ &fileSystem = *pFileSystem ]( std::string_view szPath ) { return fileSystem.Read( szPath ); };
+			auto pLoaded = std::make_shared<Loaded_t>();
+			pLoaded->m_szName = szName;
+			const std::string szPath = "materials/" + szName.toLower().toStdString() + ".vmt";
+			if ( const auto bytes = read( szPath ) )
+			{
+				std::string szError;
+				pLoaded->m_Material = xv::material::ParseMaterial( std::string_view{ reinterpret_cast<const char *>( bytes->data() ), bytes->size() }, read, {}, &szError );
+				if ( pLoaded->m_Material )
+				{
+					pLoaded->m_Textures = xv::material::CTextureSet::Load( *pLoaded->m_Material, read, PREVIEW_TEXTURE_SIZE );
+					pLoaded->m_pProxies = std::make_unique<xv::material::CProxies>( *pLoaded->m_Material );
+				}
+				else
+				{
+					pLoaded->m_szProblem = QString::fromStdString( szError );
+				}
+			}
+			else
+			{
+				pLoaded->m_szProblem = tr( "%1 isn't in the game's files" ).arg( QString::fromStdString( szPath ) );
+			}
+			QMetaObject::invokeMethod( this, [ this, nGeneration, pLoaded = std::shared_ptr<const Loaded_t>( std::move( pLoaded ) ) ] {
+				if ( nGeneration != m_nGeneration )
+					return;
+				m_pLoaded = pLoaded;
+				m_szShown = pLoaded->m_szName;
+				m_Clock.restart();
+				if ( IsAnimated() )
+					m_pAnimate->start();
+				else
+					m_pAnimate->stop();
+				Render();
+			} );
+		}
+	} );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+CMaterialPreview::~CMaterialPreview()
+{
+	{
+		const std::lock_guard lock( m_Mutex );
+		m_bStop = true;
+	}
+	m_Wake.notify_all();
+	if ( m_Worker.joinable() )
+		m_Worker.join();
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Read once the pointer has rested on it a moment, so sweeping across the grid
+//          doesn't read every material on the way.
+//-----------------------------------------------------------------------------
+void CMaterialPreview::Show( const QString &szName )
+{
+	if ( szName == m_szWanted )
+		return;
+	m_szWanted = szName;
+	m_nGeneration++;
+	if ( szName.isEmpty() )
+	{
+		m_pWait->stop();
+		m_pAnimate->stop();
+		m_pLoaded.reset();
+		m_szShown.clear();
+		Render();
+		return;
+	}
+	m_pName->setText( szName );
+	m_pWait->start();
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+void CMaterialPreview::Load()
+{
+	{
+		const std::lock_guard lock( m_Mutex );
+		m_szQueued = m_szWanted;
+	}
+	m_Wake.notify_one();
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+bool CMaterialPreview::IsAnimated() const
+{
+	return m_pLoaded && m_pLoaded->m_pProxies && m_pLoaded->m_pProxies->IsAnimated();
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: The material as at now for its proxies, with what it is under it.
+//-----------------------------------------------------------------------------
+void CMaterialPreview::Render()
+{
+	if ( !m_pLoaded )
+	{
+		m_Picture = {};
+		m_pPicture->clear();
+		m_pName->setText( m_szWanted );
+		m_pAbout->clear();
+		return;
+	}
+	const Loaded_t &loaded = *m_pLoaded;
+	m_pName->setText( loaded.m_szName );
+	if ( !loaded.m_Material )
+	{
+		m_Picture = {};
+		m_pPicture->clear();
+		m_pAbout->setText( loaded.m_szProblem );
+		return;
+	}
+	const float flTime = static_cast<float>( m_Clock.elapsed() ) / 1000.0f;
+	const xv::material::CMaterial now = loaded.m_pProxies->At( flTime, [ &loaded ]( std::string_view szParameter ) { return loaded.m_Textures.FrameCount( szParameter ); } );
+	xv::material::PreviewOptions_t options;
+	options.m_nSize = PREVIEW_SIZE;
+	options.m_nShape = m_pShape->currentIndex() == 1 ? xv::material::Shape_t::SHAPE_SPHERE : xv::material::Shape_t::SHAPE_FLAT;
+	const xv::texture::CImage image = xv::material::RenderPreview( now, loaded.m_Textures, options );
+	m_Picture = QImage( image.m_Pixels.data(), image.m_nWidth, image.m_nHeight, image.m_nWidth * 4, QImage::Format_RGBA8888 ).copy();
+	m_pPicture->setPixmap( QPixmap::fromImage( m_Picture ) );
+	QString szAbout = QString::fromStdString( loaded.m_Material->m_szShader );
+	if ( const xv::material::Texture_t *pBase = loaded.m_Textures.Find( "$basetexture" ); pBase && pBase->m_Info )
+		szAbout += QStringLiteral( " · %1×%2" ).arg( pBase->m_Info->m_nWidth ).arg( pBase->m_Info->m_nHeight );
+	if ( IsAnimated() )
+		szAbout += tr( " · animated" );
+	m_pAbout->setText( szAbout );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Off the grid, the preview goes back to the material picked.
+//-----------------------------------------------------------------------------
+bool CMaterialBrowser::eventFilter( QObject *pObject, QEvent *pEvent )
+{
+	if ( pObject == m_pView->viewport() && pEvent->type() == QEvent::Leave )
+	{
+		const QModelIndex current = m_pView->currentIndex();
+		m_pPreview->Show( current.isValid() ? current.data( CMaterialList::ROLE_NAME ).toString() : m_szPicked.toUpper() );
+	}
+	return QDialog::eventFilter( pObject, pEvent );
 }
 
 //-----------------------------------------------------------------------------

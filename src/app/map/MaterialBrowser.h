@@ -11,6 +11,7 @@
 #pragma once
 
 #include <atomic>
+#include <condition_variable>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -19,6 +20,7 @@
 
 #include <QAbstractListModel>
 #include <QDialog>
+#include <QElapsedTimer>
 #include <QIcon>
 #include <QImage>
 #include <limits>
@@ -29,6 +31,7 @@ class QTimer;
 
 class QCheckBox;
 class QComboBox;
+class QLabel;
 class QLineEdit;
 class QListView;
 class QSortFilterProxyModel;
@@ -73,6 +76,51 @@ private:
 	std::atomic<int> m_nPictureSize{ 128 };
 };
 
+// The material under the mouse in the browser (or, away from the grid, the one picked) drawn
+// live, as the material editor's preview draws it: its proxies animating, on a square or a ball,
+// with its shader and its base texture's size. Each is read on a thread of the pane's own.
+class CMaterialPreview : public QWidget
+{
+	Q_OBJECT
+
+public:
+	explicit CMaterialPreview( const xv::vfs::CGameInfo &game, QWidget *pParent = nullptr );
+	~CMaterialPreview() override;
+
+	// A material by its name as the browser shows it ("BRICK/BRICKWALL001A"); empty for none.
+	void Show( const QString &szName );
+	// What is drawn now: the name read (empty until it is), and the picture.
+	[[nodiscard]] const QString &GetShown() const { return m_szShown; }
+	[[nodiscard]] QImage GetPicture() const { return m_Picture; }
+	[[nodiscard]] bool IsAnimated() const;
+
+	struct Loaded_t;
+
+private:
+	void Load();
+	void Render();
+
+	xv::vfs::CGameInfo m_Game;
+	QString m_szWanted;
+	QString m_szShown;
+	std::shared_ptr<const Loaded_t> m_pLoaded;
+	QImage m_Picture;
+	QLabel *m_pPicture = nullptr;
+	QLabel *m_pName = nullptr;
+	QLabel *m_pAbout = nullptr;
+	QComboBox *m_pShape = nullptr;
+	QTimer *m_pWait = nullptr;    // a hover settles before it is read
+	QTimer *m_pAnimate = nullptr; // the proxies' frames
+	QElapsedTimer m_Clock;
+	// The reading thread: one material at a time, the newest asked for.
+	std::thread m_Worker;
+	std::mutex m_Mutex;
+	std::condition_variable m_Wake;
+	QString m_szQueued;
+	bool m_bStop = false;
+	std::atomic<int> m_nGeneration{ 0 };
+};
+
 class CMaterialBrowser : public QDialog
 {
 	Q_OBJECT
@@ -91,10 +139,14 @@ public:
 	[[nodiscard]] QString GetPicked() const { return m_szPicked; }
 	[[nodiscard]] CMaterialList &GetList() { return *m_pList; }
 	[[nodiscard]] QListView *GetView() const { return m_pView; }
+	[[nodiscard]] CMaterialPreview *GetPreview() const { return m_pPreview; }
 	// Waits for the names to be listed (tests).
 	[[nodiscard]] bool IsListed() const { return m_bListed; }
 	// Where the pictures are kept between runs.
 	[[nodiscard]] static QString CacheFolder();
+
+protected:
+	bool eventFilter( QObject *pObject, QEvent *pEvent ) override;
 
 private:
 	void Run();
@@ -111,6 +163,7 @@ private:
 	QComboBox *m_pSize = nullptr;
 	QCheckBox *m_pOnlyUsed = nullptr;
 	QCheckBox *m_pOnlySprites = nullptr;
+	CMaterialPreview *m_pPreview = nullptr;
 	bool m_bSprites = false;
 	std::thread m_Worker;
 	std::atomic<bool> m_bStop{ false };

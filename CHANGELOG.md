@@ -294,6 +294,9 @@
 - A 3D view can be orthographic (its pane's menu, or the View_3D_Orthographic key; keypad 5
   in the Blender keys): no perspective, what it looks at the same size as before, the wheel
   zooming about the pointer. The 2D views draw its camera as a box.
+- The texture browser shows the material under the mouse live beside the grid (proxies
+  animating, on a square or a ball, with its shader and size), and the one picked once the
+  mouse leaves the grid.
 - Check for Problems tells errors (the compile fails or the game breaks) from warnings: each row
   tagged ERROR or WARN with its icon and colour, errors first, a count of each, toggles to show
   either, and a badge on the side tab with the error count (or the warnings', when none).
