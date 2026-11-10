@@ -51,6 +51,7 @@ class CMapPane;
 class CMapProperties;
 class CMapLighting;
 class CMapParticles;
+class CMapScreenEffect;
 class CMapResources;
 class CMapQuadSplitter;
 class QTimer;
@@ -85,6 +86,20 @@ public:
 	[[nodiscard]] const MapViewSettings_t &GetSettings() const { return m_Settings; }
 	// The env_fog_controller the views show (its entity id; 0: the first that starts on).
 	void SetFogController( int nId );
+	// The screen effect over the 3D views (M16): a screenspace_general material, read through the
+	// game's files (empty: none), shown or not, its c0 to c3 held at other values or not.
+	void SetScreenEffect( const QString &szMaterial );
+	// One read already (or none), with why it couldn't be when it wasn't.
+	void UseScreenEffect( std::shared_ptr<const CMapScreenEffect> pEffect, const QString &szProblem = {} );
+	void ShowScreenEffect( bool bShown );
+	void SetScreenEffectOverrides( std::array<std::optional<std::array<float, 4>>, 4> overrides );
+	[[nodiscard]] const std::shared_ptr<const CMapScreenEffect> &GetScreenEffect() const { return m_pScreenEffect; }
+	[[nodiscard]] std::shared_ptr<const CMapScreenEffect> GetShownScreenEffect() const { return m_bScreenEffectShown ? m_pScreenEffect : nullptr; }
+	[[nodiscard]] bool IsScreenEffectShown() const { return m_bScreenEffectShown; }
+	// Why the material picked couldn't be read; empty when it was (or none is picked).
+	[[nodiscard]] const QString &GetScreenEffectProblem() const { return m_szScreenEffectProblem; }
+	// Seconds for the effect's proxies (the materials' clock).
+	[[nodiscard]] float GetScreenEffectTime() const;
 	[[nodiscard]] CMapBrushEdit &GetBrushEdit() { return *m_pBrushEdit; }
 	[[nodiscard]] CMapSplineTool &GetSplineTool() { return *m_pSplineTool; }
 	[[nodiscard]] CMapPhysicsTool &GetPhysicsTool() { return *m_pPhysicsTool; }
@@ -361,6 +376,7 @@ signals:
 	void CurrentMaterialChanged( const QString &szMaterial );
 	void TextureGameChanged();
 	void FogControllerChanged();
+	void ScreenEffectChanged();
 
 private:
 	void BuildToolBars();
@@ -422,6 +438,9 @@ private:
 	CMapResources *m_pResources = nullptr;
 	CMapLighting *m_pLighting = nullptr;
 	CMapParticles *m_pParticles = nullptr;
+	std::shared_ptr<const CMapScreenEffect> m_pScreenEffect;
+	bool m_bScreenEffectShown = false;
+	QString m_szScreenEffectProblem;
 	QTimer *m_pLightingTimer = nullptr;
 	// What the last bake asked for was made from: the scene, the materials read (once they all
 	// are), and the preferences that change a bake.

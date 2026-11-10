@@ -3,7 +3,7 @@ include(FetchContent)
 # Qt is only needed by the app and the tests; the core library is plain C++.
 if(VOMIT_TOOLS_BUILD_APP OR VOMIT_TOOLS_BUILD_TESTS)
     find_package(Qt6 6.5 REQUIRED COMPONENTS Core Widgets Network Test)
-    find_package(Qt6 QUIET OPTIONAL_COMPONENTS ShaderTools GuiPrivate)
+    find_package(Qt6 QUIET OPTIONAL_COMPONENTS ShaderTools ShaderToolsPrivate GuiPrivate)
     # The desktop's file chooser portal is reached over D-Bus (Linux and other freedesktop systems).
     if(UNIX AND NOT APPLE)
         find_package(Qt6 QUIET OPTIONAL_COMPONENTS DBus)

@@ -95,6 +95,8 @@
 #include "PanelColumn.h"
 #include "ModelBrowser.h"
 #include "map/MaterialBrowser.h"
+#include "map/MapScreenEffect.h"
+#include "map/MapScreenEffectPanel.h"
 #include "map/ParticleBrowser.h"
 #include "map/MapPanes.h"
 #include "map/MapProperties.h"
@@ -421,6 +423,10 @@ CMapEditor::CMapEditor( const QString &szPath, bool bFromGame, QWidget *pParent 
 	pFog->setObjectName( QStringLiteral( "mapFogPanel" ) );
 	pFog->layout()->setContentsMargins( 0, 0, 0, 0 );
 	m_pPanels->AddPanel( QStringLiteral( "fog" ), tr( "Fog" ), MakeMapIcon( MapIcon_t::MAP_ICON_FOG, panelIconColor ), pFog );
+	auto *pScreenEffect = new CMapScreenEffectPanel( *this );
+	pScreenEffect->setObjectName( QStringLiteral( "mapScreenEffectPanel" ) );
+	pScreenEffect->layout()->setContentsMargins( 0, 0, 0, 0 );
+	m_pPanels->AddPanel( QStringLiteral( "screenEffect" ), tr( "Screen Effect" ), MakeMapIcon( MapIcon_t::MAP_ICON_SCREEN_EFFECT, panelIconColor ), pScreenEffect );
 	m_pCheck = new CMapCheckPanel( *this );
 	m_pPanels->AddPanel( QStringLiteral( "problems" ), tr( "Check for Problems" ), MakeMapIcon( MapIcon_t::MAP_ICON_PROBLEMS, panelIconColor ), m_pCheck, true );
 	m_pPanels->SetHiddenByDefault( QStringLiteral( "problems" ) );
@@ -454,7 +460,7 @@ CMapEditor::CMapEditor( const QString &szPath, bool bFromGame, QWidget *pParent 
 		pTab->setToolTip( tr( "Check for Problems: %1, %2" ).arg( tr( "%n error(s)", nullptr, nErrors ), tr( "%n warning(s)", nullptr, nWarnings ) ) );
 	} );
 	// Lighting and Fog start folded: their headers are there, their settings out of the way until wanted.
-	m_pPanels->SetState( QSettings{}.value( QLatin1String( SIDE_PANELS_SETTING ), QVariantMap{ { QStringLiteral( "folded" ), QStringList{ QStringLiteral( "lighting" ), QStringLiteral( "fog" ) } } } ).toMap() );
+	m_pPanels->SetState( QSettings{}.value( QLatin1String( SIDE_PANELS_SETTING ), QVariantMap{ { QStringLiteral( "folded" ), QStringList{ QStringLiteral( "lighting" ), QStringLiteral( "fog" ), QStringLiteral( "screenEffect" ) } } } ).toMap() );
 	m_pPanels->SetOnePanel( CPreferences::Instance().GetMapPreferences().m_bOnePanel );
 	PlaceFaceEdit();
 	connect( m_pPanels, &CPanelColumn::StateChanged, this, [ this ] { QSettings{}.setValue( QLatin1String( SIDE_PANELS_SETTING ), m_pPanels->GetState() ); if ( !m_bApplyingSideState ) { m_SideState = GetSideState(); emit SideStateChanged(); } } );
@@ -4685,7 +4691,9 @@ void CMapEditor::ResourcesArrived()
 void CMapEditor::AnimateMaterials()
 {
 	const bool bParticles = m_Settings.m_bParticles && m_pParticles->IsPlaying();
-	if ( !m_pResources->HasAnimated() && !m_pParticles->IsPlaying() )
+	// A screen effect its proxies move needs drawing again as time passes.
+	const bool bEffect = GetShownScreenEffect() && GetShownScreenEffect()->IsAnimated();
+	if ( !m_pResources->HasAnimated() && !m_pParticles->IsPlaying() && !bEffect )
 	{
 		m_pAnimationTimer->stop();
 		return;
@@ -4697,7 +4705,7 @@ void CMapEditor::AnimateMaterials()
 	for ( CMapView *pView : GetViews() )
 	{
 		auto *p3D = qobject_cast<CMapView3D *>( pView );
-		if ( p3D && p3D->isVisible() && p3D->GetType() != MapViewType_t::MAP_VIEW_TYPE_3D_WIREFRAME && p3D->GetType() != MapViewType_t::MAP_VIEW_TYPE_3D_FLAT )
+		if ( p3D && p3D->isVisible() && ( bEffect || ( p3D->GetType() != MapViewType_t::MAP_VIEW_TYPE_3D_WIREFRAME && p3D->GetType() != MapViewType_t::MAP_VIEW_TYPE_3D_FLAT ) ) )
 			shown.push_back( p3D );
 	}
 	if ( shown.empty() )
@@ -4709,7 +4717,7 @@ void CMapEditor::AnimateMaterials()
 		m_pParticles->Advance( flStep );
 	}
 	const bool bMaterials = m_pResources->HasAnimated() && m_pResources->Animate( flNow );
-	if ( !bMaterials && !bParticles )
+	if ( !bMaterials && !bParticles && !bEffect )
 	{
 		return;
 	}
@@ -4722,6 +4730,87 @@ void CMapEditor::AnimateMaterials()
 	{
 		p3D->Redraw();
 	}
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: The material read with its pixel shader through the game's files (mounted for it).
+//-----------------------------------------------------------------------------
+void CMapEditor::SetScreenEffect( const QString &szMaterial )
+{
+	QString szProblem;
+	std::shared_ptr<const CMapScreenEffect> pEffect;
+	if ( !szMaterial.trimmed().isEmpty() )
+	{
+		if ( const auto &game = m_pDocument->GetGame() )
+		{
+			QApplication::setOverrideCursor( Qt::WaitCursor );
+			auto pFiles = std::make_shared<xv::vfs::CFileSystem>();
+			pFiles->Mount( *game );
+			const xv::material::Reader_t read = [ pFiles ]( std::string_view szPath ) { return pFiles->Read( szPath ); };
+			pEffect = CMapScreenEffect::Load( szMaterial, read, &szProblem );
+			QApplication::restoreOverrideCursor();
+		}
+		else
+		{
+			szProblem = tr( "No game is set up, so the material can't be read." );
+		}
+	}
+	UseScreenEffect( std::move( pEffect ), szProblem );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Shown at once when it can be drawn.
+//-----------------------------------------------------------------------------
+void CMapEditor::UseScreenEffect( std::shared_ptr<const CMapScreenEffect> pEffect, const QString &szProblem )
+{
+	m_pScreenEffect = std::move( pEffect );
+	m_szScreenEffectProblem = szProblem;
+	m_bScreenEffectShown = m_pScreenEffect && m_pScreenEffect->CanRun();
+	if ( m_pScreenEffect && m_pScreenEffect->IsAnimated() && !m_pAnimationTimer->isActive() )
+		m_pAnimationTimer->start();
+	for ( CMapView *pView : GetViews() )
+		if ( auto *p3D = qobject_cast<CMapView3D *>( pView ) )
+			p3D->Redraw();
+	emit ScreenEffectChanged();
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+void CMapEditor::ShowScreenEffect( bool bShown )
+{
+	bShown = bShown && m_pScreenEffect;
+	if ( bShown == m_bScreenEffectShown )
+		return;
+	m_bScreenEffectShown = bShown;
+	if ( bShown && m_pScreenEffect->IsAnimated() && !m_pAnimationTimer->isActive() )
+		m_pAnimationTimer->start();
+	for ( CMapView *pView : GetViews() )
+		if ( auto *p3D = qobject_cast<CMapView3D *>( pView ) )
+			p3D->Redraw();
+	emit ScreenEffectChanged();
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: A copy with the constants held (the views' frames keep the one they were made with).
+//-----------------------------------------------------------------------------
+void CMapEditor::SetScreenEffectOverrides( std::array<std::optional<std::array<float, 4>>, 4> overrides )
+{
+	if ( !m_pScreenEffect || overrides == m_pScreenEffect->GetOverrides() )
+		return;
+	m_pScreenEffect = m_pScreenEffect->WithOverrides( overrides );
+	for ( CMapView *pView : GetViews() )
+		if ( auto *p3D = qobject_cast<CMapView3D *>( pView ) )
+			p3D->Redraw();
+	emit ScreenEffectChanged();
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+float CMapEditor::GetScreenEffectTime() const
+{
+	return static_cast<float>( m_AnimationClock.elapsed() ) / 1000.0f;
 }
 
 //-----------------------------------------------------------------------------

@@ -13,6 +13,12 @@
 - The material editor previews a screenspace_general material by running its pixel shader over
   a sample scene (its proxies, CurrentTime say, moving it), with a Shader tab holding the
   disassembly; a shader the game's files don't have is named, and the scene shows as it is.
+- Hammer maps: a Screen Effect panel draws a screenspace_general material over the 3D views, as
+  the game draws an env_screenoverlay's or a post effect: picked from what the map names
+  (env_screenoverlay's OverlayName keys, r_screenoverlay commands) or the texture browser, its
+  proxies moving it, its c0 to c3 changeable there. On the graphics card its pixel shader is
+  written as GLSL and baked as the map draws (the scene to a texture, the effect from it); in
+  software it runs through the interpreter.
 
 ### Hammer maps (new)
 - Right-click menus: in the 2D and 3D views (the object under the cursor, or the selection:

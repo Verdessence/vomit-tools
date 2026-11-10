@@ -32,6 +32,8 @@ class CMapResources;
 using MapMeshLights_t = std::unordered_map<const xv::map::CMapMesh *, std::shared_ptr<const std::vector<xv::map::LightVertex_t>>>;
 
 // One picture's worth of everything; copies are cheap and share the data.
+class CMapScreenEffect;
+
 struct MapFrame_t
 {
 	std::shared_ptr<const xv::map::CScene> m_pScene;
@@ -65,6 +67,9 @@ struct MapFrame_t
 	std::uint64_t m_nGeneration = 0; // changes whenever anything but the camera does
 	bool m_bModelEdges = true;       // the props' edges in the wireframe view
 	float m_flExposure = 0.0f;       // the HDR lighting preview's auto exposure, in the light's scale; 0: none (nothing to measure)
+	// A screen effect drawn over the picture (M16), as at a time for its proxies; null for none.
+	std::shared_ptr<const CMapScreenEffect> m_pScreenEffect;
+	float m_flScreenTime = 0.0f;
 
 	[[nodiscard]] xv::map::RasterScene_t MakeScene() const;
 };

@@ -213,6 +213,8 @@ void CMapRenderer::Release()
 	// Its QRhi goes, and with it any reading still on its way.
 	m_pReadback.reset();
 	m_pReadbackDone.reset();
+	m_pEffectPass.reset();
+	m_pPipelinePass = nullptr;
 	m_pOpaque.reset();
 	m_pBlended.reset();
 	m_pAdditive.reset();
@@ -305,7 +307,14 @@ void CMapRenderer::Initialize( QRhi *pRhi, QRhiRenderTarget * )
 		m_pLightSampler.reset( m_pRhi->newSampler( QRhiSampler::Linear, QRhiSampler::Linear, QRhiSampler::None, QRhiSampler::ClampToEdge, QRhiSampler::ClampToEdge ) );
 		m_pLightSampler->create();
 	}
-	// Pipelines follow the target's pass and sample count.
+	ResetPipelines();
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Pipelines follow the target's pass and sample count: made again for another.
+//-----------------------------------------------------------------------------
+void CMapRenderer::ResetPipelines()
+{
 	m_pOpaque.reset();
 	m_pBlended.reset();
 	m_pAdditive.reset();
@@ -313,6 +322,7 @@ void CMapRenderer::Initialize( QRhi *pRhi, QRhiRenderTarget * )
 	m_pPremultiplied.reset();
 	m_pPremultipliedAdditive.reset();
 	m_pLines.reset();
+	m_pPipelinePass = nullptr;
 }
 
 //-----------------------------------------------------------------------------
@@ -1062,9 +1072,24 @@ void CMapRenderer::Render( QRhiCommandBuffer *pCommands, QRhiRenderTarget *pTarg
 	UploadMeshes( frame, pUpdates );
 	UploadState( frame, pUpdates );
 	UploadMaterials( frame, pUpdates );
+	// A screen effect the card can draw: the scene into its texture first, the effect from it
+	// onto the view after.
+	QRhiRenderTarget *pFinal = pTarget;
+	const bool bEffect = frame.m_pScreenEffect && frame.m_pScreenEffect->CanRun() && frame.m_pScreenEffect->GetBaked().isValid();
+	if ( bEffect )
+	{
+		if ( !m_pEffectPass )
+			m_pEffectPass = std::make_unique<CScreenEffectPass>();
+		pTarget = m_pEffectPass->SceneTarget( m_pRhi, pFinal );
+	}
+	if ( m_pOpaque && m_pPipelinePass != pTarget->renderPassDescriptor() )
+	{
+		ResetPipelines();
+	}
 	if ( !m_pOpaque )
 	{
 		MakePipelines( pTarget );
+		m_pPipelinePass = pTarget->renderPassDescriptor();
 	}
 	m_Stats.m_flUploadMs = static_cast<double>( timer.nsecsElapsed() ) / 1e6 - m_Stats.m_flSnapshotMs;
 	const double flRecordFrom = static_cast<double>( timer.nsecsElapsed() ) / 1e6;
@@ -1351,6 +1376,10 @@ void CMapRenderer::Render( QRhiCommandBuffer *pCommands, QRhiRenderTarget *pTarg
 	QRhiResourceUpdateBatch *pReadback = nullptr;
 	MeasureExposure( frame, pTarget, pReadback );
 	pCommands->endPass( pReadback );
+	if ( bEffect )
+	{
+		m_pEffectPass->Draw( pCommands, pFinal, frame.m_pScreenEffect, frame.m_flScreenTime );
+	}
 	m_Held = frame;
 	m_Stats.m_nDrawCalls = m_nDrawCalls;
 	m_Stats.m_flRecordMs = static_cast<double>( timer.nsecsElapsed() ) / 1e6 - flRecordFrom;

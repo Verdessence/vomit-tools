@@ -39,6 +39,7 @@ struct MapRenderStats_t
 
 #include "GpuView.h"
 #include "map/MapRenderData.h"
+#include "map/MapScreenEffect.h"
 
 class QRhiBuffer;
 class QRhiGraphicsPipeline;
@@ -162,6 +163,11 @@ private:
 	std::unique_ptr<QRhiGraphicsPipeline> m_pAlphaSky; // the same, marking what is left as sky (the HDR lighting preview)
 	std::unique_ptr<QRhiShaderResourceBindings> m_pNoBindings;
 	std::unique_ptr<QRhiGraphicsPipeline> m_pSkyBehind; // the 2D sky over the whole picture, first (mapsky.frag)
+	// A screen effect's: the scene drawn into its texture, then it onto the view. The pipelines
+	// are made for one target's pass at a time.
+	std::unique_ptr<CScreenEffectPass> m_pEffectPass;
+	QRhiRenderPassDescriptor *m_pPipelinePass = nullptr;
+	void ResetPipelines();
 	std::unique_ptr<QRhiBuffer> m_pSkyView;             // its uniforms: the way back from clip space, and the look
 	std::unique_ptr<QRhiShaderResourceBindings> m_pSkyBehindBindings; // made again when the sky's faces change
 	quint32 m_nFrameStride = 0; // the world's frame uniforms, then the 3D skybox's

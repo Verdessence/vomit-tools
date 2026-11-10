@@ -40,6 +40,7 @@
 #include "map/MapConstants.h"
 #include "map/MapDocument.h"
 #include "map/MapEditor.h"
+#include "map/MapScreenEffect.h"
 #include "map/MapPhysics.h"
 #include "Graphics.h"
 #include "GpuView.h"
@@ -402,6 +403,9 @@ MapFrame_t CMapView3D::MakeFrame( QSize size )
 		frame.m_flExposure = m_flExposure;
 		frame.m_Options.m_Shade.m_flLightScale *= m_flExposure;
 	}
+	// The screen effect shown over the 3D views, as at now for its proxies.
+	frame.m_pScreenEffect = m_Editor.GetShownScreenEffect();
+	frame.m_flScreenTime = m_Editor.GetScreenEffectTime();
 	return frame;
 }
 
@@ -460,6 +464,8 @@ void CMapView3D::WorkerLoop()
 		QElapsedTimer timer;
 		timer.start();
 		xv::map::RenderView( frame.MakeScene(), frame.m_Camera, frame.m_Options, image );
+		if ( frame.m_pScreenEffect )
+			frame.m_pScreenEffect->Apply( image, frame.m_flScreenTime );
 		const double flMs = static_cast<double>( timer.nsecsElapsed() ) / 1e6;
 		QImage picture = ToQImage( image );
 		// The HDR lighting preview's next exposure, from this picture (every fourth pixel each way).
@@ -518,6 +524,8 @@ QImage CMapView3D::RenderNow( QSize size )
 	const MapFrame_t frame = MakeFrame( size );
 	xv::texture::CImage image;
 	xv::map::RenderView( frame.MakeScene(), frame.m_Camera, frame.m_Options, image );
+	if ( frame.m_pScreenEffect )
+		frame.m_pScreenEffect->Apply( image, frame.m_flScreenTime );
 	return ToQImage( image );
 }
 

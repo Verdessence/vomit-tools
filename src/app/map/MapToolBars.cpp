@@ -529,6 +529,18 @@ QIcon MakeMapIcon( MapIcon_t nIcon, const QColor &color )
 				painter.drawPath( path );
 			}
 			break;
+		case MapIcon_t::MAP_ICON_SCREEN_EFFECT:
+			// A screen with a wave across it: what is drawn over the picture.
+			{
+				painter.drawRoundedRect( QRectF{ 4, 6, 24, 17 }, 2, 2 );
+				painter.drawLine( QPointF{ 12, 27 }, QPointF{ 20, 27 } );
+				QPainterPath wave;
+				wave.moveTo( 7, 16 );
+				wave.cubicTo( 11, 10, 14, 10, 16, 14.5 );
+				wave.cubicTo( 18, 19, 21, 19, 25, 13 );
+				painter.drawPath( wave );
+			}
+			break;
 		case MapIcon_t::MAP_ICON_WALKABLE:
 			// Steps a player can walk up.
 			painter.drawPolyline( QPolygonF{ { QPointF{ 4, 27 }, QPointF{ 4, 22 }, QPointF{ 12, 22 }, QPointF{ 12, 16 }, QPointF{ 20, 16 }, QPointF{ 20, 10 }, QPointF{ 28, 10 }, QPointF{ 28, 27 } } } );

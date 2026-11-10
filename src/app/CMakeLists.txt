@@ -233,6 +233,10 @@ add_library(vomit_tools_ui STATIC
         map/MaterialPictures.h
         map/MaterialBrowser.cpp
         map/MaterialBrowser.h
+        map/MapScreenEffect.cpp
+        map/MapScreenEffect.h
+        map/MapScreenEffectPanel.cpp
+        map/MapScreenEffectPanel.h
         map/ParticleBrowser.cpp
         map/ParticleBrowser.h
         PointerLock.cpp
@@ -253,7 +257,7 @@ add_dependencies(vomit_tools_ui vomit_tools_build_info)
 
 # The previews draw on the graphics card (Vulkan first, through Qt's RHI) where Qt has QRhiWidget
 # (6.7+) and the shader tools to build their shaders; otherwise they draw in software only.
-if(Qt6_VERSION VERSION_GREATER_EQUAL 6.7 AND TARGET Qt6::ShaderTools AND TARGET Qt6::GuiPrivate)
+if(Qt6_VERSION VERSION_GREATER_EQUAL 6.7 AND TARGET Qt6::ShaderTools AND TARGET Qt6::ShaderToolsPrivate AND TARGET Qt6::GuiPrivate)
     # Qt can support Vulkan without installing the SDK headers an application needs to use it.
     # Only the headers are needed: Qt loads the driver at run time.
     if(QT_FEATURE_vulkan)
@@ -280,6 +284,9 @@ if(Qt6_VERSION VERSION_GREATER_EQUAL 6.7 AND TARGET Qt6::ShaderTools AND TARGET 
             HLSL 50
             MSL 12
             FILES shaders/map.vert shaders/map.frag shaders/mapline.vert shaders/mapline.frag shaders/mapalpha.vert shaders/mapalpha.frag shaders/mapalphasky.frag shaders/mapsky.vert shaders/mapsky.frag)
+    # Screen effects' pixel shaders are written as GLSL and baked for the card as the map opens them.
+    # (its QShaderBaker is in the private module, as QRhi is in GuiPrivate).
+    target_link_libraries(vomit_tools_ui PUBLIC Qt6::ShaderToolsPrivate)
     target_link_libraries(vomit_tools_ui PRIVATE Qt6::GuiPrivate)
     target_compile_definitions(vomit_tools_ui PUBLIC VOMIT_TOOLS_GPU)
     message(STATUS "vomit-tools: previews on the graphics card")
