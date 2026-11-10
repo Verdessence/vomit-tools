@@ -42,6 +42,8 @@ class CMapCheckPanel;
 class CMapEntityReport;
 class CMapFaceEdit;
 class CMapSprinklePanel;
+class CMapSplineTool;
+class CMapRecentPanel;
 class CMapBuildingPanel;
 class CMapFilterControl;
 class CMapPane;
@@ -82,6 +84,7 @@ public:
 	// The env_fog_controller the views show (its entity id; 0: the first that starts on).
 	void SetFogController( int nId );
 	[[nodiscard]] CMapBrushEdit &GetBrushEdit() { return *m_pBrushEdit; }
+	[[nodiscard]] CMapSplineTool &GetSplineTool() { return *m_pSplineTool; }
 	[[nodiscard]] MapTool_t GetTool() const { return m_nTool; }
 	void SetTool( MapTool_t nTool );
 	[[nodiscard]] MapEditMode_t GetEditMode() const { return m_nEditMode; }
@@ -500,6 +503,8 @@ private:
 	CMapFaceEdit *m_pFaceEdit = nullptr;
 	CMapBrushEdit *m_pBrushEdit = nullptr;
 	CMapSprinklePanel *m_pSprinkle = nullptr;
+	CMapSplineTool *m_pSplineTool = nullptr;
+	CMapRecentPanel *m_pRecent = nullptr;
 	CMapBuildingPanel *m_pBuilding = nullptr;
 	CMapProperties *m_pWorldProperties = nullptr; // Map Properties: the world's keys
 	QWidget *m_pFaceEditHolder = nullptr; // Face Edit's panel, when it isn't in its window

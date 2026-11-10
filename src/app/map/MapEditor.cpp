@@ -18,6 +18,7 @@
 #include "map/MapToolBars.h"
 #include "map/MapReports.h"
 #include "map/Write.h"
+#include "map/MapSplineTool.h"
 #include "map/MapSprinkle.h"
 #include "map/MapBuilding.h"
 #include "map/Materials.h"
@@ -318,6 +319,9 @@ CMapEditor::CMapEditor( const QString &szPath, bool bFromGame, QWidget *pParent 
 	m_pSprinkle = new CMapSprinklePanel;
 	m_pPanels->AddPanel( QStringLiteral( "sprinkle" ), tr( "Sprinkle" ), MakeMapIcon( MapIcon_t::MAP_ICON_SPRINKLE, panelIconColor ), m_pSprinkle );
 	m_pPanels->SetAvailable( QStringLiteral( "sprinkle" ), false );
+	m_pSplineTool = new CMapSplineTool( *this );
+	m_pPanels->AddPanel( QStringLiteral( "spline" ), tr( "Spline" ), MakeMapIcon( MapIcon_t::MAP_ICON_SPLINE, panelIconColor ), m_pSplineTool );
+	m_pPanels->SetAvailable( QStringLiteral( "spline" ), false ); // the spline tool's, there only with it
 	m_pBuilding = new CMapBuildingPanel;
 	m_pPanels->AddPanel( QStringLiteral( "building" ), tr( "Building Generator" ), MakeMapIcon( MapIcon_t::MAP_ICON_BLOCK, panelIconColor ), m_pBuilding );
 	m_pPanels->SetHiddenByDefault( QStringLiteral( "building" ) );
@@ -432,6 +436,8 @@ CMapEditor::CMapEditor( const QString &szPath, bool bFromGame, QWidget *pParent 
 		{ MapTool_t::MAP_TOOL_MAGNIFY, MapIcon_t::MAP_ICON_MAGNIFY, tr( "Magnify" ), MapAction_t::MAP_ACTION_TOOL_MAGNIFY },
 		{ MapTool_t::MAP_TOOL_CAMERA, MapIcon_t::MAP_ICON_CAMERA, tr( "Camera" ), MapAction_t::MAP_ACTION_TOOL_CAMERA },
 		{ MapTool_t::MAP_TOOL_ENTITY, MapIcon_t::MAP_ICON_ENTITY, tr( "Entity Tool" ), MapAction_t::MAP_ACTION_TOOL_ENTITY },
+		{ MapTool_t::MAP_TOOL_POLYGON, MapIcon_t::MAP_ICON_POLYGON, tr( "Polygon Tool" ), MapAction_t::MAP_ACTION_TOOL_POLYGON },
+		{ MapTool_t::MAP_TOOL_SPLINE, MapIcon_t::MAP_ICON_SPLINE, tr( "Spline Tool" ), MapAction_t::MAP_ACTION_TOOL_SPLINE },
 		{ MapTool_t::MAP_TOOL_BLOCK, MapIcon_t::MAP_ICON_BLOCK, tr( "Block Tool" ), MapAction_t::MAP_ACTION_TOOL_BLOCK },
 		{ MapTool_t::MAP_TOOL_TEXTURE, MapIcon_t::MAP_ICON_TEXTURE, tr( "Texture Application" ), MapAction_t::MAP_ACTION_TOOL_TEXTURE },
 		{ MapTool_t::MAP_TOOL_OVERLAY, MapIcon_t::MAP_ICON_OVERLAY, tr( "Overlay Tool" ), MapAction_t::MAP_ACTION_TOOL_OVERLAY },
@@ -1308,6 +1314,15 @@ void CMapEditor::SetTool( MapTool_t nTool )
 	{
 		m_pSprinkle->SetEditorGrid( m_Settings.m_nGridSize );
 		m_pPanels->ScrollTo( QStringLiteral( "sprinkle" ) );
+	}
+	// The spline tool's panel likewise; choosing the tool takes up a selected spline.
+	const bool bSpline = nTool == MapTool_t::MAP_TOOL_SPLINE;
+	const bool bWasSpline = m_pPanels->IsAvailable( QStringLiteral( "spline" ) );
+	m_pPanels->SetAvailable( QStringLiteral( "spline" ), bSpline );
+	m_pSplineTool->SetActive( bSpline );
+	if ( bSpline && !bWasSpline )
+	{
+		m_pPanels->ScrollTo( QStringLiteral( "spline" ) );
 	}
 	for ( CMapView *pView : GetViews() )
 	{
@@ -2684,6 +2699,15 @@ bool CMapEditor::RunAction( MapAction_t nAction, CMapView *pFrom )
 			return true;
 		case MapAction_t::MAP_ACTION_TOGGLE_CORDON:
 			ToggleCordon();
+			return true;
+		case MapAction_t::MAP_ACTION_TOOL_POLYGON:
+			SetTool( MapTool_t::MAP_TOOL_POLYGON );
+			return true;
+		case MapAction_t::MAP_ACTION_TOOL_SPLINE:
+			SetTool( MapTool_t::MAP_TOOL_SPLINE );
+			return true;
+		case MapAction_t::MAP_ACTION_MERGE_BRUSHES:
+			MergeBrushes();
 			return true;
 		case MapAction_t::MAP_ACTION_CARVE:
 			Carve();

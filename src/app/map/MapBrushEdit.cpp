@@ -4,6 +4,7 @@
 // Purpose: See MapBrushEdit.h.
 //===========================================================================//
 #include "MapBrushEdit.h"
+#include "map/MapSplineTool.h"
 
 #include <algorithm>
 #include <cmath>

@@ -208,6 +208,32 @@ struct ViewSettings_t
 	bool m_bShow3DGrid = false;
 };
 
+// A spline tool path (map/Spline.h): its points and how its pieces are made, and the solids it
+// made. Kept in a "vomit_spline" block of its own.
+struct SplinePoint_t
+{
+	Point_t m_Position{};
+	double m_flWidth = 0.0; // 0: the spline's width
+
+	friend bool operator==( const SplinePoint_t &, const SplinePoint_t & ) = default;
+};
+
+struct Spline_t
+{
+	int m_nId = 0;
+	std::vector<SplinePoint_t> m_Points;
+	double m_flWidth = 128.0;
+	double m_flPieceLength = 128.0; // about how long each piece is along the curve
+	int m_nPower = 3;               // the pieces' displacements: 2 to 4
+	double m_flThickness = 16.0;    // the brushes under the surface
+	bool m_bClosed = false;         // the last point joins the first
+	std::string m_szMaterial = "DEV/DEV_MEASUREGENERIC01";
+	double m_flTextureScale = 0.25;
+	std::vector<int> m_Pieces;      // the ids of the solids it made, in order along it
+
+	friend bool operator==( const Spline_t &, const Spline_t & ) = default;
+};
+
 // A block the reader keeps but doesn't look into (Hammer++'s "palette_plus", "quickhide"...).
 struct RawBlock_t
 {
@@ -268,6 +294,9 @@ public:
 	bool m_bCordonsActive = false;
 	std::vector<Span_t> m_CordonSpans;    // the "cordon" and "cordons" blocks as read
 	bool m_bCordonsChanged = false;       // the writer puts a fresh "cordons" block in their place
+	std::vector<Spline_t> m_Splines;
+	std::vector<Span_t> m_SplineSpans;   // the "vomit_spline" blocks as read
+	bool m_bSplinesChanged = false;      // the writer puts fresh blocks in their place
 	std::vector<RawBlock_t> m_RawBlocks;
 	std::vector<std::string> m_Materials; // each once, lower case with '/'
 	std::vector<Span_t> m_TopBlocks;      // every top-level block, in file order

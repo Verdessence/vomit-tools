@@ -245,6 +245,18 @@
   out is kept but hidden, each kind in a visgroup under "Stripper: <config>" (Added, Modified,
   Removed). Visgroups made here are saved in the map.
 
+### Hammer maps: the spline tool (new)
+- A path of points with a strip of displacements swept along it, for roads, paths and river
+  beds: click points on surfaces in 3D or on the grid in 2D, Enter makes the pieces. The curve
+  passes through every point without loops (centripetal Catmull-Rom), its height never rises
+  past or dips under its points, the strip stays level across, and neighbouring pieces share
+  their edges point for point. Width, piece length, displacement power, thickness, material,
+  texture scale and loop are in the side panel; the texture runs along the road.
+- The spline stays editable: it is kept in the map (a `vomit_spline` block naming its pieces).
+  Choose the tool with a piece selected to take it up; dragging a point, adding one on the curve,
+  removing one (right-click) or changing a setting makes the pieces again, one undo step each.
+  Hammer keeps the pieces as ordinary displacements and drops the block on its own saves.
+
 ### Settings file (new)
 - Settings live in `vomit-tools.nut` (beside Qt's settings: `~/.config/vomit-tools/` on Linux),
   written as Squirrel (VScript) tables and read as data, never run: `map <- { fov = 90 }`,

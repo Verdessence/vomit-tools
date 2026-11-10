@@ -63,6 +63,8 @@ add_library(vomit_tools_core STATIC
         map/Clip.h
         map/Cordon.cpp
         map/Cordon.h
+        map/Spline.cpp
+        map/Spline.h
         map/Vertex.cpp
         map/BrushMesh.cpp
         map/BrushOperations.cpp

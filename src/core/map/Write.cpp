@@ -1039,6 +1039,55 @@ std::string CWriter::Run()
 		}
 	}
 
+	// Changed splines: a "vomit_spline" block each, where the first one read was (the others
+	// removed), or at the end of the file.
+	if ( m_Map.m_bSplinesChanged )
+	{
+		const std::string nl{ m_szNewline };
+		std::string szBlocks;
+		for ( const Spline_t &spline : m_Map.m_Splines )
+		{
+			std::string szPieces;
+			for ( const int nId : spline.m_Pieces )
+			{
+				szPieces += ( szPieces.empty() ? "" : " " ) + std::to_string( nId );
+			}
+			szBlocks += "vomit_spline" + nl + "{" + nl;
+			szBlocks += "\t" + Pair( "id", std::to_string( spline.m_nId ) ) + nl;
+			szBlocks += "\t" + Pair( "width", FormatNumber( spline.m_flWidth ) ) + nl;
+			szBlocks += "\t" + Pair( "piece", FormatNumber( spline.m_flPieceLength ) ) + nl;
+			szBlocks += "\t" + Pair( "power", std::to_string( spline.m_nPower ) ) + nl;
+			szBlocks += "\t" + Pair( "thickness", FormatNumber( spline.m_flThickness ) ) + nl;
+			szBlocks += "\t" + Pair( "closed", spline.m_bClosed ? "1" : "0" ) + nl;
+			szBlocks += "\t" + Pair( "material", spline.m_szMaterial ) + nl;
+			szBlocks += "\t" + Pair( "scale", FormatNumber( spline.m_flTextureScale ) ) + nl;
+			szBlocks += "\t" + Pair( "pieces", szPieces ) + nl;
+			for ( const SplinePoint_t &point : spline.m_Points )
+			{
+				szBlocks += "\t" + Pair( "point", FormatPoint( point.m_Position ) + " " + FormatNumber( point.m_flWidth ) ) + nl;
+			}
+			szBlocks += "}" + nl;
+		}
+		if ( m_Map.m_SplineSpans.empty() )
+		{
+			if ( !szBlocks.empty() )
+			{
+				const bool bEndsLine = m_szText.empty() || m_szText.back() == '\n';
+				Replace( m_szText.size(), 0, ( bEndsLine ? std::string{} : nl ) + szBlocks );
+			}
+		}
+		else
+		{
+			for ( std::size_t i = 0; i < m_Map.m_SplineSpans.size(); i++ )
+			{
+				const Span_t span = m_Map.m_SplineSpans[ i ];
+				const std::size_t nStart = LineStart( span.m_nOffset );
+				const std::size_t nEnd = LineEnd( span.m_nOffset + span.m_nLength );
+				Replace( nStart, nEnd - nStart, i == 0 ? szBlocks : std::string{} );
+			}
+		}
+	}
+
 	// Changed visgroups: a fresh "visgroups" block where the first one read was (the others
 	// removed), else where Hammer puts it, before the view settings and the world.
 	if ( m_Map.m_bVisgroupsChanged )

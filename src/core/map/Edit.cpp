@@ -156,6 +156,11 @@ std::shared_ptr<CScene> ApplyEdit( const CScene &scene, const MapEdit_t &edit, b
 		map.m_bCordonsActive = edit.m_Cordons->second;
 		map.m_bCordonsChanged = true;
 	}
+	if ( edit.m_Splines )
+	{
+		map.m_Splines = *edit.m_Splines;
+		map.m_bSplinesChanged = true;
+	}
 	if ( edit.m_Visgroups )
 	{
 		map.m_Visgroups = *edit.m_Visgroups;
@@ -372,6 +377,10 @@ MapEdit_t InverseOf( const CScene &scene, const MapEdit_t &edit )
 	if ( edit.m_Cordons )
 	{
 		inverse.m_Cordons = std::make_pair( map.m_Cordons, map.m_bCordonsActive );
+	}
+	if ( edit.m_Splines )
+	{
+		inverse.m_Splines = map.m_Splines;
 	}
 	if ( edit.m_Visgroups )
 	{

@@ -121,6 +121,7 @@ private:
 	std::size_t ReadCameras( std::size_t nOpen, int nDepth );
 	std::size_t ReadCordon( std::size_t nOpen, int nDepth, Cordon_t &cordon );
 	std::size_t ReadCordons( std::size_t nOpen, int nDepth );
+	std::size_t ReadSpline( std::size_t nOpen, int nDepth, Spline_t &spline );
 	std::uint32_t Intern( std::string_view szSpelling );
 	void ReadRows( std::string_view szBlock, const std::vector<std::pair<std::size_t, std::string_view>> &rows, std::size_t nRows, std::size_t nPerRow, std::vector<double> &out, std::size_t nOffset, int nSideId );
 
@@ -888,6 +889,78 @@ std::size_t CReader::ReadCameras( std::size_t nOpen, int nDepth )
 //-----------------------------------------------------------------------------
 // Purpose: One cordon: the old single "cordon" block, or one inside "cordons" with its boxes.
 //-----------------------------------------------------------------------------
+// Purpose: A spline tool path (map/Spline.h): its settings, its points in order (a "point" key
+//          each, "x y z width"), and the ids of the solids it made.
+//-----------------------------------------------------------------------------
+std::size_t CReader::ReadSpline( std::size_t nOpen, int nDepth, Spline_t &spline )
+{
+	return ReadBody(
+		nOpen, nDepth,
+		[ & ]( const Token_t &key, const Token_t &value ) {
+			const std::string_view szKey = key.GetText();
+			const std::string_view szValue = value.GetText();
+			if ( Is( szKey, "id" ) )
+			{
+				spline.m_nId = ParseNumber<int>( szValue ).value_or( 0 );
+			}
+			else if ( Is( szKey, "point" ) )
+			{
+				std::vector<double> numbers;
+				if ( ParseNumbers( szValue, 4, numbers ) || ParseNumbers( szValue, 3, numbers ) )
+				{
+					spline.m_Points.push_back( { { numbers[ 0 ], numbers[ 1 ], numbers[ 2 ] }, numbers.size() > 3 ? numbers[ 3 ] : 0.0 } );
+				}
+				else
+				{
+					Report( value.m_nOffset, Severity_t::SEVERITY_WARNING, "a spline point should be \"x y z width\"" );
+				}
+			}
+			else if ( Is( szKey, "width" ) )
+			{
+				spline.m_flWidth = ParseNumber<double>( szValue ).value_or( spline.m_flWidth );
+			}
+			else if ( Is( szKey, "piece" ) )
+			{
+				spline.m_flPieceLength = ParseNumber<double>( szValue ).value_or( spline.m_flPieceLength );
+			}
+			else if ( Is( szKey, "power" ) )
+			{
+				spline.m_nPower = ParseNumber<int>( szValue ).value_or( spline.m_nPower );
+			}
+			else if ( Is( szKey, "thickness" ) )
+			{
+				spline.m_flThickness = ParseNumber<double>( szValue ).value_or( spline.m_flThickness );
+			}
+			else if ( Is( szKey, "closed" ) )
+			{
+				spline.m_bClosed = ParseNumber<int>( szValue ).value_or( 0 ) != 0;
+			}
+			else if ( Is( szKey, "material" ) )
+			{
+				spline.m_szMaterial = std::string{ szValue };
+			}
+			else if ( Is( szKey, "scale" ) )
+			{
+				spline.m_flTextureScale = ParseNumber<double>( szValue ).value_or( spline.m_flTextureScale );
+			}
+			else if ( Is( szKey, "pieces" ) )
+			{
+				std::size_t nAt = 0;
+				while ( nAt < szValue.size() )
+				{
+					const std::size_t nEnd = std::min( szValue.find( ' ', nAt ), szValue.size() );
+					if ( const auto nId = ParseNumber<int>( szValue.substr( nAt, nEnd - nAt ) ) )
+					{
+						spline.m_Pieces.push_back( *nId );
+					}
+					nAt = nEnd + 1;
+				}
+			}
+		},
+		[ & ]( const Token_t &, int ) { return SkipBody( m_Lexer.GetOffset() - 1 ); } );
+}
+
+//-----------------------------------------------------------------------------
 std::size_t CReader::ReadCordon( std::size_t nOpen, int nDepth, Cordon_t &cordon )
 {
 	Box_t single;
@@ -1062,6 +1135,13 @@ void CReader::Read()
 		{
 			nEnd = ReadCordons( nOpen, 1 );
 			m_Map.m_CordonSpans.push_back( SpanOf( key.m_nOffset, nEnd ) );
+		}
+		else if ( Is( szName, "vomit_spline" ) )
+		{
+			Spline_t spline;
+			nEnd = ReadSpline( nOpen, 1, spline );
+			m_Map.m_Splines.push_back( std::move( spline ) );
+			m_Map.m_SplineSpans.push_back( SpanOf( key.m_nOffset, nEnd ) );
 		}
 		else
 		{

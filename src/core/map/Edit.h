@@ -48,6 +48,8 @@ struct MapEdit_t
 	std::vector<int> m_RemovedGroups;
 	// The cordons as they are to be, and whether the cordon is on.
 	std::optional<std::pair<std::vector<Cordon_t>, bool>> m_Cordons;
+	// The spline tool's paths as they are to be (map/Spline.h).
+	std::optional<std::vector<Spline_t>> m_Splines;
 	std::optional<std::pair<std::vector<Camera_t>, int>> m_Cameras;
 	// The map's visgroups as they are to be (m_nParent indexes this list); objects join them
 	// through their editor notes.
