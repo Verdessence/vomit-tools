@@ -43,15 +43,19 @@ struct PhysicsSettings_t
 
 // A model's collision as the simulation takes it: its convex pieces in model space (the PHY's,
 // placed by their bones' rest pose), and its mass from the PHY's text (0 when it says none).
+// A model without a .phy has its bounds as one box, m_bBounds set: it can fall, but the game
+// doesn't collide with it, so it is nothing for others to hit.
 struct PropCollision_t
 {
 	std::vector<std::vector<Point_t>> m_Pieces;
 	double m_flMass = 0.0;
+	bool m_bBounds = false;
 };
 // A model's collision by its path ("models/props_junk/wood_crate001a.mdl"); null when it has none.
 using PropCollisionLookup_t = std::function<std::shared_ptr<const PropCollision_t>( std::string_view szModel )>;
 
-// Reads a model's collision: its .phy beside the .mdl, checked against the model's checksum.
+// Reads a model's collision: its .phy beside the .mdl, checked against the model's checksum, or
+// the model's bounds when it has no .phy.
 [[nodiscard]] std::shared_ptr<const PropCollision_t> ReadPropCollision( std::string_view szModel, const model::Reader_t &pfnRead, std::string *pError = nullptr );
 // The mass a PHY's text gives (its solids' "mass" summed, or "totalmass"); 0 when none.
 [[nodiscard]] double PhysicsTextMass( std::string_view szText );

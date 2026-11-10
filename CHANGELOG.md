@@ -274,6 +274,9 @@
 - While it runs, in a 3D view: left-drag pulls an object, right click shoots it, middle click
   sets off an explosion. The panel has the strengths, gravity, air density, time scale, sleeping
   until touched, mass from the model, props only, and drawing the collision models.
+- While it's stopped, a click in a 3D view picks what falls next, as the selection tool does.
+- A prop whose model has no .phy falls as its model's bounds, and the panel says so; one that
+  isn't moving is nothing for the others to hit, as in the game.
 - Runs on Box3D (Erin Catto, MIT).
 
 ### Hammer maps

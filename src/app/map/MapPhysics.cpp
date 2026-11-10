@@ -23,6 +23,7 @@
 #include <QVBoxLayout>
 
 #include "Preferences.h"
+#include "map/MapConstants.h"
 #include "map/MapDocument.h"
 #include "map/MapEditor.h"
 #include "map/MapView2D.h"
@@ -39,8 +40,6 @@ constexpr int TICK_MS = 16;
 constexpr double LONGEST_FRAME = 0.1;
 // More edges than this aren't drawn: a big map's world would cost every frame its time.
 constexpr std::size_t MOST_EDGES = 200000;
-const QColor MOVING_EDGES{ 255, 150, 40 };
-const QColor STATIC_EDGES{ 80, 160, 255, 150 };
 
 } // namespace
 
@@ -568,11 +567,11 @@ void CMapPhysicsTool::Paint( CMapView &view, QPainter &painter ) const
 	const MapPreferences_t &preferences = CPreferences::Instance().GetMapPreferences();
 	if ( preferences.m_bPhysicsDrawStatic )
 	{
-		draw( m_pScene->GetEdges( false ), STATIC_EDGES );
+		draw( m_pScene->GetEdges( false ), mapstyle::PHYSICS_STATIC_EDGES );
 	}
 	if ( preferences.m_bPhysicsDrawMoving )
 	{
-		draw( m_pScene->GetEdges( true ), MOVING_EDGES );
+		draw( m_pScene->GetEdges( true ), mapstyle::PHYSICS_MOVING_EDGES );
 	}
 	painter.restore();
 }

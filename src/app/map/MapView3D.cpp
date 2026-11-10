@@ -40,6 +40,7 @@
 #include "map/MapConstants.h"
 #include "map/MapDocument.h"
 #include "map/MapEditor.h"
+#include "map/MapPhysics.h"
 #include "Graphics.h"
 #include "GpuView.h"
 #ifdef VOMIT_TOOLS_GPU
@@ -1361,7 +1362,9 @@ void CMapView3D::mouseReleaseEvent( QMouseEvent *pEvent )
 				m_Editor.PlaceOverlay( surface->first, surface->second, *face );
 		return;
 	}
-	if ( m_Editor.GetTool() == MapTool_t::MAP_TOOL_SELECT )
+	// The physics tool picks as the selection tool does while it is stopped, so what falls next
+	// can be chosen without switching tools.
+	if ( m_Editor.GetTool() == MapTool_t::MAP_TOOL_SELECT || ( m_Editor.GetTool() == MapTool_t::MAP_TOOL_PHYSICS && !m_Editor.GetPhysicsTool().IsRunning() ) )
 	{
 		Select( pEvent->position(), pEvent->modifiers().testFlag( Qt::ControlModifier ) );
 	}

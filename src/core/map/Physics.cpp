@@ -208,7 +208,28 @@ std::shared_ptr<const PropCollision_t> ReadPropCollision( std::string_view szMod
 	const auto bytes = pfnRead( std::string{ szModel.substr( 0, szModel.size() - 4 ) } + ".phy" );
 	if ( !bytes )
 	{
-		return fail( "it has no collision model (.phy)" );
+		// Its bounds, as one box: the hull studiomdl wrote, else the view's.
+		CVec3 vecMin = studio->m_vecHullMin;
+		CVec3 vecMax = studio->m_vecHullMax;
+		if ( !( vecMax.m_flX > vecMin.m_flX && vecMax.m_flY > vecMin.m_flY && vecMax.m_flZ > vecMin.m_flZ ) )
+		{
+			vecMin = studio->m_vecViewMin;
+			vecMax = studio->m_vecViewMax;
+		}
+		if ( !( vecMax.m_flX > vecMin.m_flX && vecMax.m_flY > vecMin.m_flY && vecMax.m_flZ > vecMin.m_flZ ) )
+		{
+			return fail( "it has no collision model (.phy) and no bounds" );
+		}
+		auto pBox = std::make_shared<PropCollision_t>();
+		std::vector<Point_t> corners;
+		for ( int i = 0; i < 8; i++ )
+		{
+			corners.push_back( { ( i & 1 ) ? vecMax.m_flX : vecMin.m_flX, ( i & 2 ) ? vecMax.m_flY : vecMin.m_flY, ( i & 4 ) ? vecMax.m_flZ : vecMin.m_flZ } );
+		}
+		pBox->m_Pieces.push_back( std::move( corners ) );
+		pBox->m_flMass = studio->m_flMass > 0.0f ? studio->m_flMass : 0.0;
+		pBox->m_bBounds = true;
+		return pBox;
 	}
 	const auto physics = model::ReadPhysics( *bytes, &szError );
 	if ( !physics )
@@ -499,6 +520,10 @@ CPhysicsScene::CPhysicsScene( const CScene &scene, const std::vector<std::uint32
 				impl.m_Problems.push_back( szModel + " has no collision model, so it stays" );
 				continue;
 			}
+			if ( pCollision->m_bBounds )
+			{
+				impl.m_Problems.push_back( szModel + " has no .phy, so it falls as its bounds" );
+			}
 			const Transform_t placement = PlacementOf( entity );
 			std::vector<std::vector<Point_t>> pieces;
 			for ( const auto &piece : pCollision->m_Pieces )
@@ -643,7 +668,7 @@ CPhysicsScene::CPhysicsScene( const CScene &scene, const std::vector<std::uint32
 			continue;
 		}
 		const auto pCollision = pfnCollision( entity.GetValue( "model" ) );
-		if ( !pCollision )
+		if ( !pCollision || pCollision->m_bBounds )
 		{
 			continue;
 		}
