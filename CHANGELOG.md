@@ -10,6 +10,9 @@
   picture as the game draws them: their textures in s0 to s3 (the frame for _rt_FullFrameFB),
   $c0_x to $c3_w in c0 to c3, texel sizes in c4 to c7, sRGB read and written unless
   $linearread_*/$linearwrite, and $additive, $alpha_blend, $alpha_blend_color_overlay, $copyalpha.
+- The material editor previews a screenspace_general material by running its pixel shader over
+  a sample scene (its proxies, CurrentTime say, moving it), with a Shader tab holding the
+  disassembly; a shader the game's files don't have is named, and the scene shows as it is.
 
 ### Hammer maps (new)
 - Right-click menus: in the 2D and 3D views (the object under the cursor, or the selection:

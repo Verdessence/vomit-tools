@@ -18,7 +18,9 @@
 #include <QLabel>
 #include <QListWidget>
 #include <QMouseEvent>
+#include <QFontDatabase>
 #include <QPainter>
+#include <QPlainTextEdit>
 #include <QPushButton>
 #include <QSlider>
 #include <QSpinBox>
@@ -34,6 +36,10 @@
 #include "ImageFiles.h"
 #include "InterfaceMode.h"
 #include "Language.h"
+#include "shader/Bytecode.h"
+#include "shader/Interpreter.h"
+#include "shader/ScreenEffect.h"
+#include "shader/Vcs.h"
 #include "texture/Vtf.h"
 
 #ifdef VOMIT_TOOLS_GPU
@@ -242,6 +248,154 @@ private:
 };
 
 //-----------------------------------------------------------------------------
+// What a screen effect's preview runs: its pixel shader (when it was found and reads), where it
+// was looked for, its disassembly, and why it can't run when it can't.
+//-----------------------------------------------------------------------------
+struct CMaterialView::Screen_t
+{
+	std::optional<xv::shader::CPixelShader> m_Shader;
+	QString m_szPath;
+	QString m_szText;
+	QString m_szProblem;
+};
+
+namespace
+{
+
+//-----------------------------------------------------------------------------
+// Purpose: What a screen effect is previewed over: a scene of sorts (a sky going pale to the
+//          horizon, a checkered floor, a red pillar and a white light), so blurs, shifts, colour
+//          grades and edges all show on it.
+//-----------------------------------------------------------------------------
+xv::texture::CImage SampleScene( int nWidth, int nHeight )
+{
+	xv::texture::CImage image( nWidth, nHeight );
+	for ( int y = 0; y < nHeight; y++ )
+	{
+		for ( int x = 0; x < nWidth; x++ )
+		{
+			const float u = ( static_cast<float>( x ) + 0.5f ) / static_cast<float>( nWidth );
+			const float v = ( static_cast<float>( y ) + 0.5f ) / static_cast<float>( nHeight );
+			std::array<float, 3> colour{};
+			if ( v < 0.55f )
+			{
+				const float t = v / 0.55f;
+				colour = { 0.25f + 0.55f * t, 0.45f + 0.4f * t, 0.85f + 0.1f * t };
+			}
+			else
+			{
+				// The floor's squares smaller towards the horizon.
+				const float flDepth = 0.12f / std::max( 0.01f, v - 0.55f );
+				const bool bLight = ( static_cast<int>( std::floor( ( u - 0.5f ) * flDepth * 8.0f ) ) + static_cast<int>( std::floor( flDepth * 4.0f ) ) ) % 2 == 0;
+				const float flShade = 0.35f + 0.65f * ( v - 0.55f ) / 0.45f;
+				colour = bLight ? std::array<float, 3>{ 0.8f * flShade, 0.75f * flShade, 0.65f * flShade } : std::array<float, 3>{ 0.25f * flShade, 0.25f * flShade, 0.3f * flShade };
+			}
+			if ( u > 0.62f && u < 0.74f && v > 0.2f && v < 0.85f )
+				colour = { 0.75f * ( 1.0f - ( u - 0.62f ) * 4.0f ), 0.12f, 0.1f };
+			if ( std::hypot( u - 0.3f, v - 0.25f ) < 0.07f )
+				colour = { 1.0f, 1.0f, 0.95f };
+			std::uint8_t *p = image.Pixel( x, y );
+			for ( std::size_t i = 0; i < 3; i++ )
+				p[ i ] = static_cast<std::uint8_t>( std::clamp( colour[ i ], 0.0f, 1.0f ) * 255.0f + 0.5f );
+			p[ 3 ] = 255;
+		}
+	}
+	return image;
+}
+
+} // namespace
+
+//-----------------------------------------------------------------------------
+// Purpose: The material's $pixshader from the game's shaders/fxc (the _ps20b one first for a
+//          _ps20 name, as cards with ps_2_b load), its first combo (screenspace_general uses
+//          combo 0), disassembled.
+//-----------------------------------------------------------------------------
+void CMaterialView::ReadScreenShader( const material::Reader_t &pfnRead )
+{
+	m_pScreen = std::make_unique<Screen_t>();
+	const xv::shader::ScreenEffect_t effect = xv::shader::ReadScreenEffect( *m_Material );
+	if ( effect.m_szPixelShader.empty() )
+	{
+		m_pScreen->m_szProblem = tr( "It names no $pixshader." );
+		return;
+	}
+	const std::vector<std::string> paths = xv::shader::PixelShaderPaths( effect.m_szPixelShader );
+	std::optional<std::vector<std::byte>> bytes;
+	for ( const std::string &szPath : paths )
+	{
+		if ( ( bytes = pfnRead ? pfnRead( szPath ) : std::nullopt ) )
+		{
+			m_pScreen->m_szPath = Qs( szPath );
+			break;
+		}
+	}
+	if ( !bytes )
+	{
+		m_pScreen->m_szProblem = tr( "%1 isn't in the game's files, so the preview shows the picture as it is." ).arg( Qs( paths.front() ) );
+		return;
+	}
+	std::string szError;
+	const auto file = xv::shader::ReadVcs( *bytes, &szError );
+	const xv::shader::VcsCombo_t *pCombo = file ? file->Find( 0, 0 ) : nullptr;
+	if ( !pCombo && file && !file->m_Combos.empty() )
+		pCombo = &file->m_Combos.front();
+	const auto program = pCombo ? xv::shader::ReadBytecode( pCombo->m_Tokens, &szError ) : std::nullopt;
+	if ( !program )
+	{
+		m_pScreen->m_szProblem = tr( "%1 can't be read: %2" ).arg( m_pScreen->m_szPath, Qs( szError.empty() ? std::string{ "it has no combos" } : szError ) );
+		return;
+	}
+	m_pScreen->m_szText = tr( "// %1: version %2, %3 combo(s), %4\n" ).arg( m_pScreen->m_szPath ).arg( file->m_nVersion ).arg( file->m_Combos.size() ).arg( Qs( program->Profile() ) ) + Qs( xv::shader::Disassemble( *program ) );
+	m_pScreen->m_Shader.emplace( *program );
+	if ( !m_pScreen->m_Shader->CanRun() )
+		m_pScreen->m_szProblem = Qs( m_pScreen->m_Shader->GetProblem() );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: The effect over the sample scene as it is now (the proxies' constants with it): the
+//          frame's own pictures are the scene, the material's textures as read.
+//-----------------------------------------------------------------------------
+QImage CMaterialView::RenderScreen( int nSize ) const
+{
+	const int nWidth = std::max( 16, nSize );
+	const int nHeight = std::max( 9, nSize * 3 / 4 );
+	const xv::texture::CImage scene = SampleScene( nWidth, nHeight );
+	xv::texture::CImage out = scene;
+	if ( m_pScreen && m_pScreen->m_Shader && m_pScreen->m_Shader->CanRun() && m_Now )
+	{
+		const xv::shader::ScreenEffect_t effect = xv::shader::ReadScreenEffect( *m_Now );
+		std::array<const xv::texture::CImage *, 4> textures{};
+		constexpr std::array<std::string_view, 4> PARAMETERS{ "$basetexture", "$texture1", "$texture2", "$texture3" };
+		for ( std::size_t i = 0; i < 4; i++ )
+		{
+			if ( xv::shader::IsFrameTexture( effect.m_Textures[ i ] ) )
+				textures[ i ] = &scene;
+			else if ( const material::Texture_t *pTexture = m_Textures.Find( PARAMETERS[ i ] ); pTexture && !pTexture->m_Frames.empty() )
+				textures[ i ] = &pTexture->m_Frames.front();
+		}
+		if ( auto applied = xv::shader::ApplyScreenEffect( *m_pScreen->m_Shader, effect, scene, textures ) )
+			out = std::move( *applied );
+	}
+	return ToQImage( out );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+QString CMaterialView::GetScreenShaderText() const
+{
+	return m_pScreen ? m_pScreen->m_szText : QString{};
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+QString CMaterialView::GetScreenShaderProblem() const
+{
+	return m_pScreen ? m_pScreen->m_szProblem : QString{};
+}
+
+//-----------------------------------------------------------------------------
 // Purpose:
 //-----------------------------------------------------------------------------
 CMaterialView::CMaterialView( const QString &szPath, const QString &szSource, std::span<const std::byte> bytes, material::Reader_t pfnRead, QWidget *pParent )
@@ -254,6 +408,8 @@ CMaterialView::CMaterialView( const QString &szPath, const QString &szSource, st
 	{
 		m_Textures = material::CTextureSet::Load( *m_Material, pfnRead );
 		m_pProxies = std::make_unique<material::CProxies>( *m_Material );
+		if ( xv::shader::IsScreenEffect( *m_Material ) )
+			ReadScreenShader( pfnRead );
 	}
 
 	m_pSummary = new QLabel;
@@ -346,6 +502,17 @@ CMaterialView::CMaterialView( const QString &szPath, const QString &szSource, st
 	pTabs->addTab( m_pParameters, tr( "Parameters" ) );
 	pTabs->addTab( m_pTextureList, tr( "Textures" ) );
 	pTabs->addTab( new CKeyValuesView( szPath, bytes ), tr( "Text" ) );
+	if ( m_pScreen )
+	{
+		// A screen effect's pixel shader, disassembled (or why it isn't).
+		auto *pShader = new QPlainTextEdit;
+		pShader->setObjectName( QStringLiteral( "materialShader" ) );
+		pShader->setReadOnly( true );
+		pShader->setLineWrapMode( QPlainTextEdit::NoWrap );
+		pShader->setFont( QFontDatabase::systemFont( QFontDatabase::FixedFont ) );
+		pShader->setPlainText( m_pScreen->m_szProblem.isEmpty() ? m_pScreen->m_szText : QStringLiteral( "// %1\n%2" ).arg( m_pScreen->m_szProblem, m_pScreen->m_szText ) );
+		pTabs->addTab( pShader, tr( "Shader" ) );
+	}
 
 	auto *pSplitter = new QSplitter( Qt::Horizontal );
 	pSplitter->addWidget( pPreviewSide );
@@ -425,7 +592,15 @@ CMaterialView::CMaterialView( const QString &szPath, const QString &szSource, st
 		m_Clock.start();
 		m_pTimer->start();
 	}
-	SetUseGpu( CGraphics::Instance().IsGpu() );
+	// A screen effect runs its pixel shader in software, over a picture of its own: no surface,
+	// so no shape, repeat or backdrop.
+	SetUseGpu( CGraphics::Instance().IsGpu() && !m_pScreen );
+	if ( m_pScreen )
+	{
+		m_pShape->hide();
+		m_pRepeat->hide();
+		m_pBackdrop->hide();
+	}
 	Render();
 }
 
@@ -583,6 +758,12 @@ void CMaterialView::Render()
 	{
 		m_pCanvas->m_pGpu->update();
 	}
+	else if ( m_pScreen )
+	{
+		m_Preview = RenderScreen( Options().m_nSize );
+		m_pCanvas->m_Image = m_Preview;
+		m_pCanvas->update();
+	}
 	else
 	{
 		m_Preview = ToQImage( material::RenderPreview( *m_Now, m_Textures, Options() ) );
@@ -701,8 +882,16 @@ void CMaterialView::FillTextures()
 void CMaterialView::UpdateNotes()
 {
 	QStringList lines;
+	if ( m_pScreen )
+	{
+		// What the screen effect preview does instead of the surface's note.
+		lines << ( m_pScreen->m_szProblem.isEmpty() ? tr( "Its pixel shader (%1) runs over a sample picture, as it would over the game's frame." ).arg( m_pScreen->m_szPath ) : m_pScreen->m_szProblem ).toHtmlEscaped();
+	}
 	for ( const std::string &szNote : material::PreviewNotes( *m_Material, m_Textures ) )
 	{
+		// The frame's own pictures are the sample picture here.
+		if ( m_pScreen && ( szNote.find( "draws over the screen" ) != std::string::npos || szNote.find( "_rt_" ) != std::string::npos ) )
+			continue;
 		lines << Qs( szNote ).toHtmlEscaped();
 	}
 	if ( !m_pProxies->GetSkipped().empty() )

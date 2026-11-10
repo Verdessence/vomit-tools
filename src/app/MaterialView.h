@@ -98,4 +98,14 @@ private:
 	QListWidget *m_pTextureList = nullptr;
 	QWidget *m_pTabs = nullptr;
 	QTimer *m_pTimer = nullptr;
+	// A screenspace_general material: its pixel shader, run over a sample picture of a scene.
+	struct Screen_t;
+	std::unique_ptr<Screen_t> m_pScreen;
+	void ReadScreenShader( const xv::material::Reader_t &pfnRead );
+	[[nodiscard]] QImage RenderScreen( int nSize ) const;
+
+public:
+	// Its pixel shader as read (empty when it isn't a screen effect), and why it can't run.
+	[[nodiscard]] QString GetScreenShaderText() const;
+	[[nodiscard]] QString GetScreenShaderProblem() const;
 };
