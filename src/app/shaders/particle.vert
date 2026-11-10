@@ -6,11 +6,11 @@
 layout(location = 0) in vec3 position; // x, y in pixels from the top-left; depth
 layout(location = 1) in vec2 uv;
 layout(location = 2) in vec4 color;    // tint (overbright included) and alpha
-layout(location = 3) in float addSelf;
+layout(location = 3) in vec2 addSelf;   // $addself, and 1 to premultiply ($addoverblend: 0)
 
 layout(location = 0) out vec2 v_uv;
 layout(location = 1) out vec4 v_color;
-layout(location = 2) out float v_addSelf;
+layout(location = 2) out vec2 v_addSelf;
 
 layout(std140, binding = 0) uniform Frame {
 	vec2 viewport;    // pixels

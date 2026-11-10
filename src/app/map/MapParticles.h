@@ -27,6 +27,7 @@
 #include "map/Raster.h"
 #include "map/Scene.h"
 #include "particles/Render.h"
+#include "map/Check.h"
 #include "particles/Simulation.h"
 #include "vfs/Vfs.h"
 
@@ -39,7 +40,8 @@ public:
 	~CMapParticles() override;
 
 	// Reads the game's particle systems on a thread of its own (the manifest's files, then
-	// szMapName's own manifest); Ready follows. Without a game there are none.
+	// szMapName's own manifest, then every other .pcf under particles/ for the names still
+	// missing); Ready follows. Without a game there are none.
 	void Start( std::optional<xv::vfs::CGameInfo> game, std::string szMapName );
 	void Stop();
 	[[nodiscard]] bool IsReady() const { return m_bReady; }
@@ -61,6 +63,10 @@ public:
 	[[nodiscard]] std::shared_ptr<const xv::vfs::CFileSystem> GetFileSystem() const { return m_pFileSystem; }
 	[[nodiscard]] std::vector<std::string> GetSystemNames() const;
 	[[nodiscard]] std::size_t GetParticleCount() const;
+	// The system an object (an info_particle_system's) plays; null when it plays none.
+	[[nodiscard]] const xv::particles::CSimulation *GetSimulation( std::uint32_t nObject ) const;
+	// Where an effect is found, for Check for Problems: nothing until the files are read.
+	[[nodiscard]] std::optional<xv::map::ParticleSource_t> FindSource( std::string_view szEffect ) const;
 	// The effect names the scene asks for that the game doesn't have.
 	[[nodiscard]] const std::vector<std::string> &GetMissing() const { return m_Missing; }
 	// Their materials, one per system's definition drawn, and what keeps their textures alive.
@@ -78,6 +84,7 @@ private:
 	{
 		std::shared_ptr<const xv::particles::CLibrary> m_pLibrary;
 		std::size_t m_nDefinition = 0;
+		std::string m_szUnlistedFile; // read though no manifest lists it
 	};
 	struct Playing_t
 	{

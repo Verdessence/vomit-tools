@@ -15,6 +15,7 @@
 #include <thread>
 
 #include "kv1/Kv1.h"
+#include "material/Material.h"
 #include "texture/Vtf.h"
 #include "vfs/Vfs.h"
 
@@ -38,16 +39,6 @@ T ReadAt( std::span<const std::byte> data, std::size_t nOffset )
 	return value;
 }
 
-//-----------------------------------------------------------------------------
-// Purpose:
-//-----------------------------------------------------------------------------
-std::string Lower( std::string_view szText )
-{
-	std::string szOut{ szText };
-	std::ranges::transform( szOut, szOut.begin(), []( unsigned char c ) { return static_cast<char>( std::tolower( c ) ); } );
-	return szOut;
-}
-
 // A four-sided shape on screen, textured by rect. Its corners, in order, show the texture's
 // top-left, top-right, bottom-right and bottom-left; between them the texture follows the
 // perspective, so a sprite lying on the ground looks like a decal, not a skewed parallelogram.
@@ -63,6 +54,7 @@ struct CQuad
 	const texture::CImage *m_pImage = nullptr;
 	Sprite_t::Blend_t m_nBlend = Sprite_t::Blend_t::BLEND_ALPHA;
 	float m_flAddSelf = 0.0f;
+	bool m_bPointSample = false;
 
 	// Works out the mapping from screen to texture and the screen area covered; false when there is
 	// nothing to draw.
@@ -188,6 +180,17 @@ std::array<float, 4> Sample( const texture::CImage &image, float x, float y )
 }
 
 //-----------------------------------------------------------------------------
+// Purpose: The texel a point falls in, for point-sampled textures; RGBA 0-1.
+//-----------------------------------------------------------------------------
+std::array<float, 4> SampleNearest( const texture::CImage &image, float x, float y )
+{
+	const int nX = std::clamp( static_cast<int>( std::floor( x * static_cast<float>( image.m_nWidth ) ) ), 0, image.m_nWidth - 1 );
+	const int nY = std::clamp( static_cast<int>( std::floor( y * static_cast<float>( image.m_nHeight ) ) ), 0, image.m_nHeight - 1 );
+	const std::uint8_t *p = image.Pixel( nX, nY );
+	return { static_cast<float>( p[ 0 ] ) / 255.0f, static_cast<float>( p[ 1 ] ) / 255.0f, static_cast<float>( p[ 2 ] ) / 255.0f, static_cast<float>( p[ 3 ] ) / 255.0f };
+}
+
+//-----------------------------------------------------------------------------
 // Purpose:
 //-----------------------------------------------------------------------------
 void Fill( const CQuad &quad, std::vector<float> &buffer, const std::vector<float> &depth, int nWidth, int nRowStart, int nRowEnd )
@@ -219,9 +222,11 @@ void Fill( const CQuad &quad, std::vector<float> &buffer, const std::vector<floa
 			{
 				continue;
 			}
-			const auto texel = Sample( *quad.m_pImage, quad.m_Rect[ 0 ] + a * flRw, quad.m_Rect[ 1 ] + b * flRh );
+			const float flU = quad.m_Rect[ 0 ] + a * flRw;
+			const float flV = quad.m_Rect[ 1 ] + b * flRh;
+			const auto texel = quad.m_bPointSample ? SampleNearest( *quad.m_pImage, flU, flV ) : Sample( *quad.m_pImage, flU, flV );
 			const float flAlpha = texel[ 3 ] * quad.m_flAlpha;
-			if ( flAlpha <= 0.0f )
+			if ( flAlpha <= 0.0f && quad.m_nBlend != Sprite_t::Blend_t::BLEND_ADD_OVER )
 			{
 				continue;
 			}
@@ -232,6 +237,11 @@ void Fill( const CQuad &quad, std::vector<float> &buffer, const std::vector<floa
 				if ( quad.m_nBlend == Sprite_t::Blend_t::BLEND_ADDITIVE )
 				{
 					pOut[ c ] += flSrc * flAlpha;
+				}
+				else if ( quad.m_nBlend == Sprite_t::Blend_t::BLEND_ADD_OVER )
+				{
+					// The texture's colour isn't weighted by its own alpha, only by the particle's.
+					pOut[ c ] = pOut[ c ] * ( 1.0f - flAlpha ) + flSrc * quad.m_flAlpha * ( 1.0f + quad.m_flAddSelf );
 				}
 				else
 				{
@@ -477,6 +487,133 @@ const texture::CImage &MipFor( const Sprite_t &sprite, float flTexels, float flP
 	return sprite.m_Mips[ static_cast<std::size_t>( nLevel ) ];
 }
 
+// The most pieces one span of a rope is cut into where its texture repeats: a texture far
+// shorter than its span repeats unseen past that, stretched over the last.
+constexpr int MAX_ROPE_CUTS = 64;
+
+// A piece of a rope, from a to b: its width and the rope's direction at each end (shared with
+// the pieces either side, so they join), and the part of the texture it shows (left, top at a,
+// right, bottom at b).
+struct RopePiece_t
+{
+	CVec3 m_vecA;
+	CVec3 m_vecB;
+	CVec3 m_vecAlongA;
+	CVec3 m_vecAlongB;
+	float m_flRadiusA = 0.0f;
+	float m_flRadiusB = 0.0f;
+	std::array<float, 4> m_Rect{ 0, 0, 1, 1 };
+	std::array<float, 3> m_vecColor{ 1, 1, 1 };
+	float m_flAlpha = 1.0f;
+
+	// The corners in the world (the texture's top-left, top-right, bottom-right, bottom-left),
+	// the strip turned to face the eye at each end; nullopt seen end on.
+	[[nodiscard]] std::optional<std::array<CVec3, 4>> Corners( CVec3 vecEye ) const
+	{
+		const CVec3 vecAcrossA = Cross( m_vecAlongA, m_vecA - vecEye );
+		const CVec3 vecAcrossB = Cross( m_vecAlongB, m_vecB - vecEye );
+		if ( Length( vecAcrossA ) < 1e-6f || Length( vecAcrossB ) < 1e-6f )
+			return std::nullopt;
+		const CVec3 a = Normalized( vecAcrossA ) * m_flRadiusA;
+		const CVec3 b = Normalized( vecAcrossB ) * m_flRadiusB;
+		return std::array<CVec3, 4>{ m_vecA - a, m_vecA + a, m_vecB + b, m_vecB - b };
+	}
+};
+
+//-----------------------------------------------------------------------------
+// Purpose: render_rope as the VDC describes it: one rope through the particles in the order
+//          they were made, each span between two smoothed into subdivision_count pieces (a
+//          Catmull-Rom curve through them), the texture running down its length and repeating.
+//          texel_size is taken as world units a texel, so a texture as tall as the rope is long
+//          over texel_size shows once; texture_scroll_rate moves it on that many times a second.
+//          Pieces are cut where the texture repeats, so each shows one stretch of it.
+//-----------------------------------------------------------------------------
+std::vector<RopePiece_t> RopePieces( std::span<const Particle_t *const> ordered, const CCompiledOperator &renderer, const Sprite_t &sprite, float flTime )
+{
+	std::vector<RopePiece_t> pieces;
+	if ( ordered.size() < 2 )
+	{
+		return pieces;
+	}
+	const int nSubdivisions = std::clamp( renderer.Integer( "subdivision_count", 3 ), 1, 64 );
+	const float flTexelSize = std::max( renderer.Number( "texel_size", 4.0f ), 1e-3f );
+	const float flScroll = renderer.Number( "texture_scroll_rate" ) * flTime;
+	// The points the rope passes through: each particle, and the curve's between them.
+	struct Node_t
+	{
+		CVec3 m_vecPosition;
+		std::size_t m_nSpan = 0; // between particles m_nSpan and m_nSpan + 1
+		float m_flT = 0.0f;      // how far along that span
+	};
+	std::vector<Node_t> nodes;
+	for ( std::size_t i = 0; i + 1 < ordered.size(); i++ )
+	{
+		const CVec3 p1 = ordered[ i ]->m_vecPosition;
+		const CVec3 p2 = ordered[ i + 1 ]->m_vecPosition;
+		const CVec3 p0 = i > 0 ? ordered[ i - 1 ]->m_vecPosition : p1 * 2.0f - p2;
+		const CVec3 p3 = i + 2 < ordered.size() ? ordered[ i + 2 ]->m_vecPosition : p2 * 2.0f - p1;
+		for ( int n = 0; n < nSubdivisions; n++ )
+		{
+			const float t = static_cast<float>( n ) / static_cast<float>( nSubdivisions );
+			const float t2 = t * t;
+			const float t3 = t2 * t;
+			nodes.push_back( { ( p1 * 2.0f + ( p2 - p0 ) * t + ( p0 * 2.0f - p1 * 5.0f + p2 * 4.0f - p3 ) * t2 + ( p1 * 3.0f - p0 - p2 * 3.0f + p3 ) * t3 ) * 0.5f, i, t } );
+		}
+	}
+	nodes.push_back( { ordered.back()->m_vecPosition, ordered.size() - 2, 1.0f } );
+	// The rope's direction at each node, from its neighbours.
+	std::vector<CVec3> along( nodes.size() );
+	for ( std::size_t k = 0; k < nodes.size(); k++ )
+	{
+		const CVec3 d = nodes[ std::min( k + 1, nodes.size() - 1 ) ].m_vecPosition - nodes[ k > 0 ? k - 1 : 0 ].m_vecPosition;
+		along[ k ] = Length( d ) > 1e-6f ? Normalized( d ) : CVec3{};
+	}
+	float flLength = 0.0f; // along the rope so far
+	for ( std::size_t k = 0; k + 1 < nodes.size(); k++ )
+	{
+		const Node_t &from = nodes[ k ];
+		const Node_t &to = nodes[ k + 1 ];
+		const Particle_t &a = *ordered[ from.m_nSpan ];
+		const Particle_t &b = *ordered[ from.m_nSpan + 1 ];
+		const float flToT = to.m_nSpan == from.m_nSpan ? to.m_flT : 1.0f;
+		const std::array<float, 4> frame = FrameRect( sprite, &renderer, a );
+		const float flTall = frame[ 3 ] - frame[ 1 ];
+		const float flRepeat = std::max( 1.0f, flTall * static_cast<float>( sprite.m_Mips.empty() ? 1 : sprite.m_Mips.front().m_nHeight ) ) * flTexelSize; // world units the texture covers once
+		const CVec3 vecPiece = to.m_vecPosition - from.m_vecPosition;
+		const float flPiece = Length( vecPiece );
+		// The texture's v (in repeats) at this piece's start and end.
+		const float flVFrom = flLength / flRepeat + flScroll;
+		const float flVTo = ( flLength + flPiece ) / flRepeat + flScroll;
+		flLength += flPiece;
+		const CVec3 vecStraight = flPiece > 1e-6f ? vecPiece * ( 1.0f / flPiece ) : CVec3{};
+		// Cut where the texture starts over (but into no more than MAX_ROPE_CUTS).
+		float flV = flVFrom;
+		for ( int nCut = 0; flPiece > 1e-6f && flV < flVTo && nCut < MAX_ROPE_CUTS; nCut++ )
+		{
+			const float flStart = std::floor( flV );
+			const float flEnd = nCut + 1 == MAX_ROPE_CUTS ? flVTo : std::min( flVTo, flStart + 1.0f );
+			const float flU0 = ( flV - flVFrom ) / ( flVTo - flVFrom );
+			const float flU1 = ( flEnd - flVFrom ) / ( flVTo - flVFrom );
+			const auto spanT = [ & ]( float u ) { return from.m_flT + ( flToT - from.m_flT ) * u; };
+			RopePiece_t piece;
+			piece.m_vecA = from.m_vecPosition + vecPiece * flU0;
+			piece.m_vecB = from.m_vecPosition + vecPiece * flU1;
+			piece.m_vecAlongA = flU0 <= 0.0f ? along[ k ] : vecStraight;
+			piece.m_vecAlongB = flEnd >= flVTo ? along[ k + 1 ] : vecStraight;
+			piece.m_flRadiusA = a.m_flRadius + ( b.m_flRadius - a.m_flRadius ) * spanT( flU0 );
+			piece.m_flRadiusB = a.m_flRadius + ( b.m_flRadius - a.m_flRadius ) * spanT( flU1 );
+			const float flMiddle = spanT( 0.5f * ( flU0 + flU1 ) );
+			for ( std::size_t c = 0; c < 3; c++ )
+				piece.m_vecColor[ c ] = a.m_vecColor[ c ] + ( b.m_vecColor[ c ] - a.m_vecColor[ c ] ) * flMiddle;
+			piece.m_flAlpha = a.m_flAlpha + ( b.m_flAlpha - a.m_flAlpha ) * flMiddle;
+			piece.m_Rect = { frame[ 0 ], frame[ 1 ] + ( flV - flStart ) * flTall, frame[ 2 ], frame[ 1 ] + std::min( flEnd - flStart, 1.0f ) * flTall };
+			pieces.push_back( piece );
+			flV = flEnd;
+		}
+	}
+	return pieces;
+}
+
 } // namespace
 
 //-----------------------------------------------------------------------------
@@ -515,7 +652,9 @@ Sprite_t FallbackSprite()
 }
 
 //-----------------------------------------------------------------------------
-// Purpose: Reads materials/<material>.vmt and its $basetexture through read.
+// Purpose: Reads materials/<material>.vmt as the game does (a patch's include, the fallbacks)
+//          and its $basetexture through read: the blend, SpriteCard's overbright and $addself,
+//          $color for the shaders that take it, $alpha, and the texture's point sampling.
 //-----------------------------------------------------------------------------
 Sprite_t LoadSprite( std::string_view szMaterial, const FileReader_t &pfnRead )
 {
@@ -527,49 +666,35 @@ Sprite_t LoadSprite( std::string_view szMaterial, const FileReader_t &pfnRead )
 		sprite.m_szProblem = szVmtPath + " not found";
 		return sprite;
 	}
-	const auto parsed = kv1::Parse( std::string{ reinterpret_cast<const char *>( vmt->data() ), vmt->size() } );
-	const kv1::CNode *pRoot = nullptr;
-	for ( const kv1::CNode &node : parsed.m_Document.m_Roots )
+	std::string szParseError;
+	const std::optional<material::CMaterial> parsed = material::ParseMaterial( std::string_view{ reinterpret_cast<const char *>( vmt->data() ), vmt->size() }, pfnRead, {}, &szParseError );
+	if ( !parsed )
 	{
-		if ( node.IsBlock() )
-		{
-			pRoot = &node;
-			break;
-		}
-	}
-	if ( !pRoot )
-	{
-		sprite.m_szProblem = szVmtPath + " has no shader block";
+		sprite.m_szProblem = szVmtPath + ": " + szParseError;
 		return sprite;
 	}
-	const std::string szShader = Lower( pRoot->GetKey() );
-	std::string szBase;
-	for ( const kv1::CNode &child : pRoot->GetChildren() )
+	const std::string szShader = parsed->GetShaderKind();
+	const std::string szBase = parsed->Value( "$basetexture" );
+	if ( parsed->Flag( "$additive" ) )
 	{
-		if ( !child.IsPair() )
-		{
-			continue;
-		}
-		const std::string szKey = Lower( child.GetKey() );
-		const std::string szValue = child.GetValue();
-		const float flNumber = std::strtof( szValue.c_str(), nullptr );
-		if ( szKey == "$basetexture" )
-		{
-			szBase = szValue;
-		}
-		else if ( szKey == "$additive" )
-		{
-			sprite.m_nBlend = flNumber != 0.0f ? Sprite_t::Blend_t::BLEND_ADDITIVE : sprite.m_nBlend;
-		}
-		else if ( szKey == "$overbrightfactor" )
-		{
-			sprite.m_flOverbright = flNumber > 0.0f ? flNumber : 1.0f;
-		}
-		else if ( szKey == "$addself" )
-		{
-			sprite.m_flAddSelf = flNumber;
-		}
+		sprite.m_nBlend = Sprite_t::Blend_t::BLEND_ADDITIVE;
 	}
+	else if ( szShader == "spritecard" && parsed->Flag( "$addoverblend" ) )
+	{
+		sprite.m_nBlend = Sprite_t::Blend_t::BLEND_ADD_OVER;
+	}
+	if ( szShader == "spritecard" )
+	{
+		const float flOverbright = parsed->Number( "$overbrightfactor", 1.0f );
+		sprite.m_flOverbright = flOverbright > 0.0f ? flOverbright : 1.0f;
+		sprite.m_flAddSelf = parsed->Number( "$addself", 0.0f );
+	}
+	else
+	{
+		const CVec3 vecColor = parsed->Color( "$color" );
+		sprite.m_vecTint = { vecColor.m_flX, vecColor.m_flY, vecColor.m_flZ };
+	}
+	sprite.m_flAlpha = std::clamp( parsed->Number( "$alpha", 1.0f ), 0.0f, 1.0f );
 	if ( szShader == "refract" )
 	{
 		sprite.m_bVisible = false;
@@ -599,6 +724,7 @@ Sprite_t LoadSprite( std::string_view szMaterial, const FileReader_t &pfnRead )
 		sprite.m_szProblem = szVtfPath + ": " + szError;
 		return sprite;
 	}
+	sprite.m_bPointSample = ( vtf->m_Info.m_nFlags & texture::vtf_flag::POINTSAMPLE ) != 0;
 	sprite.m_Mips = { *image };
 	while ( sprite.m_Mips.back().m_nWidth > 1 || sprite.m_Mips.back().m_nHeight > 1 )
 	{
@@ -780,6 +906,42 @@ std::vector<ScreenQuad_t> Layout( const CSimulation &simulation, const CCamera &
 				if ( bRope )
 				{
 					std::ranges::sort( ordered, {}, &Particle_t::m_flCreationTime );
+					for ( const RopePiece_t &piece : RopePieces( ordered, *pRenderer, *pSprite, instance.m_flTime ) )
+					{
+						const auto corners = piece.Corners( camera.GetEye() );
+						if ( !corners )
+						{
+							continue;
+						}
+						ScreenQuad_t quad;
+						bool bSeen = true;
+						for ( std::size_t c = 0; c < 4 && bSeen; c++ )
+						{
+							const auto corner = camera.Project( ( *corners )[ c ] );
+							bSeen = corner.has_value();
+							if ( corner )
+							{
+								quad.m_Corners[ c ] = *corner;
+							}
+						}
+						if ( !bSeen )
+						{
+							continue;
+						}
+						quad.m_flDepth = 0.25f * ( quad.m_Corners[ 0 ][ 2 ] + quad.m_Corners[ 1 ][ 2 ] + quad.m_Corners[ 2 ][ 2 ] + quad.m_Corners[ 3 ][ 2 ] );
+						quad.m_pSprite = pSprite;
+						quad.m_Rect = piece.m_Rect;
+						quad.m_flAlpha = std::clamp( piece.m_flAlpha, 0.0f, 1.0f ) * pSprite->m_flAlpha;
+						quad.m_vecColor = pSprite->Color( piece.m_vecColor );
+						quad.m_nBlend = pSprite->m_nBlend;
+						quad.m_flAddSelf = pSprite->m_flAddSelf;
+						quad.m_flPixels = 2.0f * std::max( piece.m_flRadiusA * camera.Scale( quad.m_Corners[ 0 ][ 2 ] ), piece.m_flRadiusB * camera.Scale( quad.m_Corners[ 2 ][ 2 ] ) );
+						if ( OnScreen( quad, camera ) && quad.m_flAlpha > 0.0f )
+						{
+							mine.push_back( quad );
+						}
+					}
+					continue;
 				}
 				for ( std::size_t i = 0; i < ordered.size(); i++ )
 				{
@@ -793,8 +955,8 @@ std::vector<ScreenQuad_t> Layout( const CSimulation &simulation, const CCamera &
 					quad.m_flDepth = ( *center )[ 2 ];
 					quad.m_pSprite = pSprite;
 					quad.m_Rect = FrameRect( *pSprite, pRenderer, p );
-					quad.m_flAlpha = std::clamp( p.m_flAlpha, 0.0f, 1.0f );
-					quad.m_vecColor = { p.m_vecColor[ 0 ] * pSprite->m_flOverbright, p.m_vecColor[ 1 ] * pSprite->m_flOverbright, p.m_vecColor[ 2 ] * pSprite->m_flOverbright };
+					quad.m_flAlpha = std::clamp( p.m_flAlpha, 0.0f, 1.0f ) * pSprite->m_flAlpha;
+					quad.m_vecColor = pSprite->Color( p.m_vecColor );
 					quad.m_nBlend = pSprite->m_nBlend;
 					quad.m_flAddSelf = pSprite->m_flAddSelf;
 					const float flSize = p.m_flRadius * camera.Scale( quad.m_flDepth ); // radius in pixels
@@ -809,10 +971,6 @@ std::vector<ScreenQuad_t> Layout( const CSimulation &simulation, const CCamera &
 						{
 							end = camera.Project( p.m_vecPosition - p.m_vecVelocity * ( flTrailLength / flSpeed ) );
 						}
-					}
-					else if ( bRope && i + 1 < ordered.size() )
-					{
-						end = camera.Project( ordered[ i + 1 ]->m_vecPosition );
 					}
 					// A shape in the world, drawn through its four projected corners.
 					const auto worldQuad = [ & ]( CVec3 u, CVec3 v ) {
@@ -847,7 +1005,7 @@ std::vector<ScreenQuad_t> Layout( const CSimulation &simulation, const CCamera &
 						const float flEd = ( *end )[ 2 ];
 						quad.m_Corners = { { { flHx - flNx, flHy - flNy, flHd }, { flHx + flNx, flHy + flNy, flHd }, { flHx + flNx + flDx, flHy + flNy + flDy, flEd }, { flHx - flNx + flDx, flHy - flNy + flDy, flEd } } };
 					}
-					else if ( bTrail || bRope )
+					else if ( bTrail )
 					{
 						continue;
 					}
@@ -942,7 +1100,24 @@ std::vector<WorldQuad_t> WorldLayout( const CSimulation &simulation, CVec3 vecEy
 				for ( const Particle_t &p : instance.m_Particles )
 					ordered.push_back( &p );
 				if ( bRope )
+				{
 					std::ranges::sort( ordered, {}, &Particle_t::m_flCreationTime );
+					for ( const RopePiece_t &piece : RopePieces( ordered, *pRenderer, *pSprite, instance.m_flTime ) )
+					{
+						const auto corners = piece.Corners( vecEye );
+						WorldQuad_t quad;
+						quad.m_nDefinition = nIndex;
+						quad.m_flDepth = Dot( ( piece.m_vecA + piece.m_vecB ) * 0.5f - vecEye, vecForward );
+						quad.m_Rect = piece.m_Rect;
+						quad.m_flAlpha = std::clamp( piece.m_flAlpha, 0.0f, 1.0f ) * pSprite->m_flAlpha;
+						quad.m_vecColor = pSprite->Color( piece.m_vecColor );
+						if ( !corners || quad.m_flDepth <= 0.0f || quad.m_flAlpha <= 0.0f )
+							continue;
+						quad.m_Corners = *corners;
+						mine.push_back( quad );
+					}
+					continue;
+				}
 				for ( std::size_t i = 0; i < ordered.size(); i++ )
 				{
 					const Particle_t &p = *ordered[ i ];
@@ -950,8 +1125,8 @@ std::vector<WorldQuad_t> WorldLayout( const CSimulation &simulation, CVec3 vecEy
 					quad.m_nDefinition = nIndex;
 					quad.m_flDepth = Dot( p.m_vecPosition - vecEye, vecForward );
 					quad.m_Rect = FrameRect( *pSprite, pRenderer, p );
-					quad.m_flAlpha = std::clamp( p.m_flAlpha, 0.0f, 1.0f );
-					quad.m_vecColor = { p.m_vecColor[ 0 ] * pSprite->m_flOverbright, p.m_vecColor[ 1 ] * pSprite->m_flOverbright, p.m_vecColor[ 2 ] * pSprite->m_flOverbright };
+					quad.m_flAlpha = std::clamp( p.m_flAlpha, 0.0f, 1.0f ) * pSprite->m_flAlpha;
+					quad.m_vecColor = pSprite->Color( p.m_vecColor );
 					if ( quad.m_flDepth <= 0.0f || quad.m_flAlpha <= 0.0f )
 						continue;
 					// u runs along the texture's width, v down its height; both are half sizes.
@@ -964,10 +1139,6 @@ std::vector<WorldQuad_t> WorldLayout( const CSimulation &simulation, CVec3 vecEy
 						if ( flSpeed > 0.0f && flTrailLength > 0.0f )
 							end = p.m_vecPosition - p.m_vecVelocity * ( flTrailLength / flSpeed );
 					}
-					else if ( bRope && i + 1 < ordered.size() )
-					{
-						end = ordered[ i + 1 ]->m_vecPosition;
-					}
 					if ( end )
 					{
 						// A strip from here to the end, as wide as the particle, turned to face the eye.
@@ -978,7 +1149,7 @@ std::vector<WorldQuad_t> WorldLayout( const CSimulation &simulation, CVec3 vecEy
 						const CVec3 n = Normalized( vecAcross ) * p.m_flRadius;
 						quad.m_Corners = { p.m_vecPosition - n, p.m_vecPosition + n, *end + n, *end - n };
 					}
-					else if ( bTrail || bRope )
+					else if ( bTrail )
 					{
 						continue;
 					}
@@ -1153,6 +1324,7 @@ void RenderScene( const CCamera &camera, std::span<const ScreenMesh_t> meshes, s
 		quad.m_nBlend = shape.m_nBlend;
 		quad.m_flAddSelf = shape.m_flAddSelf;
 		const Sprite_t &sprite = shape.m_pSprite && !shape.m_pSprite->m_Mips.empty() ? *shape.m_pSprite : white;
+		quad.m_bPointSample = sprite.m_bPointSample;
 		const float flTexels = ( shape.m_Rect[ 2 ] - shape.m_Rect[ 0 ] ) * static_cast<float>( sprite.m_Mips[ 0 ].m_nWidth );
 		quad.m_pImage = &MipFor( sprite, flTexels, shape.m_flPixels );
 		if ( quad.Finish( nWidth, nHeight ) )

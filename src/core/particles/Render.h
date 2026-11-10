@@ -35,20 +35,31 @@ struct Sprite_t
 {
 	enum class Blend_t
 	{
-		BLEND_ALPHA,
-		BLEND_ADDITIVE
+		BLEND_ALPHA,    // over what's behind, by the texture's alpha
+		BLEND_ADDITIVE, // $additive: added, weighted by alpha
+		BLEND_ADD_OVER  // SpriteCard's $addoverblend: added whole, what's behind darkened by alpha
 	};
 
 	std::vector<texture::CImage> m_Mips; // mips[0] full size; a soft round dot when the texture is missing
 	CSheet m_Sheet;
 	Blend_t m_nBlend = Blend_t::BLEND_ALPHA;
-	float m_flOverbright = 1.0f; // SpriteCard's $overbrightfactor
-	float m_flAddSelf = 0.0f;    // SpriteCard's $addself: adds the texture on top of blending it
-	bool m_bVisible = true;     // false for materials the preview can't draw (refraction)
-	std::string m_szProblem;     // why the texture couldn't be used, if it couldn't
+	float m_flOverbright = 1.0f;              // SpriteCard's $overbrightfactor
+	float m_flAddSelf = 0.0f;                 // SpriteCard's $addself: adds the texture on top of blending it
+	std::array<float, 3> m_vecTint{ 1, 1, 1 }; // $color, for the shaders that take it (SpriteCard doesn't)
+	float m_flAlpha = 1.0f;                   // $alpha
+	bool m_bPointSample = false;              // the VTF's POINTSAMPLE flag: texels drawn as hard squares
+	bool m_bVisible = true;                   // false for materials the preview can't draw (refraction)
+	std::string m_szProblem;                  // why the texture couldn't be used, if it couldn't
+
+	// A particle's colour as this material draws it: overbright and tint applied.
+	[[nodiscard]] std::array<float, 3> Color( const std::array<float, 3> &vecParticle ) const
+	{
+		return { vecParticle[ 0 ] * m_flOverbright * m_vecTint[ 0 ], vecParticle[ 1 ] * m_flOverbright * m_vecTint[ 1 ], vecParticle[ 2 ] * m_flOverbright * m_vecTint[ 2 ] };
+	}
 };
 using FileReader_t = std::function<std::optional<std::vector<std::byte>>( std::string_view szGamePath )>;
-// Reads materials/<material>.vmt and its $basetexture through read.
+// Reads materials/<material>.vmt as the game does (a patch's include, the fallbacks for DirectX
+// 9) and its $basetexture through read.
 [[nodiscard]] Sprite_t LoadSprite( std::string_view szMaterial, const FileReader_t &pfnRead );
 // The soft dot drawn for missing textures.
 [[nodiscard]] Sprite_t FallbackSprite();

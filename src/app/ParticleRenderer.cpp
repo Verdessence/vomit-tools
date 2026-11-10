@@ -18,7 +18,7 @@ namespace
 {
 
 // Per corner: x, y, depth; u, v; r, g, b, a; addSelf.
-constexpr int FLOATS_PER_VERTEX = 10;
+constexpr int FLOATS_PER_VERTEX = 11;
 constexpr quint32 VERTEX_SIZE = FLOATS_PER_VERTEX * sizeof( float );
 
 //-----------------------------------------------------------------------------
@@ -81,6 +81,7 @@ void CParticleRenderer::Release()
 	m_pSolid.reset();
 	m_pModelVertices.reset();
 	m_pRepeatSampler.reset();
+	m_pPointSampler.reset();
 	m_pSampler.reset();
 	m_pUniforms.reset();
 	m_pIndices.reset();
@@ -107,6 +108,8 @@ void CParticleRenderer::Initialize( QRhi *pRhi, QRhiRenderTarget * )
 		m_pSampler->create();
 		m_pRepeatSampler.reset( m_pRhi->newSampler( QRhiSampler::Linear, QRhiSampler::Linear, QRhiSampler::Linear, QRhiSampler::Repeat, QRhiSampler::Repeat ) );
 		m_pRepeatSampler->create();
+		m_pPointSampler.reset( m_pRhi->newSampler( QRhiSampler::Nearest, QRhiSampler::Nearest, QRhiSampler::Nearest, QRhiSampler::ClampToEdge, QRhiSampler::ClampToEdge ) );
+		m_pPointSampler->create();
 	}
 	// The render target may be new (a resize, a different sample count); the pipelines follow it.
 	m_pBlended.reset();
@@ -146,7 +149,7 @@ std::unique_ptr<QRhiGraphicsPipeline> CParticleRenderer::MakePipeline( Pipeline_
 		{ 0, 0, QRhiVertexInputAttribute::Float3, 0 },
 		{ 0, 1, QRhiVertexInputAttribute::Float2, 3 * sizeof( float ) },
 		{ 0, 2, QRhiVertexInputAttribute::Float4, 5 * sizeof( float ) },
-		{ 0, 3, QRhiVertexInputAttribute::Float, 9 * sizeof( float ) },
+		{ 0, 3, QRhiVertexInputAttribute::Float2, 9 * sizeof( float ) },
 	} );
 	pPipeline->setVertexInputLayout( layout );
 	// Any texture's bindings will do for the layout; they all look alike.
@@ -200,7 +203,8 @@ CParticleRenderer::Texture_t &CParticleRenderer::TextureFor( const particles::Sp
 	entry.m_pBindings.reset( m_pRhi->newShaderResourceBindings() );
 	entry.m_pBindings->setBindings( {
 		QRhiShaderResourceBinding::uniformBuffer( 0, QRhiShaderResourceBinding::VertexStage, m_pUniforms.get() ),
-		QRhiShaderResourceBinding::sampledTexture( 1, QRhiShaderResourceBinding::FragmentStage, entry.m_pTexture.get(), bRepeat ? m_pRepeatSampler.get() : m_pSampler.get() ),
+		QRhiShaderResourceBinding::sampledTexture( 1, QRhiShaderResourceBinding::FragmentStage, entry.m_pTexture.get(), bRepeat ? m_pRepeatSampler.get() : pSprite && pSprite->m_bPointSample ? m_pPointSampler.get()
+																																															  : m_pSampler.get() ),
 	} );
 	entry.m_pBindings->create();
 	return entry;
@@ -261,7 +265,7 @@ void CParticleRenderer::RenderWith( QRhiCommandBuffer *pCommands, QRhiRenderTarg
 			const std::array<std::array<float, 2>, 4> uv{ { { quad.m_Rect[ 0 ], quad.m_Rect[ 1 ] }, { quad.m_Rect[ 2 ], quad.m_Rect[ 1 ] }, { quad.m_Rect[ 2 ], quad.m_Rect[ 3 ] }, { quad.m_Rect[ 0 ], quad.m_Rect[ 3 ] } } };
 			for ( std::size_t c = 0; c < 4; c++ )
 			{
-				data.insert( data.end(), { quad.m_Corners[ c ][ 0 ] + x, quad.m_Corners[ c ][ 1 ] + y, quad.m_Corners[ c ][ 2 ], uv[ c ][ 0 ], uv[ c ][ 1 ], quad.m_vecColor[ 0 ], quad.m_vecColor[ 1 ], quad.m_vecColor[ 2 ], quad.m_flAlpha, quad.m_flAddSelf } );
+				data.insert( data.end(), { quad.m_Corners[ c ][ 0 ] + x, quad.m_Corners[ c ][ 1 ] + y, quad.m_Corners[ c ][ 2 ], uv[ c ][ 0 ], uv[ c ][ 1 ], quad.m_vecColor[ 0 ], quad.m_vecColor[ 1 ], quad.m_vecColor[ 2 ], quad.m_flAlpha, quad.m_flAddSelf, quad.m_nBlend == particles::Sprite_t::Blend_t::BLEND_ADD_OVER ? 0.0f : 1.0f } );
 			}
 		}
 		// The model: its triangles in one buffer, a run per texture.
@@ -274,7 +278,7 @@ void CParticleRenderer::RenderWith( QRhiCommandBuffer *pCommands, QRhiRenderTarg
 			meshRuns.push_back( { nPicture, &TextureFor( mesh.m_pSprite, pUpdates, true ), false, static_cast<quint32>( modelData.size() / FLOATS_PER_VERTEX ), static_cast<quint32>( mesh.m_Vertices.size() ) } );
 			for ( const particles::ScreenVertex_t &vertex : mesh.m_Vertices )
 			{
-				modelData.insert( modelData.end(), { vertex.m_vecPosition[ 0 ] + x, vertex.m_vecPosition[ 1 ] + y, vertex.m_vecPosition[ 2 ], vertex.m_Uv[ 0 ], vertex.m_Uv[ 1 ], vertex.m_vecColor[ 0 ], vertex.m_vecColor[ 1 ], vertex.m_vecColor[ 2 ], 1.0f, 0.0f } );
+				modelData.insert( modelData.end(), { vertex.m_vecPosition[ 0 ] + x, vertex.m_vecPosition[ 1 ] + y, vertex.m_vecPosition[ 2 ], vertex.m_Uv[ 0 ], vertex.m_Uv[ 1 ], vertex.m_vecColor[ 0 ], vertex.m_vecColor[ 1 ], vertex.m_vecColor[ 2 ], 1.0f, 0.0f, 1.0f } );
 			}
 		}
 	}

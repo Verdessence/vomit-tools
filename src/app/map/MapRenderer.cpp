@@ -104,7 +104,9 @@ MaterialUniforms_t MaterialUniforms( const xv::map::RasterMaterial_t *pMaterial,
 	u.m_Extra[ 0 ] = shade.m_bSky ? 1.0f : 0.0f;
 	u.m_Extra[ 1 ] = shade.m_bTinted ? 1.0f : 0.0f;
 	u.m_Extra[ 2 ] = shade.m_bUnlit ? 1.0f : 0.0f;
-	u.m_Extra[ 3 ] = shade.m_bVertexColor ? 1.0f : 0.0f;
+	u.m_Extra[ 3 ] = !shade.m_bVertexColor ? 0.0f : !shade.m_bPremultiplied ? 1.0f
+		: shade.m_bAddOver                                                  ? 3.0f
+																			: 2.0f;
 	u.m_SelfIllum[ 0 ] = shade.m_vecSelfIllumTint.m_flX;
 	u.m_SelfIllum[ 1 ] = shade.m_vecSelfIllumTint.m_flY;
 	u.m_SelfIllum[ 2 ] = shade.m_vecSelfIllumTint.m_flZ;
@@ -123,6 +125,7 @@ MaterialUniforms_t MaterialUniforms( const xv::map::RasterMaterial_t *pMaterial,
 	u.m_EnvTint[ 0 ] = shade.m_vecEnvTint.m_flX;
 	u.m_EnvTint[ 1 ] = shade.m_vecEnvTint.m_flY;
 	u.m_EnvTint[ 2 ] = shade.m_vecEnvTint.m_flZ;
+	u.m_EnvTint[ 3 ] = shade.m_flAddSelf;
 	const bool bDetail = shade.m_pDetail && shade.m_pDetail->GetMipCount() > 0 && !shade.m_bMissing;
 	u.m_Detail[ 0 ] = bDetail ? static_cast<float>( shade.m_nDetailMode ) : -1.0f;
 	u.m_Detail[ 1 ] = shade.m_flDetailBlend;
@@ -172,6 +175,8 @@ void CMapRenderer::Release()
 	m_pBlended.reset();
 	m_pAdditive.reset();
 	m_pMultiply.reset();
+	m_pPremultiplied.reset();
+	m_pPremultipliedAdditive.reset();
 	m_pLines.reset();
 	m_Materials.clear();
 	m_LinesAll = {};
@@ -259,6 +264,8 @@ void CMapRenderer::Initialize( QRhi *pRhi, QRhiRenderTarget * )
 	m_pBlended.reset();
 	m_pAdditive.reset();
 	m_pMultiply.reset();
+	m_pPremultiplied.reset();
+	m_pPremultipliedAdditive.reset();
 	m_pLines.reset();
 }
 
@@ -830,6 +837,17 @@ void CMapRenderer::MakePipelines( QRhiRenderTarget *pTarget )
 			blend.dstAlpha = QRhiGraphicsPipeline::One;
 			pPipeline->setTargetBlends( { blend } );
 		}
+		else if ( nBlend == 5 || nBlend == 6 )
+		{
+			// Particles, weighted by their alpha in the shader already (ShadeMaterial_t::m_bPremultiplied).
+			QRhiGraphicsPipeline::TargetBlend blend;
+			blend.enable = true;
+			blend.srcColor = QRhiGraphicsPipeline::One;
+			blend.dstColor = nBlend == 6 ? QRhiGraphicsPipeline::One : QRhiGraphicsPipeline::OneMinusSrcAlpha;
+			blend.srcAlpha = QRhiGraphicsPipeline::One;
+			blend.dstAlpha = QRhiGraphicsPipeline::OneMinusSrcAlpha;
+			pPipeline->setTargetBlends( { blend } );
+		}
 		else if ( nBlend != 0 )
 		{
 			QRhiGraphicsPipeline::TargetBlend blend;
@@ -851,6 +869,8 @@ void CMapRenderer::MakePipelines( QRhiRenderTarget *pTarget )
 	m_pBlended = make( 1, false );
 	m_pAdditive = make( 2, false );
 	m_pMultiply = make( 4, false );
+	m_pPremultiplied = make( 5, false );
+	m_pPremultipliedAdditive = make( 6, false );
 	m_pLines = make( 0, true );
 	m_pSkyFaces = make( 3, false );
 
@@ -1177,7 +1197,11 @@ void CMapRenderer::Render( QRhiCommandBuffer *pCommands, QRhiRenderTarget *pTarg
 				draw( batch.m_nMesh, *batch.m_pBatch, m_pAdditive.get(), true );
 				continue;
 			}
-			draw( batch.m_nMesh, *batch.m_pBatch, pMaterial && pMaterial->m_Shade.m_bAdditive ? m_pAdditive.get() : m_pBlended.get() );
+			const bool bAdditive = pMaterial && pMaterial->m_Shade.m_bAdditive;
+			if ( pMaterial && pMaterial->m_Shade.m_bPremultiplied )
+				draw( batch.m_nMesh, *batch.m_pBatch, bAdditive ? m_pPremultipliedAdditive.get() : m_pPremultiplied.get() );
+			else
+				draw( batch.m_nMesh, *batch.m_pBatch, bAdditive ? m_pAdditive.get() : m_pBlended.get() );
 		}
 	};
 	const float flWidth = static_cast<float>( size.width() );

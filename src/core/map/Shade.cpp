@@ -493,6 +493,13 @@ std::optional<std::array<float, 4>> ShadeFragment( const ShadeMaterial_t &materi
 			color[ 1 ] *= input.m_vecVertexColor.m_flY;
 			color[ 2 ] *= input.m_vecVertexColor.m_flZ;
 			color[ 3 ] *= input.m_flBlend;
+			if ( material.m_bPremultiplied )
+			{
+				const float flWeight = ( material.m_bAddOver ? input.m_flBlend : color[ 3 ] ) * ( 1.0f + material.m_flAddSelf );
+				color[ 0 ] *= flWeight;
+				color[ 1 ] *= flWeight;
+				color[ 2 ] *= flWeight;
+			}
 		}
 		if ( options.m_nMode == RasterMode_t::RASTER_MODE_LIGHTING && options.m_bLightOnly && !material.m_bUnlit )
 		{
@@ -568,6 +575,11 @@ std::optional<std::array<float, 4>> ShadeFragment( const ShadeMaterial_t &materi
 		{
 			const float t = 0.5f * ( 1.0f + Dot( vecDir * ( 1.0f / Length( vecDir ) ), ToVec3( fog.m_Direction ) ) );
 			vecFog = fog.m_vecColor2 + ( fog.m_vecColor - fog.m_vecColor2 ) * t;
+		}
+		if ( material.m_bPremultiplied )
+		{
+			// Weighted as the colour is: what is laid over fogs by its alpha, what is added fades out.
+			vecFog = vecFog * ( material.m_bAdditive ? 0.0f : color[ 3 ] );
 		}
 		color[ 0 ] += ( vecFog.m_flX - color[ 0 ] ) * flAmount;
 		color[ 1 ] += ( vecFog.m_flY - color[ 1 ] ) * flAmount;

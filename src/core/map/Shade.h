@@ -80,6 +80,12 @@ struct ShadeMaterial_t
 	bool m_bTinted = false;                    // sprites: times the object's colour (a light's)
 	bool m_bUnlit = false;                     // sprites: never shaded by facing
 	bool m_bVertexColor = false;               // particles: times their vertices' colour (carried in the normal) and alpha (in the blend)
+	// Particles, as the particle editor draws them: the colour weighted by its alpha before it is
+	// laid over or added, so an overbright past 1 still brightens; with m_bAddOver
+	// (SpriteCard's $addoverblend) weighted by the vertex's alpha alone.
+	bool m_bPremultiplied = false;
+	bool m_bAddOver = false;
+	float m_flAddSelf = 0.0f;                  // SpriteCard's $addself: the texture added on top of blending it
 	bool m_bBlend = false;
 	bool m_bAlphaTest = false;
 	bool m_bTranslucent = false;

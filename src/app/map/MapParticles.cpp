@@ -8,6 +8,7 @@
 
 #include <algorithm>
 #include <format>
+#include <set>
 
 #include <QMetaObject>
 
@@ -131,6 +132,17 @@ void CMapParticles::Start( std::optional<xv::vfs::CGameInfo> game, std::string s
 		auto pFileSystem = std::make_shared<xv::vfs::CFileSystem>();
 		pFileSystem->Mount( game );
 		std::map<std::string, Found_t, xv::particles::CLessNoCase> systems;
+		std::set<std::string> read;
+		auto readFile = [ & ]( const std::string &szFile ) -> std::shared_ptr<const xv::particles::CLibrary> {
+			read.insert( szFile );
+			const auto bytes = pFileSystem->Read( szFile );
+			if ( !bytes )
+				return nullptr;
+			auto document = xv::dmx::Read( *bytes );
+			if ( !document.m_Document || !xv::particles::IsParticleFile( *document.m_Document ) )
+				return nullptr;
+			return std::make_shared<const xv::particles::CLibrary>( xv::particles::Compile( *document.m_Document ) );
+		};
 		// The map's own manifest comes last: its systems stand in for the game's of the same name.
 		for ( const std::string &szManifest : { std::string{ xv::particles::MANIFEST_PATH }, xv::particles::MapManifestPath( szMapName ) } )
 		{
@@ -141,15 +153,25 @@ void CMapParticles::Start( std::optional<xv::vfs::CGameInfo> game, std::string s
 			{
 				if ( m_bStop )
 					return;
-				const auto bytes = pFileSystem->Read( szFile );
-				if ( !bytes )
-					continue;
-				auto read = xv::dmx::Read( *bytes );
-				if ( !read.m_Document || !xv::particles::IsParticleFile( *read.m_Document ) )
-					continue;
-				auto pLibrary = std::make_shared<const xv::particles::CLibrary>( xv::particles::Compile( *read.m_Document ) );
+				if ( const auto pLibrary = readFile( szFile ) )
+				{
+					for ( std::size_t i = 0; i < pLibrary->m_Definitions.size(); i++ )
+						systems.insert_or_assign( pLibrary->m_Definitions[ i ].m_szName, Found_t{ pLibrary, i, {} } );
+				}
+			}
+		}
+		// The game loads nothing else, but a map being made often plays files its manifest
+		// doesn't list yet: they play too, and Check for Problems says what the game will miss.
+		for ( const std::string &szFile : pFileSystem->Find( "particles", ".pcf", true ) )
+		{
+			if ( m_bStop )
+				return;
+			if ( read.contains( szFile ) )
+				continue;
+			if ( const auto pLibrary = readFile( szFile ) )
+			{
 				for ( std::size_t i = 0; i < pLibrary->m_Definitions.size(); i++ )
-					systems.insert_or_assign( pLibrary->m_Definitions[ i ].m_szName, Found_t{ pLibrary, i } );
+					systems.try_emplace( pLibrary->m_Definitions[ i ].m_szName, Found_t{ pLibrary, i, szFile } );
 			}
 		}
 		QMetaObject::invokeMethod(
@@ -338,6 +360,28 @@ std::size_t CMapParticles::GetParticleCount() const
 }
 
 //-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+const xv::particles::CSimulation *CMapParticles::GetSimulation( std::uint32_t nObject ) const
+{
+	const auto found = std::ranges::find( m_Playing, nObject, &Playing_t::m_nObject );
+	return found != m_Playing.end() ? found->m_pSimulation.get() : nullptr;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+std::optional<xv::map::ParticleSource_t> CMapParticles::FindSource( std::string_view szEffect ) const
+{
+	if ( !m_bReady || !m_pFileSystem )
+		return std::nullopt;
+	const auto found = m_Systems.find( std::string{ szEffect } );
+	if ( found == m_Systems.end() )
+		return xv::map::ParticleSource_t{};
+	return xv::map::ParticleSource_t{ true, found->second.m_szUnlistedFile };
+}
+
+//-----------------------------------------------------------------------------
 // Purpose: The sprite as the particle editor reads it (a soft dot when its material can't be).
 //-----------------------------------------------------------------------------
 const xv::particles::Sprite_t *CMapParticles::SpriteFor( const xv::particles::CLibrary &library, std::size_t nDefinition )
@@ -411,6 +455,10 @@ void CMapParticles::MakeMaterial( Sprite_t &sprite )
 	shade.m_bVertexColor = true;
 	shade.m_bAdditive = sprite.m_pSprite->m_nBlend == xv::particles::Sprite_t::Blend_t::BLEND_ADDITIVE;
 	shade.m_bTranslucent = !shade.m_bAdditive;
+	// Blended as the particle editor blends: overbright past 1 and $addself still brighten.
+	shade.m_bPremultiplied = true;
+	shade.m_bAddOver = sprite.m_pSprite->m_nBlend == xv::particles::Sprite_t::Blend_t::BLEND_ADD_OVER;
+	shade.m_flAddSelf = sprite.m_pSprite->m_flAddSelf;
 	material.m_bNoCull = true;
 	auto pMaterials = std::make_shared<std::vector<xv::map::RasterMaterial_t>>( *m_pMaterials );
 	sprite.m_nMaterial = static_cast<std::uint32_t>( pMaterials->size() );

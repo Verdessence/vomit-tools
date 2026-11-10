@@ -38,13 +38,13 @@ layout(std140, binding = 1) uniform Material {
 	vec4 options; // alpha test reference (below 0: none), see-through (1 blended, 2 additive), blend to base2, missing
 	vec4 size;    // the base texture's size, then base2's, in texels
 	vec4 kind;    // 1: the object's colour (entity boxes), has a base texture, has base2
-	vec4 extra;   // 1: a sky face, showing the map's sky; times the object's colour; unlit; times the vertex's colour (particles)
+	vec4 extra;   // 1: a sky face, showing the map's sky; times the object's colour; unlit; times the vertex's colour (particles: 2 weighted by alpha, 3 by the vertex's alpha)
 	vec4 selfIllum; // $selfillumtint, and 1 when it glows by its base texture's alpha
 	vec4 uvTransform; // $basetexturetransform: u' = a*u + b*v + tx, v' = c*u + d*v + ty (a b c d)
 	vec4 uvOffset;    // tx ty
 	vec4 refraction;  // 1: Refract or Water (base is its normal map, base2 its tint texture); 1: the reflection's pass, else the tint's; 1: reflects; 1: reflects the sky, not env_cubemap
 	vec4 refractTint; // rgb
-	vec4 envTint;     // rgb
+	vec4 envTint;     // rgb; w: SpriteCard's $addself (particles)
 	vec4 detail;          // $detailblendmode (below 0: no detail), $detailblendfactor, $detailscale u v
 	vec4 detailTransform; // $detailtexturetransform: a b c d
 	vec4 detailOffset;    // tx ty, and the detail texture's size
@@ -287,6 +287,12 @@ void main() {
 			// A particle's own colour and alpha, as xv::map::ShadeFragment's m_bVertexColor.
 			color.rgb *= v_normal;
 			color.a *= v_blend;
+			if (material.extra.w > 1.5) {
+				// Weighted by alpha here, before the target clamps it, so an overbright counts
+				// (ShadeMaterial_t::m_bPremultiplied; 3: $addoverblend, by the vertex's alpha alone).
+				float weight = material.extra.w > 2.5 ? v_blend : color.a;
+				color.rgb *= weight * (1.0 + material.envTint.w);
+			}
 		}
 		if (mode == MODE_LIGHTING && frame.fogRange.w > 0.5 && material.extra.z < 0.5) {
 			// mat_fullbright 2, as xv::map::ShadeFragment: a colourless monotone.
@@ -341,6 +347,10 @@ void main() {
 		if (frame.fogColor2.w > 0.5 && length(dir) > 1e-6) {
 			float t = 0.5 * (1.0 + dot(normalize(dir), frame.fogDirection.xyz));
 			fogColour = mix(frame.fogColor2.rgb, frame.fogColor.rgb, t);
+		}
+		if (material.extra.w > 1.5) {
+			// Weighted as the colour is: what is laid over fogs by its alpha, what is added fades out.
+			fogColour *= material.options.y > 1.5 ? 0.0 : color.a;
 		}
 		color.rgb = mix(color.rgb, fogColour, amount);
 	}

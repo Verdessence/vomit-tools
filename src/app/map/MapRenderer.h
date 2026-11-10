@@ -152,6 +152,8 @@ private:
 	std::unique_ptr<QRhiGraphicsPipeline> m_pBlended;
 	std::unique_ptr<QRhiGraphicsPipeline> m_pAdditive;
 	std::unique_ptr<QRhiGraphicsPipeline> m_pMultiply; // what is behind times the colour (Refract and Water's tint)
+	std::unique_ptr<QRhiGraphicsPipeline> m_pPremultiplied;         // particles laid over, their colour weighted by alpha already
+	std::unique_ptr<QRhiGraphicsPipeline> m_pPremultipliedAdditive; // and added
 	std::unique_ptr<QRhiGraphicsPipeline> m_pLines;
 	std::unique_ptr<QRhiGraphicsPipeline> m_pSkyFaces; // the world's sky faces over a 3D skybox
 	std::unique_ptr<QRhiGraphicsPipeline> m_pAlpha;    // makes the picture opaque afterwards

@@ -514,7 +514,17 @@ void CRasterizer::FillTriangle( const ScreenVertex_t &a, const ScreenVertex_t &b
 				for ( std::size_t i = 0; i < 3; i++ )
 				{
 					const float flSource = std::clamp( ( *color )[ i ], 0.0f, 1.0f ) * 255.0f;
-					const float flResult = material.m_bAdditive ? p[ i ] + flSource * flAlpha : p[ i ] + ( flSource - p[ i ] ) * flAlpha;
+					float flResult = 0.0f;
+					if ( material.m_bPremultiplied )
+					{
+						// Weighted already (ShadeFragment) before the clamp, so an overbright counts:
+						// the card's One and OneMinusSrcAlpha (or One, One added).
+						flResult = material.m_bAdditive ? p[ i ] + flSource : flSource + p[ i ] * ( 1.0f - flAlpha );
+					}
+					else
+					{
+						flResult = material.m_bAdditive ? p[ i ] + flSource * flAlpha : p[ i ] + ( flSource - p[ i ] ) * flAlpha;
+					}
 					p[ i ] = static_cast<std::uint8_t>( std::clamp( flResult + 0.5f, 0.0f, 255.0f ) );
 				}
 			}

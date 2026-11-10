@@ -79,6 +79,7 @@ private:
 	std::unique_ptr<QRhiBuffer> m_pUniforms;
 	std::unique_ptr<QRhiSampler> m_pSampler;
 	std::unique_ptr<QRhiSampler> m_pRepeatSampler;
+	std::unique_ptr<QRhiSampler> m_pPointSampler; // for VTFs flagged POINTSAMPLE
 	std::unique_ptr<QRhiGraphicsPipeline> m_pSolid;
 	std::unique_ptr<QRhiGraphicsPipeline> m_pBlended;
 	std::unique_ptr<QRhiGraphicsPipeline> m_pAdded;
