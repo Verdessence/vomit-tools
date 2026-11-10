@@ -132,7 +132,8 @@ private:
 	void PaintLayer();
 	void PaintGrid( class QPainter &painter, const QRectF &visible ) const;
 	// Props big enough on screen, textured (Preferences > Maps), drawn in software from this axis.
-	// The textured models of the whole view (a part of the layer clips them).
+	// The textured models of the whole view (a part of the layer clips them), and the selected
+	// sprites, each as its picture facing the view.
 	void PaintModels( QPainter &painter ) const;
 	// Whether a prop is drawn textured rather than as its edges or box.
 	[[nodiscard]] bool IsTexturedModel( const MapFlatObject_t &object, const QRectF &box ) const;
@@ -319,6 +320,7 @@ private:
 		std::vector<std::uint8_t> m_Flags;
 		const void *m_pMesh = nullptr;
 		std::uint64_t m_nMaterials = 0; // the props' materials' revision, as the layer's
+		const void *m_pSprites = nullptr;
 		std::shared_ptr<const std::vector<std::array<std::uint8_t, 3>>> m_pColors; // made again by each edit: the same when they say the same
 		QPointF m_Center;
 		double m_flZoom = 0.0;
@@ -327,7 +329,7 @@ private:
 		friend bool operator==( const ModelsKey_t &a, const ModelsKey_t &b )
 		{
 			const bool bColors = a.m_pColors == b.m_pColors || ( a.m_pColors && b.m_pColors && *a.m_pColors == *b.m_pColors );
-			return bColors && a.m_Flags == b.m_Flags && a.m_pMesh == b.m_pMesh && a.m_nMaterials == b.m_nMaterials && a.m_Center == b.m_Center && a.m_flZoom == b.m_flZoom && a.m_Size == b.m_Size && a.m_flRatio == b.m_flRatio;
+			return bColors && a.m_Flags == b.m_Flags && a.m_pMesh == b.m_pMesh && a.m_nMaterials == b.m_nMaterials && a.m_pSprites == b.m_pSprites && a.m_Center == b.m_Center && a.m_flZoom == b.m_flZoom && a.m_Size == b.m_Size && a.m_flRatio == b.m_flRatio;
 		}
 	};
 	mutable ModelsKey_t m_ModelsKey;

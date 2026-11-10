@@ -625,6 +625,19 @@ QRectF CMapView2D::LooksOf( const MapFlatObject_t &object ) const
 			add( helper.m_To );
 		}
 	}
+	// A sprite's picture (shown while it is selected), as big as its texture makes it.
+	if ( const auto &pSprites = m_Editor.GetRenderData().GetSprites() )
+	{
+		for ( const xv::map::SpritePlacement_t &sprite : *pSprites )
+		{
+			if ( sprite.m_nObject == object.m_nObject )
+			{
+				const QPointF centre = Flatten( sprite.m_Origin );
+				const double flHalf = std::max( sprite.m_flHalfWidth, sprite.m_flHalfHeight );
+				looks = looks.united( QRectF{ centre.x() - flHalf, centre.y() - flHalf, 2.0 * flHalf, 2.0 * flHalf } );
+			}
+		}
+	}
 	for ( const xv::map::PathLink_t &link : GetDocument().GetPathLinks() )
 	{
 		if ( link.m_nFrom != nEntity && link.m_nTo != nEntity )
@@ -957,15 +970,16 @@ void CMapView2D::PaintModels( QPainter &painter ) const
 {
 	const CMapDocument &document = GetDocument();
 	const xv::map::CScene *pScene = document.GetScene();
-	if ( !pScene || !m_pProps || !m_Editor.GetSettings().m_bModels2D || !Look().m_bTexturedModels2D )
+	if ( !pScene )
 	{
 		return;
 	}
 	const MapFrame_t frame = m_Editor.GetRenderData().GetShared();
-	if ( !frame.m_pPropMesh || !frame.m_pMaterials )
+	if ( !frame.m_pMaterials )
 	{
 		return;
 	}
+	const bool bModels = m_pProps && frame.m_pPropMesh && m_Editor.GetSettings().m_bModels2D && Look().m_bTexturedModels2D;
 	// Which models show is worked out for the whole view, so a part of it drawn again can take
 	// the picture as it was.
 	const QRectF all = GetVisible();
@@ -973,7 +987,7 @@ void CMapView2D::PaintModels( QPainter &painter ) const
 	bool bAny = false;
 	for ( const MapFlatObject_t &object : m_Objects )
 	{
-		if ( ( document.GetGeometryPreviewBase() && std::ranges::binary_search( document.GetPreviewObjects(), object.m_nObject ) ) || object.m_nModelLineCount == 0 || !Overlaps( object.m_Bounds, all ) || !document.IsShown( object.m_nObject ) || ( document.IsSelected( object.m_nObject ) && MapSelectedModelEdges( *pScene, object.m_nObject ) ) )
+		if ( !bModels || ( document.GetGeometryPreviewBase() && std::ranges::binary_search( document.GetPreviewObjects(), object.m_nObject ) ) || object.m_nModelLineCount == 0 || !Overlaps( object.m_Bounds, all ) || !document.IsShown( object.m_nObject ) || ( document.IsSelected( object.m_nObject ) && MapSelectedModelEdges( *pScene, object.m_nObject ) ) )
 		{
 			continue;
 		}
@@ -984,6 +998,21 @@ void CMapView2D::PaintModels( QPainter &painter ) const
 			bAny = true;
 		}
 	}
+	// Selected sprites show their picture, as in the 3D views, facing this view.
+	const auto &pSprites = m_Editor.GetRenderData().GetSprites();
+	std::vector<xv::map::SpritePlacement_t> selected;
+	if ( pSprites && !document.GetSelection().empty() )
+	{
+		for ( const xv::map::SpritePlacement_t &sprite : *pSprites )
+		{
+			if ( sprite.m_nObject < flags.size() && document.IsSelected( sprite.m_nObject ) && document.IsShown( sprite.m_nObject ) && !( document.GetGeometryPreviewBase() && std::ranges::binary_search( document.GetPreviewObjects(), sprite.m_nObject ) ) )
+			{
+				selected.push_back( sprite );
+				flags[ sprite.m_nObject ] = xv::map::RASTER_OBJECT_SHOWN;
+				bAny = true;
+			}
+		}
+	}
 	if ( !bAny )
 	{
 		return;
@@ -992,6 +1021,7 @@ void CMapView2D::PaintModels( QPainter &painter ) const
 	ModelsKey_t key;
 	key.m_pMesh = frame.m_pPropMesh.get();
 	key.m_nMaterials = m_Editor.GetRenderData().GetPropMaterialsRevision();
+	key.m_pSprites = selected.empty() ? nullptr : pSprites.get();
 	key.m_pColors = frame.m_pFlatColors;
 	key.m_Center = m_Center;
 	key.m_flZoom = m_flZoom;
@@ -1013,7 +1043,19 @@ void CMapView2D::PaintModels( QPainter &painter ) const
 	camera.m_nHeight = std::max( 1, static_cast<int>( std::lround( height() * flRatio ) ) );
 	camera.LookAlongAxis( centre, forward, m_flZoom * flRatio, GetWorldLimit() * 2.0 );
 	xv::map::RasterScene_t scene;
-	scene.m_Meshes = { frame.m_pPropMesh.get() };
+	if ( bModels )
+	{
+		scene.m_Meshes.push_back( frame.m_pPropMesh.get() );
+	}
+	xv::map::Point_t right{};
+	xv::map::Point_t up{};
+	right[ static_cast<std::size_t>( GetAxis( 0 ) ) ] = 1.0;
+	up[ static_cast<std::size_t>( GetAxis( 1 ) ) ] = 1.0;
+	const xv::map::CMapMesh sprites = xv::map::BuildSpriteMesh( selected, right, up );
+	if ( !selected.empty() )
+	{
+		scene.m_Meshes.push_back( &sprites );
+	}
 	scene.m_Materials = *frame.m_pMaterials;
 	scene.m_ObjectFlags = flags;
 	if ( frame.m_pFlatColors )

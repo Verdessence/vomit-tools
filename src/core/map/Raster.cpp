@@ -497,6 +497,7 @@ void CRasterizer::FillTriangle( const ScreenVertex_t &a, const ScreenVertex_t &b
 			{
 				continue;
 			}
+			int nBlendAlpha = -1; // a blend over a see-through background: the alpha it leaves
 			if ( bRefract )
 			{
 				// What is behind times the tint, plus the reflection: the card's two passes.
@@ -512,21 +513,35 @@ void CRasterizer::FillTriangle( const ScreenVertex_t &a, const ScreenVertex_t &b
 			else if ( bBlend )
 			{
 				const float flAlpha = std::clamp( ( *color )[ 3 ], 0.0f, 1.0f );
+				// Over a see-through background (a picture drawn over another) what is behind is
+				// only as there as its own alpha: blended weighted by it, the result's alpha the
+				// two together, and the colour unweighted again after.
+				const float flBehind = m_Options.m_bTransparent ? p[ 3 ] / 255.0f : 1.0f;
+				std::array<float, 3> result{};
 				for ( std::size_t i = 0; i < 3; i++ )
 				{
 					const float flSource = std::clamp( ( *color )[ i ], 0.0f, 1.0f ) * 255.0f;
-					float flResult = 0.0f;
+					const float flDest = p[ i ] * flBehind;
 					if ( material.m_bPremultiplied )
 					{
 						// Weighted already (ShadeFragment) before the clamp, so an overbright counts:
 						// the card's One and OneMinusSrcAlpha (or One, One added).
-						flResult = material.m_bAdditive ? p[ i ] + flSource : flSource + p[ i ] * ( 1.0f - flAlpha );
+						result[ i ] = material.m_bAdditive ? flDest + flSource : flSource + flDest * ( 1.0f - flAlpha );
 					}
 					else
 					{
-						flResult = material.m_bAdditive ? p[ i ] + flSource * flAlpha : p[ i ] + ( flSource - p[ i ] ) * flAlpha;
+						result[ i ] = material.m_bAdditive ? flDest + flSource * flAlpha : flDest + ( flSource - flDest ) * flAlpha;
 					}
+				}
+				const float flCovered = m_Options.m_bTransparent ? flAlpha + flBehind * ( 1.0f - flAlpha ) : 1.0f;
+				for ( std::size_t i = 0; i < 3; i++ )
+				{
+					const float flResult = flCovered > 0.0f ? result[ i ] / flCovered : 0.0f;
 					p[ i ] = static_cast<std::uint8_t>( std::clamp( flResult + 0.5f, 0.0f, 255.0f ) );
+				}
+				if ( m_Options.m_bTransparent )
+				{
+					nBlendAlpha = static_cast<std::uint8_t>( std::clamp( flCovered * 255.0f + 0.5f, 0.0f, 255.0f ) );
 				}
 			}
 			else
@@ -539,7 +554,8 @@ void CRasterizer::FillTriangle( const ScreenVertex_t &a, const ScreenVertex_t &b
 			}
 			// The HDR lighting preview's sky and unlit faces, marked for its auto exposure to leave out.
 			const bool bUnmeasured = m_bSkyPass || ( material.m_bSky && shade.m_pSky ) || input.m_Light[ 3 ] == LIGHT_KIND_FULLBRIGHT;
-			p[ 3 ] = shade.m_nMode == RasterMode_t::RASTER_MODE_LIGHTING && shade.m_pLighting && shade.m_bLightHdr && !bBlend && bUnmeasured ? UNMEASURED_ALPHA : 255;
+			p[ 3 ] = nBlendAlpha >= 0 ? static_cast<std::uint8_t>( nBlendAlpha ) : shade.m_nMode == RasterMode_t::RASTER_MODE_LIGHTING && shade.m_pLighting && shade.m_bLightHdr && !bBlend && bUnmeasured ? UNMEASURED_ALPHA
+																																																		   : 255;
 			if ( m_bSkyPass )
 			{
 				( *m_pSkyMask )[ nPixel ] = 1;

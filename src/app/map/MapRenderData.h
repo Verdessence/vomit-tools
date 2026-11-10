@@ -114,6 +114,8 @@ public:
 	void SetOverlays( std::shared_ptr<const xv::map::CMapMesh> pOverlays, std::shared_ptr<const xv::map::MeshParts_t> pParts = {} );
 	// The entities drawn as sprites, tinted by their own colours: those show no box either.
 	void SetSprites( std::shared_ptr<const std::vector<xv::map::SpritePlacement_t>> pSprites );
+	// Those drawn (null when the sprites are hidden).
+	[[nodiscard]] const std::shared_ptr<const std::vector<xv::map::SpritePlacement_t>> &GetSprites() const { return m_pSprites; }
 	// The particle systems playing (info_particle_system), drawn in textured 3D frames; null for none.
 	void SetParticles( const CMapParticles *pParticles ) { m_pParticles = pParticles; }
 
