@@ -12,6 +12,7 @@
 #include <QIcon>
 
 #include "AboutDialog.h"
+#include "CrashHandler.h"
 #include "DebugLog.h"
 #include "Language.h"
 #include "Graphics.h"
@@ -29,11 +30,12 @@
 int main( int nArgc, char *argv[] )
 {
 	xv::TuneAllocator();
-	QApplication app{ nArgc, argv };
+	CApplication app{ nArgc, argv };
 	QApplication::setApplicationName( QStringLiteral( "vomit-tools" ) );
 	QApplication::setOrganizationName( QStringLiteral( "vomit-tools" ) );
 	QApplication::setApplicationVersion( CAboutDialog::VersionText() );
 	QApplication::setWindowIcon( QIcon( QStringLiteral( ":/assets/vomit-tools.png" ) ) );
+	InstallCrashHandler();
 	// Before any popup is made: Kvantum's menu blur crashes the app with KWindowSystem before 6.32.
 	InstallPopupBlurWorkaround( app );
 
@@ -48,6 +50,8 @@ int main( int nArgc, char *argv[] )
 	parser.addOption( edit );
 	parser.process( app );
 
+	// Before the debug log starts afresh: a crash's log takes its last lines.
+	const QStringList crashes = CollectCrashLogs();
 	if ( CPreferences::Instance().IsDebugLog() )
 	{
 		SetDebugLogging( true );
@@ -117,8 +121,12 @@ int main( int nArgc, char *argv[] )
 	}
 	window.show();
 	splash.finish( &window );
-	// New maps a crash left unsaved, once the window is up (maps with files ask in their tabs).
-	QTimer::singleShot( 0, &window, [ &window ] { window.OfferNewMapAutosaves(); } );
+	// What a crash last time wrote, then the new maps it left unsaved, once the window is up
+	// (maps with files ask in their tabs).
+	QTimer::singleShot( 0, &window, [ &window, crashes ] {
+		ShowCrashLogs( &window, crashes );
+		window.OfferNewMapAutosaves();
+	} );
 	// The first start says hello.
 	if ( !CPremiumDialog::HasBeenShown() )
 	{

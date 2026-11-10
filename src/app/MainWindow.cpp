@@ -3725,6 +3725,11 @@ void CMainWindow::UpdateTitle()
 		szTitle.prepend( pTab->GetTabTitle() + QStringLiteral( " — " ) );
 	}
 	setWindowTitle( szTitle );
+	// What a crash log says was open: the game, then each tab, the current one marked.
+	QString szContext = QStringLiteral( "game: %1\n" ).arg( m_Game ? ToQString( m_Game->m_GameDir ) : QStringLiteral( "none" ) );
+	for ( int i = 1; i < m_pTabs->count(); i++ )
+		szContext += QStringLiteral( "%1 %2 (%3)\n" ).arg( i == m_pTabs->currentIndex() ? QStringLiteral( ">" ) : QStringLiteral( " " ), m_pTabs->tabText( i ), m_pTabs->tabToolTip( i ) );
+	SetCrashContext( szContext );
 }
 
 //-----------------------------------------------------------------------------
