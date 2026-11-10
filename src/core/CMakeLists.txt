@@ -1,4 +1,6 @@
 add_library(vomit_tools_core STATIC
+        conf/Conf.cpp
+        conf/Conf.h
         audio/Audio.cpp
         audio/Audio.h
         bsp/Bsp.cpp
@@ -156,10 +158,10 @@ add_library(vomit_tools_core STATIC
         sound/Wav.h
         texture/Build.cpp
         texture/Build.h
+        texture/Exr.h
         texture/Image.cpp
         texture/Image.h
         texture/Sheet.cpp
-        texture/Exr.h
         texture/Sheet.h
         texture/Vtf.cpp
         texture/Vtf.h

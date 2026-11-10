@@ -735,31 +735,30 @@ QWidget *CPreferencesDialog::BuildSourceToolsPage()
 	pLayout->addWidget( Hint( tr( "Leave a path empty to discover tools beside the current game and in PATH. Tool folders named by gameinfo.txt are checked too. Use native executables for your operating system." ) ) );
 	for ( auto nTool : SOURCE_TOOLS )
 	{
-		const auto szKey = SourceToolSetting( nTool );
 		pLayout->addWidget( new QLabel( SourceToolLabel( nTool ) ) );
 		auto *pRow = new QHBoxLayout;
-		auto *pPath = new QLineEdit( QSettings{}.value( szKey ).toString() );
+		auto *pPath = new QLineEdit( CPreferences::Instance().GetSourceToolPath( nTool ) );
 		pPath->setObjectName( SourceToolBaseName( nTool ) + QStringLiteral( "Path" ) );
 		pPath->setPlaceholderText( tr( "Automatic discovery" ) );
 		auto *pBrowse = new QPushButton( tr( "Browse…" ) );
 		pRow->addWidget( pPath, 1 );
 		pRow->addWidget( pBrowse );
 		pLayout->addLayout( pRow );
-		connect( pPath, &QLineEdit::textChanged, pPage, [ szKey ]( const QString &szPath ) { QSettings{}.setValue( szKey, szPath.trimmed() ); } );
+		connect( pPath, &QLineEdit::textChanged, pPage, [ nTool ]( const QString &szPath ) { CPreferences::Instance().SetSourceToolPath( nTool, szPath ); } );
 		connect( pBrowse, &QPushButton::clicked, pPage, [ this, pPath ] {const auto szFile=AskOpenFile(this,tr("Select Source Tool"),pPath->text());if(!szFile.isEmpty())pPath->setText(szFile); } );
 	}
 	{
 		// Hammer's $bspdir: where Run Map copies the compiled map.
 		pLayout->addWidget( new QLabel( tr( "Compiled maps go to" ) ) );
 		auto *pRow = new QHBoxLayout;
-		auto *pPath = new QLineEdit( QSettings{}.value( BspDirSetting() ).toString() );
+		auto *pPath = new QLineEdit( CPreferences::Instance().GetBspDir() );
 		pPath->setObjectName( QStringLiteral( "bspDirPath" ) );
 		pPath->setPlaceholderText( tr( "The game's maps folder" ) );
 		auto *pBrowse = new QPushButton( tr( "Browse…" ) );
 		pRow->addWidget( pPath, 1 );
 		pRow->addWidget( pBrowse );
 		pLayout->addLayout( pRow );
-		connect( pPath, &QLineEdit::textChanged, pPage, []( const QString &szPath ) { QSettings{}.setValue( BspDirSetting(), szPath.trimmed() ); } );
+		connect( pPath, &QLineEdit::textChanged, pPage, []( const QString &szPath ) { CPreferences::Instance().SetBspDir( szPath ); } );
 		connect( pBrowse, &QPushButton::clicked, pPage, [ this, pPath ] {
 			const QString szFolder = AskFolder( this, tr( "Compiled Maps Folder" ), pPath->text() );
 			if ( !szFolder.isEmpty() )

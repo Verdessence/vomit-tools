@@ -19,6 +19,7 @@
 #include "MainWindow.h"
 #include "PopupBlur.h"
 #include "Preferences.h"
+#include "StateFormat.h"
 #include "PremiumDialog.h"
 #include "SingleInstance.h"
 #include "Splash.h"
@@ -33,6 +34,11 @@ int main( int nArgc, char *argv[] )
 	CApplication app{ nArgc, argv };
 	QApplication::setApplicationName( QStringLiteral( "vomit-tools" ) );
 	QApplication::setOrganizationName( QStringLiteral( "vomit-tools" ) );
+	// Qt's own settings as Squirrel tables (vomit-tools.state.nut), beside the settings in
+	// vomit-tools.nut: before
+	// anything reads a setting.
+	QSettings::setDefaultFormat( NutSettingsFormat() );
+	MigrateSettingsToNut();
 	QApplication::setApplicationVersion( CAboutDialog::VersionText() );
 	QApplication::setWindowIcon( QIcon( QStringLiteral( ":/assets/vomit-tools.png" ) ) );
 	InstallCrashHandler();
@@ -49,6 +55,10 @@ int main( int nArgc, char *argv[] )
 		QStringLiteral( "file" ) };
 	parser.addOption( edit );
 	parser.process( app );
+
+	// vomit-tools.nut's theme, now and whenever the file changes it.
+	CPreferences::Instance().ApplyTheme();
+	QObject::connect( &CPreferences::Instance(), &CPreferences::ThemeChanged, &app, [] { CPreferences::Instance().ApplyTheme(); } );
 
 	// Before the debug log starts afresh: a crash's log takes its last lines.
 	const QStringList crashes = CollectCrashLogs();

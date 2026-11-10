@@ -6,6 +6,8 @@
 //===========================================================================//
 #include "TabGroups.h"
 
+#include "Preferences.h"
+
 #include <iterator>
 
 #include <QInputDialog>
@@ -71,6 +73,7 @@ CTabGroups::CTabGroups( CEditorTabWidget *pTabs )
 {
 	m_pBar = new QTabBar;
 	m_pBar->setObjectName( QStringLiteral( "tabGroups" ) );
+	connect( &CPreferences::Instance(), &CPreferences::RulesChanged, this, &CTabGroups::Refresh );
 	m_pBar->setDocumentMode( true );
 	m_pBar->setDrawBase( false );
 	m_pBar->setExpanding( false );
@@ -146,7 +149,45 @@ QString CTabGroups::KindOf( const QWidget *pTab )
 QString CTabGroups::GroupOf( const QWidget *pTab ) const
 {
 	const QString szUser = m_UserGroups.value( pTab );
-	return szUser.isEmpty() ? KindOf( pTab ) : szUser;
+	if ( !szUser.isEmpty() )
+		return szUser;
+	// A "rule = group:<name>, <pattern>" for the tab's file comes before its kind.
+	const QString szKey = m_pfnKey ? m_pfnKey( const_cast<QWidget *>( pTab ) ) : QString{};
+	if ( const QString szPath = szKey.section( u'\t', 2 ); !szPath.isEmpty() )
+	{
+		if ( const QString szRule = CPreferences::Instance().RuleFor( QStringLiteral( "group" ), szPath ); !szRule.isEmpty() )
+			return szRule;
+	}
+	return KindOf( pTab );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: The editor around a widget, by its class.
+//-----------------------------------------------------------------------------
+QString CTabGroups::EditorNameOf( const QWidget *pWidget )
+{
+	static constexpr std::pair<const char *, const char *> EDITORS[] = {
+		{ "CMapEditor", "map" },
+		{ "CModelEditor", "model" },
+		{ "CModelBrowser", "model" },
+		{ "CTextureEditor", "texture" },
+		{ "CMaterialEditor", "material" },
+		{ "CParticleEditor", "particle" },
+		{ "CSoundEditor", "sound" },
+		{ "CSkyEditor", "sky" },
+		{ "CDetailEditor", "detail" },
+		{ "CVpkEditor", "archive" },
+		{ "CStripperEditor", "stripper" },
+	};
+	for ( const QWidget *p = pWidget; p; p = p->parentWidget() )
+	{
+		for ( const auto &[ pszClass, pszName ] : EDITORS )
+		{
+			if ( p->inherits( pszClass ) )
+				return QLatin1String( pszName );
+		}
+	}
+	return {};
 }
 
 //-----------------------------------------------------------------------------
@@ -196,6 +237,12 @@ QStringList CTabGroups::GetGroups() const
 	for ( const QString &szGroup : GetUserGroups() )
 	{
 		if ( !groups.contains( szGroup ) )
+			groups.append( szGroup );
+	}
+	// Groups that rules made, in the order their tabs are.
+	for ( int i = 1; i < m_pTabs->count(); i++ )
+	{
+		if ( const QString szGroup = GroupOf( m_pTabs->widget( i ) ); !groups.contains( szGroup ) )
 			groups.append( szGroup );
 	}
 	return groups;

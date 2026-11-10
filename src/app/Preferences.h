@@ -1,13 +1,18 @@
 //===========================================================================//
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
-// Purpose: The settings Edit > Preferences changes, remembered between runs. The simple interface
-//          is CInterfaceMode's; the rest live here.
+// Purpose: The settings Edit > Preferences changes, kept in vomit-tools.nut (Squirrel tables read
+//          as data, src/core/conf): written back as they change without touching the rest of
+//          the file, and read again whenever the file (or one it includes) changes on disk. The
+//          file also holds the map keys (binds / unbinds), file and tab rules (rules),
+//          per-editor overrides (editor <- { sound = { ... } }) and the theme.
 //
 //===========================================================================//
 #pragma once
 
 #include <cstdint>
+#include <optional>
+#include <vector>
 
 #include <QColor>
 #include <QFont>
@@ -15,8 +20,89 @@
 #include <QHash>
 #include <QStringList>
 
+class QFileSystemWatcher;
+class QTimer;
+
 #include "Graphics.h"
+#include "SourceTools.h"
+#include "conf/Conf.h"
 #include "map/MapConstants.h"
+#include "map/MapKeys.h"
+
+// The text editors' colours (a config's or material's text): the desktop's, or a scheme of
+// their own whatever the desktop's colours are.
+enum class CodeScheme_t
+{
+	CODE_SCHEME_SYSTEM,
+	CODE_SCHEME_GRUVBOX_DARK,
+	CODE_SCHEME_GRUVBOX_DARK_HARD,
+	CODE_SCHEME_GRUVBOX_LIGHT,
+	CODE_SCHEME_COUNT
+};
+
+// The application's light or dark look: the desktop's, or one forced.
+enum class ThemeScheme_t
+{
+	THEME_SCHEME_SYSTEM,
+	THEME_SCHEME_LIGHT,
+	THEME_SCHEME_DARK,
+};
+
+// Settings that aren't the map viewer's. The defaults are what a new install starts with.
+struct GeneralPreferences_t
+{
+	GraphicsApi_t m_nGraphicsApi = GraphicsApi_t::GRAPHICS_API_AUTO;
+	bool m_bSingleWindow = true;
+	bool m_bReopenSession = true;
+	bool m_bTabGroups = true;
+	bool m_bManifestReminder = true;
+	bool m_bDesktopFileChooser = true;
+	bool m_bDebugLog = false;
+	bool m_bSimpleInterface = false;
+	ThemeScheme_t m_nThemeScheme = ThemeScheme_t::THEME_SCHEME_SYSTEM;
+	QColor m_ThemeAccent;  // invalid: the desktop's
+	QString m_szThemeStyle; // a Qt style ("Fusion"); empty: the desktop's
+	CodeScheme_t m_nCodeScheme = CodeScheme_t::CODE_SCHEME_SYSTEM;
+	QString m_szCodeFontFamily; // empty: the system's fixed font
+	int m_nCodeFontSize = 0;    // points; 0: the system's
+	bool m_bCodeCompletion = true;
+	bool m_bMaterialVisual = true;
+	bool m_bMaterialLive = true;
+	bool m_bGridAnimatingAll = false;
+	// Source tools (empty: found beside the game and in PATH) and Hammer's $bspdir.
+	QString m_szStudiomdl;
+	QString m_szBspzip;
+	QString m_szVbsp;
+	QString m_szVvis;
+	QString m_szVrad;
+	QString m_szGameExe;
+	QString m_szBspDir;
+
+	friend bool operator==( const GeneralPreferences_t &, const GeneralPreferences_t & ) = default;
+};
+
+// What an editor's own table can change (editor <- { sound = { code = { font_size = 12 } } }); unset parts
+// follow the general setting.
+struct CodeOverrides_t
+{
+	std::optional<CodeScheme_t> m_nScheme;
+	std::optional<QString> m_szFontFamily;
+	std::optional<int> m_nFontSize;
+	std::optional<bool> m_bCompletion;
+
+	friend bool operator==( const CodeOverrides_t &, const CodeOverrides_t & ) = default;
+};
+
+// A rule, [ "<effect>:<argument>", glob ]: a file whose path matches gets the effect. A glob with a '/' is
+// matched against the whole path ('*' crossing folders), one without against the file name.
+struct FileRule_t
+{
+	QString m_szEffect;   // "group", "editor"
+	QString m_szArgument; // the group's or editor's name
+	QString m_szGlob;
+
+	friend bool operator==( const FileRule_t &, const FileRule_t & ) = default;
+};
 
 // How 2D views colour grouped objects (Hammer++ gives each group a colour of its own).
 enum class MapGroupColors_t
@@ -191,39 +277,65 @@ class CPreferences : public QObject
 public:
 	[[nodiscard]] static CPreferences &Instance();
 
+	// vomit-tools.nut: beside Qt's own settings file (VOMIT_TOOLS_CONFIG names another).
+	[[nodiscard]] QString GetConfigPath() const;
+	// Problems with the file as last read: "file:line: message".
+	[[nodiscard]] const QStringList &GetConfigProblems() const { return m_ConfigProblems; }
+	// Reads the file (and what it sources) again, as a change on disk does.
+	void ReloadConfig();
+	[[nodiscard]] const GeneralPreferences_t &GetGeneral() const { return m_General; }
+
+	// The light or dark look, accent colour and Qt style, put onto the application.
+	void ApplyTheme() const;
+
+	// The rule for a file, if any: the group or editor a "rule" line gives its path.
+	[[nodiscard]] QString RuleFor( const QString &szEffect, const QString &szPath ) const;
+	// The editors "editor:<name>" blocks and editor rules can name.
+	[[nodiscard]] static const QStringList &EditorNames();
+
+	// The simple interface (CInterfaceMode shows it; it is kept here).
+	[[nodiscard]] bool IsSimpleInterface() const { return m_General.m_bSimpleInterface; }
+	void SetSimpleInterface( bool bSimple );
+
+	// A Source tool's path as set (empty: found automatically), and Hammer's $bspdir.
+	[[nodiscard]] QString GetSourceToolPath( SourceTool_t nTool ) const;
+	void SetSourceToolPath( SourceTool_t nTool, const QString &szPath );
+	[[nodiscard]] QString GetBspDir() const { return m_General.m_szBspDir; }
+	void SetBspDir( const QString &szPath );
+
 	// Whether every system in the particle editor's grid plays, rather than only the selected one.
-	[[nodiscard]] bool IsGridAnimatingAll() const { return m_bGridAnimatingAll; }
+	[[nodiscard]] bool IsGridAnimatingAll() const { return m_General.m_bGridAnimatingAll; }
 	void SetGridAnimatingAll( bool bAll );
 
 	// What the previews draw with. CGraphics reads it as the app starts, so a change takes effect
 	// the next time.
-	[[nodiscard]] GraphicsApi_t GetGraphicsApi() const { return m_nGraphicsApi; }
+	[[nodiscard]] GraphicsApi_t GetGraphicsApi() const { return m_General.m_nGraphicsApi; }
 	void SetGraphicsApi( GraphicsApi_t nApi );
 
 	// Whether files opened from outside (a file manager, the command line) join the window
 	// already open rather than starting another.
-	[[nodiscard]] bool IsSingleWindow() const { return m_bSingleWindow; }
+	[[nodiscard]] bool IsSingleWindow() const { return m_General.m_bSingleWindow; }
 	void SetSingleWindow( bool bSingle );
 
 	// Whether saving a file the game's manifest doesn't list offers to add it.
-	[[nodiscard]] bool IsManifestReminder() const { return m_bManifestReminder; }
+	[[nodiscard]] bool IsManifestReminder() const { return m_General.m_bManifestReminder; }
 	void SetManifestReminder( bool bRemind );
 
 	// Whether the files open at closing open again at the next start.
-	[[nodiscard]] bool IsReopenSession() const { return m_bReopenSession; }
+	[[nodiscard]] bool IsReopenSession() const { return m_General.m_bReopenSession; }
 	void SetReopenSession( bool bReopen );
 
 	// Whether the main window's tabs are grouped (by kind, or the user's groups) under a strip.
-	[[nodiscard]] bool IsTabGroups() const { return m_bTabGroups; }
+	[[nodiscard]] bool IsTabGroups() const { return m_General.m_bTabGroups; }
 	void SetTabGroups( bool bGroups );
 
 	// Whether open and save windows are the desktop's own file chooser (the XDG portal's, on
 	// Linux) rather than Qt's.
-	[[nodiscard]] bool IsDesktopFileChooser() const { return m_bDesktopFileChooser; }
+	[[nodiscard]] bool IsDesktopFileChooser() const { return m_General.m_bDesktopFileChooser; }
 	void SetDesktopFileChooser( bool bDesktop );
 
 	// Whether the debug log prints what goes on in the background (Advanced).
-	[[nodiscard]] bool IsDebugLog() const { return m_bDebugLog; }
+	[[nodiscard]] bool IsDebugLog() const { return m_General.m_bDebugLog; }
 	void SetDebugLog( bool bOn );
 
 	// The map viewer's: open maps take a change at once (their own toggles start over).
@@ -233,11 +345,23 @@ public:
 	[[nodiscard]] std::uint64_t GetMapRevision() const { return m_nMapRevision; }
 
 	// Whether materials are edited as a list of parameters (else as their text).
-	[[nodiscard]] bool IsMaterialVisual() const { return m_bMaterialVisual; }
+	[[nodiscard]] bool IsMaterialVisual() const { return m_General.m_bMaterialVisual; }
 	void SetMaterialVisual( bool bVisual );
 	// Whether the material preview redraws at each edit made in the list (the text's always does).
-	[[nodiscard]] bool IsMaterialLive() const { return m_bMaterialLive; }
+	[[nodiscard]] bool IsMaterialLive() const { return m_General.m_bMaterialLive; }
 	void SetMaterialLive( bool bLive );
+
+	// The text editors': their colours, their font (the system's fixed one when its family is
+	// empty) and whether they suggest words as they're typed. With an editor's name (as
+	// EditorNames()), its own block's overrides come first.
+	[[nodiscard]] CodeScheme_t GetCodeScheme( const QString &szEditor = {} ) const;
+	void SetCodeScheme( CodeScheme_t nScheme );
+	[[nodiscard]] QFont GetCodeFont( const QString &szEditor = {} ) const;
+	[[nodiscard]] const QString &GetCodeFontFamily() const { return m_General.m_szCodeFontFamily; }
+	[[nodiscard]] int GetCodeFontSize() const { return m_General.m_nCodeFontSize; } // points; 0: the system's
+	void SetCodeFont( const QString &szFamily, int nSize );
+	[[nodiscard]] bool IsCodeCompletion( const QString &szEditor = {} ) const;
+	void SetCodeCompletion( bool bOn );
 
 	// Says that the Discord settings changed.
 	void NotifyDiscordChanged() { emit DiscordChanged(); }
@@ -249,20 +373,34 @@ signals:
 	void TabGroupsChanged( bool bGroups );
 	// The Discord settings changed (they live in QSettings under discord/).
 	void DiscordChanged();
+	void CodeEditorChanged();
+	void ThemeChanged();
+	void SimpleInterfaceChanged( bool bSimple );
+	void RulesChanged();
+	void ConfigProblemsChanged();
 
 private:
 	CPreferences();
 
-	bool m_bGridAnimatingAll = false;
-	GraphicsApi_t m_nGraphicsApi = GraphicsApi_t::GRAPHICS_API_AUTO;
-	bool m_bSingleWindow = true;
-	bool m_bMaterialVisual = true;
-	bool m_bMaterialLive = true;
-	bool m_bManifestReminder = true;
-	bool m_bReopenSession = true;
-	bool m_bTabGroups = true;
-	bool m_bDesktopFileChooser = true;
-	bool m_bDebugLog = false;
+	// Reads the settings out of the config as it is, noting what can't be read.
+	void ApplyConfig();
+	// Writes one setting (by its key in the file) and saves.
+	template <class Value_t>
+	void Store( const char *pszKey, const Value_t &value );
+	void StoreKeys();
+	void SaveConfig();
+	void WatchConfig();
+	// The first run: the old settings (QSettings) written out as the file.
+	void Migrate();
+
+	xv::conf::CConfig m_Config;
+	QString m_szConfigPath;
+	QStringList m_ConfigProblems;
+	QFileSystemWatcher *m_pWatcher = nullptr;
+	QTimer *m_pReloadTimer = nullptr;
+	GeneralPreferences_t m_General;
+	QHash<QString, CodeOverrides_t> m_CodeOverrides; // by editor name
+	std::vector<FileRule_t> m_Rules;
 	MapPreferences_t m_Map;
 	std::uint64_t m_nMapRevision = 0;
 };

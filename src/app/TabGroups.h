@@ -45,6 +45,9 @@ public:
 	[[nodiscard]] QTabBar *GetBar() const { return m_pBar; }
 	// A tab's kind ("Maps", "Textures"...), from its editor's class.
 	[[nodiscard]] static QString KindOf( const QWidget *pTab );
+	// The editor a widget sits in, as vomit_tools.conf names editors ("map", "sound"...), or
+	// empty outside one.
+	[[nodiscard]] static QString EditorNameOf( const QWidget *pWidget );
 	// Its group: the user's when it has one, else its kind.
 	[[nodiscard]] QString GroupOf( const QWidget *pTab ) const;
 	// Puts a tab in a group of the user's (empty: back to its kind's).

@@ -70,6 +70,8 @@ add_library(vomit_tools_ui STATIC
         ModelDocument.cpp
         ModelDocument.h
         SourceTools.cpp
+        StateFormat.cpp
+        StateFormat.h
         SourceTools.h
         ModelImport.cpp
         ModelImport.h
@@ -121,14 +123,14 @@ add_library(vomit_tools_ui STATIC
         SkyDocument.h
         SkyEditor.cpp
         SkyEditor.h
+        SkyPanoramaDialog.cpp
+        SkyPanoramaDialog.h
         SkyRenderer.cpp
         SkyRenderer.h
         SkyTestPattern.cpp
         SkyTestPattern.h
         SkyView.cpp
         SkyView.h
-        SkyPanoramaDialog.cpp
-        SkyPanoramaDialog.h
         SheetDialog.cpp
         SheetDialog.h
         SoundDocument.cpp

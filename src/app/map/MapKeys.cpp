@@ -6,6 +6,9 @@
 //===========================================================================//
 #include "MapKeys.h"
 
+#include "Preferences.h"
+
+#include <algorithm>
 #include <array>
 
 #include <QCoreApplication>

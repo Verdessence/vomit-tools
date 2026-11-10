@@ -130,6 +130,8 @@ public:
 	CParticleSearch *FindParticleSystem( const QString &szQuery = {} );
 	// Edit > Preferences: one window, raised again when it is already open.
 	CPreferencesDialog *ShowPreferences();
+	// vomit-tools.nut in the desktop's editor.
+	void OpenConfigFile();
 	// Closes a tab, asking first about unsaved changes. Returns false when the user keeps it.
 	bool CloseTab( int nIndex );
 	// Lists a particle file in a map's manifest (maps/<map>_particles.txt), written to the write
@@ -158,6 +160,7 @@ protected:
 	void dropEvent( QDropEvent *pEvent ) override;
 
 private:
+	QWidget *BuildConfigBar();
 	CDetailEditor *GetCurrentDetails() const;
 	// The session entry that reopens tab nIndex; empty for tabs that can't be (new, unsaved files).
 	[[nodiscard]] QString SessionEntryFor( int nIndex ) const;

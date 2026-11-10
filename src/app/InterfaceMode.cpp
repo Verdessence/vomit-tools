@@ -6,14 +6,7 @@
 //===========================================================================//
 #include "InterfaceMode.h"
 
-#include <QSettings>
-
-namespace
-{
-
-constexpr auto SIMPLE_KEY = "simpleInterface";
-
-} // namespace
+#include "Preferences.h"
 
 //-----------------------------------------------------------------------------
 // Purpose:
@@ -28,8 +21,10 @@ CInterfaceMode &CInterfaceMode::Instance()
 // Purpose:
 //-----------------------------------------------------------------------------
 CInterfaceMode::CInterfaceMode()
-	: m_bSimple( QSettings{}.value( SIMPLE_KEY, false ).toBool() )
+	: m_bSimple( CPreferences::Instance().IsSimpleInterface() )
 {
+	// Kept in vomit-tools.nut, so an edit there switches it too.
+	connect( &CPreferences::Instance(), &CPreferences::SimpleInterfaceChanged, this, &CInterfaceMode::SetSimple );
 }
 
 //-----------------------------------------------------------------------------
@@ -42,6 +37,6 @@ void CInterfaceMode::SetSimple( bool bSimple )
 		return;
 	}
 	m_bSimple = bSimple;
-	QSettings{}.setValue( SIMPLE_KEY, bSimple );
+	CPreferences::Instance().SetSimpleInterface( bSimple );
 	emit Changed( bSimple );
 }

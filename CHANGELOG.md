@@ -245,6 +245,26 @@
   out is kept but hidden, each kind in a visgroup under "Stripper: <config>" (Added, Modified,
   Removed). Visgroups made here are saved in the map.
 
+### Settings file (new)
+- Settings live in `vomit-tools.nut` (beside Qt's settings: `~/.config/vomit-tools/` on Linux),
+  written as Squirrel (VScript) tables and read as data, never run: `map <- { fov = 90 }`,
+  `map.fov = 90;`, `local` values, and `IncludeScript( "keys.nut" )` to pull in others
+  (relative, `~`, globs). Preferences writes each change back in place and leaves the rest of the
+  file as written; edits saved in the file apply at once. The first run moves the old settings
+  into it, every setting listed, the defaults commented out.
+- Problems in the file (a typo'd key, a bad value, an unknown action, a syntax error) show in a
+  bar over the tabs with the file and line, until fixed. Edit → Open Settings File opens it.
+- Keys: `map.keys_preset` and `binds` / `unbinds` lists (`[ "map", "Ctrl+Shift+E", <action> ]`),
+  actions named as in Hammer++'s keybindings; Preferences → Keys writes them.
+- Rules: `[ "group:<name>", pattern ]` puts matching files' tabs in a group;
+  `[ "editor:<map|model|detail|stripper>", pattern ]` opens them in that editor.
+- Per-editor tables: `editor <- { sound = { code = { font_size = 12 } } }` (the text editor's
+  scheme, font, size and completion).
+- Theme: `theme.color_scheme` (system, light, dark), `theme.accent` and `theme.style`.
+- The app's own state (window layouts, recent files, last folders, the session) is kept as
+  Squirrel tables too, in `vomit-tools.state.nut` (Qt's `vomit-tools.conf` before), moved over
+  on the first run.
+
 ### Skyboxes
 - Import Panorama: an equirectangular panorama becomes all six faces, with a face size, a turn,
   and a preview to look around in. An HDRI (.hdr, or OpenEXR .exr) also gives the HDR set the

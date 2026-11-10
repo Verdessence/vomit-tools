@@ -19,6 +19,7 @@
 #include <QCloseEvent>
 #include <QCryptographicHash>
 #include <QDesktopServices>
+#include <QFrame>
 #include <QDockWidget>
 #include <QDragEnterEvent>
 #include <QDropEvent>
@@ -46,6 +47,7 @@
 #include <QSlider>
 #include <QSortFilterProxyModel>
 #include <QSplitter>
+#include <QStyle>
 #include <QPointer>
 #include <QSysInfo>
 #include <QStandardPaths>
@@ -550,7 +552,13 @@ CMainWindow::CMainWindow( QWidget *pParent, xv::audio::CEngine::Output_t nAudio 
 	pSplitter->addWidget( pTabArea );
 	pSplitter->setStretchFactor( 1, 3 );
 	pSplitter->setSizes( { 320, 1080 } );
-	setCentralWidget( pSplitter );
+	auto *pCentral = new QWidget;
+	auto *pCentralLayout = new QVBoxLayout( pCentral );
+	pCentralLayout->setContentsMargins( 0, 0, 0, 0 );
+	pCentralLayout->setSpacing( 0 );
+	pCentralLayout->addWidget( BuildConfigBar() );
+	pCentralLayout->addWidget( pSplitter, 1 );
+	setCentralWidget( pCentral );
 
 	m_pMounts = new QTableWidget( 0, 4 );
 	m_pMounts->setHorizontalHeaderLabels( { tr( "Status" ), tr( "Search path" ), tr( "Path IDs" ), tr( "Mounted from" ) } );
@@ -709,6 +717,7 @@ void CMainWindow::BuildMenus( QAction *pSearchPathsToggle )
 	QAction *pPreferences = pEdit->addAction( tr( "&Preferences…" ), preferencesKey, this, &CMainWindow::ShowPreferences );
 	pPreferences->setObjectName( QStringLiteral( "preferencesAction" ) );
 	pPreferences->setMenuRole( QAction::PreferencesRole );
+	pEdit->addAction( tr( "Open Settings &File" ), this, &CMainWindow::OpenConfigFile )->setToolTip( tr( "vomit-tools.nut: every setting, the keys and rules, as Squirrel tables" ) );
 
 	auto *pGame = menuBar()->addMenu( tr( "&Game" ) );
 	pGame->addAction( tr( "&Reload Files" ), QKeySequence::Refresh, this, &CMainWindow::Remount );
@@ -2023,7 +2032,7 @@ void CMainWindow::PreviewDiskFile( const QString &szPath )
 }
 
 //-----------------------------------------------------------------------------
-// Purpose:
+// Purpose: Opens a file from disk in the editor for its kind.
 //-----------------------------------------------------------------------------
 void CMainWindow::OpenDiskFile( const QString &szPath )
 {
@@ -2510,6 +2519,50 @@ bool CMainWindow::ExportSky( CSkyEditor *pEditor, bool bChooseFolder )
 		Remount();
 	}
 	return true;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: The bar over the tabs that shows what vomit-tools.nut has wrong, until it's fixed.
+//-----------------------------------------------------------------------------
+QWidget *CMainWindow::BuildConfigBar()
+{
+	auto *pBar = new QFrame;
+	pBar->setObjectName( QStringLiteral( "configProblems" ) );
+	pBar->setFrameShape( QFrame::StyledPanel );
+	auto *pLayout = new QHBoxLayout( pBar );
+	pLayout->setContentsMargins( 8, 4, 8, 4 );
+	auto *pIcon = new QLabel;
+	pIcon->setPixmap( style()->standardIcon( QStyle::SP_MessageBoxWarning ).pixmap( 16, 16 ) );
+	auto *pText = new QLabel;
+	pText->setObjectName( QStringLiteral( "configProblemsText" ) );
+	pText->setTextInteractionFlags( Qt::TextSelectableByMouse );
+	auto *pOpen = new QPushButton( tr( "Open File" ) );
+	connect( pOpen, &QPushButton::clicked, this, &CMainWindow::OpenConfigFile );
+	auto *pReload = new QPushButton( tr( "Read Again" ) );
+	connect( pReload, &QPushButton::clicked, this, [] { CPreferences::Instance().ReloadConfig(); } );
+	pLayout->addWidget( pIcon );
+	pLayout->addWidget( pText, 1 );
+	pLayout->addWidget( pOpen );
+	pLayout->addWidget( pReload );
+	const auto update = [ pBar, pText ] {
+		const QStringList &problems = CPreferences::Instance().GetConfigProblems();
+		pBar->setVisible( !problems.isEmpty() );
+		if ( problems.isEmpty() )
+			return;
+		pText->setText( problems.size() == 1 ? problems.front() : tr( "%1 (and %n more)", nullptr, static_cast<int>( problems.size() - 1 ) ).arg( problems.front() ) );
+		pText->setToolTip( problems.join( u'\n' ) );
+	};
+	connect( &CPreferences::Instance(), &CPreferences::ConfigProblemsChanged, pBar, update );
+	update();
+	return pBar;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: vomit-tools.nut in the desktop's editor for it.
+//-----------------------------------------------------------------------------
+void CMainWindow::OpenConfigFile()
+{
+	QDesktopServices::openUrl( QUrl::fromLocalFile( CPreferences::Instance().GetConfigPath() ) );
 }
 
 //-----------------------------------------------------------------------------

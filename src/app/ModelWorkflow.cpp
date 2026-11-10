@@ -6,6 +6,7 @@
 #include "FileDialogs.h"
 #include "ModelImport.h"
 #include "ModelVmfDialog.h"
+#include "Preferences.h"
 #include "QtPaths.h"
 #include "bsp/Bsp.h"
 #include <QCheckBox>
@@ -185,8 +186,8 @@ CModelWorkflow::CModelWorkflow( QString szPath, xv::model::Reader_t pfnRead, xv:
 	connect( m_pPack, &QPushButton::clicked, this, &CModelWorkflow::Pack );
 	pTabs->addTab( pPackPage, tr( "Pack" ) );
 	connect( m_pGame, &QLineEdit::editingFinished, this, &CModelWorkflow::UpdateTools );
-	connect( m_pCompiler, &QLineEdit::editingFinished, this, [ this ] { QSettings{}.setValue( SourceToolSetting( SourceTool_t::SOURCE_TOOL_STUDIOMDL ), m_pCompiler->text() ); } );
-	connect( m_pPacker, &QLineEdit::editingFinished, this, [ this ] { QSettings{}.setValue( SourceToolSetting( SourceTool_t::SOURCE_TOOL_BSPZIP ), m_pPacker->text() ); } );
+	connect( m_pCompiler, &QLineEdit::editingFinished, this, [ this ] { CPreferences::Instance().SetSourceToolPath( SourceTool_t::SOURCE_TOOL_STUDIOMDL, m_pCompiler->text() ); } );
+	connect( m_pPacker, &QLineEdit::editingFinished, this, [ this ] { CPreferences::Instance().SetSourceToolPath( SourceTool_t::SOURCE_TOOL_BSPZIP, m_pPacker->text() ); } );
 	UpdateTools();
 	m_pLog = new QPlainTextEdit;
 	m_pLog->setReadOnly( true );
@@ -239,8 +240,8 @@ void CModelWorkflow::UpdateTools()
 	try
 	{
 		const auto game = Game();
-		m_pCompiler->setText( FindSourceTool( SourceTool_t::SOURCE_TOOL_STUDIOMDL, game, QSettings{}.value( SourceToolSetting( SourceTool_t::SOURCE_TOOL_STUDIOMDL ) ).toString() ) );
-		m_pPacker->setText( FindSourceTool( SourceTool_t::SOURCE_TOOL_BSPZIP, game, QSettings{}.value( SourceToolSetting( SourceTool_t::SOURCE_TOOL_BSPZIP ) ).toString() ) );
+		m_pCompiler->setText( FindSourceTool( SourceTool_t::SOURCE_TOOL_STUDIOMDL, game, CPreferences::Instance().GetSourceToolPath( SourceTool_t::SOURCE_TOOL_STUDIOMDL ) ) );
+		m_pPacker->setText( FindSourceTool( SourceTool_t::SOURCE_TOOL_BSPZIP, game, CPreferences::Instance().GetSourceToolPath( SourceTool_t::SOURCE_TOOL_BSPZIP ) ) );
 	}
 	catch ( const std::exception & )
 	{}

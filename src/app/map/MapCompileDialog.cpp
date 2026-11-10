@@ -5,6 +5,7 @@
 //
 //===========================================================================//
 #include "MapCompileDialog.h"
+#include "Preferences.h"
 
 #include <algorithm>
 
@@ -561,11 +562,11 @@ xv::map::CompileVariables_t CMapCompileDialog::GetVariables() const
 	{
 		variables.m_szGameDir = game->m_GameDir.string();
 		variables.m_szExeDir = game->m_BaseDir.string();
-		variables.m_szBspDir = FindBspDir( *game, QSettings{}.value( BspDirSetting() ).toString() ).toStdString();
-		variables.m_szBspExe = FindSourceTool( SourceTool_t::SOURCE_TOOL_VBSP, *game, QSettings{}.value( SourceToolSetting( SourceTool_t::SOURCE_TOOL_VBSP ) ).toString() ).toStdString();
-		variables.m_szVisExe = FindSourceTool( SourceTool_t::SOURCE_TOOL_VVIS, *game, QSettings{}.value( SourceToolSetting( SourceTool_t::SOURCE_TOOL_VVIS ) ).toString() ).toStdString();
-		variables.m_szLightExe = FindSourceTool( SourceTool_t::SOURCE_TOOL_VRAD, *game, QSettings{}.value( SourceToolSetting( SourceTool_t::SOURCE_TOOL_VRAD ) ).toString() ).toStdString();
-		variables.m_szGameExe = FindSourceTool( SourceTool_t::SOURCE_TOOL_GAME, *game, QSettings{}.value( SourceToolSetting( SourceTool_t::SOURCE_TOOL_GAME ) ).toString() ).toStdString();
+		variables.m_szBspDir = FindBspDir( *game, CPreferences::Instance().GetBspDir() ).toStdString();
+		variables.m_szBspExe = FindSourceTool( SourceTool_t::SOURCE_TOOL_VBSP, *game, CPreferences::Instance().GetSourceToolPath( SourceTool_t::SOURCE_TOOL_VBSP ) ).toStdString();
+		variables.m_szVisExe = FindSourceTool( SourceTool_t::SOURCE_TOOL_VVIS, *game, CPreferences::Instance().GetSourceToolPath( SourceTool_t::SOURCE_TOOL_VVIS ) ).toStdString();
+		variables.m_szLightExe = FindSourceTool( SourceTool_t::SOURCE_TOOL_VRAD, *game, CPreferences::Instance().GetSourceToolPath( SourceTool_t::SOURCE_TOOL_VRAD ) ).toStdString();
+		variables.m_szGameExe = FindSourceTool( SourceTool_t::SOURCE_TOOL_GAME, *game, CPreferences::Instance().GetSourceToolPath( SourceTool_t::SOURCE_TOOL_GAME ) ).toStdString();
 	}
 	return variables;
 }
