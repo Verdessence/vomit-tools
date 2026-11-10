@@ -389,6 +389,7 @@ CMapEditor::CMapEditor( const QString &szPath, bool bFromGame, QWidget *pParent 
 		} );
 		pNewLayout->addWidget( m_pBuildingFold );
 		pNewLayout->addWidget( m_pBuilding );
+		pNewLayout->addStretch();
 		// Open unless it was folded: it keeps the object lists from taking the whole panel.
 		const bool bOpen = QSettings().value( QStringLiteral( "map/buildingGeneratorOpen" ), true ).toBool();
 		m_pBuildingFold->setChecked( bOpen );
@@ -818,6 +819,8 @@ QWidget *CMapEditor::BuildNewObjects()
 	m_pObjectChoices = new QStackedWidget;
 	m_pObjectChoices->addWidget( m_pEntityClass );
 	m_pObjectChoices->addWidget( m_pPrefabObjects );
+	// As tall as its box: the side's spare height isn't the class name's to sit in the middle of.
+	m_pObjectChoices->setSizePolicy( QSizePolicy::Preferred, QSizePolicy::Fixed );
 	m_pMaterial = new QLineEdit( QStringLiteral( "DEV/DEV_MEASUREGENERIC01" ) );
 	connect( m_pMaterial, &QLineEdit::editingFinished, this, [ this ] { SetCurrentMaterial( m_pMaterial->text() ); } );
 	m_pMaterial->setObjectName( QStringLiteral( "mapNewMaterial" ) );
