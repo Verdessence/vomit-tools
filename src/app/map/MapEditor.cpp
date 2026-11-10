@@ -95,6 +95,7 @@
 #include "PanelColumn.h"
 #include "ModelBrowser.h"
 #include "map/MaterialBrowser.h"
+#include "map/ParticleBrowser.h"
 #include "map/MapPanes.h"
 #include "map/MapProperties.h"
 #include "map/MapRecent.h"
@@ -340,6 +341,8 @@ CMapEditor::CMapEditor( const QString &szPath, bool bFromGame, QWidget *pParent 
 	{
 		pSheet->SetNameSource( [ this ]( const std::string &szType ) { return KeyNames( szType ); } );
 		pSheet->SetPicker( [ this ]( const std::string &szType, const QString &szCurrent ) -> std::optional<QString> {
+			if ( szType == "particlesystem" )
+				return CParticleBrowser::Pick( this, *m_pParticles, szCurrent );
 			const std::optional<xv::vfs::CGameInfo> &game = m_pDocument->GetGame();
 			if ( !game )
 				return std::nullopt;

@@ -505,8 +505,8 @@ bool CMapProperties::IsBrowsable( const std::string &szType )
 
 //-----------------------------------------------------------------------------
 // Purpose: A key's value picked by its type: materials, decals and sprites from the texture
-//          browser, models from the model browser, sounds and particle systems from the names
-//          the editor lists; the pick is one step to undo.
+//          browser, models from the model browser, particle systems from the particle browser,
+//          sounds from the names the editor lists; the pick is one step to undo.
 //-----------------------------------------------------------------------------
 void CMapProperties::BrowseKey( std::size_t nRow )
 {
@@ -515,7 +515,7 @@ void CMapProperties::BrowseKey( std::size_t nRow )
 	const xv::map::PropertyRow_t &row = m_Sheet.m_Rows[ nRow ];
 	const QString szCurrent = FromStd( row.m_szValue );
 	std::optional<QString> picked;
-	if ( row.m_szType == "material" || row.m_szType == "decal" || row.m_szType == "sprite" || row.m_szType == "studio" )
+	if ( row.m_szType == "material" || row.m_szType == "decal" || row.m_szType == "sprite" || row.m_szType == "studio" || ( row.m_szType == "particlesystem" && m_pfnPick ) )
 	{
 		if ( m_pfnPick )
 			picked = m_pfnPick( row.m_szType, szCurrent );

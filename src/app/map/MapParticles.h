@@ -62,6 +62,16 @@ public:
 	// particle systems' names it has.
 	[[nodiscard]] std::shared_ptr<const xv::vfs::CFileSystem> GetFileSystem() const { return m_pFileSystem; }
 	[[nodiscard]] std::vector<std::string> GetSystemNames() const;
+	// Where a system is from: its file's compiled systems, its place among them, the file, and
+	// whether a manifest lists that file (the game loads only those). nullopt for none of that name.
+	struct SystemSource_t
+	{
+		std::shared_ptr<const xv::particles::CLibrary> m_pLibrary;
+		std::size_t m_nDefinition = 0;
+		std::string m_szFile;
+		bool m_bListed = true;
+	};
+	[[nodiscard]] std::optional<SystemSource_t> GetSystemSource( std::string_view szName ) const;
 	[[nodiscard]] std::size_t GetParticleCount() const;
 	// The system an object (an info_particle_system's) plays; null when it plays none.
 	[[nodiscard]] const xv::particles::CSimulation *GetSimulation( std::uint32_t nObject ) const;
@@ -85,6 +95,7 @@ private:
 		std::shared_ptr<const xv::particles::CLibrary> m_pLibrary;
 		std::size_t m_nDefinition = 0;
 		std::string m_szUnlistedFile; // read though no manifest lists it
+		std::string m_szFile;         // the file it is from, listed or not
 	};
 	struct Playing_t
 	{

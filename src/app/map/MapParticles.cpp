@@ -156,7 +156,7 @@ void CMapParticles::Start( std::optional<xv::vfs::CGameInfo> game, std::string s
 				if ( const auto pLibrary = readFile( szFile ) )
 				{
 					for ( std::size_t i = 0; i < pLibrary->m_Definitions.size(); i++ )
-						systems.insert_or_assign( pLibrary->m_Definitions[ i ].m_szName, Found_t{ pLibrary, i, {} } );
+						systems.insert_or_assign( pLibrary->m_Definitions[ i ].m_szName, Found_t{ pLibrary, i, {}, szFile } );
 				}
 			}
 		}
@@ -171,7 +171,7 @@ void CMapParticles::Start( std::optional<xv::vfs::CGameInfo> game, std::string s
 			if ( const auto pLibrary = readFile( szFile ) )
 			{
 				for ( std::size_t i = 0; i < pLibrary->m_Definitions.size(); i++ )
-					systems.try_emplace( pLibrary->m_Definitions[ i ].m_szName, Found_t{ pLibrary, i, szFile } );
+					systems.try_emplace( pLibrary->m_Definitions[ i ].m_szName, Found_t{ pLibrary, i, szFile, szFile } );
 			}
 		}
 		QMetaObject::invokeMethod(
@@ -284,6 +284,17 @@ std::vector<std::string> CMapParticles::GetSystemNames() const
 	for ( const auto &[ szName, found ] : m_Systems )
 		names.push_back( szName );
 	return names;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+std::optional<CMapParticles::SystemSource_t> CMapParticles::GetSystemSource( std::string_view szName ) const
+{
+	const auto found = m_Systems.find( std::string{ szName } );
+	if ( found == m_Systems.end() )
+		return std::nullopt;
+	return SystemSource_t{ found->second.m_pLibrary, found->second.m_nDefinition, found->second.m_szFile, found->second.m_szUnlistedFile.empty() };
 }
 
 //-----------------------------------------------------------------------------

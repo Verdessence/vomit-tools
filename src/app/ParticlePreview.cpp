@@ -547,6 +547,21 @@ void CParticlePreview::SetDocument( const xv::dmx::Document_t &document )
 }
 
 //-----------------------------------------------------------------------------
+// Purpose: As SetDocument, the systems compiled already; the same ones again change nothing.
+//-----------------------------------------------------------------------------
+void CParticlePreview::SetLibrary( std::shared_ptr<const particles::CLibrary> pLibrary )
+{
+	if ( pLibrary == m_pLibrary )
+	{
+		return;
+	}
+	m_pLibrary = std::move( pLibrary );
+	m_PlayingThumbnails.clear();
+	m_Drag = {};
+	Rebuild( true );
+}
+
+//-----------------------------------------------------------------------------
 // Purpose: Shows a system by name, from the start, framed.
 //-----------------------------------------------------------------------------
 void CParticlePreview::SetSystem( const std::string &szName )

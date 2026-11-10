@@ -233,6 +233,8 @@ add_library(vomit_tools_ui STATIC
         map/MaterialPictures.h
         map/MaterialBrowser.cpp
         map/MaterialBrowser.h
+        map/ParticleBrowser.cpp
+        map/ParticleBrowser.h
         PointerLock.cpp
         PointerLock.h)
 target_include_directories(vomit_tools_ui PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")

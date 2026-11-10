@@ -60,6 +60,8 @@ public:
 	// The systems of the file being edited. The current system keeps playing, from about where it
 	// was, so edits show at once.
 	void SetDocument( const xv::dmx::Document_t &document );
+	// Systems compiled already (another file's, as the map read them), the same way.
+	void SetLibrary( std::shared_ptr<const xv::particles::CLibrary> pLibrary );
 	// Shows a system by name, from the start, framed.
 	void SetSystem( const std::string &szName );
 	[[nodiscard]] const std::string &GetSystem() const { return m_szSystem; }
