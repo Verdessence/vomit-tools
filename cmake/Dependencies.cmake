@@ -113,3 +113,12 @@ if(MSVC)
     target_compile_options(vomit_tools_vhacd PRIVATE /bigobj /utf-8)
     target_compile_definitions(vomit_tools_vhacd PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
 endif()
+
+# Box3D (v0.1.0), the map viewer's physics tool. Used through FetchContent, it builds the library
+# alone (its samples, tests and validation stay with its own top-level build); SYSTEM keeps its
+# headers' warnings out of ours.
+FetchContent_Declare(box3d
+        URL https://api.github.com/repos/erincatto/box3d/tarball/8441b4a06d6d09dcfb0b0f704df4d847d1437b92
+        URL_HASH SHA256=188a106664038a7a207b9c558c9b02e4785cc9f914c6322a3f6131b5e1d4d73f
+        DOWNLOAD_EXTRACT_TIMESTAMP ON SYSTEM)
+FetchContent_MakeAvailable(box3d)

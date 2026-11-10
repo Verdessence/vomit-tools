@@ -18,6 +18,7 @@
 #include "map/MapToolBars.h"
 #include "map/MapReports.h"
 #include "map/Write.h"
+#include "map/MapPhysics.h"
 #include "map/MapSplineTool.h"
 #include "map/MapSprinkle.h"
 #include "map/MapBuilding.h"
@@ -322,6 +323,9 @@ CMapEditor::CMapEditor( const QString &szPath, bool bFromGame, QWidget *pParent 
 	m_pSplineTool = new CMapSplineTool( *this );
 	m_pPanels->AddPanel( QStringLiteral( "spline" ), tr( "Spline" ), MakeMapIcon( MapIcon_t::MAP_ICON_SPLINE, panelIconColor ), m_pSplineTool );
 	m_pPanels->SetAvailable( QStringLiteral( "spline" ), false ); // the spline tool's, there only with it
+	m_pPhysicsTool = new CMapPhysicsTool( *this );
+	m_pPanels->AddPanel( QStringLiteral( "physics" ), tr( "Physics Simulation" ), MakeMapIcon( MapIcon_t::MAP_ICON_PHYSICS, panelIconColor ), m_pPhysicsTool );
+	m_pPanels->SetAvailable( QStringLiteral( "physics" ), false );
 	m_pBuilding = new CMapBuildingPanel;
 	m_pPanels->AddPanel( QStringLiteral( "building" ), tr( "Building Generator" ), MakeMapIcon( MapIcon_t::MAP_ICON_BLOCK, panelIconColor ), m_pBuilding );
 	m_pPanels->SetHiddenByDefault( QStringLiteral( "building" ) );
@@ -438,6 +442,7 @@ CMapEditor::CMapEditor( const QString &szPath, bool bFromGame, QWidget *pParent 
 		{ MapTool_t::MAP_TOOL_ENTITY, MapIcon_t::MAP_ICON_ENTITY, tr( "Entity Tool" ), MapAction_t::MAP_ACTION_TOOL_ENTITY },
 		{ MapTool_t::MAP_TOOL_POLYGON, MapIcon_t::MAP_ICON_POLYGON, tr( "Polygon Tool" ), MapAction_t::MAP_ACTION_TOOL_POLYGON },
 		{ MapTool_t::MAP_TOOL_SPLINE, MapIcon_t::MAP_ICON_SPLINE, tr( "Spline Tool" ), MapAction_t::MAP_ACTION_TOOL_SPLINE },
+		{ MapTool_t::MAP_TOOL_PHYSICS, MapIcon_t::MAP_ICON_PHYSICS, tr( "Physics Tool" ), MapAction_t::MAP_ACTION_TOOL_PHYSICS },
 		{ MapTool_t::MAP_TOOL_BLOCK, MapIcon_t::MAP_ICON_BLOCK, tr( "Block Tool" ), MapAction_t::MAP_ACTION_TOOL_BLOCK },
 		{ MapTool_t::MAP_TOOL_TEXTURE, MapIcon_t::MAP_ICON_TEXTURE, tr( "Texture Application" ), MapAction_t::MAP_ACTION_TOOL_TEXTURE },
 		{ MapTool_t::MAP_TOOL_OVERLAY, MapIcon_t::MAP_ICON_OVERLAY, tr( "Overlay Tool" ), MapAction_t::MAP_ACTION_TOOL_OVERLAY },
@@ -1325,6 +1330,15 @@ void CMapEditor::SetTool( MapTool_t nTool )
 	if ( bSpline && !bWasSpline )
 	{
 		m_pPanels->ScrollTo( QStringLiteral( "spline" ) );
+	}
+	// The physics tool's: leaving it stops a simulation, keeping where things landed.
+	const bool bPhysics = nTool == MapTool_t::MAP_TOOL_PHYSICS;
+	const bool bWasPhysics = m_pPanels->IsAvailable( QStringLiteral( "physics" ) );
+	m_pPanels->SetAvailable( QStringLiteral( "physics" ), bPhysics );
+	m_pPhysicsTool->SetActive( bPhysics );
+	if ( bPhysics && !bWasPhysics )
+	{
+		m_pPanels->ScrollTo( QStringLiteral( "physics" ) );
 	}
 	for ( CMapView *pView : GetViews() )
 	{
@@ -2712,6 +2726,9 @@ bool CMapEditor::RunAction( MapAction_t nAction, CMapView *pFrom )
 			return true;
 		case MapAction_t::MAP_ACTION_TOOL_SPLINE:
 			SetTool( MapTool_t::MAP_TOOL_SPLINE );
+			return true;
+		case MapAction_t::MAP_ACTION_TOOL_PHYSICS:
+			SetTool( MapTool_t::MAP_TOOL_PHYSICS );
 			return true;
 		case MapAction_t::MAP_ACTION_MERGE_BRUSHES:
 			MergeBrushes();

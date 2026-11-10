@@ -141,6 +141,9 @@ this distribution uses version 3. Their unmodified source is available at the pi
 vomit_tools_add_notice(NAME "V-HACD (open render mesh voxel decomposition)" FETCH vhacd FILE ./LICENSE
         URL "https://github.com/kmammou/v-hacd/tree/f900e42361491f525262d4825e758845e4969897" LICENSE "BSD-3-Clause")
 
+vomit_tools_add_notice(NAME "Box3D (Erin Catto, the physics tool)" FETCH box3d FILE ./LICENSE
+        URL "https://github.com/erincatto/box3d/tree/8441b4a06d6d09dcfb0b0f704df4d847d1437b92" LICENSE "MIT")
+
 file(WRITE "${VOMIT_TOOLS_NOTICES}.new" "${notices}")
 file(COPY_FILE "${VOMIT_TOOLS_NOTICES}.new" "${VOMIT_TOOLS_NOTICES}" ONLY_IF_DIFFERENT)
 file(REMOVE "${VOMIT_TOOLS_NOTICES}.new")

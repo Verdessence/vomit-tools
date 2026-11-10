@@ -209,6 +209,8 @@ add_library(vomit_tools_ui STATIC
         map/MapBrushModeling.cpp
         map/MapBrushSelect.cpp
         map/MapBrushEdit.h
+        map/MapPhysics.cpp
+        map/MapPhysics.h
         map/MapSplineTool.cpp
         map/MapSplineTool.h
         map/MapSprinkle.cpp

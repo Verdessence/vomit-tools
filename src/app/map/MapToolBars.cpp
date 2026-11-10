@@ -132,6 +132,19 @@ QIcon MakeMapIcon( MapIcon_t nIcon, const QColor &color )
 			painter.drawPolygon( QPolygonF{ { { 5, 24 }, { 9, 6 }, { 23, 5 }, { 28, 19 }, { 18, 28 } } } );
 			painter.drawEllipse( QPointF( 9, 6 ), 3, 3 );
 			break;
+		case MapIcon_t::MAP_ICON_PHYSICS:
+		{
+			// A crate tumbling onto the ground, with the line it fell along.
+			painter.drawLine( QPointF( 3, 28 ), QPointF( 29, 28 ) );
+			painter.save();
+			painter.translate( 18, 17 );
+			painter.rotate( 25 );
+			painter.drawRect( QRectF( -6, -6, 12, 12 ) );
+			painter.restore();
+			painter.drawLine( QPointF( 6, 4 ), QPointF( 11, 10 ) );
+			painter.drawLine( QPointF( 11, 3 ), QPointF( 14, 8 ) );
+			break;
+		}
 		case MapIcon_t::MAP_ICON_SPLINE:
 		{
 			// A road's curve through three handles.

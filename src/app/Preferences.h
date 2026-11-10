@@ -214,6 +214,20 @@ struct MapPreferences_t
 	bool m_bSkybox3D = true;
 	bool m_bSky2D = true;            // the map's 2D sky behind everything in the textured 3D views
 	bool m_bOriginAxes = true;       // the world's axes at 0 0 0 in the 3D views
+	// The physics tool (Hammer++'s Physics Simulation box).
+	double m_flPhysicsDrag = 5.0;      // how hard the left button pulls
+	double m_flPhysicsBullet = 1000.0; // a right click's shot
+	double m_flPhysicsExplode = 1000.0; // a middle click's explosion
+	double m_flPhysicsGravityX = 0.0;  // units/s²
+	double m_flPhysicsGravityY = 0.0;
+	double m_flPhysicsGravityZ = -800.0;
+	double m_flPhysicsAirDensity = 1.0;
+	double m_flPhysicsTimeScale = 1.0;
+	bool m_bPhysicsSleep = false;      // objects asleep until touched
+	bool m_bPhysicsAutoMass = true;    // a prop's mass from its collision model
+	bool m_bPhysicsPropsOnly = false;  // brushes stay
+	bool m_bPhysicsDrawMoving = false; // the collision models drawn
+	bool m_bPhysicsDrawStatic = false;
 	bool m_bSprites = true;          // iconsprites and env_sprites drawn as such (else as boxes)
 	bool m_bWireframeModels = true;  // props' edges in the wireframe view
 	MapSelectedModels_t m_nSelectedModels = MapSelectedModels_t::MAP_SELECTED_MODELS_PROPS;

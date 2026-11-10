@@ -53,6 +53,7 @@ enum class MapTool_t
 	MAP_TOOL_BRUSH_EDIT,
 	MAP_TOOL_POLYGON,
 	MAP_TOOL_SPLINE,  // a path of points with a strip of displacements swept along it (map/Spline.h)
+	MAP_TOOL_PHYSICS, // the selection falls and settles (map/Physics.h, Hammer++'s Physics Simulation)
 };
 
 // What the vertex tool shows as handles: Hammer's cycle (Shift+V again).

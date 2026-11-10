@@ -43,6 +43,7 @@ class CMapEntityReport;
 class CMapFaceEdit;
 class CMapSprinklePanel;
 class CMapSplineTool;
+class CMapPhysicsTool;
 class CMapRecentPanel;
 class CMapBuildingPanel;
 class CMapFilterControl;
@@ -85,6 +86,7 @@ public:
 	void SetFogController( int nId );
 	[[nodiscard]] CMapBrushEdit &GetBrushEdit() { return *m_pBrushEdit; }
 	[[nodiscard]] CMapSplineTool &GetSplineTool() { return *m_pSplineTool; }
+	[[nodiscard]] CMapPhysicsTool &GetPhysicsTool() { return *m_pPhysicsTool; }
 	[[nodiscard]] MapTool_t GetTool() const { return m_nTool; }
 	void SetTool( MapTool_t nTool );
 	[[nodiscard]] MapEditMode_t GetEditMode() const { return m_nEditMode; }
@@ -504,6 +506,7 @@ private:
 	CMapBrushEdit *m_pBrushEdit = nullptr;
 	CMapSprinklePanel *m_pSprinkle = nullptr;
 	CMapSplineTool *m_pSplineTool = nullptr;
+	CMapPhysicsTool *m_pPhysicsTool = nullptr;
 	CMapRecentPanel *m_pRecent = nullptr;
 	CMapBuildingPanel *m_pBuilding = nullptr;
 	CMapProperties *m_pWorldProperties = nullptr; // Map Properties: the world's keys

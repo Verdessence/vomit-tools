@@ -63,6 +63,8 @@ add_library(vomit_tools_core STATIC
         map/Clip.h
         map/Cordon.cpp
         map/Cordon.h
+        map/Physics.cpp
+        map/Physics.h
         map/Spline.cpp
         map/Spline.h
         map/Vertex.cpp
@@ -191,7 +193,7 @@ target_link_libraries(vomit_tools_core PRIVATE sourcepp::vpkpp MINIZIP::minizip 
 FetchContent_GetProperties(liblzma)
 target_include_directories(vomit_tools_core SYSTEM PRIVATE "${liblzma_SOURCE_DIR}/src/liblzma/api")
 target_link_libraries(vomit_tools_core PRIVATE vomit_tools_coacd)
-target_link_libraries(vomit_tools_core PRIVATE vomit_tools_vhacd)
+target_link_libraries(vomit_tools_core PRIVATE vomit_tools_vhacd box3d::box3d)
 vomit_tools_set_warnings(vomit_tools_core)
 
 # stb's implementations (stb is fetched in cmake/Dependencies.cmake), built once and without our

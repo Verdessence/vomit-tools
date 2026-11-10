@@ -135,6 +135,7 @@ enum class MapAction_t
 	MAP_ACTION_GIZMO_SCALE,          // E
 	MAP_ACTION_TOOL_POLYGON,
 	MAP_ACTION_TOOL_SPLINE,          // no key by default: Hammer++ has no such tool
+	MAP_ACTION_TOOL_PHYSICS,         // no key by default, as Hammer++'s has none
 	MAP_ACTION_MERGE_BRUSHES,
 	MAP_ACTION_GIZMO_ORIENTATION,    // J: the world's axes or the entity's own
 	// Brush Edit's part modes (and the vertex tool, for split and scale). These come before

@@ -4,6 +4,7 @@
 // Purpose: See MapBrushEdit.h.
 //===========================================================================//
 #include "MapBrushEdit.h"
+#include "map/MapPhysics.h"
 #include "map/MapSplineTool.h"
 
 #include <algorithm>
@@ -410,6 +411,7 @@ std::optional<CMapGizmo> CMapBrushEdit::Gizmo() const
 void CMapBrushEdit::Paint( CMapView &view, QPainter &painter ) const
 {
 	m_Editor.GetSplineTool().Paint( view, painter );
+	m_Editor.GetPhysicsTool().Paint( view, painter );
 	PaintConstruction( view, painter );
 	PaintModel( view, painter );
 	PaintModelHandle( view, painter );
@@ -780,6 +782,8 @@ bool CMapBrushEdit::HandleEvent( CMapView &view, QEvent *pEvent )
 	// The spline tool takes the views' events the way the construction tools here do.
 	if ( m_Editor.GetTool() == MapTool_t::MAP_TOOL_SPLINE )
 		return m_Editor.GetSplineTool().HandleEvent( view, pEvent );
+	if ( m_Editor.GetTool() == MapTool_t::MAP_TOOL_PHYSICS )
+		return m_Editor.GetPhysicsTool().HandleEvent( view, pEvent );
 	// The wheel during a proportional move sizes its radius; otherwise the view's own.
 	if ( pEvent->type() == QEvent::Wheel )
 	{

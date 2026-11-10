@@ -66,6 +66,7 @@ const MapActionInfo_t ACTIONS[] = {
 	{ A::MAP_ACTION_TOOL_BLOCK, "Tools_Block", QT_TRANSLATE_NOOP( "MapKeys", "Block tool" ), "Tools", BOTH },
 	{ A::MAP_ACTION_TOOL_POLYGON, "Tools_Polygon", QT_TRANSLATE_NOOP( "MapKeys", "Polygon tool" ), "Tools", BOTH },
 	{ A::MAP_ACTION_TOOL_SPLINE, "Tools_Spline", QT_TRANSLATE_NOOP( "MapKeys", "Spline tool" ), "Tools", BOTH },
+	{ A::MAP_ACTION_TOOL_PHYSICS, "Tools_Physics", QT_TRANSLATE_NOOP( "MapKeys", "Physics tool" ), "Tools", BOTH },
 	{ A::MAP_ACTION_TOOL_TEXTURE, "Tools_Texture_Application", QT_TRANSLATE_NOOP( "MapKeys", "Texture application" ), "Tools", BOTH },
 	{ A::MAP_ACTION_TOOL_OVERLAY, "Tools_Overlay", QT_TRANSLATE_NOOP( "MapKeys", "Overlay tool" ), "Tools", BOTH },
 	{ A::MAP_ACTION_TOOL_DECAL, "Tools_Apply_Decals", QT_TRANSLATE_NOOP( "MapKeys", "Apply decals" ), "Tools", BOTH },

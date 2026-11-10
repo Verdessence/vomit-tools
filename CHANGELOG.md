@@ -266,6 +266,16 @@
   browser; points clicked on a displacement land on its surface.
 - The 3D views show the world's axes at 0 0 0 (Origin Axes on the Show bar).
 
+### Hammer maps: the physics tool (new)
+- Hammer++'s Physics Simulation: select props and brushes, Space, and they fall, tumble and
+  settle against the rest of the map (brushes, displacements, other props' collision models);
+  Space again keeps where they land, one undo step, and Escape puts them back. Props move as
+  their collision models (.phy) with their mass; brushes as their own shapes.
+- While it runs, in a 3D view: left-drag pulls an object, right click shoots it, middle click
+  sets off an explosion. The panel has the strengths, gravity, air density, time scale, sleeping
+  until touched, mass from the model, props only, and drawing the collision models.
+- Runs on Box3D (Erin Catto, MIT).
+
 ### Settings file (new)
 - Settings live in `vomit-tools.nut` (beside Qt's settings: `~/.config/vomit-tools/` on Linux),
   written as Squirrel (VScript) tables and read as data, never run: `map <- { fov = 90 }`,
