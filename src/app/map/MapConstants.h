@@ -78,6 +78,9 @@ inline constexpr int CAMERA_PIXELS = 48;          // from the eye to the rectang
 inline const QColor AXIS_X{ 255, 64, 64 };
 inline const QColor AXIS_Y{ 64, 255, 64 };
 inline const QColor AXIS_Z{ 64, 128, 255 };
+// Check for Problems' errors and warnings, in the other editors' issue colours (KvCard's).
+inline const QColor PROBLEM_ERROR{ 220, 50, 50 };
+inline const QColor PROBLEM_WARNING{ 235, 160, 20 };
 inline constexpr double ORIGIN_AXIS_LENGTH = 64.0; // the world axes at 0 0 0 in the 3D views, in units
 inline constexpr double ORIGIN_AXIS_WIDTH = 2.0;   // and their lines' width in pixels
 inline constexpr int GIZMO_SIZE = 28;             // the axes' length in pixels

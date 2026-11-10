@@ -81,6 +81,29 @@ bool TargetExists( std::string_view szTarget, const std::set<std::string> &names
 //-----------------------------------------------------------------------------
 // Purpose:
 //-----------------------------------------------------------------------------
+// Purpose: A broken solid, a class the game hasn't or in the wrong shape, no player start or
+//          an effect nothing has stop the compile or break the game; the rest are warnings.
+//-----------------------------------------------------------------------------
+ProblemSeverity_t SeverityOf( ProblemKind_t nKind )
+{
+	switch ( nKind )
+	{
+		case ProblemKind_t::PROBLEM_INVALID_SOLID:
+		case ProblemKind_t::PROBLEM_UNKNOWN_CLASS:
+		case ProblemKind_t::PROBLEM_POINT_CLASS_SOLIDS:
+		case ProblemKind_t::PROBLEM_SOLID_CLASS_POINT:
+		case ProblemKind_t::PROBLEM_NO_PLAYER_START:
+		case ProblemKind_t::PROBLEM_PARTICLE_MISSING: return ProblemSeverity_t::PROBLEM_SEVERITY_ERROR;
+		case ProblemKind_t::PROBLEM_EMPTY_SOLID_ENTITY:
+		case ProblemKind_t::PROBLEM_UNUSED_KEY:
+		case ProblemKind_t::PROBLEM_MISSING_TARGET:
+		case ProblemKind_t::PROBLEM_OVERLAY_NO_FACES:
+		case ProblemKind_t::PROBLEM_PARTICLE_UNLISTED: return ProblemSeverity_t::PROBLEM_SEVERITY_WARNING;
+	}
+	return ProblemSeverity_t::PROBLEM_SEVERITY_ERROR;
+}
+
+//-----------------------------------------------------------------------------
 std::vector<Problem_t> CheckMap( const CScene &scene, const std::function<bool( std::uint32_t )> &pfnInclude, const ParticleLookup_t &pfnParticle )
 {
 	std::vector<Problem_t> problems;
@@ -180,6 +203,11 @@ std::vector<Problem_t> CheckMap( const CScene &scene, const std::function<bool( 
 	{
 		problems.push_back( { ProblemKind_t::PROBLEM_NO_PLAYER_START, std::nullopt, "There is no player start.", {}, false } );
 	}
+	for ( Problem_t &problem : problems )
+	{
+		problem.m_nSeverity = SeverityOf( problem.m_nKind );
+	}
+	std::ranges::stable_sort( problems, {}, &Problem_t::m_nSeverity );
 	return problems;
 }
 

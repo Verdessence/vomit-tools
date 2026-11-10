@@ -19,8 +19,10 @@
 #include <QPushButton>
 #include <QRadioButton>
 #include <QShowEvent>
+#include <QStyle>
 #include <QVBoxLayout>
 
+#include "map/MapConstants.h"
 #include "map/MapDocument.h"
 #include "map/MapEditor.h"
 #include "map/MapKeys.h"
@@ -370,6 +372,24 @@ CMapCheckPanel::CMapCheckPanel( CMapEditor &editor )
 	setObjectName( QStringLiteral( "mapCheckPanel" ) );
 	auto *pLayout = new QVBoxLayout( this );
 	pLayout->setContentsMargins( 0, 0, 0, 0 );
+	m_pSummary = new QLabel;
+	m_pSummary->setObjectName( QStringLiteral( "mapCheckSummary" ) );
+	pLayout->addWidget( m_pSummary );
+	auto *pShow = new QHBoxLayout;
+	m_pShowErrors = new QCheckBox( tr( "Errors" ) );
+	m_pShowErrors->setObjectName( QStringLiteral( "mapCheckShowErrors" ) );
+	m_pShowErrors->setToolTip( tr( "Problems that stop the compile or break the map in game" ) );
+	m_pShowErrors->setChecked( true );
+	m_pShowWarnings = new QCheckBox( tr( "Warnings" ) );
+	m_pShowWarnings->setObjectName( QStringLiteral( "mapCheckShowWarnings" ) );
+	m_pShowWarnings->setToolTip( tr( "Problems the map compiles and runs with, but something is off" ) );
+	m_pShowWarnings->setChecked( true );
+	connect( m_pShowErrors, &QCheckBox::toggled, this, &CMapCheckPanel::Fill );
+	connect( m_pShowWarnings, &QCheckBox::toggled, this, &CMapCheckPanel::Fill );
+	pShow->addWidget( m_pShowErrors );
+	pShow->addWidget( m_pShowWarnings );
+	pShow->addStretch();
+	pLayout->addLayout( pShow );
 	m_pList = new QListWidget;
 	m_pList->setObjectName( QStringLiteral( "mapCheckList" ) );
 	m_pList->setWordWrap( true );
@@ -429,8 +449,6 @@ void CMapCheckPanel::Run()
 {
 	CMapDocument &document = m_Editor.GetDocument();
 	const xv::map::CScene *pScene = document.GetScene();
-	const int nRow = m_pList->currentRow();
-	m_pList->clear();
 	m_Problems.clear();
 	if ( pScene )
 	{
@@ -447,17 +465,61 @@ void CMapCheckPanel::Run()
 		}
 		m_Problems = xv::map::CheckMap( *pScene, pfnInclude, pfnParticle );
 	}
+	int nErrors = 0;
 	for ( const xv::map::Problem_t &problem : m_Problems )
 	{
-		auto *pItem = new QListWidgetItem( QString::fromStdString( problem.m_szMessage ), m_pList );
-		pItem->setToolTip( pItem->text() );
+		nErrors += problem.m_nSeverity == xv::map::ProblemSeverity_t::PROBLEM_SEVERITY_ERROR ? 1 : 0;
 	}
-	if ( m_Problems.empty() )
+	const int nWarnings = static_cast<int>( m_Problems.size() ) - nErrors;
+	m_pSummary->setText( m_Problems.empty() ? tr( "No problems." ) : tr( "%n error(s)", nullptr, nErrors ) + QStringLiteral( ", " ) + tr( "%n warning(s)", nullptr, nWarnings ) );
+	Fill();
+	emit CountsChanged( nErrors, nWarnings );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: The list as the toggles have it: each row tagged ERROR or WARN with the theme's icon,
+//          in the other editors' issue colours, errors first.
+//-----------------------------------------------------------------------------
+void CMapCheckPanel::Fill()
+{
+	const int nRow = m_pList->currentRow();
+	m_pList->clear();
+	m_Rows.clear();
+	const QIcon error = style()->standardIcon( QStyle::SP_MessageBoxCritical );
+	const QIcon warning = style()->standardIcon( QStyle::SP_MessageBoxWarning );
+	for ( std::size_t i = 0; i < m_Problems.size(); i++ )
 	{
-		m_pList->addItem( tr( "No problems found." ) );
+		const xv::map::Problem_t &problem = m_Problems[ i ];
+		const bool bError = problem.m_nSeverity == xv::map::ProblemSeverity_t::PROBLEM_SEVERITY_ERROR;
+		if ( !( bError ? m_pShowErrors : m_pShowWarnings )->isChecked() )
+		{
+			continue;
+		}
+		const QString szTag = bError ? tr( "ERROR" ) : tr( "WARN" );
+		auto *pItem = new QListWidgetItem( bError ? error : warning, szTag + QStringLiteral( "  " ) + QString::fromStdString( problem.m_szMessage ), m_pList );
+		pItem->setForeground( bError ? mapstyle::PROBLEM_ERROR : mapstyle::PROBLEM_WARNING );
+		pItem->setData( Qt::UserRole, bError ? QStringLiteral( "error" ) : QStringLiteral( "warning" ) );
+		pItem->setToolTip( QString::fromStdString( problem.m_szMessage ) );
+		m_Rows.push_back( i );
+	}
+	if ( m_Rows.empty() )
+	{
+		m_pList->addItem( m_Problems.empty() ? tr( "No problems found." ) : tr( "Nothing shown: tick Errors or Warnings." ) );
 	}
 	m_pList->setCurrentRow( std::min( nRow, m_pList->count() - 1 ) );
 	Pick();
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+const xv::map::Problem_t *CMapCheckPanel::ProblemAt( int nRow ) const
+{
+	if ( nRow < 0 || static_cast<std::size_t>( nRow ) >= m_Rows.size() )
+	{
+		return nullptr;
+	}
+	return &m_Problems[ m_Rows[ static_cast<std::size_t>( nRow ) ] ];
 }
 
 //-----------------------------------------------------------------------------
@@ -465,9 +527,7 @@ void CMapCheckPanel::Run()
 //-----------------------------------------------------------------------------
 void CMapCheckPanel::Pick()
 {
-	const int nRow = m_pList->currentRow();
-	const bool bProblem = nRow >= 0 && static_cast<std::size_t>( nRow ) < m_Problems.size();
-	const xv::map::Problem_t *pProblem = bProblem ? &m_Problems[ static_cast<std::size_t>( nRow ) ] : nullptr;
+	const xv::map::Problem_t *pProblem = ProblemAt( m_pList->currentRow() );
 	m_pGoTo->setEnabled( pProblem && pProblem->m_nObject.has_value() );
 	m_pFix->setEnabled( pProblem && pProblem->m_bFixable );
 	m_pFixAll->setEnabled( pProblem && pProblem->m_bFixable );
@@ -495,13 +555,13 @@ void CMapCheckPanel::GoTo()
 //-----------------------------------------------------------------------------
 void CMapCheckPanel::Fix()
 {
-	const int nRow = m_pList->currentRow();
+	const xv::map::Problem_t *pProblem = ProblemAt( m_pList->currentRow() );
 	const xv::map::CScene *pScene = m_Editor.GetDocument().GetScene();
-	if ( !pScene || nRow < 0 || static_cast<std::size_t>( nRow ) >= m_Problems.size() )
+	if ( !pScene || !pProblem )
 	{
 		return;
 	}
-	xv::map::MapEdit_t edit = xv::map::FixProblem( *pScene, m_Problems[ static_cast<std::size_t>( nRow ) ] );
+	xv::map::MapEdit_t edit = xv::map::FixProblem( *pScene, *pProblem );
 	if ( !edit.IsEmpty() )
 	{
 		m_Editor.GetDocument().Edit( std::move( edit ), tr( "Fix Problem" ), std::vector<std::uint32_t>{} );
@@ -513,13 +573,13 @@ void CMapCheckPanel::Fix()
 //-----------------------------------------------------------------------------
 void CMapCheckPanel::FixAll()
 {
-	const int nRow = m_pList->currentRow();
+	const xv::map::Problem_t *pProblem = ProblemAt( m_pList->currentRow() );
 	const xv::map::CScene *pScene = m_Editor.GetDocument().GetScene();
-	if ( !pScene || nRow < 0 || static_cast<std::size_t>( nRow ) >= m_Problems.size() )
+	if ( !pScene || !pProblem )
 	{
 		return;
 	}
-	xv::map::MapEdit_t edit = xv::map::FixProblems( *pScene, m_Problems, m_Problems[ static_cast<std::size_t>( nRow ) ].m_nKind );
+	xv::map::MapEdit_t edit = xv::map::FixProblems( *pScene, m_Problems, pProblem->m_nKind );
 	if ( !edit.IsEmpty() )
 	{
 		m_Editor.GetDocument().Edit( std::move( edit ), tr( "Fix Problems" ), std::vector<std::uint32_t>{} );

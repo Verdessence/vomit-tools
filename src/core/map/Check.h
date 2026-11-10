@@ -45,6 +45,14 @@ struct ParticleSource_t
 };
 using ParticleLookup_t = std::function<ParticleSource_t( std::string_view szEffect )>;
 
+// Errors break the compile or the game; warnings compile and run, but something is off.
+enum class ProblemSeverity_t
+{
+	PROBLEM_SEVERITY_ERROR,
+	PROBLEM_SEVERITY_WARNING,
+};
+[[nodiscard]] ProblemSeverity_t SeverityOf( ProblemKind_t nKind );
+
 struct Problem_t
 {
 	ProblemKind_t m_nKind = ProblemKind_t::PROBLEM_INVALID_SOLID;
@@ -52,9 +60,10 @@ struct Problem_t
 	std::string m_szMessage;                // as Hammer words it
 	std::string m_szKey;                    // PROBLEM_UNUSED_KEY: the key
 	bool m_bFixable = false;
+	ProblemSeverity_t m_nSeverity = ProblemSeverity_t::PROBLEM_SEVERITY_ERROR; // set from the kind
 };
 
-// Every problem, in object order; pfnInclude (when given) leaves out objects it says no to
+// Every problem, errors first, each in object order; pfnInclude (when given) leaves out objects it says no to
 // (Hammer's "check visible parts of the map only"). Without game data the class checks are
 // skipped, and without pfnParticle (the game's particles not read yet) the particle checks.
 [[nodiscard]] std::vector<Problem_t> CheckMap( const CScene &scene, const std::function<bool( std::uint32_t )> &pfnInclude, const ParticleLookup_t &pfnParticle = {} );

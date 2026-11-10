@@ -279,6 +279,9 @@
 ### Hammer maps
 - The Building Generator is a fold at the bottom of New Objects rather than a panel of its own;
   Tools > Building Generator opens it there.
+- Check for Problems tells errors (the compile fails or the game breaks) from warnings: each row
+  tagged ERROR or WARN with its icon and colour, errors first, a count of each, toggles to show
+  either, and a badge on the side tab with the error count (or the warnings', when none).
 
 ### Settings file (new)
 - Settings live in `vomit-tools.nut` (beside Qt's settings: `~/.config/vomit-tools/` on Linux),

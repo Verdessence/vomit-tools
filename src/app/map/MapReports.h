@@ -20,6 +20,7 @@
 class CMapEditor;
 class QButtonGroup;
 class QCheckBox;
+class QLabel;
 class QLineEdit;
 class QListWidget;
 class QPushButton;
@@ -89,10 +90,17 @@ public:
 	void Run();
 	[[nodiscard]] const std::vector<xv::map::Problem_t> &GetProblems() const { return m_Problems; }
 	[[nodiscard]] QListWidget *GetList() const { return m_pList; }
+	// The problem a row of the list shows (errors or warnings may be hidden); null for none.
+	[[nodiscard]] const xv::map::Problem_t *ProblemAt( int nRow ) const;
 	void Fix();
 	void FixAll();
 
+signals:
+	// After each check: how many errors and warnings it found (for the side tab's badge).
+	void CountsChanged( int nErrors, int nWarnings );
+
 private:
+	void Fill();
 	void Pick();
 	void GoTo();
 
@@ -103,6 +111,10 @@ private:
 	CMapEditor &m_Editor;
 	QListWidget *m_pList = nullptr;
 	QCheckBox *m_pVisibleOnly = nullptr;
+	QCheckBox *m_pShowErrors = nullptr;
+	QCheckBox *m_pShowWarnings = nullptr;
+	QLabel *m_pSummary = nullptr;
+	std::vector<std::size_t> m_Rows; // each row's problem, by index into m_Problems
 	QPushButton *m_pGoTo = nullptr;
 	QPushButton *m_pFix = nullptr;
 	QPushButton *m_pFixAll = nullptr;

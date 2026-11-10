@@ -411,6 +411,35 @@ CMapEditor::CMapEditor( const QString &szPath, bool bFromGame, QWidget *pParent 
 	m_pCheck = new CMapCheckPanel( *this );
 	m_pPanels->AddPanel( QStringLiteral( "problems" ), tr( "Check for Problems" ), MakeMapIcon( MapIcon_t::MAP_ICON_PROBLEMS, panelIconColor ), m_pCheck, true );
 	m_pPanels->SetHiddenByDefault( QStringLiteral( "problems" ) );
+	// The tab shows how many errors the last check found (or warnings, when there are none).
+	connect( m_pCheck, &CMapCheckPanel::CountsChanged, this, [ this, panelIconColor ]( int nErrors, int nWarnings ) {
+		QToolButton *pTab = m_pPanels->GetTab( QStringLiteral( "problems" ) );
+		if ( !pTab )
+			return;
+		const QIcon base = MakeMapIcon( MapIcon_t::MAP_ICON_PROBLEMS, panelIconColor );
+		const int nCount = nErrors > 0 ? nErrors : nWarnings;
+		if ( nCount == 0 )
+		{
+			pTab->setIcon( base );
+			return;
+		}
+		QPixmap pixmap = base.pixmap( 32, 32 );
+		QPainter painter( &pixmap );
+		painter.setRenderHint( QPainter::Antialiasing );
+		const QRectF badge( 15, 15, 17, 17 );
+		painter.setPen( Qt::NoPen );
+		painter.setBrush( nErrors > 0 ? mapstyle::PROBLEM_ERROR : mapstyle::PROBLEM_WARNING );
+		painter.drawEllipse( badge );
+		QFont font = painter.font();
+		font.setPixelSize( 11 );
+		font.setBold( true );
+		painter.setFont( font );
+		painter.setPen( Qt::white );
+		painter.drawText( badge, Qt::AlignCenter, nCount > 99 ? QStringLiteral( "99" ) : QString::number( nCount ) );
+		painter.end();
+		pTab->setIcon( QIcon( pixmap ) );
+		pTab->setToolTip( tr( "Check for Problems: %1, %2" ).arg( tr( "%n error(s)", nullptr, nErrors ), tr( "%n warning(s)", nullptr, nWarnings ) ) );
+	} );
 	// Lighting and Fog start folded: their headers are there, their settings out of the way until wanted.
 	m_pPanels->SetState( QSettings{}.value( QLatin1String( SIDE_PANELS_SETTING ), QVariantMap{ { QStringLiteral( "folded" ), QStringList{ QStringLiteral( "lighting" ), QStringLiteral( "fog" ) } } } ).toMap() );
 	m_pPanels->SetOnePanel( CPreferences::Instance().GetMapPreferences().m_bOnePanel );
