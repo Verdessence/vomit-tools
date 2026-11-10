@@ -167,6 +167,7 @@ private:
 		return nObject < m_Scene.m_ObjectFlags.size() ? m_Scene.m_ObjectFlags[ nObject ] : static_cast<std::uint8_t>( RASTER_OBJECT_SHOWN );
 	}
 	void Gather();
+	bool SkyBehind() const;
 	bool Corners( const TriangleRef_t &ref, std::array<ClipVertex_t, 3> &corners ) const;
 	void DrawTriangle( const TriangleRef_t &ref, int nTop, int nBottom, bool bBlend );
 	void FillTriangle( const ScreenVertex_t &a, const ScreenVertex_t &b, const ScreenVertex_t &c, const TriangleRef_t &ref, std::uint32_t nObject, int nTop, int nBottom, bool bBlend );
@@ -582,6 +583,15 @@ void CRasterizer::AddLine( Point_t from, Point_t to, std::array<std::uint8_t, 3>
 }
 
 //-----------------------------------------------------------------------------
+// Purpose: Whether the picture starts from the map's 2D sky rather than the flat background.
+//-----------------------------------------------------------------------------
+bool CRasterizer::SkyBehind() const
+{
+	const RasterMode_t nMode = m_Options.m_Shade.m_nMode;
+	return m_Options.m_bSkyBackground && m_Options.m_Shade.m_pSky && !m_Options.m_bTransparent && nMode != RasterMode_t::RASTER_MODE_FLAT && nMode != RasterMode_t::RASTER_MODE_WIREFRAME;
+}
+
+//-----------------------------------------------------------------------------
 // Purpose: The lines added, a pixel a step, in the order they were added. Each band of rows is
 //          drawn on its own thread, and each line only where it crosses the band.
 //-----------------------------------------------------------------------------
@@ -681,7 +691,37 @@ void CRasterizer::Run()
 	const std::size_t nPixels = static_cast<std::size_t>( m_Out.m_nWidth ) * static_cast<std::size_t>( m_Out.m_nHeight );
 	// The world's pass after the 3D skybox draws over its picture.
 	const bool bOverSky = m_pSkyMask && !m_bSkyPass;
-	if ( !bOverSky )
+	if ( !bOverSky && SkyBehind() )
+	{
+		// The map's 2D sky behind everything, along each pixel's ray as its sky faces show it, so
+		// what is see-through blends onto it. Not measured for the HDR preview's exposure.
+		const ShadeOptions_t &shade = m_Options.m_Shade;
+		const std::uint8_t nAlpha = shade.m_nMode == RasterMode_t::RASTER_MODE_LIGHTING && shade.m_pLighting && shade.m_bLightHdr ? UNMEASURED_ALPHA : 255;
+		const bool bGamma = shade.m_nMode == RasterMode_t::RASTER_MODE_LIGHTING && shade.m_flMonitorGamma != 2.2f;
+		const float flPower = shade.m_flMonitorGamma / 2.2f;
+		ParallelFor( static_cast<std::size_t>( m_Out.m_nHeight ), 8, [ & ]( std::size_t nBegin, std::size_t nEnd ) {
+			for ( std::size_t y = nBegin; y < nEnd; y++ )
+			{
+				for ( int x = 0; x < m_Out.m_nWidth; x++ )
+				{
+					const auto [ from, dir ] = m_Camera.Ray( x + 0.5, static_cast<double>( y ) + 0.5 );
+					const std::array<float, 3> colour = sky::Sample( *shade.m_pSky, ToVec3( dir ), shade.m_pSkyTransforms );
+					std::uint8_t *p = m_Out.Pixel( x, static_cast<int>( y ) );
+					for ( std::size_t c = 0; c < 3; c++ )
+					{
+						float flValue = colour[ c ];
+						if ( bGamma )
+						{
+							flValue = std::pow( std::max( flValue / 255.0f, 0.0f ), flPower ) * 255.0f;
+						}
+						p[ c ] = static_cast<std::uint8_t>( std::clamp( flValue + 0.5f, 0.0f, 255.0f ) );
+					}
+					p[ 3 ] = nAlpha;
+				}
+			}
+		} );
+	}
+	else if ( !bOverSky )
 	{
 		for ( std::size_t i = 0; i < nPixels; i++ )
 		{

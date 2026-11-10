@@ -264,6 +264,7 @@ void CMapResources::Run( std::shared_ptr<const xv::map::CScene> pScene, xv::vfs:
 		auto pCube = std::make_shared<const xv::sky::CCube>( std::move( sky.m_Cube ) );
 		post( [ this, pCube ] {
 			m_pSky = pCube;
+			m_pSkyTransforms.reset();
 			emit Arrived();
 		} );
 	}
@@ -984,6 +985,18 @@ bool CMapResources::Animate( float flTime )
 	if ( bChanged )
 	{
 		m_pMaterials = std::make_shared<const std::vector<xv::map::RasterMaterial_t>>( m_Current );
+	}
+	if ( m_pSky && m_pSky->IsMoving() )
+	{
+		const xv::sky::SkyTransforms_t transforms = m_pSky->TransformsAt( flTime );
+		const auto same = []( const xv::sky::CUvTransform &a, const xv::sky::CUvTransform &b ) {
+			return a.m_flA == b.m_flA && a.m_flB == b.m_flB && a.m_flC == b.m_flC && a.m_flD == b.m_flD && a.m_flTx == b.m_flTx && a.m_flTy == b.m_flTy;
+		};
+		if ( !m_pSkyTransforms || !std::ranges::equal( *m_pSkyTransforms, transforms, same ) )
+		{
+			m_pSkyTransforms = std::make_shared<const xv::sky::SkyTransforms_t>( transforms );
+			bChanged = true;
+		}
 	}
 	return bChanged;
 }

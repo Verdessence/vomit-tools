@@ -191,7 +191,8 @@ void CSkyRenderer::Render( QRhiCommandBuffer *pCommands, QRhiRenderTarget *pTarg
 		const std::size_t i = sky::IndexOf( nFace );
 		put( uniforms.m_FaceRight[ i ], sky::Basis( nFace ).m_vecRight, 0.0f );
 		put( uniforms.m_FaceUp[ i ], sky::Basis( nFace ).m_vecUp, 0.0f );
-		const sky::CUvTransform t = frame.m_pCube ? frame.m_pCube->m_Transforms[ i ] : sky::CUvTransform{};
+		const sky::CUvTransform t = !frame.m_pCube ? sky::CUvTransform{} : frame.m_Moved ? ( *frame.m_Moved )[ i ]
+																						 : frame.m_pCube->m_Transforms[ i ];
 		uniforms.m_Transform[ i ][ 0 ] = t.m_flA;
 		uniforms.m_Transform[ i ][ 1 ] = t.m_flB;
 		uniforms.m_Transform[ i ][ 2 ] = t.m_flC;

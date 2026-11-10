@@ -112,7 +112,7 @@ std::array<float, 3> Bilinear( const CImage &image, float u, float v, bool bRepe
 // Purpose: Samples the cube with one face's image swapped for another (for trying out
 //          orientations).
 //-----------------------------------------------------------------------------
-std::array<float, 3> SampleWith( const CCube &cube, CVec3 vecDir, Face_t nSwapped, const CImage *pReplacement )
+std::array<float, 3> SampleWith( const CCube &cube, CVec3 vecDir, Face_t nSwapped, const CImage *pReplacement, const SkyTransforms_t *pTransforms = nullptr )
 {
 	const FacePoint_t point = Project( vecDir );
 	const CImage &image = pReplacement && point.m_nFace == nSwapped ? *pReplacement : cube.Face( point.m_nFace );
@@ -120,7 +120,7 @@ std::array<float, 3> SampleWith( const CCube &cube, CVec3 vecDir, Face_t nSwappe
 	{
 		return {};
 	}
-	const CUvTransform &t = cube.m_Transforms[ IndexOf( point.m_nFace ) ];
+	const CUvTransform &t = ( pTransforms ? *pTransforms : cube.m_Transforms )[ IndexOf( point.m_nFace ) ];
 	return Bilinear( image, t.m_flA * point.m_flU + t.m_flB * point.m_flV + t.m_flTx, t.m_flC * point.m_flU + t.m_flD * point.m_flV + t.m_flTy, t.m_bRepeatU, t.m_bRepeatV );
 }
 
@@ -214,10 +214,16 @@ std::optional<std::string> LoadMaterialFace( LoadedSky_t &sky, Face_t nFace, con
 	const material::Reader_t pfnMaterialRead = [ &pfnRead ]( std::string_view szPath ) { return pfnRead( std::string{ szPath } ); };
 	if ( const auto material = material::ParseMaterial( szText, pfnMaterialRead ) )
 	{
-		const material::CMaterial start = material::CProxies( *material ).At( 0.0f, {} );
+		auto pProxies = std::make_shared<const material::CProxies>( *material );
+		const material::CMaterial start = pProxies->At( 0.0f, {} );
 		if ( const material::Parameter_t *pTransform = start.Find( "$basetexturetransform" ) )
 		{
 			sky.m_Cube.m_Transforms[ IndexOf( nFace ) ] = CUvTransform::Parse( pTransform->m_szValue );
+			// Kept to move it later, when it does (a scrolling sky).
+			if ( pProxies->IsAnimated() && pProxies->At( 1.0f, {} ).Value( "$basetexturetransform" ) != pTransform->m_szValue )
+			{
+				sky.m_Cube.m_Proxies[ IndexOf( nFace ) ] = std::move( pProxies );
+			}
 		}
 	}
 	std::optional<std::string> firstProblem;
@@ -240,7 +246,7 @@ std::optional<std::string> LoadMaterialFace( LoadedSky_t &sky, Face_t nFace, con
 		}
 		// A transformed face can reach past the texture's edges: it repeats there unless the
 		// texture is clamped, as sky textures usually are.
-		if ( CUvTransform &transform = sky.m_Cube.m_Transforms[ IndexOf( nFace ) ]; !transform.IsIdentity() )
+		if ( CUvTransform &transform = sky.m_Cube.m_Transforms[ IndexOf( nFace ) ]; !transform.IsIdentity() || sky.m_Cube.m_Proxies[ IndexOf( nFace ) ] )
 		{
 			transform.m_bRepeatU = ( vtf->m_Info.m_nFlags & texture::vtf_flag::CLAMPS ) == 0;
 			transform.m_bRepeatV = ( vtf->m_Info.m_nFlags & texture::vtf_flag::CLAMPT ) == 0;
@@ -524,8 +530,6 @@ CUvTransform CUvTransform::Parse( std::string_view szText )
 }
 
 //-----------------------------------------------------------------------------
-// Purpose: The colour seen in a direction, 0-255 per channel: bilinear, clamped at the face edges.
-//-----------------------------------------------------------------------------
 // Purpose: Every face has light values.
 //-----------------------------------------------------------------------------
 bool CCube::HasHdr() const
@@ -534,9 +538,44 @@ bool CCube::HasHdr() const
 }
 
 //-----------------------------------------------------------------------------
-std::array<float, 3> Sample( const CCube &cube, CVec3 vecDir )
+// Purpose: Some face's transform moves over time.
+//-----------------------------------------------------------------------------
+bool CCube::IsMoving() const
 {
-	return SampleWith( cube, vecDir, Face_t::FACE_RT, nullptr );
+	return std::ranges::any_of( m_Proxies, []( const auto &pProxies ) { return pProxies != nullptr; } );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Each face's transform at a time, from its proxies as the material editor's preview
+//          runs them; a face that doesn't move keeps its own. Whether it repeats stays as read.
+//-----------------------------------------------------------------------------
+SkyTransforms_t CCube::TransformsAt( float flTime ) const
+{
+	SkyTransforms_t transforms = m_Transforms;
+	for ( std::size_t i = 0; i < transforms.size(); i++ )
+	{
+		if ( !m_Proxies[ i ] )
+		{
+			continue;
+		}
+		const material::CMaterial moved = m_Proxies[ i ]->At( flTime, {} );
+		if ( const material::Parameter_t *pTransform = moved.Find( "$basetexturetransform" ) )
+		{
+			CUvTransform t = CUvTransform::Parse( pTransform->m_szValue );
+			t.m_bRepeatU = transforms[ i ].m_bRepeatU;
+			t.m_bRepeatV = transforms[ i ].m_bRepeatV;
+			transforms[ i ] = t;
+		}
+	}
+	return transforms;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: The colour seen in a direction, 0-255 per channel: bilinear, clamped at the face edges.
+//-----------------------------------------------------------------------------
+std::array<float, 3> Sample( const CCube &cube, CVec3 vecDir, const SkyTransforms_t *pTransforms )
+{
+	return SampleWith( cube, vecDir, Face_t::FACE_RT, nullptr, pTransforms );
 }
 
 //-----------------------------------------------------------------------------
@@ -581,7 +620,7 @@ std::optional<std::array<float, 2>> CView::ToScreen( CVec3 vecDir ) const
 // Purpose: Renders what a player sees, into out (view.width x view.height). edges outlines the
 //          faces.
 //-----------------------------------------------------------------------------
-void Render( const CCube &cube, const CView &view, CImage &out, bool bEdges )
+void Render( const CCube &cube, const CView &view, CImage &out, bool bEdges, const SkyTransforms_t *pTransforms )
 {
 	if ( out.m_nWidth != view.m_nWidth || out.m_nHeight != view.m_nHeight )
 	{
@@ -593,7 +632,7 @@ void Render( const CCube &cube, const CView &view, CImage &out, bool bEdges )
 			for ( int x = 0; x < view.m_nWidth; x++ )
 			{
 				const CVec3 vecDir = view.Ray( static_cast<float>( x ) + 0.5f, static_cast<float>( y ) + 0.5f );
-				auto vecColour = Sample( cube, vecDir );
+				auto vecColour = Sample( cube, vecDir, pTransforms );
 				if ( bEdges )
 				{
 					// Within about a pixel of a face's border: draw the edge.

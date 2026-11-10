@@ -449,6 +449,24 @@ QIcon MakeMapIcon( MapIcon_t nIcon, const QColor &color )
 			painter.drawPolyline( QPolygonF{ { QPointF{ 4, 22 }, QPointF{ 12, 14 }, QPointF{ 17, 19 }, QPointF{ 21, 15 }, QPointF{ 28, 21 } } } );
 			painter.drawEllipse( QPointF{ 22, 10.5 }, 1.8, 1.8 );
 			break;
+		case MapIcon_t::MAP_ICON_SKY_2D:
+		{
+			// A sun behind a cloud: the sky alone, with no box round it.
+			QPainterPath cloud;
+			cloud.moveTo( 8, 26 );
+			cloud.cubicTo( 3, 26, 3, 19, 9, 19 );
+			cloud.cubicTo( 10, 13, 19, 12, 21, 18 );
+			cloud.cubicTo( 27, 16, 31, 26, 25, 26 );
+			cloud.closeSubpath();
+			QPainterPath outside;
+			outside.addRect( 0, 0, 32, 32 );
+			painter.save();
+			painter.setClipPath( outside.subtracted( cloud ) );
+			painter.drawEllipse( QPointF{ 12, 12 }, 6, 6 );
+			painter.restore();
+			painter.drawPath( cloud );
+			break;
+		}
 		case MapIcon_t::MAP_ICON_DETAIL_PROPS:
 			// Blades of grass on the ground.
 			painter.drawLine( QPointF{ 4, 27 }, QPointF{ 28, 27 } );

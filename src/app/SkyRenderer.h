@@ -9,6 +9,7 @@
 
 #ifdef VOMIT_TOOLS_GPU
 
+#include <optional>
 #include <array>
 #include <functional>
 #include <memory>
@@ -33,6 +34,7 @@ public:
 		xv::sky::Angles_t m_Angles;
 		float m_flFov = 90.0f;
 		bool m_bEdges = false;
+		std::optional<xv::sky::SkyTransforms_t> m_Moved; // the faces' transforms as their proxies have moved them; none: the cube's
 	};
 	using Source_t = std::function<Frame_t()>;
 

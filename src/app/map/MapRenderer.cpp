@@ -73,6 +73,13 @@ struct SkyUniforms_t
 	float m_Translate[ 6 ][ 4 ];
 };
 
+// mapsky.frag's own block.
+struct SkyViewUniforms_t
+{
+	float m_ClipToWorld[ 16 ];
+	float m_Options[ 4 ]; // mat_monitorgamma / 2.2 (0: none), the alpha written
+};
+
 static_assert( sizeof( xv::map::MeshVertex_t ) == 48, "map.vert reads the vertex layout as it is" );
 static_assert( sizeof( xv::map::LightVertex_t ) == 16, "map.vert reads the light as it is" );
 
@@ -148,6 +155,41 @@ bool IsSeeThrough( const xv::map::RasterMaterial_t *pMaterial )
 	return pMaterial && !pMaterial->m_bObjectColor && ( pMaterial->m_Shade.m_bTranslucent || pMaterial->m_Shade.m_bAdditive || pMaterial->m_Shade.m_flAlpha < 1.0f || pMaterial->m_Shade.m_bRefract );
 }
 
+//-----------------------------------------------------------------------------
+// Purpose: map.frag's sky block for the sky uploaded: each face's layout and its transform, as
+//          moved when the sky scrolls.
+//-----------------------------------------------------------------------------
+SkyUniforms_t MakeSkyUniforms( const xv::sky::CCube *pSky, const xv::sky::SkyTransforms_t *pTransforms, const std::array<std::unique_ptr<QRhiTexture>, 6> &faces, bool bEnvAtlas )
+{
+	SkyUniforms_t uniforms{};
+	for ( const xv::sky::Face_t nFace : xv::sky::FACES )
+	{
+		const std::size_t i = xv::sky::IndexOf( nFace );
+		const xv::sky::FaceBasis_t &basis = xv::sky::Basis( nFace );
+		uniforms.m_FaceRight[ i ][ 0 ] = basis.m_vecRight.m_flX;
+		uniforms.m_FaceRight[ i ][ 1 ] = basis.m_vecRight.m_flY;
+		uniforms.m_FaceRight[ i ][ 2 ] = basis.m_vecRight.m_flZ;
+		uniforms.m_FaceUp[ i ][ 0 ] = basis.m_vecUp.m_flX;
+		uniforms.m_FaceUp[ i ][ 1 ] = basis.m_vecUp.m_flY;
+		uniforms.m_FaceUp[ i ][ 2 ] = basis.m_vecUp.m_flZ;
+		xv::sky::CUvTransform t;
+		if ( pSky )
+		{
+			t = pTransforms ? ( *pTransforms )[ i ] : pSky->m_Transforms[ i ];
+		}
+		uniforms.m_Transform[ i ][ 0 ] = t.m_flA;
+		uniforms.m_Transform[ i ][ 1 ] = t.m_flB;
+		uniforms.m_Transform[ i ][ 2 ] = t.m_flC;
+		uniforms.m_Transform[ i ][ 3 ] = t.m_flD;
+		uniforms.m_Translate[ i ][ 0 ] = t.m_flTx;
+		uniforms.m_Translate[ i ][ 1 ] = t.m_flTy;
+		uniforms.m_Translate[ i ][ 2 ] = faces[ i ] ? 1.0f : 0.0f;
+	}
+	uniforms.m_Translate[ 0 ][ 3 ] = pSky ? 1.0f : 0.0f;
+	uniforms.m_Translate[ 1 ][ 3 ] = bEnvAtlas ? 1.0f : 0.0f;
+	return uniforms;
+}
+
 } // namespace
 
 //-----------------------------------------------------------------------------
@@ -194,6 +236,7 @@ void CMapRenderer::Release()
 		pFace.reset();
 	}
 	m_pSkyFor = nullptr;
+	m_pSkyTransformsFor.reset();
 	m_pEnvAtlas.reset();
 	m_pEnvFor.reset();
 	m_pLightmap.reset();
@@ -215,6 +258,9 @@ void CMapRenderer::Release()
 	m_pSkyFaces.reset();
 	m_pAlpha.reset();
 	m_pAlphaSky.reset();
+	m_pSkyBehind.reset();
+	m_pSkyBehindBindings.reset();
+	m_pSkyView.reset();
 	m_pNoBindings.reset();
 	m_pMaterialsFor = nullptr;
 	m_bRemakeMaterials = true;
@@ -560,8 +606,16 @@ QRhiSampler *CMapRenderer::SkySampler( std::size_t nFace ) const
 //-----------------------------------------------------------------------------
 bool CMapRenderer::UploadSky( const MapFrame_t &frame, QRhiResourceUpdateBatch *pUpdates )
 {
+	const bool bMoved = frame.m_pSkyTransforms != m_pSkyTransformsFor;
+	m_pSkyTransformsFor = frame.m_pSkyTransforms;
 	if ( m_pSkyUniforms && frame.m_pSky.get() == m_pSkyFor && frame.m_pEnvMap == m_pEnvFor )
 	{
+		if ( bMoved )
+		{
+			// A scrolling sky: only its faces' transforms change.
+			SkyUniforms_t uniforms = MakeSkyUniforms( m_pSkyFor, m_pSkyTransformsFor.get(), m_SkyFaces, m_pEnvAtlas != nullptr );
+			pUpdates->updateDynamicBuffer( m_pSkyUniforms.get(), 0, sizeof uniforms, &uniforms );
+		}
 		return false;
 	}
 	m_pSkyFor = frame.m_pSky.get();
@@ -595,32 +649,15 @@ bool CMapRenderer::UploadSky( const MapFrame_t &frame, QRhiResourceUpdateBatch *
 		m_pSkyUniforms.reset( m_pRhi->newBuffer( QRhiBuffer::Dynamic, QRhiBuffer::UniformBuffer, sizeof( SkyUniforms_t ) ) );
 		m_pSkyUniforms->create();
 	}
-	SkyUniforms_t uniforms{};
-	for ( const xv::sky::Face_t nFace : xv::sky::FACES )
+	for ( std::size_t i = 0; i < m_SkyFaces.size(); i++ )
 	{
-		const std::size_t i = xv::sky::IndexOf( nFace );
-		const xv::sky::FaceBasis_t &basis = xv::sky::Basis( nFace );
-		uniforms.m_FaceRight[ i ][ 0 ] = basis.m_vecRight.m_flX;
-		uniforms.m_FaceRight[ i ][ 1 ] = basis.m_vecRight.m_flY;
-		uniforms.m_FaceRight[ i ][ 2 ] = basis.m_vecRight.m_flZ;
-		uniforms.m_FaceUp[ i ][ 0 ] = basis.m_vecUp.m_flX;
-		uniforms.m_FaceUp[ i ][ 1 ] = basis.m_vecUp.m_flY;
-		uniforms.m_FaceUp[ i ][ 2 ] = basis.m_vecUp.m_flZ;
 		m_SkyFaces[ i ].reset();
-		const xv::sky::CUvTransform t = m_pSkyFor ? m_pSkyFor->m_Transforms[ i ] : xv::sky::CUvTransform{};
-		uniforms.m_Transform[ i ][ 0 ] = t.m_flA;
-		uniforms.m_Transform[ i ][ 1 ] = t.m_flB;
-		uniforms.m_Transform[ i ][ 2 ] = t.m_flC;
-		uniforms.m_Transform[ i ][ 3 ] = t.m_flD;
-		uniforms.m_Translate[ i ][ 0 ] = t.m_flTx;
-		uniforms.m_Translate[ i ][ 1 ] = t.m_flTy;
 		const xv::texture::CImage *pImage = m_pSkyFor ? &m_pSkyFor->m_Faces[ i ] : nullptr;
 		if ( pImage && !pImage->Empty() )
 		{
 			m_SkyFaces[ i ].reset( m_pRhi->newTexture( QRhiTexture::RGBA8, { pImage->m_nWidth, pImage->m_nHeight } ) );
 			m_SkyFaces[ i ]->create();
 			pUpdates->uploadTexture( m_SkyFaces[ i ].get(), QImage( pImage->m_Pixels.data(), pImage->m_nWidth, pImage->m_nHeight, pImage->m_nWidth * 4, QImage::Format_RGBA8888 ) );
-			uniforms.m_Translate[ i ][ 2 ] = 1.0f;
 		}
 	}
 	SkyUniforms_t uniforms = MakeSkyUniforms( m_pSkyFor, m_pSkyTransformsFor.get(), m_SkyFaces, m_pEnvAtlas != nullptr );
@@ -660,6 +697,10 @@ void CMapRenderer::UploadMaterials( const MapFrame_t &frame, QRhiResourceUpdateB
 		m_ModelLinesSelected.m_pBindings.reset();
 		m_pMaterialsFor = nullptr;
 		m_bRemakeMaterials = true;
+		if ( m_pSkyBehindBindings )
+		{
+			MakeSkyBehindBindings();
+		}
 	}
 	if ( !m_LinesAll.m_pBindings )
 	{
@@ -894,6 +935,36 @@ void CMapRenderer::MakePipelines( QRhiRenderTarget *pTarget )
 	m_pAlphaSky->setShaderResourceBindings( m_pNoBindings.get() );
 	m_pAlphaSky->setRenderPassDescriptor( pTarget->renderPassDescriptor() );
 	m_pAlphaSky->create();
+
+	m_pSkyView.reset( m_pRhi->newBuffer( QRhiBuffer::Dynamic, QRhiBuffer::UniformBuffer, sizeof( SkyViewUniforms_t ) ) );
+	m_pSkyView->create();
+	MakeSkyBehindBindings();
+	m_pSkyBehind.reset( m_pRhi->newGraphicsPipeline() );
+	m_pSkyBehind->setShaderStages( { { QRhiShaderStage::Vertex, LoadShader( QStringLiteral( ":/shaders/mapsky.vert.qsb" ) ) }, { QRhiShaderStage::Fragment, LoadShader( QStringLiteral( ":/shaders/mapsky.frag.qsb" ) ) } } );
+	m_pSkyBehind->setSampleCount( pTarget->sampleCount() );
+	m_pSkyBehind->setShaderResourceBindings( m_pSkyBehindBindings.get() );
+	m_pSkyBehind->setRenderPassDescriptor( pTarget->renderPassDescriptor() );
+	m_pSkyBehind->create();
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: The 2D sky pass's bindings: its own uniforms and the sky's, as map.frag binds them.
+//-----------------------------------------------------------------------------
+void CMapRenderer::MakeSkyBehindBindings()
+{
+	const auto fragment = QRhiShaderResourceBinding::FragmentStage;
+	m_pSkyBehindBindings.reset( m_pRhi->newShaderResourceBindings() );
+	m_pSkyBehindBindings->setBindings( {
+		QRhiShaderResourceBinding::uniformBuffer( 0, fragment, m_pSkyView.get() ),
+		QRhiShaderResourceBinding::uniformBuffer( 6, fragment, m_pSkyUniforms.get() ),
+		QRhiShaderResourceBinding::sampledTexture( 7, fragment, SkyFace( 0 ), SkySampler( 0 ) ),
+		QRhiShaderResourceBinding::sampledTexture( 8, fragment, SkyFace( 1 ), SkySampler( 1 ) ),
+		QRhiShaderResourceBinding::sampledTexture( 9, fragment, SkyFace( 2 ), SkySampler( 2 ) ),
+		QRhiShaderResourceBinding::sampledTexture( 10, fragment, SkyFace( 3 ), SkySampler( 3 ) ),
+		QRhiShaderResourceBinding::sampledTexture( 11, fragment, SkyFace( 4 ), SkySampler( 4 ) ),
+		QRhiShaderResourceBinding::sampledTexture( 12, fragment, SkyFace( 5 ), SkySampler( 5 ) ),
+	} );
+	m_pSkyBehindBindings->create();
 }
 
 //-----------------------------------------------------------------------------
@@ -1096,6 +1167,23 @@ void CMapRenderer::Render( QRhiCommandBuffer *pCommands, QRhiRenderTarget *pTarg
 		upload( uniformsFor( skyCamera, true ), 3 );
 	}
 
+	// The 2D sky behind everything, in place of the flat background (xv::map::RenderView's).
+	const bool bTextured = shade.m_nMode != xv::map::RasterMode_t::RASTER_MODE_FLAT && shade.m_nMode != xv::map::RasterMode_t::RASTER_MODE_WIREFRAME;
+	const bool bSkyBehind = frame.m_Options.m_bSkyBackground && m_pSkyFor && !frame.m_Options.m_bTransparent && bTextured;
+	if ( bSkyBehind )
+	{
+		xv::map::CViewCamera atOrigin = frame.m_Camera;
+		atOrigin.m_Eye = {};
+		const std::array<float, 16> matrix = atOrigin.GetViewProjection();
+		const QMatrix4x4 clipToWorld = ( m_pRhi->clipSpaceCorrMatrix() * QMatrix4x4( matrix.data() ).transposed() ).inverted();
+		SkyViewUniforms_t view{};
+		std::memcpy( view.m_ClipToWorld, clipToWorld.constData(), sizeof view.m_ClipToWorld );
+		const bool bLighting = shade.m_nMode == xv::map::RasterMode_t::RASTER_MODE_LIGHTING;
+		view.m_Options[ 0 ] = bLighting ? shade.m_flMonitorGamma / 2.2f : 0.0f;
+		view.m_Options[ 1 ] = bLighting && frame.m_pLighting && shade.m_bLightHdr ? xv::map::UNMEASURED_ALPHA / 255.0f : 1.0f;
+		pUpdates->updateDynamicBuffer( m_pSkyView.get(), 0, sizeof view, &view );
+	}
+
 	// Under a 3D skybox the picture starts see-through: what the skybox draws is opaque, and
 	// the world's sky faces show the sky only where it is still see-through.
 	const auto &background = frame.m_Options.m_Background;
@@ -1104,6 +1192,16 @@ void CMapRenderer::Render( QRhiCommandBuffer *pCommands, QRhiRenderTarget *pTarg
 	pCommands->beginPass( pTarget, QColor( background[ 0 ], background[ 1 ], background[ 2 ], bSky ? 0 : 255 ), { 1.0f, 0 }, pUpdates );
 	m_Stats.m_flPassMs = passClock.nsecsElapsed() / 1e6;
 	m_nDrawCalls = 0;
+	if ( bSkyBehind )
+	{
+		// Opaque, so under a 3D skybox the sky faces show it where the skybox drew nothing, as
+		// they would show the sky themselves.
+		pCommands->setGraphicsPipeline( m_pSkyBehind.get() );
+		pCommands->setShaderResources( m_pSkyBehindBindings.get() );
+		pCommands->setViewport( { 0, 0, static_cast<float>( size.width() ), static_cast<float>( size.height() ) } );
+		pCommands->draw( 3 );
+		m_nDrawCalls++;
+	}
 	const xv::map::RasterScene_t scene = frame.MakeScene();
 	auto materialOf = [ &scene ]( std::uint32_t n ) -> const xv::map::RasterMaterial_t * { return n < scene.m_Materials.size() ? &scene.m_Materials[ n ] : nullptr; };
 	struct Later_t

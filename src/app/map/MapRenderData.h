@@ -51,6 +51,7 @@ struct MapFrame_t
 	std::shared_ptr<const std::vector<xv::map::RasterMaterial_t>> m_pMaterials;
 	std::shared_ptr<const void> m_pTextures; // keeps the materials' textures alive
 	std::shared_ptr<const xv::sky::CCube> m_pSky;
+	std::shared_ptr<const xv::sky::SkyTransforms_t> m_pSkyTransforms; // m_pSky's faces as its proxies have moved them; null: as read
 	std::shared_ptr<const xv::sky::CCube> m_pEnvMap;        // env_cubemap's stand-in in reflections
 	std::shared_ptr<const xv::map::CLighting> m_pLighting;  // lighting preview views only
 	std::shared_ptr<const MapMeshLights_t> m_pMeshLights;
@@ -101,7 +102,7 @@ public:
 	// Once initial assets arrive, discard obsolete placeholder boxes from the shared buffer.
 	void CompactEntityBoxes();
 	// The map's sky, drawn on its sky faces.
-	void SetSky( std::shared_ptr<const xv::sky::CCube> pSky );
+	void SetSky( std::shared_ptr<const xv::sky::CCube> pSky, std::shared_ptr<const xv::sky::SkyTransforms_t> pTransforms = nullptr );
 	// What Refract and Water reflect for env_cubemap (the game's default cube map).
 	void SetEnvMap( std::shared_ptr<const xv::sky::CCube> pEnvMap );
 	// The lighting preview's last bake, which lighting preview frames draw with.

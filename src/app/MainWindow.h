@@ -83,6 +83,9 @@ public:
 	bool OpenGame( const QString &szGameInfoPath );
 	void OpenFolder( const QString &szFolder );
 	void OpenDiskFile( const QString &szPath );
+	// A sky face's material or texture in the material or texture editor, rather than its sky
+	// in the sky editor: a game path, or a file's.
+	void OpenSkyFaceFile( const QString &szPath );
 	CModelEditor *OpenModelFile( const QString &szPath );
 	// Opens a Hammer map (.vmf), from disk (an absolute path) or the mounted game, in the map
 	// viewer; the tab it already has, if open.
@@ -202,7 +205,9 @@ private:
 	// The real file behind a game path, when it's a loose file; empty for files in VPKs.
 	[[nodiscard]] QString DiskPathForGame( const QString &szGamePath ) const;
 	void LinkMaterial( QWidget *pView, const xv::material::Reader_t &pfnRead, const QString &szMaterial, const std::function<void()> &pfnBack );
-	[[nodiscard]] QWidget *WithEditButton( QWidget *pView, const QString &szText, const QString &szButton, const std::function<void()> &pfnOpen );
+	[[nodiscard]] QWidget *WithEditButton( QWidget *pView, const QString &szText, const QString &szButton, const std::function<void()> &pfnOpen, const QString &szSecond = {}, const std::function<void()> &pfnSecond = {} );
+	// OpenDiskFile, with a sky's face files opened as a sky (or as what they are).
+	void OpenDiskFileAs( const QString &szPath, bool bSkies );
 	void NewSoundFile( xv::sound::FileKind_t nKind );
 	bool AskAddToManifest( const QString &szText );
 	bool Save( CSoundEditor *pEditor );

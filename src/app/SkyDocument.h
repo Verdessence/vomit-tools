@@ -34,6 +34,7 @@ public:
 		xv::sky::CUvTransform m_Transform;                  // from a stock material ($basetexturetransform)
 		QString m_szMaterial;                               // the VMT it came from, if any: a game path, or a file
 		std::shared_ptr<const xv::texture::CFloatImage> m_pHdr; // light values for the HDR set, the same size and orientation as image; null for 8-bit faces
+		std::shared_ptr<const xv::material::CProxies> m_pProxies; // the material's, when they scroll its transform (previewed moving)
 	};
 
 	explicit CSkyDocument( QObject *pParent = nullptr );

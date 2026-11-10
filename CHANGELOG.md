@@ -286,6 +286,12 @@
   it (filmic, Reinhard or clip, with an exposure).
 - The sky list leaves out a sky's HDR set (`train_hdr` beside `train`).
 - OpenEXR files open wherever images do (through tinyexr).
+- A sky's proxies run: a LinearRamp scrolling its texture transform (through TextureTransform)
+  moves it in the sky editor's view and in the map's 3D views, as the game does.
+- A sky face's material or texture opens in the material or texture editor: a second button
+  on its preview, and Open in Material Editor on the sky editor's faces.
+- Hammer maps: the textured 3D views draw the map's 2D sky behind everything, so what nothing
+  covers shows the sky in that direction (2D Sky on the Show bar, and in Preferences > Maps).
 
 ### Also
 - The main window's tabs are grouped under a strip by kind (maps, textures, sounds...); a tab's

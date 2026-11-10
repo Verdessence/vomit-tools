@@ -316,9 +316,11 @@ void CMapRenderData::Rebuild()
 	m_LineColorsFor = {};
 	m_nGeneration++;
 	std::shared_ptr<const xv::sky::CCube> pSky = std::move( m_Frame.m_pSky );
+	std::shared_ptr<const xv::sky::SkyTransforms_t> pSkyTransforms = std::move( m_Frame.m_pSkyTransforms );
 	std::shared_ptr<const xv::sky::CCube> pEnvMap = std::move( m_Frame.m_pEnvMap );
 	m_Frame = {};
 	m_Frame.m_pSky = std::move( pSky );
+	m_Frame.m_pSkyTransforms = std::move( pSkyTransforms );
 	m_Frame.m_pEnvMap = std::move( pEnvMap );
 	if ( !pScene )
 	{
@@ -686,11 +688,12 @@ void CMapRenderData::ApplySprites()
 //-----------------------------------------------------------------------------
 // Purpose:
 //-----------------------------------------------------------------------------
-void CMapRenderData::SetSky( std::shared_ptr<const xv::sky::CCube> pSky )
+void CMapRenderData::SetSky( std::shared_ptr<const xv::sky::CCube> pSky, std::shared_ptr<const xv::sky::SkyTransforms_t> pTransforms )
 {
-	if ( pSky != m_Frame.m_pSky )
+	if ( pSky != m_Frame.m_pSky || pTransforms != m_Frame.m_pSkyTransforms )
 	{
 		m_Frame.m_pSky = std::move( pSky );
+		m_Frame.m_pSkyTransforms = std::move( pTransforms );
 		m_nGeneration++;
 	}
 }
@@ -861,6 +864,7 @@ MapFrame_t CMapRenderData::Snapshot( const xv::map::CViewCamera &camera, const x
 	frame.m_Options.m_bToolTextures = settings.m_bToolTextures;
 	frame.m_Options.m_bNodraw = settings.m_bNodraw;
 	frame.m_Options.m_Shade.m_pSky = frame.m_pSky.get();
+	frame.m_Options.m_Shade.m_pSkyTransforms = frame.m_pSkyTransforms.get();
 	frame.m_Options.m_Shade.m_pEnvMap = frame.m_pEnvMap.get();
 	const MapPreferences_t &preferences = CPreferences::Instance().GetMapPreferences();
 	frame.m_Options.m_Shade.m_flLightScale = static_cast<float>( preferences.m_flLightBrightness );
@@ -899,6 +903,8 @@ MapFrame_t CMapRenderData::Snapshot( const xv::map::CViewCamera &camera, const x
 		frame.m_Options.m_SkyboxCamera = xv::map::SkyboxCamera( camera, *pScene->m_Skybox3D );
 		frame.m_Options.m_SkyboxRoom = pScene->m_Skybox3D->m_Room;
 	}
+	// The 2D sky behind everything, where nothing is drawn (the Sky toggle).
+	frame.m_Options.m_bSkyBackground = settings.m_bSky2D;
 	frame.m_nGeneration = m_nGeneration;
 	return frame;
 }

@@ -147,6 +147,7 @@ class CFaceSlot : public QWidget
 {
 public:
 	std::function<void( Face_t )> m_pfnShowMaterial;
+	std::function<void( Face_t )> m_pfnEditMaterial;
 
 	CFaceSlot( CSkyDocument *pDocument, Face_t nFace, std::function<void( Face_t )> pfnBrowse, std::function<void( Face_t, QStringList )> pfnDropped )
 		: m_pDocument( pDocument ),
@@ -227,6 +228,7 @@ protected:
 		menu.addAction( tr( "Mirror" ), this, orient( { 0, true }, tr( "Mirror %1" ) ) )->setEnabled( bHas );
 		menu.addSeparator();
 		menu.addAction( tr( "Show Material" ), this, [ this ] { m_pfnShowMaterial( m_nFace ); } )->setEnabled( bHas && !slot.m_szMaterial.isEmpty() && m_pfnShowMaterial );
+		menu.addAction( tr( "Open in Material Editor" ), this, [ this ] { m_pfnEditMaterial( m_nFace ); } )->setEnabled( bHas && !slot.m_szMaterial.isEmpty() && m_pfnEditMaterial );
 		menu.addAction( tr( "Copy Source Path" ), this, [ szSource = slot.m_szSource ] { QApplication::clipboard()->setText( szSource ); } )->setEnabled( bHas && !slot.m_szSource.isEmpty() );
 		menu.addAction( tr( "Clear" ), this, [ this ] { m_pDocument->ClearFace( m_nFace ); } )->setEnabled( bHas );
 		menu.exec( pEvent->globalPos() );
@@ -416,6 +418,7 @@ CSkyEditor::CSkyEditor( CSkyDocument *pDocument, QWidget *pParent )
 				LoadFiles(paths);
 			} } );
 		pSlot->m_pfnShowMaterial = [ this ]( Face_t f ) { emit MaterialRequested( m_pDocument->Slot( f ).m_szMaterial ); };
+		pSlot->m_pfnEditMaterial = [ this ]( Face_t f ) { emit EditMaterialRequested( m_pDocument->Slot( f ).m_szMaterial ); };
 		m_Slots[ xv::sky::IndexOf( face ) ] = pSlot;
 		pGrid->addWidget( pSlot, row, column );
 	}

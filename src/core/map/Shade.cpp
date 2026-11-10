@@ -426,7 +426,7 @@ std::optional<std::array<float, 4>> ShadeFragment( const ShadeMaterial_t &materi
 	if ( bTextured && material.m_bSky && options.m_pSky )
 	{
 		// Hammer++ shows the map's sky where its sky faces are, the way the game does.
-		const std::array<float, 3> sky = sky::Sample( *options.m_pSky, input.m_vecDirection );
+		const std::array<float, 3> sky = sky::Sample( *options.m_pSky, input.m_vecDirection, options.m_pSkyTransforms );
 		color = { sky[ 0 ] / 255.0f, sky[ 1 ] / 255.0f, sky[ 2 ] / 255.0f, 1.0f };
 	}
 	else if ( bTextured )
@@ -677,7 +677,7 @@ RefractColor_t ShadeRefract( const ShadeMaterial_t &material, const ShadeInput_t
 		const sky::CCube *pCube = material.m_bReflectsSky || !options.m_pEnvMap ? options.m_pSky : options.m_pEnvMap;
 		if ( pCube )
 		{
-			const std::array<float, 3> sky = sky::Sample( *pCube, vecReflected );
+			const std::array<float, 3> sky = sky::Sample( *pCube, vecReflected, pCube == options.m_pSky ? options.m_pSkyTransforms : nullptr );
 			vecEnv = CVec3{ sky[ 0 ] / 255.0f, sky[ 1 ] / 255.0f, sky[ 2 ] / 255.0f };
 		}
 		out.m_vecReflection = CVec3{ vecEnv.m_flX * material.m_vecEnvTint.m_flX, vecEnv.m_flY * material.m_vecEnvTint.m_flY, vecEnv.m_flZ * material.m_vecEnvTint.m_flZ } * flFresnel;

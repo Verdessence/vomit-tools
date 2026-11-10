@@ -7,11 +7,16 @@
 //===========================================================================//
 #pragma once
 
+#include <optional>
+
+#include <QElapsedTimer>
 #include <QPoint>
 #include <QWidget>
 
 #include "sky/Sky.h"
 #include "texture/Image.h"
+
+class QTimer;
 
 class CSkyView : public QWidget
 {
@@ -32,6 +37,8 @@ public:
 	void SetShowEdges( bool bShow );
 	// "setang 0 90 0": the console command (sv_cheats 1) for the same view in game.
 	[[nodiscard]] QString GetSetangCommand() const;
+	// The faces as their materials' proxies have moved them now, when the sky scrolls.
+	[[nodiscard]] const std::optional<xv::sky::SkyTransforms_t> &GetMoved() const { return m_Moved; }
 
 signals:
 	void ViewChanged();
@@ -56,6 +63,9 @@ private:
 	[[nodiscard]] bool HasFaces() const;
 	// The face labels and the setang line, over the sky.
 	void PaintOverlay( QPainter &painter );
+	// Runs the faces' proxies while the sky has moving ones, as the game scrolls them.
+	void UpdateMotion();
+	void Move();
 
 	const xv::sky::CCube *m_pCube = nullptr;
 	int m_nGeneration = 0; // counts changes to the cube, so the graphics card's copy follows
@@ -67,4 +77,7 @@ private:
 	bool m_bEdges = false;
 	QPoint m_LastMouse;
 	xv::texture::CImage m_Frame;
+	QTimer *m_pMotionTimer = nullptr;
+	QElapsedTimer m_MotionClock;
+	std::optional<xv::sky::SkyTransforms_t> m_Moved;
 };

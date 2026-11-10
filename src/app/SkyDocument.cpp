@@ -190,6 +190,7 @@ const xv::sky::CCube &CSkyDocument::GetCube() const
 			{
 				cube.Face( nFace ) = xv::texture::Oriented( *s.m_pImage, s.m_Orientation.m_nQuarterTurns, s.m_Orientation.m_bMirror );
 				cube.m_Transforms[ xv::sky::IndexOf( nFace ) ] = s.m_Transform;
+				cube.m_Proxies[ xv::sky::IndexOf( nFace ) ] = s.m_pProxies;
 				// Light values only stand for a face drawn whole: a stock face's transform shows
 				// part of its texture, which the HDR set wouldn't follow.
 				if ( s.m_pHdr && s.m_Transform.IsIdentity() )

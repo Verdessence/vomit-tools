@@ -1824,7 +1824,7 @@ void CMainWindow::SetPreview( QWidget *pView )
 //-----------------------------------------------------------------------------
 // Purpose:
 //-----------------------------------------------------------------------------
-QWidget *CMainWindow::WithEditButton( QWidget *pView, const QString &szText, const QString &szButton, const std::function<void()> &pfnOpen )
+QWidget *CMainWindow::WithEditButton( QWidget *pView, const QString &szText, const QString &szButton, const std::function<void()> &pfnOpen, const QString &szSecond, const std::function<void()> &pfnSecond )
 {
 	auto *pWrapper = new QWidget;
 	auto *pBar = new QHBoxLayout;
@@ -1833,6 +1833,12 @@ QWidget *CMainWindow::WithEditButton( QWidget *pView, const QString &szText, con
 	auto *pEdit = new QPushButton( szButton );
 	connect( pEdit, &QPushButton::clicked, this, pfnOpen );
 	pBar->addWidget( pEdit );
+	if ( pfnSecond )
+	{
+		auto *pOther = new QPushButton( szSecond );
+		connect( pOther, &QPushButton::clicked, this, pfnSecond );
+		pBar->addWidget( pOther );
+	}
 	pBar->addStretch();
 	auto *pLayout = new QVBoxLayout( pWrapper );
 	pLayout->setContentsMargins( 0, 0, 0, 0 );
@@ -1901,7 +1907,8 @@ void CMainWindow::PreviewGameFile( const QString &szPath, const QString &szSourc
 	}
 	else if ( const QString szSky = SkyNameFor( szPath ); !szSky.isEmpty() )
 	{
-		pView = WithEditButton( pView, tr( "This is part of the sky %1." ).arg( szSky ), tr( "Open Sky in Editor" ), [ this, szSky ] { OpenSky( szSky ); } );
+		const bool bMaterial = szPath.endsWith( u".vmt", Qt::CaseInsensitive );
+		pView = WithEditButton( pView, tr( "This is part of the sky %1." ).arg( szSky ), tr( "Open Sky in Editor" ), [ this, szSky ] { OpenSky( szSky ); }, bMaterial ? tr( "Edit Material" ) : tr( "Open in Texture Editor" ), [ this, szPath ] { OpenSkyFaceFile( szPath ); } );
 	}
 	else if ( IsParticlePath( szPath ) && ReadParticleFile( *bytes ) )
 	{
@@ -2036,6 +2043,34 @@ void CMainWindow::PreviewDiskFile( const QString &szPath )
 //-----------------------------------------------------------------------------
 void CMainWindow::OpenDiskFile( const QString &szPath )
 {
+	OpenDiskFileAs( szPath, true );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: A sky face's material or texture in the material or texture editor: the sky editor
+//          shows the sky they make, these what each file says.
+//-----------------------------------------------------------------------------
+void CMainWindow::OpenSkyFaceFile( const QString &szPath )
+{
+	if ( QDir::isAbsolutePath( szPath ) )
+	{
+		OpenDiskFileAs( szPath, false );
+	}
+	else if ( szPath.endsWith( u".vmt", Qt::CaseInsensitive ) )
+	{
+		OpenMaterialFile( szPath );
+	}
+	else
+	{
+		OpenTextureFile( szPath );
+	}
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: OpenDiskFile; bSkies false opens a sky's face files as what they are.
+//-----------------------------------------------------------------------------
+void CMainWindow::OpenDiskFileAs( const QString &szPath, bool bSkies )
+{
 	DebugLog() << "opening" << szPath;
 	const QFileInfo info{ szPath };
 	if ( info.fileName().compare( u"gameinfo.txt", Qt::CaseInsensitive ) == 0 )
@@ -2050,7 +2085,38 @@ void CMainWindow::OpenDiskFile( const QString &szPath )
 	}
 	AutoMountFor( szPath );
 	AddRecent( szPath );
-	if ( const auto sky = SkyFilesFor( szPath ) )
+	// A rule [ "editor:<name>", pattern ] in vomit-tools.nut picks the editor before the file's
+	// kind does.
+	if ( const QString szEditor = CPreferences::Instance().RuleFor( QStringLiteral( "editor" ), info.absoluteFilePath() ); !szEditor.isEmpty() )
+	{
+		if ( szEditor == u"map" )
+		{
+			OpenMapFile( info.absoluteFilePath() );
+			return;
+		}
+		if ( szEditor == u"model" )
+		{
+			OpenModelFile( info.absoluteFilePath() );
+			return;
+		}
+		if ( szEditor == u"stripper" )
+		{
+			OpenStripperFile( info.absoluteFilePath() );
+			return;
+		}
+		if ( szEditor == u"detail" )
+		{
+			if ( const auto data = ReadDiskFile( szPath ) )
+			{
+				const fs::path file = ToPath( info.absoluteFilePath() );
+				auto *pDocument = new CDetailDocument( GamePathForDisk( file ), xv::kv1::Parse( data->toStdString() ) );
+				pDocument->SetDiskPath( file );
+				AddDetailEditor( pDocument );
+				return;
+			}
+		}
+	}
+	if ( const auto sky = bSkies ? SkyFilesFor( szPath ) : std::nullopt )
 	{
 		OpenSkyFiles( *sky );
 		return;
@@ -2305,6 +2371,7 @@ CSkyEditor *CMainWindow::NewSky( CSkyDocument *pDocument )
 	connect( pDocument, &CSkyDocument::FacesChanged, this, updateTab );
 	connect( pEditor, &CSkyEditor::ExportRequested, this, [ this, pEditor ] { ExportSky( pEditor, false ); } );
 	connect( pEditor, &CSkyEditor::ExportToRequested, this, [ this, pEditor ] { ExportSky( pEditor, true ); } );
+	connect( pEditor, &CSkyEditor::EditMaterialRequested, this, &CMainWindow::OpenSkyFaceFile );
 	connect( pEditor, &CSkyEditor::MaterialRequested, this, [ this ]( const QString &szMaterial ) {
 		if ( QDir::isAbsolutePath( szMaterial ) )
 		{
@@ -2354,7 +2421,9 @@ CSkyEditor *CMainWindow::OpenSky( const QString &szName )
 		const std::size_t i = xv::sky::IndexOf( nFace );
 		if ( !loaded.m_Cube.m_Faces[ i ].Empty() )
 		{
-			faces[ i ] = CSkyDocument::Slot_t{ std::make_shared<const xv::texture::CImage>( loaded.m_Cube.m_Faces[ i ] ), QString::fromStdString( loaded.m_Textures[ i ] ), {}, loaded.m_Cube.m_Transforms[ i ], QString::fromStdString( loaded.m_Materials[ i ] ) };
+			faces[ i ] = CSkyDocument::Slot_t{
+				std::make_shared<const xv::texture::CImage>( loaded.m_Cube.m_Faces[ i ] ), QString::fromStdString( loaded.m_Textures[ i ] ), {}, loaded.m_Cube.m_Transforms[ i ], QString::fromStdString( loaded.m_Materials[ i ] ), {}, loaded.m_Cube.m_Proxies[ i ]
+			};
 		}
 	}
 	pDocument->SetName( szName );
@@ -2399,7 +2468,9 @@ CSkyEditor *CMainWindow::OpenSkyFiles( const xv::sky::CSkyFiles &files )
 		const std::size_t i = xv::sky::IndexOf( nFace );
 		if ( !loaded.m_Cube.m_Faces[ i ].Empty() )
 		{
-			faces[ i ] = CSkyDocument::Slot_t{ std::make_shared<const xv::texture::CImage>( loaded.m_Cube.m_Faces[ i ] ), ToQString( files.m_Faces[ i ] ), {}, loaded.m_Cube.m_Transforms[ i ], QString::fromStdString( loaded.m_Materials[ i ] ) };
+			faces[ i ] = CSkyDocument::Slot_t{
+				std::make_shared<const xv::texture::CImage>( loaded.m_Cube.m_Faces[ i ] ), ToQString( files.m_Faces[ i ] ), {}, loaded.m_Cube.m_Transforms[ i ], QString::fromStdString( loaded.m_Materials[ i ] ), {}, loaded.m_Cube.m_Proxies[ i ]
+			};
 		}
 	}
 	pDocument->SetName( QString::fromStdString( files.m_szName ) );

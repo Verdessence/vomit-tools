@@ -72,6 +72,7 @@ signals:
 	void ExportToRequested(); // to a folder the user picks
 	// "Show Material" on a face: the VMT it came from (a game path, or a file on disk).
 	void MaterialRequested( const QString &szMaterial );
+	void EditMaterialRequested( const QString &szMaterial ); // in the material editor
 
 protected:
 	void dragEnterEvent( QDragEnterEvent *pEvent ) override;

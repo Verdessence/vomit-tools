@@ -88,11 +88,14 @@ public:
 	[[nodiscard]] int GetLoaded() const { return m_nLoaded; }
 	[[nodiscard]] int GetTotal() const { return m_nTotal; }
 	[[nodiscard]] bool IsFinished() const { return m_bFinished; }
-	// Materials whose proxies change them over time (AnimatedTexture, TextureScroll, Sine...).
-	[[nodiscard]] bool HasAnimated() const { return !m_Animated.empty(); }
+	// Materials whose proxies change them over time (AnimatedTexture, TextureScroll, Sine...), or
+	// a sky whose faces scroll.
+	[[nodiscard]] bool HasAnimated() const { return !m_Animated.empty() || ( m_pSky && m_pSky->IsMoving() ); }
 	// Those materials as they are at a time (seconds); true when one changed (GetMaterials then
-	// gives the new table).
+	// gives the new table, GetSkyTransforms the sky's faces).
 	bool Animate( float flTime );
+	// The sky's faces as its proxies have moved them; null when it doesn't move.
+	[[nodiscard]] std::shared_ptr<const xv::sky::SkyTransforms_t> GetSkyTransforms() const { return m_pSkyTransforms; }
 	[[nodiscard]] bool IsRefreshing() const { return m_bRefreshing || m_pRefreshNext != nullptr; }
 
 signals:
@@ -180,6 +183,7 @@ private:
 	std::vector<std::string> m_DetailTypes;
 	std::shared_ptr<const std::vector<std::string>> m_pDetailTypes = std::make_shared<const std::vector<std::string>>();
 	std::shared_ptr<const xv::sky::CCube> m_pSky;
+	std::shared_ptr<const xv::sky::SkyTransforms_t> m_pSkyTransforms; // m_pSky's, moved
 	std::shared_ptr<const xv::sky::CCube> m_pEnvMap;
 	std::shared_ptr<const xv::map::CMapMesh> m_pProps;
 	std::vector<std::uint32_t> m_PropObjects;

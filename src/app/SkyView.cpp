@@ -92,7 +92,46 @@ CSkyView::CSkyView( QWidget *pParent )
 	setFocusPolicy( Qt::StrongFocus );
 	setCursor( Qt::OpenHandCursor );
 	setToolTip( tr( "Drag to look around, scroll to zoom, double-click to look east (yaw 0) again" ) );
+	m_pMotionTimer = new QTimer( this );
+	m_pMotionTimer->setInterval( 33 );
+	connect( m_pMotionTimer, &QTimer::timeout, this, &CSkyView::Move );
 	SetUseGpu( CGraphics::Instance().IsGpu() );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Runs the faces' proxies while the sky has moving ones (a LinearRamp scrolling its
+//          texture transform), from when it was first shown, as the game's clock runs them.
+//-----------------------------------------------------------------------------
+void CSkyView::UpdateMotion()
+{
+	if ( !m_pCube || !m_pCube->IsMoving() )
+	{
+		m_pMotionTimer->stop();
+		m_Moved.reset();
+		return;
+	}
+	if ( !m_MotionClock.isValid() )
+	{
+		m_MotionClock.start();
+	}
+	m_Moved = m_pCube->TransformsAt( static_cast<float>( m_MotionClock.elapsed() ) / 1000.0f );
+	if ( !m_pMotionTimer->isActive() )
+	{
+		m_pMotionTimer->start();
+	}
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: The next step of a scrolling sky, while it is on screen.
+//-----------------------------------------------------------------------------
+void CSkyView::Move()
+{
+	if ( !m_pCube || !isVisible() )
+	{
+		return;
+	}
+	m_Moved = m_pCube->TransformsAt( static_cast<float>( m_MotionClock.elapsed() ) / 1000.0f );
+	Redraw();
 }
 
 //-----------------------------------------------------------------------------
@@ -107,7 +146,7 @@ void CSkyView::SetUseGpu( bool bOn )
 #ifdef VOMIT_TOOLS_GPU
 	if ( bOn )
 	{
-		auto *pView = new CGpuView( std::make_unique<CSkyRenderer>( [ this ] { return CSkyRenderer::Frame_t{ m_pCube, m_nGeneration, m_Angles, m_flFov, m_bEdges }; } ), this );
+		auto *pView = new CGpuView( std::make_unique<CSkyRenderer>( [ this ] { return CSkyRenderer::Frame_t{ m_pCube, m_nGeneration, m_Angles, m_flFov, m_bEdges, m_Moved }; } ), this );
 		pView->setObjectName( QStringLiteral( "skyGpuView" ) );
 		pView->setAttribute( Qt::WA_TransparentForMouseEvents );
 		pView->setGeometry( rect() );
@@ -157,6 +196,7 @@ void CSkyView::SetCube( const xv::sky::CCube *pCube )
 {
 	m_pCube = pCube;
 	m_nGeneration++;
+	UpdateMotion();
 	Redraw();
 }
 
@@ -166,6 +206,7 @@ void CSkyView::SetCube( const xv::sky::CCube *pCube )
 void CSkyView::Refresh()
 {
 	m_nGeneration++;
+	UpdateMotion();
 	Redraw();
 }
 
@@ -237,7 +278,7 @@ void CSkyView::paintEvent( QPaintEvent * )
 	if ( HasFaces() )
 	{
 		const xv::sky::CView view{ m_Angles, m_flFov, width(), height() };
-		xv::sky::Render( *m_pCube, view, m_Frame, m_bEdges );
+		xv::sky::Render( *m_pCube, view, m_Frame, m_bEdges, m_Moved ? &*m_Moved : nullptr );
 		const QImage image( m_Frame.m_Pixels.data(), m_Frame.m_nWidth, m_Frame.m_nHeight, m_Frame.m_nWidth * 4, QImage::Format_RGBA8888 );
 		painter.drawImage( 0, 0, image );
 	}

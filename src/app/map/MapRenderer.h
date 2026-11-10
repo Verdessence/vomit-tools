@@ -106,6 +106,7 @@ private:
 	void UploadMaterials( const MapFrame_t &frame, QRhiResourceUpdateBatch *pUpdates );
 	[[nodiscard]] QRhiTexture *Upload( const xv::map::RasterTexture_t &texture, std::unique_ptr<QRhiTexture> &pTexture, QRhiResourceUpdateBatch *pUpdates );
 	[[nodiscard]] QRhiSampler *SamplerFor( const xv::map::RasterTexture_t *pTexture ) const;
+	void MakeSkyBehindBindings();
 	void MakeBindings( Material_t &material, QRhiTexture *pBase, QRhiTexture *pBase2, const xv::map::RasterTexture_t *pBaseTexture, const xv::map::RasterTexture_t *pBase2Texture, QRhiTexture *pDetail = nullptr, const xv::map::RasterTexture_t *pDetailTexture = nullptr );
 	void MakePipelines( QRhiRenderTarget *pTarget );
 	bool UploadSky( const MapFrame_t &frame, QRhiResourceUpdateBatch *pUpdates );
@@ -132,6 +133,7 @@ private:
 	std::unique_ptr<QRhiBuffer> m_pSkyUniforms;
 	std::array<std::unique_ptr<QRhiTexture>, 6> m_SkyFaces;
 	const xv::sky::CCube *m_pSkyFor = nullptr;
+	std::shared_ptr<const xv::sky::SkyTransforms_t> m_pSkyTransformsFor; // its faces as moved, when it scrolls
 	// env_cubemap's stand-in: its six faces side by side, rt bk lf over ft up dn (one sampler,
 	// where six would pass OpenGL's sixteen).
 	std::unique_ptr<QRhiTexture> m_pEnvAtlas;
@@ -159,6 +161,9 @@ private:
 	std::unique_ptr<QRhiGraphicsPipeline> m_pAlpha;    // makes the picture opaque afterwards
 	std::unique_ptr<QRhiGraphicsPipeline> m_pAlphaSky; // the same, marking what is left as sky (the HDR lighting preview)
 	std::unique_ptr<QRhiShaderResourceBindings> m_pNoBindings;
+	std::unique_ptr<QRhiGraphicsPipeline> m_pSkyBehind; // the 2D sky over the whole picture, first (mapsky.frag)
+	std::unique_ptr<QRhiBuffer> m_pSkyView;             // its uniforms: the way back from clip space, and the look
+	std::unique_ptr<QRhiShaderResourceBindings> m_pSkyBehindBindings; // made again when the sky's faces change
 	quint32 m_nFrameStride = 0; // the world's frame uniforms, then the 3D skybox's
 	int m_nDrawCalls = 0;
 	MapRenderStats_t m_Stats;

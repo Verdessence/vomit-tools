@@ -12,6 +12,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
+#include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -20,6 +21,11 @@
 #include "texture/Image.h"
 #include "texture/Vtf.h"
 #include "util/Vec3.h"
+
+namespace xv::material
+{
+class CProxies;
+}
 
 namespace xv::vfs
 {
@@ -113,6 +119,9 @@ struct CUvTransform
 	[[nodiscard]] static CUvTransform Parse( std::string_view szText );
 };
 
+// Each face's texture transform, by indexOf(Face).
+using SkyTransforms_t = std::array<CUvTransform, 6>;
+
 struct CCube
 {
 	std::array<texture::CImage, 6> m_Faces;   // by indexOf(Face); a missing face reads as black
@@ -123,12 +132,21 @@ struct CCube
 
 	[[nodiscard]] const texture::CImage &Face( Face_t f ) const { return m_Faces[ IndexOf( f ) ]; }
 	[[nodiscard]] texture::CImage &Face( Face_t f ) { return m_Faces[ IndexOf( f ) ]; }
+	// The faces whose material's proxies move their transform over time (a LinearRamp scrolling
+	// $basetexturetransform through TextureTransform); null for the rest.
+	std::array<std::shared_ptr<const material::CProxies>, 6> m_Proxies;
+
 	// Every face has light values.
 	[[nodiscard]] bool HasHdr() const;
+	// Some face's transform moves over time.
+	[[nodiscard]] bool IsMoving() const;
+	// Each face's transform at a time (seconds), as its proxies make it then.
+	[[nodiscard]] SkyTransforms_t TransformsAt( float flTime ) const;
 };
 
 // The colour seen in a direction, 0-255 per channel: bilinear, clamped at the face edges.
-[[nodiscard]] std::array<float, 3> Sample( const CCube &cube, CVec3 vecDirection );
+// pTransforms, when given, stands for the cube's own (the faces as they have moved).
+[[nodiscard]] std::array<float, 3> Sample( const CCube &cube, CVec3 vecDirection, const SkyTransforms_t *pTransforms = nullptr );
 
 struct CView
 {
@@ -143,7 +161,7 @@ struct CView
 	[[nodiscard]] std::optional<std::array<float, 2>> ToScreen( CVec3 vecDirection ) const;
 };
 // Renders what a player sees, into out (view.width x view.height). edges outlines the faces.
-void Render( const CCube &cube, const CView &view, texture::CImage &out, bool bEdges = false );
+void Render( const CCube &cube, const CView &view, texture::CImage &out, bool bEdges = false, const SkyTransforms_t *pTransforms = nullptr );
 
 // How well the faces meet: the mean difference (0-255) between the pixels on either side of an edge.
 struct Seam_t

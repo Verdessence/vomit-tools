@@ -151,6 +151,7 @@ struct ShadeOptions_t
 	CVec3 m_vecFaceShade{ 0.65f, 0.8f, 1.0f }; // brightness of faces facing along x, y and z
 	float m_flLuxelShade = 0.75f;              // the lightmap grid's darker squares
 	const sky::CCube *m_pSky = nullptr;        // Hammer++'s 2D skybox on sky faces; null: none
+	const sky::SkyTransforms_t *m_pSkyTransforms = nullptr; // its faces' transforms as its proxies have moved them; null: as read
 	// What stands in for env_cubemap in reflections: the game's default cube map, as a map shows
 	// before buildcubemaps. Null: the sky does.
 	const sky::CCube *m_pEnvMap = nullptr;

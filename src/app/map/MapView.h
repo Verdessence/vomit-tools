@@ -87,6 +87,7 @@ struct MapViewSettings_t
 	bool m_bToolTextures = true;  // Ctrl+Shift+F2 (not nodraw, which has a toggle of its own)
 	bool m_bNodraw = true;
 	bool m_bSkybox3D = true;      // Alt+V
+	bool m_bSky2D = true;         // the map's 2D sky behind everything in the textured 3D views
 	bool m_bFog = true;           // env_fog_controller's fog in the textured 3D views
 	int m_nFogController = 0;     // the one shown (its entity id); 0: the first that starts on
 	bool m_bWalkable = false;     // the selected displacements' steep triangles tinted (Hammer's Display walkable area)
