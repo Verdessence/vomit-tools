@@ -19,6 +19,8 @@
 #include <QPainter>
 #include <QMimeData>
 #include <QMouseEvent>
+#include <QContextMenuEvent>
+#include <QMenu>
 #include <QScrollArea>
 #include <QScrollBar>
 #include <QTimer>
@@ -155,6 +157,9 @@ bool CPanel::eventFilter( QObject *pObject, QEvent *pEvent )
 	}
 	switch ( pEvent->type() )
 	{
+		case QEvent::ContextMenu:
+			m_Column.ShowMenu( m_szId, static_cast<QContextMenuEvent *>( pEvent )->globalPos() );
+			return true;
 		case QEvent::MouseButtonPress:
 		{
 			const auto *pMouse = static_cast<QMouseEvent *>( pEvent );
@@ -286,7 +291,9 @@ CPanel *CPanelColumn::AddPanel( const QString &szId, const QString &szTitle, con
 					entry.m_pTab->setChecked( false );
 				}
 			}
+			m_szCurrent = szId;
 			Relayout();
+			emit StateChanged();
 			return;
 		}
 		Relayout();
@@ -296,7 +303,7 @@ CPanel *CPanelColumn::AddPanel( const QString &szId, const QString &szTitle, con
 		Relayout();
 		emit StateChanged();
 	} );
-	m_Entries.push_back( { pPanel, pTab } );
+	m_Entries.push_back( { pPanel, pTab, {} } );
 	Relayout();
 	return pPanel;
 }
@@ -502,7 +509,7 @@ QVariantMap CPanelColumn::GetState() const
 			folded.append( entry.m_pPanel->GetId() );
 		}
 	}
-	return { { QStringLiteral( "order" ), order }, { QStringLiteral( "hidden" ), hidden }, { QStringLiteral( "folded" ), folded } };
+	return { { QStringLiteral( "order" ), order }, { QStringLiteral( "hidden" ), hidden }, { QStringLiteral( "folded" ), folded }, { QStringLiteral( "current" ), m_szCurrent } };
 }
 
 //-----------------------------------------------------------------------------
@@ -513,6 +520,7 @@ void CPanelColumn::SetState( const QVariantMap &state )
 	const QStringList order = state.value( QStringLiteral( "order" ) ).toStringList();
 	const QStringList hidden = state.value( QStringLiteral( "hidden" ) ).toStringList();
 	const QStringList folded = state.value( QStringLiteral( "folded" ) ).toStringList();
+	m_szCurrent = state.value( QStringLiteral( "current" ) ).toString();
 	// Named panels first, in the order given; the rest after them as they were.
 	std::ranges::stable_sort( m_Entries, std::less<>{}, [ & ]( const Entry_t &entry ) {
 		const qsizetype n = order.indexOf( entry.m_pPanel->GetId() );
@@ -550,8 +558,15 @@ void CPanelColumn::SetOnePanel( bool bOnePanel )
 					szKeep = entry.m_pPanel->GetId();
 			}
 		}
+		// The panel shown alone last time, when it is still about.
+		for ( const Entry_t &entry : m_Entries )
+		{
+			if ( entry.m_pPanel->GetId() == m_szCurrent && entry.m_bAvailable && !entry.m_bMode )
+				szKeep = m_szCurrent;
+		}
 		if ( szKeep.isEmpty() && !m_Entries.empty() )
 			szKeep = m_Entries.front().m_pPanel->GetId();
+		m_szCurrent = szKeep;
 		// A mode's panel that is there now stays the one shown.
 		for ( const Entry_t &entry : m_Entries )
 			if ( entry.m_bMode && entry.m_bAvailable && entry.m_pTab->isChecked() )
@@ -730,7 +745,8 @@ void CPanelColumn::Relayout()
 	for ( const Entry_t &entry : m_Entries )
 	{
 		const bool bShown = entry.m_bAvailable && entry.m_pTab->isChecked();
-		const bool bStretch = bShown && entry.m_pPanel->IsStretching();
+		// A panel shown alone fills the column, its lists growing into the height.
+		const bool bStretch = bShown && ( entry.m_pPanel->IsStretching() || ( m_bOnePanel && !entry.m_pPanel->IsFolded() ) );
 		bStretching = bStretching || bStretch;
 		m_pPanels->addWidget( entry.m_pPanel, bStretch ? 1 : 0 );
 		entry.m_pPanel->setVisible( bShown );
@@ -752,4 +768,35 @@ void CPanelColumn::Relayout()
 	static_cast<QVBoxLayout *>( m_TabGroups[ 2 ]->layout() )->addStretch( 1 );
 	m_TabGroups[ 0 ]->setVisible( used[ 0 ] );
 	m_TabGroups[ 1 ]->setVisible( used[ 1 ] );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: A panel supplies commands for both its header and its tab.
+//-----------------------------------------------------------------------------
+void CPanelColumn::SetMenu( const QString &szId, std::function<void( QMenu & )> pfnMenu )
+{
+	for ( Entry_t &entry : m_Entries )
+		if ( entry.m_pPanel->GetId() == szId )
+		{
+			entry.m_pfnMenu = std::move( pfnMenu );
+			entry.m_pTab->setContextMenuPolicy( Qt::CustomContextMenu );
+			connect( entry.m_pTab, &QWidget::customContextMenuRequested, this, [ this, szId, pTab = entry.m_pTab ]( const QPoint &at ) { ShowMenu( szId, pTab->mapToGlobal( at ) ); } );
+			break;
+		}
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: The panel's own commands at the pointer.
+//-----------------------------------------------------------------------------
+void CPanelColumn::ShowMenu( const QString &szId, const QPoint &globalAt )
+{
+	for ( const Entry_t &entry : m_Entries )
+		if ( entry.m_pPanel->GetId() == szId && entry.m_pfnMenu )
+		{
+			auto *pMenu = new QMenu( this );
+			pMenu->setAttribute( Qt::WA_DeleteOnClose );
+			entry.m_pfnMenu( *pMenu );
+			pMenu->popup( globalAt );
+			break;
+		}
 }

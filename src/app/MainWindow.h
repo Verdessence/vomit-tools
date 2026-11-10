@@ -13,6 +13,7 @@
 
 #include <QMainWindow>
 #include <QPointer>
+#include <QVariantMap>
 
 #include "ChoiceBoxes.h"
 #include "ManifestDialog.h"
@@ -177,6 +178,7 @@ private:
 	void FillGameMenu( QMenu *pMenu );
 	void FillRecentMenu( QMenu *pMenu );
 	void AddMapTab( CMapEditor *pEditor );
+	QVariantMap m_MapSideState;
 	void FillSkyMenu( QMenu *pMenu );
 	// The Map menu shows while a map tab is current.
 	void UpdateMapMenu();

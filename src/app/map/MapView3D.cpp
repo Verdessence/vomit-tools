@@ -381,6 +381,13 @@ MapFrame_t CMapView3D::MakeFrame( QSize size )
 		m_Editor.WantLighting();
 	}
 	MapFrame_t frame = m_Editor.GetRenderData().Snapshot( camera, options, m_Editor.GetSettings() );
+	if ( m_Editor.GetTool() == MapTool_t::MAP_TOOL_BRUSH_EDIT && frame.m_pFlags )
+	{
+		auto pFlags = std::make_shared<std::vector<std::uint8_t>>( *frame.m_pFlags );
+		for ( auto &nFlags : *pFlags )
+			nFlags &= ~xv::map::RASTER_OBJECT_SELECTED;
+		frame.m_pFlags = std::move( pFlags );
+	}
 	frame.m_bModelEdges = preferences.m_bWireframeModels;
 	// HDR's auto exposure is this view's own, measured from what it draws.
 	if ( frame.m_pLighting && frame.m_Options.m_Shade.m_bLightHdr )
@@ -1388,39 +1395,76 @@ std::vector<xv::map::TraceHit_t> CMapView3D::HitsAt( QPointF at )
 }
 
 //-----------------------------------------------------------------------------
-// Purpose: Only the map's own meshes (as read, and the edit mesh) map triangles back to sides.
+// Purpose:
 //-----------------------------------------------------------------------------
 std::optional<xv::map::FaceRef_t> CMapView3D::FaceAt( QPointF at, bool bThroughOverlays )
 {
+	return FacesAt( std::span<const QPointF>( &at, 1 ), bThroughOverlays ).front();
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Along each point's ray, as the view casts it, up to just short of the point.
+//-----------------------------------------------------------------------------
+std::vector<bool> CMapView3D::BrushesHide( std::span<const xv::map::Point_t> points, std::span<const std::uint32_t> objects )
+{
+	std::vector<bool> hidden( points.size(), false );
+	const MapFrame_t frame = MakeFrame( size() );
+	if ( !frame.m_pScene )
+		return hidden;
+	const xv::map::RasterScene_t scene = frame.MakeScene();
+	std::vector<const xv::map::CMapMesh *> brushes{ &frame.m_pScene->GetMesh(), &frame.m_pScene->GetEditMesh() };
+	for ( const auto &entry : frame.m_pScene->m_SolidMeshes )
+		brushes.push_back( entry.second.get() );
+	for ( std::size_t i = 0; i < points.size(); i++ )
+	{
+		const auto screen = frame.m_Camera.Project( points[ i ] );
+		if ( !screen )
+			continue;
+		const auto [ from, dir ] = frame.m_Camera.Ray( ( *screen )[ 0 ], ( *screen )[ 1 ] );
+		const double flDistance = xv::map::Dot( xv::map::Subtract( points[ i ], from ), dir ) - 0.1;
+		hidden[ i ] = flDistance > 0 && xv::map::TraceBlocked( scene, m_Editor.GetSettings().m_bToolTextures, m_Editor.GetSettings().m_bNodraw, from, dir, flDistance, brushes, objects[ i ] );
+	}
+	return hidden;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Only the map's own meshes (as read, and the edit mesh) map triangles back to sides.
+//-----------------------------------------------------------------------------
+std::vector<std::optional<xv::map::FaceRef_t>> CMapView3D::FacesAt( std::span<const QPointF> points, bool bThroughOverlays )
+{
+	std::vector<std::optional<xv::map::FaceRef_t>> faces( points.size() );
 	const MapFrame_t frame = MakeFrame( size() );
 	if ( !frame.m_pScene )
 	{
-		return std::nullopt;
+		return faces;
 	}
 	const xv::map::RasterScene_t scene = frame.MakeScene();
-	const auto [ from, dir ] = frame.m_Camera.Ray( at.x(), at.y() );
-	const std::vector<xv::map::TraceHit_t> hits = xv::map::TraceScene( scene, m_Editor.GetSettings().m_bToolTextures, m_Editor.GetSettings().m_bNodraw, from, dir, m_Camera.m_flFar );
-	if ( hits.empty() )
+	const auto isMapMesh = [ & ]( const xv::map::CMapMesh &mesh ) {
+		return &mesh == &frame.m_pScene->GetMesh() || &mesh == &frame.m_pScene->GetEditMesh() || std::ranges::any_of( frame.m_pScene->m_SolidMeshes, [ &mesh ]( const auto &entry ) { return entry.second.get() == &mesh; } );
+	};
+	for ( std::size_t i = 0; i < points.size(); i++ )
 	{
-		return std::nullopt;
-	}
-	for ( const auto &hit : hits )
-	{
-		const xv::map::CMapMesh &mesh = *scene.m_Meshes[ hit.m_nMesh ];
-		if ( ( &mesh == &frame.m_pScene->GetMesh() || &mesh == &frame.m_pScene->GetEditMesh() || std::ranges::any_of( frame.m_pScene->m_SolidMeshes, [ &mesh ]( const auto &entry ) { return entry.second.get() == &mesh; } ) ) && hit.m_nTriangle < mesh.m_TriangleFaces.size() )
+		const auto [ from, dir ] = frame.m_Camera.Ray( points[ i ].x(), points[ i ].y() );
+		const std::vector<xv::map::TraceHit_t> hits = xv::map::TraceScene( scene, m_Editor.GetSettings().m_bToolTextures, m_Editor.GetSettings().m_bNodraw, from, dir, m_Camera.m_flFar );
+		for ( const auto &hit : hits )
 		{
-			const auto &face = mesh.m_Faces[ mesh.m_TriangleFaces[ hit.m_nTriangle ] ];
-			return xv::map::FaceRef_t{ face.m_nSolid, face.m_nSide };
+			const xv::map::CMapMesh &mesh = *scene.m_Meshes[ hit.m_nMesh ];
+			if ( isMapMesh( mesh ) && hit.m_nTriangle < mesh.m_TriangleFaces.size() )
+			{
+				const auto &face = mesh.m_Faces[ mesh.m_TriangleFaces[ hit.m_nTriangle ] ];
+				faces[ i ] = xv::map::FaceRef_t{ face.m_nSolid, face.m_nSide };
+				break;
+			}
+			if ( bThroughOverlays && !frame.m_pScene->IsSolidObject( hit.m_nObject ) )
+			{
+				const auto szClass = frame.m_pScene->m_Map.m_Entities[ frame.m_pScene->GetIndex( hit.m_nObject ) ].GetClassname();
+				if ( szClass == "info_overlay" || szClass == "infodecal" || szClass == "info_overlay_transition" )
+					continue;
+			}
+			break;
 		}
-		if ( bThroughOverlays && !frame.m_pScene->IsSolidObject( hit.m_nObject ) )
-		{
-			const auto szClass = frame.m_pScene->m_Map.m_Entities[ frame.m_pScene->GetIndex( hit.m_nObject ) ].GetClassname();
-			if ( szClass == "info_overlay" || szClass == "infodecal" || szClass == "info_overlay_transition" )
-				continue;
-		}
-		return std::nullopt;
 	}
-	return std::nullopt;
+	return faces;
 }
 
 //-----------------------------------------------------------------------------
@@ -1863,12 +1907,12 @@ void CMapView3D::PaintTools( QPainter &painter )
 	const bool bOverlay = m_Editor.GetTool() == MapTool_t::MAP_TOOL_OVERLAY && !GetDocument().GetSelection().empty();
 	const bool bWalkable = m_Editor.GetSettings().m_bWalkable && GetDocument().GetScene();
 	// The selected entities' FGD helpers (Ctrl+Shift+H): lines to their targets, cones, radii.
-	std::vector<xv::map::EntityHelpers_t> helpers;
+	std::vector<const xv::map::EntityHelpers_t *> helpers;
 	if ( const xv::map::CScene *pScene = GetDocument().GetScene(); pScene && m_Editor.GetSettings().m_bHelpers )
 		for ( const std::uint32_t nObject : GetDocument().GetSelection() )
 			if ( !pScene->IsSolidObject( nObject ) && !pScene->IsDeleted( nObject ) )
-				if ( auto entity = xv::map::DescribeHelpers( *pScene, pScene->GetIndex( nObject ) ); !entity.m_Lines.empty() || !entity.m_Rings.empty() || !entity.m_Sides.empty() )
-					helpers.push_back( std::move( entity ) );
+				if ( const xv::map::EntityHelpers_t &entity = GetDocument().GetHelpers( pScene->GetIndex( nObject ) ); !entity.m_Lines.empty() || !entity.m_Rings.empty() || !entity.m_Sides.empty() )
+					helpers.push_back( &entity );
 	// Every path's line to its next corner, selected or not, while both ends are shown.
 	std::vector<const xv::map::PathLink_t *> paths;
 	if ( const xv::map::CScene *pScene = GetDocument().GetScene(); pScene && m_Editor.GetSettings().m_bHelpers )
@@ -2043,8 +2087,9 @@ void CMapView3D::PaintTools( QPainter &painter )
 	{
 		const xv::map::CScene &scene = *GetDocument().GetScene();
 		painter.setRenderHint( QPainter::Antialiasing, true );
-		for ( const xv::map::EntityHelpers_t &entity : helpers )
+		for ( const xv::map::EntityHelpers_t *pEntity : helpers )
 		{
+			const xv::map::EntityHelpers_t &entity = *pEntity;
 			for ( const auto *pLines : { &entity.m_Lines, &entity.m_Rings } )
 			{
 				for ( const xv::map::HelperLine_t &helper : *pLines )
@@ -2286,6 +2331,11 @@ void CMapView3D::Select( QPointF at, bool bToggle )
 //-----------------------------------------------------------------------------
 void CMapView3D::wheelEvent( QWheelEvent *pEvent )
 {
+	if ( m_Editor.GetBrushEdit().HandleEvent( *this, pEvent ) )
+	{
+		pEvent->accept();
+		return;
+	}
 	// Alt turns the wheel to the brush's size; some systems turn an Alt wheel sideways.
 	if ( IsBrushShown() && pEvent->modifiers().testFlag( Qt::AltModifier ) )
 	{

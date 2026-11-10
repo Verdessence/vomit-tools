@@ -15,6 +15,7 @@
 #pragma once
 
 #include <array>
+#include <functional>
 #include <vector>
 
 #include <QIcon>
@@ -22,6 +23,7 @@
 #include <QWidget>
 
 class QLabel;
+class QMenu;
 class QScrollArea;
 class QToolButton;
 class QVBoxLayout;
@@ -100,13 +102,16 @@ public:
 	void SetOnePanel( bool bOnePanel );
 	[[nodiscard]] bool IsOnePanel() const { return m_bOnePanel; }
 
-	// "order" (ids), "hidden" and "folded" (ids): what SetState takes back. Ids it doesn't
+	// "order" (ids), "hidden" and "folded" (ids), and "current" (the panel shown alone, with one
+	// panel at a time): what SetState takes back. Ids it doesn't
 	// know are passed over, and panels it doesn't name keep their place at the end.
 	[[nodiscard]] QVariantMap GetState() const;
 	void SetState( const QVariantMap &state );
 
 	// For the panels' headers: a drag of pPanel has begun.
 	void StartDrag( CPanel *pPanel );
+	void SetMenu( const QString &szId, std::function<void( QMenu & )> pfnMenu );
+	void ShowMenu( const QString &szId, const QPoint &globalAt );
 
 	// As wide as the widest panel needs, beside the tabs and the scroll bar: the scroll area
 	// alone would let a splitter squeeze the panels and cut them off.
@@ -123,6 +128,7 @@ private:
 	{
 		CPanel *m_pPanel = nullptr;
 		QToolButton *m_pTab = nullptr;
+		std::function<void( QMenu & )> m_pfnMenu;
 		bool m_bAvailable = true;
 		bool m_bMode = false; // comes and goes with a mode (SetAvailable has been called)
 		bool m_bHiddenByDefault = false;
@@ -142,6 +148,7 @@ private:
 	bool m_bOnePanel = false;
 	QStringList m_StackedShown;     // with one panel at a time: the panels the stacked layout shows
 	QString m_szBeforeMode;         // the panel a mode's panel took over from
+	QString m_szCurrent;            // the panel shown alone, kept in the state for the next start
 	QScrollArea *m_pScroll = nullptr;
 	QWidget *m_pContent = nullptr;
 	QVBoxLayout *m_pPanels = nullptr;

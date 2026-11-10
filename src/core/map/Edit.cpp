@@ -18,6 +18,7 @@
 
 #include "kv1/Kv1.h"
 #include "util/Numbers.h"
+#include "util/Parallel.h"
 #include "util/Scan.h"
 #include "map/Brushes.h"
 #include "map/Entities.h"
@@ -185,8 +186,16 @@ std::shared_ptr<CScene> ApplyEdit( const CScene &scene, const MapEdit_t &edit, b
 		out.m_Changed.push_back( out.EntityObject( std::min<std::size_t>( nIndex, map.m_Entities.size() - 1 ) ) );
 	}
 
-	for ( const auto &[ nIndex, given ] : edit.m_Solids )
+	// The shapes first, on all the cores (an edit of many brushes previews at each step of a
+	// drag); a material doesn't change one.
+	std::vector<SolidGeometry_t> shapes( edit.m_Solids.size() );
+	ParallelFor( shapes.size(), 4, [ & ]( std::size_t nBegin, std::size_t nEnd ) {
+		for ( std::size_t i = nBegin; i < nEnd; i++ )
+			shapes[ i ] = BuildSolid( edit.m_Solids[ i ].second );
+	} );
+	for ( std::size_t nGiven = 0; nGiven < edit.m_Solids.size(); nGiven++ )
 	{
+		const auto &[ nIndex, given ] = edit.m_Solids[ nGiven ];
 		Solid_t solid = given;
 		for ( Side_t &side : solid.m_Sides )
 		{
@@ -201,7 +210,7 @@ std::shared_ptr<CScene> ApplyEdit( const CScene &scene, const MapEdit_t &edit, b
 		if ( nIndex >= map.m_Solids.size() )
 		{
 			nSolid = static_cast<std::uint32_t>( map.m_Solids.size() );
-			out.m_Solids.push_back( BuildSolid( solid ) );
+			out.m_Solids.push_back( std::move( shapes[ nGiven ] ) );
 			out.m_SolidObjects.push_back( static_cast<std::uint32_t>( out.m_Objects.size() ) );
 			out.m_Objects.push_back( { true, nSolid } );
 			// Its owner lists it (a new entity may already); where it is written is where it is.
@@ -227,7 +236,7 @@ std::shared_ptr<CScene> ApplyEdit( const CScene &scene, const MapEdit_t &edit, b
 					now.m_Solids.push_back( nSolid );
 				}
 			}
-			out.m_Solids[ nSolid ] = BuildSolid( solid );
+			out.m_Solids[ nSolid ] = std::move( shapes[ nGiven ] );
 			map.m_Solids[ nSolid ] = std::move( solid );
 		}
 		const auto it = std::ranges::lower_bound( out.m_EditedSolids, nSolid );
@@ -253,10 +262,20 @@ std::shared_ptr<CScene> ApplyEdit( const CScene &scene, const MapEdit_t &edit, b
 	{
 		if ( bDisplacementPreview )
 		{
-			for ( const auto &[ nSolid, solid ] : edit.m_Solids )
+			// Each solid's mesh of its own, built on all the cores.
+			std::vector<std::shared_ptr<const CMapMesh>> meshes( edit.m_Solids.size() );
+			ParallelFor( meshes.size(), 2, [ & ]( std::size_t nBegin, std::size_t nEnd ) {
+				for ( std::size_t i = nBegin; i < nEnd; i++ )
+				{
+					const std::uint32_t nSolid = edit.m_Solids[ i ].first;
+					const MeshSolid_t given{ nSolid, out.SolidObject( nSolid ), &std::as_const( out.m_Solids )[ nSolid ] };
+					meshes[ i ] = std::make_shared<const CMapMesh>( BuildMesh( std::as_const( map ), std::span<const MeshSolid_t>{ &given, 1 } ) );
+				}
+			} );
+			for ( std::size_t i = 0; i < edit.m_Solids.size(); i++ )
 			{
-				const MeshSolid_t given{ nSolid, out.SolidObject( nSolid ), &std::as_const( out.m_Solids )[ nSolid ] };
-				auto pMesh = std::make_shared<const CMapMesh>( BuildMesh( std::as_const( map ), std::span<const MeshSolid_t>{ &given, 1 } ) );
+				const std::uint32_t nSolid = edit.m_Solids[ i ].first;
+				auto pMesh = std::move( meshes[ i ] );
 				const auto it = std::ranges::lower_bound( out.m_SolidMeshes, nSolid, {}, []( const auto &entry ) { return entry.first; } );
 				if ( it != out.m_SolidMeshes.end() && it->first == nSolid )
 					it->second = std::move( pMesh );

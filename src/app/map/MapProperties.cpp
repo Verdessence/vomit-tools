@@ -504,8 +504,9 @@ bool CMapProperties::IsBrowsable( const std::string &szType )
 }
 
 //-----------------------------------------------------------------------------
-// Purpose: A key's value picked by its type: materials and decals from the texture browser,
-//          the rest from the names the editor lists; the pick is one step to undo.
+// Purpose: A key's value picked by its type: materials, decals and sprites from the texture
+//          browser, models from the model browser, sounds and particle systems from the names
+//          the editor lists; the pick is one step to undo.
 //-----------------------------------------------------------------------------
 void CMapProperties::BrowseKey( std::size_t nRow )
 {
@@ -514,16 +515,14 @@ void CMapProperties::BrowseKey( std::size_t nRow )
 	const xv::map::PropertyRow_t &row = m_Sheet.m_Rows[ nRow ];
 	const QString szCurrent = FromStd( row.m_szValue );
 	std::optional<QString> picked;
-	if ( ( row.m_szType == "material" || row.m_szType == "decal" ) && m_pfnPickMaterial )
+	if ( row.m_szType == "material" || row.m_szType == "decal" || row.m_szType == "sprite" || row.m_szType == "studio" )
 	{
-		picked = m_pfnPickMaterial( szCurrent );
+		if ( m_pfnPick )
+			picked = m_pfnPick( row.m_szType, szCurrent );
 	}
 	else if ( m_pfnNames )
 	{
-		const QString szTitle = row.m_szType == "sound" ? tr( "Sounds" ) : row.m_szType == "particlesystem" ? tr( "Particle Systems" )
-			: row.m_szType == "studio"                                                                      ? tr( "Models" )
-																											: tr( "Sprites" );
-		picked = CMapNamePicker::Pick( this, szTitle, m_pfnNames( row.m_szType ), szCurrent );
+		picked = CMapNamePicker::Pick( this, row.m_szType == "sound" ? tr( "Sounds" ) : tr( "Particle Systems" ), m_pfnNames( row.m_szType ), szCurrent );
 	}
 	if ( picked && *picked != szCurrent )
 		CommitKey( nRow, picked->toStdString() );
@@ -542,7 +541,7 @@ void CMapProperties::ShowHelp()
 	{
 		const xv::map::PropertyRow_t &row = m_Sheet.m_Rows[ i ];
 		m_pBrowseInstance->setVisible( row.m_szKey == "file" && m_Sheet.m_szClass == "func_instance" );
-		m_pBrowseKey->setVisible( IsBrowsable( row.m_szType ) && ( m_pfnNames || m_pfnPickMaterial ) );
+		m_pBrowseKey->setVisible( IsBrowsable( row.m_szType ) && ( m_pfnNames || m_pfnPick ) );
 		const bool bSides = ( row.m_szKey == "sides" || row.m_szKey == "sides2" ) && ( m_Sheet.m_szClass == "info_overlay" || m_Sheet.m_szClass == "info_overlay_transition" );
 		m_pPickFaces->setVisible( bSides );
 		PreviewSides( i, FromStd( row.m_szValue ) );

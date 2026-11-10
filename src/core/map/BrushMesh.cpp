@@ -13,6 +13,7 @@
 
 #include "map/Clip.h"
 #include "map/Vertex.h"
+#include "util/Parallel.h"
 
 namespace xv::map
 {
@@ -227,8 +228,21 @@ bool OnFace( const FlatFace_t &face, const Point_t &point )
 //          their union is still convex. Each cell's sides come from the face on its plane, or
 //          are nodraw where there is none.
 //-----------------------------------------------------------------------------
-std::vector<Solid_t> SplitConvex( const CMap &map, const Solid_t &source, const std::vector<FlatFace_t> &faces, const std::vector<Point_t> &corners )
+std::vector<Solid_t> SplitConvex( const CMap &map, const Solid_t &source, const std::vector<FlatFace_t> &faces, const std::vector<Point_t> &corners, std::string &szProblem )
 {
+	// Building a cell costs about the square of its planes. A fine sphere bent in along a loop
+	// has a hundred faces to cut by, each through the whole sphere's two thousand planes, which
+	// would take minutes (and make thousands of pieces); past this it is refused instead.
+	constexpr double SPLIT_WORK = 1.5e7;
+	double flWork = 0;
+	const auto makeCell = [ & ]( Cell_t &cell ) {
+		flWork += static_cast<double>( cell.m_Planes.size() ) * static_cast<double>( cell.m_Planes.size() );
+		return MakeCell( cell );
+	};
+	const auto tooMuch = [ & ]() {
+		szProblem = "it has too many faces bent inwards to split into convex pieces";
+		return std::vector<Solid_t>{};
+	};
 	std::vector<Plane_t> outer;
 	std::vector<Plane_t> cuts;
 	for ( const FlatFace_t &face : faces )
@@ -238,16 +252,19 @@ std::vector<Solid_t> SplitConvex( const CMap &map, const Solid_t &source, const 
 		if ( std::ranges::none_of( list, [ & ]( const Plane_t &p ) { return SamePlane( p, face.m_Plane ); } ) )
 			list.push_back( face.m_Plane );
 	}
+	// Every cut goes through at least one cell of about all the outer planes.
+	if ( static_cast<double>( cuts.size() ) * static_cast<double>( outer.size() ) * static_cast<double>( outer.size() ) > SPLIT_WORK )
+		return tooMuch();
 	std::vector<Cell_t> cells( 1 );
 	cells.front().m_Planes = outer;
-	if ( !MakeCell( cells.front() ) )
+	if ( !makeCell( cells.front() ) )
 	{
 		// The outer faces alone don't close it (a shape folded over itself): start from its hull.
 		const std::optional<std::vector<Plane_t>> hull = ConvexHull( corners );
 		if ( !hull )
 			return {};
 		cells.front().m_Planes = *hull;
-		if ( !MakeCell( cells.front() ) )
+		if ( !makeCell( cells.front() ) )
 			return {};
 	}
 	for ( const Plane_t &cut : cuts )
@@ -276,13 +293,15 @@ std::vector<Solid_t> SplitConvex( const CMap &map, const Solid_t &source, const 
 			Cell_t before;
 			before.m_Planes = cell.m_Planes;
 			before.m_Planes.push_back( { Scale( cut.m_Normal, -1.0 ), -cut.m_flDistance } );
-			if ( MakeCell( behind ) )
+			if ( flWork > SPLIT_WORK )
+				return tooMuch();
+			if ( makeCell( behind ) )
 				next.push_back( std::move( behind ) );
-			if ( MakeCell( before ) )
+			if ( makeCell( before ) )
 				next.push_back( std::move( before ) );
 		}
 		if ( next.size() > 4096 )
-			return {};
+			return tooMuch();
 		cells = std::move( next );
 	}
 	std::vector<std::vector<Point_t>> surface;
@@ -297,6 +316,14 @@ std::vector<Solid_t> SplitConvex( const CMap &map, const Solid_t &source, const 
 		{
 			for ( std::size_t j = i + 1; j < cells.size() && !bMerged; j++ )
 			{
+				// Only cells either side of one cut can make a convex whole.
+				const bool bTouch = std::ranges::any_of( cells[ i ].m_Planes, [ & ]( const Plane_t &a ) {
+					return std::ranges::any_of( cells[ j ].m_Planes, [ & ]( const Plane_t &b ) { return SamePlane( a, { Scale( b.m_Normal, -1.0 ), -b.m_flDistance } ); } );
+				} );
+				if ( !bTouch )
+					continue;
+				if ( flWork > SPLIT_WORK )
+					return tooMuch();
 				std::vector<Point_t> points;
 				for ( const Cell_t *pCell : { &cells[ i ], &cells[ j ] } )
 					for ( const Polygon_t &polygon : pCell->m_Polygons )
@@ -306,7 +333,7 @@ std::vector<Solid_t> SplitConvex( const CMap &map, const Solid_t &source, const 
 					continue;
 				Cell_t merged;
 				merged.m_Planes = *hull;
-				if ( !MakeCell( merged ) )
+				if ( !makeCell( merged ) )
 					continue;
 				const double flBoth = cells[ i ].m_flVolume + cells[ j ].m_flVolume;
 				if ( std::abs( merged.m_flVolume - flBoth ) <= std::max( 1e-3, flBoth * 1e-6 ) )
@@ -472,6 +499,13 @@ std::string CBrushMesh::Validate() const
 			if ( !std::isfinite( flCoordinate ) )
 				return "a corner has a non-finite coordinate";
 	std::map<std::pair<std::uint32_t, std::uint32_t>, std::pair<int, int>> edges;
+	// The corners by x, so that only those within an edge's box are tried against it: every
+	// corner against every edge took most of a move's time on a fine sphere.
+	constexpr double ALONG_EPSILON = 1e-6;
+	std::vector<std::uint32_t> byX( m_Vertices.size() );
+	for ( std::uint32_t n = 0; n < byX.size(); n++ )
+		byX[ n ] = n;
+	std::ranges::sort( byX, [ & ]( std::uint32_t a, std::uint32_t b ) { return m_Vertices[ a ][ 0 ] < m_Vertices[ b ][ 0 ]; } );
 	for ( std::size_t f = 0; f < m_Faces.size(); f++ )
 	{
 		const auto &corners = m_Faces[ f ].m_Corners;
@@ -490,10 +524,21 @@ std::string CBrushMesh::Validate() const
 			if ( flLengthSquared < 1e-12 )
 				return "a face contains a collapsed edge";
 			std::vector<std::pair<double, std::uint32_t>> along{ { 0, a }, { 1, b } };
-			for ( std::uint32_t n = 0; n < m_Vertices.size(); n++ )
+			Point_t low, high;
+			for ( std::size_t k = 0; k < 3; k++ )
 			{
-				const double t = Dot( Subtract( m_Vertices[ n ], m_Vertices[ a ] ), delta ) / flLengthSquared;
-				if ( t > 1e-6 && t < 1.0 - 1e-6 && Length( Subtract( m_Vertices[ n ], Add( m_Vertices[ a ], Scale( delta, t ) ) ) ) < 1e-6 )
+				low[ k ] = std::min( m_Vertices[ a ][ k ], m_Vertices[ b ][ k ] ) - ALONG_EPSILON;
+				high[ k ] = std::max( m_Vertices[ a ][ k ], m_Vertices[ b ][ k ] ) + ALONG_EPSILON;
+			}
+			const auto first = std::ranges::lower_bound( byX, low[ 0 ], {}, [ & ]( std::uint32_t n ) { return m_Vertices[ n ][ 0 ]; } );
+			for ( auto it = first; it != byX.end() && m_Vertices[ *it ][ 0 ] <= high[ 0 ]; ++it )
+			{
+				const std::uint32_t n = *it;
+				const Point_t &p = m_Vertices[ n ];
+				if ( p[ 1 ] < low[ 1 ] || p[ 1 ] > high[ 1 ] || p[ 2 ] < low[ 2 ] || p[ 2 ] > high[ 2 ] )
+					continue;
+				const double t = Dot( Subtract( p, m_Vertices[ a ] ), delta ) / flLengthSquared;
+				if ( t > 1e-6 && t < 1.0 - 1e-6 && Length( Subtract( p, Add( m_Vertices[ a ], Scale( delta, t ) ) ) ) < ALONG_EPSILON )
 					along.emplace_back( t, n );
 			}
 			std::ranges::sort( along );
@@ -729,6 +774,81 @@ bool InsetFace( CBrushMesh &mesh, std::uint32_t nFace, double flDistance )
 }
 
 //-----------------------------------------------------------------------------
+// Purpose: Put each inset polygon in its own convex brush by cutting through its outline.
+//-----------------------------------------------------------------------------
+std::vector<Solid_t> InsetBrush( const CMap &map, const Solid_t &source, const SolidGeometry_t &shape, std::uint32_t nFace, double flDistance )
+{
+	CBrushMesh mesh = CBrushMesh::FromGeometry( shape );
+	if ( !InsetFace( mesh, nFace, flDistance ) )
+		return {};
+	const auto normal = mesh.FacePlane( nFace )->m_Normal;
+	std::vector<Solid_t> pieces;
+	for ( std::size_t f = 0; f < mesh.m_Faces.size(); f++ )
+	{
+		if ( f != nFace && f < shape.m_Faces.size() )
+			continue;
+		const auto &face = mesh.m_Faces[ f ];
+		std::optional<Solid_t> piece = source;
+		for ( std::size_t i = 0; i < face.m_Corners.size() && piece; i++ )
+		{
+			const auto a = mesh.m_Vertices[ face.m_Corners[ i ] ];
+			const auto b = mesh.m_Vertices[ face.m_Corners[ ( i + 1 ) % face.m_Corners.size() ] ];
+			const auto outward = Normalized( Cross( normal, Subtract( b, a ) ) );
+			auto cut = ClipSolid( map, *piece, { outward, Dot( outward, a ) } ).m_Back;
+			if ( !cut )
+				return {};
+			for ( auto &side : cut->m_Sides )
+				if ( side.m_nId == 0 )
+				{
+					side.m_szMaterial = "TOOLS/TOOLSNODRAW";
+					side.m_nMaterial = NEW_MATERIAL;
+				}
+			piece = std::move( cut );
+		}
+		if ( !piece || !BuildSolid( *piece ).IsValid() )
+			return {};
+		pieces.push_back( std::move( *piece ) );
+	}
+	return pieces;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Insert the same midpoint in both faces sharing each edge before splitting.
+//-----------------------------------------------------------------------------
+bool SplitFaceEdges( CBrushMesh &mesh, std::uint32_t nFirst, std::uint32_t nSecond )
+{
+	const auto edges = mesh.GetEdges();
+	if ( nFirst >= edges.size() || nSecond >= edges.size() || nFirst == nSecond )
+		return false;
+	CBrushMesh result = mesh;
+	std::vector<std::uint32_t> inserted;
+	for ( const auto nEdge : { nFirst, nSecond } )
+	{
+		const auto [ a, b ] = edges[ nEdge ];
+		const auto nNew = static_cast<std::uint32_t>( result.m_Vertices.size() );
+		result.m_Vertices.push_back( Scale( Add( mesh.m_Vertices[ a ], mesh.m_Vertices[ b ] ), 0.5 ) );
+		inserted.push_back( nNew );
+		for ( auto &face : result.m_Faces )
+			for ( std::size_t i = 0; i < face.m_Corners.size(); i++ )
+			{
+				const auto x = face.m_Corners[ i ], y = face.m_Corners[ ( i + 1 ) % face.m_Corners.size() ];
+				if ( ( x == a && y == b ) || ( x == b && y == a ) )
+				{
+					face.m_Corners.insert( face.m_Corners.begin() + i + 1, nNew );
+					break;
+				}
+			}
+	}
+	for ( std::uint32_t f = 0; f < result.m_Faces.size(); f++ )
+		if ( SplitFace( result, f, inserted[ 0 ], inserted[ 1 ] ) )
+		{
+			mesh = std::move( result );
+			return true;
+		}
+	return false;
+}
+
+//-----------------------------------------------------------------------------
 // Purpose: A face that isn't flat becomes a fan of triangles when the brush is to be split (so
 //          each piece's faces are flat), and stays one bent side when it is to be kept.
 //-----------------------------------------------------------------------------
@@ -810,74 +930,152 @@ BrushSolids_t ToSolids( const CMap &map, const Solid_t &source, const CBrushMesh
 		result.m_Solids.push_back( std::move( solid ) );
 		return result;
 	}
-	result.m_Solids = SplitConvex( map, source, faces, mesh.m_Vertices );
+	std::string szSplit;
+	result.m_Solids = SplitConvex( map, source, faces, mesh.m_Vertices, szSplit );
 	if ( result.m_Solids.empty() )
-		result.m_szProblem = "it couldn't be split into convex pieces";
+		result.m_szProblem = szSplit.empty() ? "it couldn't be split into convex pieces" : szSplit;
 	return result;
 }
 
 //-----------------------------------------------------------------------------
-// Purpose: Every plane through three of the points with all the others behind it; brushes have
-//          few corners, so the plain way is quick enough and exact.
+// Purpose: Build a supporting hull incrementally so large brush selections avoid enumerating triples.
 //-----------------------------------------------------------------------------
 std::optional<std::vector<Plane_t>> ConvexHull( std::span<const Point_t> input, double flEpsilon )
 {
 	std::vector<Point_t> points;
-	for ( const Point_t &p : input )
+	for ( const auto &point : input )
 	{
-		if ( std::ranges::none_of( points, [ & ]( const Point_t &q ) { return Length( Subtract( p, q ) ) <= flEpsilon; } ) )
-			points.push_back( p );
+		for ( double value : point )
+			if ( !std::isfinite( value ) )
+				return std::nullopt;
+		if ( std::ranges::none_of( points, [ & ]( Point_t other ) { return Length( Subtract( point, other ) ) <= flEpsilon; } ) )
+			points.push_back( point );
 	}
-	std::vector<Plane_t> planes;
-	const std::size_t n = points.size();
-	for ( std::size_t i = 0; i < n; i++ )
+	if ( points.size() < 4 )
+		return std::nullopt;
+	std::size_t a = std::min_element( points.begin(), points.end(), []( Point_t p, Point_t q ) { return p[ 0 ] < q[ 0 ]; } ) - points.begin(), b = a, c = a, d = a;
+	double flBest = 0;
+	for ( std::size_t i = 0; i < points.size(); ++i )
 	{
-		for ( std::size_t j = i + 1; j < n; j++ )
+		double distance = Dot( Subtract( points[ i ], points[ a ] ), Subtract( points[ i ], points[ a ] ) );
+		if ( distance > flBest )
 		{
-			for ( std::size_t k = j + 1; k < n; k++ )
-			{
-				const Point_t normal = Cross( Subtract( points[ j ], points[ i ] ), Subtract( points[ k ], points[ i ] ) );
-				if ( Length( normal ) < 1e-9 )
-					continue;
-				Plane_t plane{ Normalized( normal ), 0.0 };
-				plane.m_flDistance = Dot( plane.m_Normal, points[ i ] );
-				bool bFront = false, bBack = false;
-				for ( const Point_t &p : points )
-				{
-					const double d = plane.Distance( p );
-					bFront |= d > flEpsilon;
-					bBack |= d < -flEpsilon;
-				}
-				if ( bFront && bBack )
-					continue;
-				if ( bFront )
-					plane = { Scale( plane.m_Normal, -1.0 ), -plane.m_flDistance };
-				if ( !bFront && !bBack )
-					continue; // every point on it: no volume this way
-				if ( std::ranges::none_of( planes, [ & ]( const Plane_t &p ) { return Dot( p.m_Normal, plane.m_Normal ) > 1.0 - 1e-9 && std::abs( p.m_flDistance - plane.m_flDistance ) <= flEpsilon; } ) )
-					planes.push_back( plane );
-			}
+			flBest = distance;
+			b = i;
 		}
 	}
-	if ( planes.size() < 4 )
+	if ( flBest <= flEpsilon * flEpsilon )
 		return std::nullopt;
-	return planes;
+	flBest = 0;
+	for ( std::size_t i = 0; i < points.size(); ++i )
+	{
+		double distance = Length( Cross( Subtract( points[ b ], points[ a ] ), Subtract( points[ i ], points[ a ] ) ) );
+		if ( distance > flBest )
+		{
+			flBest = distance;
+			c = i;
+		}
+	}
+	if ( flBest <= flEpsilon * Length( Subtract( points[ b ], points[ a ] ) ) )
+		return std::nullopt;
+	const auto normal = Normalized( Cross( Subtract( points[ b ], points[ a ] ), Subtract( points[ c ], points[ a ] ) ) );
+	flBest = 0;
+	for ( std::size_t i = 0; i < points.size(); ++i )
+	{
+		double distance = std::abs( Dot( normal, Subtract( points[ i ], points[ a ] ) ) );
+		if ( distance > flBest )
+		{
+			flBest = distance;
+			d = i;
+		}
+	}
+	if ( flBest <= flEpsilon )
+		return std::nullopt;
+	const auto inside = Scale( Add( Add( points[ a ], points[ b ] ), Add( points[ c ], points[ d ] ) ), 0.25 );
+	struct Triangle_t
+	{
+		std::size_t a, b, c;
+	};
+	std::vector<Triangle_t> faces;
+	auto add = [ & ]( std::size_t i, std::size_t j, std::size_t k ) {auto n=Cross(Subtract(points[j],points[i]),Subtract(points[k],points[i]));if(Dot(n,Subtract(inside,points[i]))>0)std::swap(j,k);faces.push_back({i,j,k}); };
+	add( a, b, c );
+	add( a, d, b );
+	add( b, d, c );
+	add( c, d, a );
+	for ( std::size_t i = 0; i < points.size(); ++i )
+	{
+		if ( i == a || i == b || i == c || i == d )
+			continue;
+		std::vector<bool> visible( faces.size() );
+		bool bOutside = false;
+		std::map<std::pair<std::size_t, std::size_t>, std::pair<std::pair<std::size_t, std::size_t>, int>> edges;
+		for ( std::size_t f = 0; f < faces.size(); ++f )
+		{
+			const auto &face = faces[ f ];
+			const auto n = Cross( Subtract( points[ face.b ], points[ face.a ] ), Subtract( points[ face.c ], points[ face.a ] ) );
+			if ( Dot( n, Subtract( points[ i ], points[ face.a ] ) ) <= flEpsilon * Length( n ) )
+				continue;
+			visible[ f ] = true;
+			bOutside = true;
+			for ( auto edge : { std::pair{ face.a, face.b }, std::pair{ face.b, face.c }, std::pair{ face.c, face.a } } )
+			{
+				auto &entry = edges[ { std::min( edge.first, edge.second ), std::max( edge.first, edge.second ) } ];
+				entry.first = edge;
+				++entry.second;
+			}
+		}
+		if ( !bOutside )
+			continue;
+		std::vector<Triangle_t> kept;
+		for ( std::size_t f = 0; f < faces.size(); ++f )
+			if ( !visible[ f ] )
+				kept.push_back( faces[ f ] );
+		faces = std::move( kept );
+		for ( const auto &[ key, entry ] : edges )
+			if ( entry.second == 1 )
+				add( entry.first.first, entry.first.second, i );
+	}
+	std::vector<Plane_t> planes;
+	for ( const auto &face : faces )
+	{
+		const auto cross = Cross( Subtract( points[ face.b ], points[ face.a ] ), Subtract( points[ face.c ], points[ face.a ] ) );
+		if ( Length( cross ) < 1e-10 )
+			continue;
+		const auto n = Normalized( cross );
+		const Plane_t plane{ n, Dot( n, points[ face.a ] ) };
+		if ( std::ranges::any_of( points, [ & ]( Point_t point ) { return plane.Distance( point ) > flEpsilon * 2; } ) )
+			return std::nullopt;
+		if ( std::ranges::none_of( planes, [ & ]( const Plane_t &other ) { return Dot( plane.m_Normal, other.m_Normal ) > 1 - 1e-9 && std::abs( plane.m_flDistance - other.m_flDistance ) <= flEpsilon; } ) )
+			planes.push_back( plane );
+	}
+	return planes.size() >= 4 ? std::optional{ planes } : std::nullopt;
 }
 
 //-----------------------------------------------------------------------------
 // Purpose:
 //-----------------------------------------------------------------------------
-std::vector<std::uint32_t> CornersOf( const CBrushMesh &mesh, BrushPartKind_t nKind, std::uint32_t nIndex )
+BrushMeshParts_t BrushMeshParts_t::FromGeometry( const SolidGeometry_t &shape )
+{
+	BrushMeshParts_t parts;
+	parts.m_Mesh = CBrushMesh::FromGeometry( shape );
+	parts.m_Edges = parts.m_Mesh.GetEdges();
+	return parts;
+}
+
+namespace
+{
+
+//-----------------------------------------------------------------------------
+// Purpose: The corners of a part, an edge's looked up in edges.
+//-----------------------------------------------------------------------------
+std::vector<std::uint32_t> CornersIn( const CBrushMesh &mesh, std::span<const std::pair<std::uint32_t, std::uint32_t>> edges, BrushPartKind_t nKind, std::uint32_t nIndex )
 {
 	switch ( nKind )
 	{
 		case BrushPartKind_t::BRUSH_PART_VERTEX:
 			return nIndex < mesh.m_Vertices.size() ? std::vector<std::uint32_t>{ nIndex } : std::vector<std::uint32_t>{};
 		case BrushPartKind_t::BRUSH_PART_EDGE:
-		{
-			const auto edges = mesh.GetEdges();
 			return nIndex < edges.size() ? std::vector<std::uint32_t>{ edges[ nIndex ].first, edges[ nIndex ].second } : std::vector<std::uint32_t>{};
-		}
 		case BrushPartKind_t::BRUSH_PART_FACE:
 			return nIndex < mesh.m_Faces.size() ? mesh.m_Faces[ nIndex ].m_Corners : std::vector<std::uint32_t>{};
 	}
@@ -885,27 +1083,57 @@ std::vector<std::uint32_t> CornersOf( const CBrushMesh &mesh, BrushPartKind_t nK
 }
 
 //-----------------------------------------------------------------------------
-// Purpose:
+// Purpose: The average of the corners.
 //-----------------------------------------------------------------------------
-Point_t PartPosition( const CBrushMesh &mesh, BrushPartKind_t nKind, std::uint32_t nIndex )
+Point_t CentreOf( const CBrushMesh &mesh, std::span<const std::uint32_t> corners )
 {
-	const std::vector<std::uint32_t> corners = CornersOf( mesh, nKind, nIndex );
 	Point_t centre{};
 	for ( const std::uint32_t n : corners )
 		centre = Add( centre, mesh.m_Vertices[ n ] );
 	return corners.empty() ? centre : Scale( centre, 1.0 / static_cast<double>( corners.size() ) );
 }
 
+} // namespace
+
 //-----------------------------------------------------------------------------
-// Purpose: A corner named by several parts moves once. Pieces after the first a split makes
-//          are new solids, numbered after the map's.
+// Purpose: Only an edge needs the edge list.
+//-----------------------------------------------------------------------------
+std::vector<std::uint32_t> CornersOf( const CBrushMesh &mesh, BrushPartKind_t nKind, std::uint32_t nIndex )
+{
+	return nKind == BrushPartKind_t::BRUSH_PART_EDGE ? CornersIn( mesh, mesh.GetEdges(), nKind, nIndex ) : CornersIn( mesh, {}, nKind, nIndex );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+std::vector<std::uint32_t> CornersOf( const BrushMeshParts_t &parts, BrushPartKind_t nKind, std::uint32_t nIndex )
+{
+	return CornersIn( parts.m_Mesh, parts.m_Edges, nKind, nIndex );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+Point_t PartPosition( const CBrushMesh &mesh, BrushPartKind_t nKind, std::uint32_t nIndex )
+{
+	return CentreOf( mesh, CornersOf( mesh, nKind, nIndex ) );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+Point_t PartPosition( const BrushMeshParts_t &parts, BrushPartKind_t nKind, std::uint32_t nIndex )
+{
+	return CentreOf( parts.m_Mesh, CornersOf( parts, nKind, nIndex ) );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: A corner named by several parts moves once, by the transform; texture lock follows
+//          the faces it moves whole.
 //-----------------------------------------------------------------------------
 MapEdit_t MoveParts( const CScene &scene, std::span<const BrushPart_t> parts, const Transform_t &transform, BrushConcave_t nConcave, std::vector<std::uint32_t> *pAdded, std::string *pProblem )
 {
-	if ( pProblem )
-		pProblem->clear();
-	MapEdit_t edit;
-	std::map<std::uint32_t, std::vector<std::uint32_t>> bySolid;
+	std::vector<BrushCornerMove_t> moves;
 	std::map<std::uint32_t, CBrushMesh> meshes;
 	for ( const BrushPart_t &part : parts )
 	{
@@ -915,52 +1143,110 @@ MapEdit_t MoveParts( const CScene &scene, std::span<const BrushPart_t> parts, co
 		auto [ it, bNew ] = meshes.try_emplace( nSolid );
 		if ( bNew )
 			it->second = CBrushMesh::FromGeometry( scene.m_Solids[ nSolid ] );
-		const std::vector<std::uint32_t> corners = CornersOf( it->second, part.m_nKind, part.m_nIndex );
-		bySolid[ nSolid ].insert( bySolid[ nSolid ].end(), corners.begin(), corners.end() );
+		for ( const std::uint32_t n : CornersOf( it->second, part.m_nKind, part.m_nIndex ) )
+			moves.push_back( { part.m_nObject, n, transform.Apply( it->second.m_Vertices[ n ] ), true } );
 	}
+	return MoveCorners( scene, moves, &transform, nConcave, pAdded, pProblem );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Each named corner to its place (the first move of a corner named twice), each solid
+//          then refitted. Pieces after the first a split makes are new solids, numbered after
+//          the map's.
+//-----------------------------------------------------------------------------
+MapEdit_t MoveCorners( const CScene &scene, std::span<const BrushCornerMove_t> moves, const Transform_t *pLock, BrushConcave_t nConcave, std::vector<std::uint32_t> *pAdded, std::string *pProblem )
+{
+	if ( pProblem )
+		pProblem->clear();
+	MapEdit_t edit;
+	// Per solid: each corner's place, and whether the lock's transform put it there.
+	std::map<std::uint32_t, std::map<std::uint32_t, std::pair<Point_t, bool>>> bySolid;
+	for ( const BrushCornerMove_t &move : moves )
+	{
+		if ( move.m_nObject >= scene.GetObjectCount() || !scene.IsSolidObject( move.m_nObject ) || scene.IsDeleted( move.m_nObject ) )
+			continue;
+		bySolid[ scene.GetIndex( move.m_nObject ) ].try_emplace( move.m_nCorner, move.m_To, move.m_bLocked && pLock );
+	}
+	// Each solid refitted on its own (on all the cores: a move of many brushes previews at each
+	// step of the pointer); the ids and groups are given after, in the solids' order.
+	struct Refit_t
+	{
+		std::uint32_t m_nSolid = 0;
+		const std::map<std::uint32_t, std::pair<Point_t, bool>> *m_pCorners = nullptr;
+		BrushSolids_t m_Solids;
+		bool m_bDisplaced = false;
+	};
+	std::vector<Refit_t> refits;
+	refits.reserve( bySolid.size() );
+	for ( const auto &[ nSolid, corners ] : bySolid )
+		refits.push_back( { nSolid, &corners, {}, false } );
+	ParallelFor( refits.size(), 1, [ & ]( std::size_t nBegin, std::size_t nEnd ) {
+		for ( std::size_t r = nBegin; r < nEnd; r++ )
+		{
+			Refit_t &refit = refits[ r ];
+			const auto &corners = *refit.m_pCorners;
+			CBrushMesh mesh = CBrushMesh::FromGeometry( scene.m_Solids[ refit.m_nSolid ] );
+			const Solid_t &source = scene.m_Map.m_Solids[ refit.m_nSolid ];
+			bool bAny = false;
+			for ( const auto &[ n, place ] : corners )
+			{
+				if ( n < mesh.m_Vertices.size() )
+				{
+					mesh.m_Vertices[ n ] = place.first;
+					bAny = true;
+				}
+			}
+			if ( !bAny )
+				continue;
+			for ( const BrushFace_t &face : mesh.m_Faces )
+			{
+				if ( face.m_nSide >= 0 && source.m_Sides[ face.m_nSide ].m_pDisp && std::ranges::any_of( face.m_Corners, [ & ]( std::uint32_t n ) { return corners.contains( n ); } ) )
+					refit.m_bDisplaced = true;
+			}
+			if ( refit.m_bDisplaced )
+				continue;
+			Solid_t textured = source;
+			if ( pLock )
+			{
+				const Solid_t transformed = TransformSolid( source, *pLock, true );
+				for ( const BrushFace_t &face : mesh.m_Faces )
+				{
+					if ( face.m_nSide >= 0 && std::ranges::all_of( face.m_Corners, [ & ]( std::uint32_t n ) { const auto it = corners.find( n ); return it != corners.end() && it->second.second; } ) )
+					{
+						textured.m_Sides[ face.m_nSide ].m_UAxis = transformed.m_Sides[ face.m_nSide ].m_UAxis;
+						textured.m_Sides[ face.m_nSide ].m_VAxis = transformed.m_Sides[ face.m_nSide ].m_VAxis;
+					}
+				}
+			}
+			refit.m_Solids = ToSolids( scene.m_Map, textured, mesh, nConcave );
+			if ( refit.m_Solids.m_Solids.empty() && refit.m_Solids.m_szProblem.empty() )
+				refit.m_Solids.m_szProblem = "the brush couldn't be rebuilt";
+		}
+	} );
 	int nNextId = scene.m_nNextObjectId;
 	int nNextSide = scene.m_nNextSideId;
 	std::vector<std::uint32_t> addedObjects;
 	std::uint32_t nObject = scene.GetObjectCount();
 	auto nNewIndex = static_cast<std::uint32_t>( scene.m_Map.m_Solids.size() );
-	for ( auto &[ nSolid, corners ] : bySolid )
+	for ( Refit_t &refit : refits )
 	{
-		std::ranges::sort( corners );
-		corners.erase( std::ranges::unique( corners ).begin(), corners.end() );
-		CBrushMesh &mesh = meshes[ nSolid ];
-		if ( corners.empty() )
-			continue;
-		const Solid_t &source = scene.m_Map.m_Solids[ nSolid ];
-		for ( const BrushFace_t &face : mesh.m_Faces )
+		if ( refit.m_bDisplaced )
 		{
-			if ( face.m_nSide < 0 || !source.m_Sides[ face.m_nSide ].m_pDisp )
-				continue;
-			if ( std::ranges::any_of( face.m_Corners, [ & ]( std::uint32_t n ) { return std::ranges::binary_search( corners, n ); } ) )
-			{
-				if ( pProblem )
-					*pProblem = "the selection touches a displacement's corners";
-				return {};
-			}
+			if ( pProblem )
+				*pProblem = "the selection touches a displacement's corners";
+			return {};
 		}
-		for ( const std::uint32_t n : corners )
-			mesh.m_Vertices[ n ] = transform.Apply( mesh.m_Vertices[ n ] );
-		Solid_t textured = source;
-		const Solid_t transformed = TransformSolid( source, transform, true );
-		for ( const BrushFace_t &face : mesh.m_Faces )
-		{
-			if ( face.m_nSide >= 0 && std::ranges::all_of( face.m_Corners, [ & ]( std::uint32_t n ) { return std::ranges::binary_search( corners, n ); } ) )
-			{
-				textured.m_Sides[ face.m_nSide ].m_UAxis = transformed.m_Sides[ face.m_nSide ].m_UAxis;
-				textured.m_Sides[ face.m_nSide ].m_VAxis = transformed.m_Sides[ face.m_nSide ].m_VAxis;
-			}
-		}
-		BrushSolids_t solids = ToSolids( scene.m_Map, textured, mesh, nConcave );
+		BrushSolids_t &solids = refit.m_Solids;
 		if ( solids.m_Solids.empty() )
 		{
+			if ( solids.m_szProblem.empty() )
+				continue; // no corner of it named
 			if ( pProblem )
 				*pProblem = solids.m_szProblem;
 			return {};
 		}
+		const std::uint32_t nSolid = refit.m_nSolid;
+		const Solid_t &source = scene.m_Map.m_Solids[ nSolid ];
 		if ( solids.m_Solids.size() > 1 && source.m_Editor.m_nGroup == 0 )
 		{
 			Group_t group;

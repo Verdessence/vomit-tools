@@ -609,12 +609,18 @@ bool CMapCompileDialog::Run()
 	// With the cordon on, Hammer++ compiles the map with what lies outside the cordon left out,
 	// as if hidden, and the BSP is the map's own. The copy holding only what is inside, sealed
 	// with walls, is written as <map>.vmf in a folder of its own (the instances' files pointed at
-	// from there) and compiled from there; vrad's <map>.rad goes with it.
+	// from there) and compiled from there; vrad's <map>.rad goes with it. A map whose brushes
+	// have faces on one plane (split faces, loop cuts) is compiled from such a copy too, with
+	// those faces made one: vbsp refuses them, and the map itself keeps them.
 	m_pCordonFolder.reset();
-	if ( m_Editor.IsCordonActive() )
+	std::size_t nMerged = 0;
+	const xv::map::CScene &scene = *m_Editor.GetDocument().GetScene();
+	const xv::map::MapEdit_t merge = xv::map::MergeCoplanarSides( scene, &nMerged );
+	if ( m_Editor.IsCordonActive() || nMerged > 0 )
 	{
+		const std::shared_ptr<const xv::map::CScene> pMerged = nMerged > 0 ? xv::map::ApplyEdit( scene, merge ) : nullptr;
 		const QFileInfo map( m_Editor.GetPath() );
-		auto pFolder = std::make_unique<QTemporaryDir>( QDir::temp().filePath( QStringLiteral( "vomit-tools-cordon-XXXXXX" ) ) );
+		auto pFolder = std::make_unique<QTemporaryDir>( QDir::temp().filePath( QStringLiteral( "vomit-tools-compile-XXXXXX" ) ) );
 		xv::map::MapCopy_t copy;
 		copy.m_Instances.m_MapFile = map.absoluteFilePath().toStdString();
 		if ( const std::optional<std::filesystem::path> path = GameInstancePath( *m_Editor.GetDocument().GetGame() ) )
@@ -624,10 +630,10 @@ bool CMapCompileDialog::Run()
 		copy.m_CopyFolder = pFolder->path().toStdString();
 		const QString szCopy = QDir( pFolder->path() ).filePath( map.fileName() );
 		QFile file( szCopy );
-		const std::string szText = xv::map::CordonedMapText( *m_Editor.GetDocument().GetScene(), mapstyle::CORDON_MATERIAL, copy );
+		const std::string szText = xv::map::CordonedMapText( pMerged ? *pMerged : scene, mapstyle::CORDON_MATERIAL, copy );
 		if ( !pFolder->isValid() || !file.open( QIODevice::WriteOnly | QIODevice::Truncate ) || file.write( szText.data(), static_cast<qint64>( szText.size() ) ) != static_cast<qint64>( szText.size() ) )
 		{
-			m_pLog->appendPlainText( tr( "The cordoned copy %1 couldn't be written, so nothing was compiled." ).arg( szCopy ) );
+			m_pLog->appendPlainText( tr( "The copy to compile, %1, couldn't be written, so nothing was compiled." ).arg( szCopy ) );
 			return false;
 		}
 		file.close();
@@ -637,7 +643,10 @@ bool CMapCompileDialog::Run()
 			QFile::copy( szRad, QDir( pFolder->path() ).filePath( map.completeBaseName() + QStringLiteral( ".rad" ) ) );
 		}
 		m_pCordonFolder = std::move( pFolder );
-		m_pLog->appendPlainText( tr( "Cordon on: compiling only what is inside the cordon, sealed with %1; the BSP is %2's own." ).arg( QString::fromUtf8( mapstyle::CORDON_MATERIAL.data(), static_cast<qsizetype>( mapstyle::CORDON_MATERIAL.size() ) ), map.completeBaseName() ) );
+		if ( m_Editor.IsCordonActive() )
+			m_pLog->appendPlainText( tr( "Cordon on: compiling only what is inside the cordon, sealed with %1; the BSP is %2's own." ).arg( QString::fromUtf8( mapstyle::CORDON_MATERIAL.data(), static_cast<qsizetype>( mapstyle::CORDON_MATERIAL.size() ) ), map.completeBaseName() ) );
+		if ( nMerged > 0 )
+			m_pLog->appendPlainText( tr( "%n brush(es) have faces on one plane (split faces, loop cuts): the compilers get them as one face; the map keeps them.", nullptr, static_cast<int>( nMerged ) ) );
 	}
 	const std::vector<xv::map::ResolvedCommand_t> commands = GetCommands();
 	if ( commands.empty() )

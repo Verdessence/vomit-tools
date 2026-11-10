@@ -24,6 +24,7 @@
 #include <QPainter>
 #include <QCursor>
 #include <QPixmap>
+#include <QRegion>
 #include <QPainterPath>
 #include <QScrollBar>
 #include <QWheelEvent>
@@ -662,26 +663,23 @@ void CMapView2D::PaintGrid( QPainter &painter, const QRectF &all ) const
 {
 	const MapViewSettings_t &settings = m_Editor.GetSettings();
 	// The map can't reach past its limit, so neither does the grid: a line stops at the edge,
-	// and beyond it there is only the background.
+	// and beyond it there is only the background, or the grid again in a colour of its own.
 	const double flLimit = GetWorldLimit();
-	const QRectF visible = all.intersected( QRectF{ -flLimit, -flLimit, 2.0 * flLimit, 2.0 * flLimit } );
-	if ( visible.isEmpty() )
-	{
-		return;
-	}
-	const QRectF edge = QRectF{ ToWidget( visible.topLeft() ), ToWidget( visible.bottomRight() ) }.normalized();
-	auto lines = [ & ]( double flSpacing, const QColor &color ) {
+	const QRectF inside{ -flLimit, -flLimit, 2.0 * flLimit, 2.0 * flLimit };
+	const QRectF visible = all.intersected( inside );
+	auto lines = [ & ]( const QRectF &area, double flSpacing, const QColor &color ) {
 		if ( flSpacing <= 0.0 )
 		{
 			return;
 		}
+		const QRectF edge = QRectF{ ToWidget( area.topLeft() ), ToWidget( area.bottomRight() ) }.normalized();
 		std::vector<QLineF> found;
-		for ( double x = std::ceil( visible.left() / flSpacing ) * flSpacing; x <= visible.right(); x += flSpacing )
+		for ( double x = std::ceil( area.left() / flSpacing ) * flSpacing; x <= area.right(); x += flSpacing )
 		{
 			const double flPixel = std::round( ToWidget( { x, 0 } ).x() ) + 0.5;
 			found.emplace_back( flPixel, edge.top(), flPixel, edge.bottom() );
 		}
-		for ( double y = std::ceil( visible.top() / flSpacing ) * flSpacing; y <= visible.bottom(); y += flSpacing )
+		for ( double y = std::ceil( area.top() / flSpacing ) * flSpacing; y <= area.bottom(); y += flSpacing )
 		{
 			const double flPixel = std::round( ToWidget( { 0, y } ).y() ) + 0.5;
 			found.emplace_back( edge.left(), flPixel, edge.right(), flPixel );
@@ -689,14 +687,37 @@ void CMapView2D::PaintGrid( QPainter &painter, const QRectF &all ) const
 		painter.setPen( QPen{ color, 0 } );
 		painter.drawLines( found.data(), static_cast<int>( found.size() ) );
 	};
+	const GridPlan_t plan = PlanGrid( m_flZoom, settings.m_nGridSize, settings.m_nHighlightEvery, settings.m_bHideSmallGrid, Look().m_flHideGridBelow );
+	if ( settings.m_bShowGrid && Look().m_bGridBeyond && visible != all )
+	{
+		// Clipped to what lies outside the map, so the lines inside keep their own colours.
+		QRegion outside{ rect() };
+		if ( !visible.isEmpty() )
+		{
+			const QRectF edge = QRectF{ ToWidget( visible.topLeft() ), ToWidget( visible.bottomRight() ) }.normalized();
+			outside -= QRegion{ edge.toAlignedRect() };
+		}
+		const QColor beyond = Look().m_Colors.m_GridBeyond;
+		painter.save();
+		painter.setClipRegion( outside, Qt::IntersectClip );
+		lines( all, plan.m_flBase, beyond );
+		lines( all, plan.m_flSixtyFour, beyond.lighter( 150 ) );
+		lines( all, plan.m_flHighlight, beyond.lighter( 150 ) );
+		lines( all, plan.m_fl1024, beyond.lighter( 200 ) );
+		painter.restore();
+	}
+	if ( visible.isEmpty() )
+	{
+		return;
+	}
+	const QRectF edge = QRectF{ ToWidget( visible.topLeft() ), ToWidget( visible.bottomRight() ) }.normalized();
 	if ( settings.m_bShowGrid )
 	{
 		const MapColors_t &colors = Look().m_Colors;
-		const GridPlan_t plan = PlanGrid( m_flZoom, settings.m_nGridSize, settings.m_nHighlightEvery, settings.m_bHideSmallGrid, Look().m_flHideGridBelow );
-		lines( plan.m_flBase, colors.m_Grid );
-		lines( plan.m_flSixtyFour, colors.m_GridHighlight );
-		lines( plan.m_flHighlight, colors.m_GridHighlight );
-		lines( plan.m_fl1024, colors.m_Grid1024 );
+		lines( visible, plan.m_flBase, colors.m_Grid );
+		lines( visible, plan.m_flSixtyFour, colors.m_GridHighlight );
+		lines( visible, plan.m_flHighlight, colors.m_GridHighlight );
+		lines( visible, plan.m_fl1024, colors.m_Grid1024 );
 	}
 	// The axes show with or without the grid.
 	painter.setPen( QPen{ Look().m_Colors.m_Axis, 0 } );
@@ -1045,7 +1066,7 @@ void CMapView2D::PaintEntityHelpers( QPainter &painter, std::uint32_t nObject ) 
 		if ( handle.m_nObject == nObject )
 			painter.fillRect( QRectF{ handle.m_At.x() - flHalf, handle.m_At.y() - flHalf, flHalf * 2.0, flHalf * 2.0 }, painter.pen().color() );
 	}
-	for ( const xv::map::HelperLine_t &helper : xv::map::DescribeHelpers( *pScene, pScene->GetIndex( nObject ) ).m_Lines )
+	for ( const xv::map::HelperLine_t &helper : GetDocument().GetHelpers( pScene->GetIndex( nObject ) ).m_Lines )
 	{
 		painter.setPen( QPen{ QColor{ helper.m_Color.m_nR, helper.m_Color.m_nG, helper.m_Color.m_nB }, 0 } );
 		painter.drawLine( ToWidget( Flatten( helper.m_From ) ), ToWidget( Flatten( helper.m_To ) ) );
@@ -1058,6 +1079,8 @@ void CMapView2D::PaintEntityHelpers( QPainter &painter, std::uint32_t nObject ) 
 //-----------------------------------------------------------------------------
 void CMapView2D::PaintSelection( QPainter &painter ) const
 {
+	if ( m_Editor.GetTool() == MapTool_t::MAP_TOOL_BRUSH_EDIT )
+		return;
 	const CMapDocument &document = GetDocument();
 	auto dotted = [ & ]( const QRectF &box ) {
 		QPen pen{ Look().m_Colors.m_ToolSelection, 0, Qt::DotLine };
@@ -1778,7 +1801,7 @@ void CMapView2D::PressClip( QPointF at, Qt::KeyboardModifiers modifiers )
 	}
 	// A new line: both ends here until the mouse moves.
 	const QPointF from{ Snap( m_ClipDragFrom.x(), modifiers ), Snap( m_ClipDragFrom.y(), modifiers ) };
-	CMapEditor::ClipLine_t line;
+	CMapEditor::ClipLine_t line{};
 	line.m_nAxis = 3 - GetAxis( 0 ) - GetAxis( 1 );
 	line.m_From[ static_cast<std::size_t>( GetAxis( 0 ) ) ] = from.x();
 	line.m_From[ static_cast<std::size_t>( GetAxis( 1 ) ) ] = from.y();
@@ -2638,6 +2661,11 @@ void CMapView2D::mouseReleaseEvent( QMouseEvent *pEvent )
 //-----------------------------------------------------------------------------
 void CMapView2D::wheelEvent( QWheelEvent *pEvent )
 {
+	if ( m_Editor.GetBrushEdit().HandleEvent( *this, pEvent ) )
+	{
+		pEvent->accept();
+		return;
+	}
 	const double flNotches = pEvent->angleDelta().y() / 120.0;
 	if ( flNotches != 0.0 )
 	{

@@ -12,6 +12,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <memory>
+#include <unordered_map>
 #include <optional>
 #include <thread>
 #include <vector>
@@ -69,6 +70,9 @@ public:
 	// Every path_track's and path_corner's link to its next corner in the scene shown, worked
 	// out once per scene for the views that draw them all.
 	[[nodiscard]] const std::vector<xv::map::PathLink_t> &GetPathLinks() const;
+	// An entity's FGD helpers (by its index), kept until the scene changes: the views draw the
+	// selection's on every frame, and finding what they point at searches the whole map.
+	[[nodiscard]] const xv::map::EntityHelpers_t &GetHelpers( std::uint32_t nEntity ) const;
 	[[nodiscard]] const std::optional<xv::vfs::CGameInfo> &GetGame() const { return m_Game; }
 	// How many maps have finished loading: an edit makes a new scene, but the same map.
 	[[nodiscard]] int GetLoadCount() const { return m_nLoads; }
@@ -81,6 +85,9 @@ public:
 	// Edits go through the undo stack: szName names them in Edit > Undo. The selection becomes
 	// selectAfter (or stays, when it is null), and goes back with an undo.
 	void Edit( xv::map::MapEdit_t edit, const QString &szName, std::optional<std::vector<std::uint32_t>> selectAfter = std::nullopt );
+	// Rebuild the last modeling command against its original snapshot, retaining one undo step.
+	bool ReplaceLastEdit( xv::map::MapEdit_t edit, const QString &szName, std::shared_ptr<const xv::map::CScene> pBase, const std::vector<std::uint32_t> &selectionBefore );
+	void SetLastEditSelection( std::vector<std::uint32_t> objects );
 	[[nodiscard]] QUndoStack *GetUndoStack() const { return m_pUndo; }
 	[[nodiscard]] bool IsModified() const;
 	// Read from an autosave (Source_t::m_bRecovered) and not saved since.
@@ -174,6 +181,8 @@ private:
 	// address isn't taken for it).
 	mutable std::weak_ptr<const xv::map::CScene> m_pPathLinkScene;
 	mutable std::vector<xv::map::PathLink_t> m_PathLinks;
+	mutable std::weak_ptr<const xv::map::CScene> m_pHelperScene; // GetHelpers' scene, as above
+	mutable std::unordered_map<std::uint32_t, xv::map::EntityHelpers_t> m_Helpers;
 	QUndoStack *m_pUndo = nullptr;
 	QStringList m_EditListenerCosts;
 	double m_flPreviewMs = 0.0;

@@ -81,7 +81,7 @@ bool TargetExists( std::string_view szTarget, const std::set<std::string> &names
 //-----------------------------------------------------------------------------
 // Purpose:
 //-----------------------------------------------------------------------------
-std::vector<Problem_t> CheckMap( const CScene &scene, const std::function<bool( std::uint32_t )> &pfnInclude )
+std::vector<Problem_t> CheckMap( const CScene &scene, const std::function<bool( std::uint32_t )> &pfnInclude, const ParticleLookup_t &pfnParticle )
 {
 	std::vector<Problem_t> problems;
 	const CMap &map = scene.m_Map;
@@ -124,6 +124,17 @@ std::vector<Problem_t> CheckMap( const CScene &scene, const std::function<bool( 
 		}
 		if ( ( szClass == "info_overlay" || szClass == "info_overlay_transition" ) && entity.GetValue( "sides" ).find_first_not_of( " \t\r\n" ) == std::string_view::npos )
 			problems.push_back( { ProblemKind_t::PROBLEM_OVERLAY_NO_FACES, nObject, "Overlay has no assigned faces.", "sides", false } );
+		if ( pfnParticle && Lower( szClass ) == "info_particle_system" && !entity.GetValue( "effect_name" ).empty() )
+		{
+			// The game loads only the files particles_manifest.txt and the map's own
+			// maps/<map>_particles.txt list; the views play the others anyway.
+			const std::string szEffect{ entity.GetValue( "effect_name" ) };
+			const ParticleSource_t source = pfnParticle( szEffect );
+			if ( !source.m_bFound )
+				problems.push_back( { ProblemKind_t::PROBLEM_PARTICLE_MISSING, nObject, "Particle system (" + NameOf( entity ) + "): no particle file has " + szEffect + ".", "effect_name", false } );
+			else if ( !source.m_szUnlistedFile.empty() )
+				problems.push_back( { ProblemKind_t::PROBLEM_PARTICLE_UNLISTED, nObject, "Particle system (" + NameOf( entity ) + "): " + szEffect + " is in " + source.m_szUnlistedFile + ", which no particle manifest lists (the game won't load it).", "effect_name", false } );
+		}
 		const FgdClass_t *pClass = scene.m_pFgd ? scene.m_pFgd->Find( szClass ) : nullptr;
 		const bool bSolids = std::ranges::any_of( entity.m_Solids, [ & ]( std::uint32_t nSolid ) { return nSolid < map.m_Solids.size() && !map.m_Solids[ nSolid ].m_bDeleted; } );
 		if ( pClass )

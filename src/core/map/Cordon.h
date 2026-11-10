@@ -50,5 +50,11 @@ struct MapCopy_t
 // active box sealed with walls (cut back where another active box is, so boxes that touch or
 // overlap make one space). The scene's own text when the cordon is off.
 [[nodiscard]] std::string CordonedMapText( const CScene &scene, std::string_view szMaterial, const std::optional<MapCopy_t> &copy = std::nullopt );
+// The faces of a brush that lie on one plane made one, for the copy the compilers get: Split
+// Face and Loop Cut leave such faces (coplanar until moved), which the map keeps, but vbsp
+// refuses a brush with two sides on a plane ("duplicate plane"). The largest piece is kept, with
+// its material and alignment, and overlays on the others move to it; brushes with a displaced
+// piece are left as they are. pMerged counts the brushes changed.
+[[nodiscard]] MapEdit_t MergeCoplanarSides( const CScene &scene, std::size_t *pMerged = nullptr );
 
 } // namespace xv::map

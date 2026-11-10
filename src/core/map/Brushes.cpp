@@ -7,6 +7,7 @@
 #include "Brushes.h"
 
 #include <algorithm>
+#include <atomic>
 #include <iterator>
 #include <optional>
 
@@ -22,6 +23,8 @@ namespace
 // enough that cutting it down keeps double precision.
 constexpr double WINDING_EXTENT = 131072.0;
 constexpr double COORDINATE_LIMIT = 16384.0;
+constexpr double CLIP_EXACT = 1e-6; // a corner this near a plane is on it (rounding only)
+constexpr std::size_t MANY_SIDES = 64; // past this, a brush's faces are built on all the cores
 
 // What building a solid uses over and over, kept on each thread between solids: cutting faces
 // then allocates nothing once these have grown, and only the finished faces are allocated (at
@@ -34,6 +37,7 @@ struct BrushScratch_t
 	std::vector<Point_t> m_Clipped;
 	std::vector<Point_t> m_Plus;
 	std::vector<FaceGeometry_t> m_Faces;
+	std::vector<std::optional<FaceGeometry_t>> m_Built;
 };
 
 //-----------------------------------------------------------------------------
@@ -179,6 +183,85 @@ const FaceGeometry_t *SolidGeometry_t::FindFace( std::uint32_t nSide ) const
 	return it == m_Faces.end() ? nullptr : &*it;
 }
 
+namespace
+{
+
+//-----------------------------------------------------------------------------
+// Purpose: Side i's face: its plane as a big square, cut by every other side's plane. What goes
+//          wrong is added to nProblems.
+//-----------------------------------------------------------------------------
+std::optional<FaceGeometry_t> BuildFace( const Solid_t &solid, const std::vector<std::optional<Plane_t>> &planes, std::size_t i, const BrushOptions_t &options, BrushScratch_t &scratch, std::uint32_t &nProblems )
+{
+	// Clipped exactly first, so that faces meeting at a shallow angle (a fine sphere's
+	// poles, where neighbours lie a fraction of a degree apart) keep the corners they share:
+	// within the tolerance, a whole sliver of face counts as on its neighbour's plane and is
+	// lost, or left with corners its neighbours don't have. Only a side the exact cut leaves
+	// nothing of (two sides Hammer wrote to the same plane give or take its rounding) is cut
+	// again within the tolerance, as Hammer reads it.
+	std::vector<Point_t> &points = scratch.m_Points;
+	for ( const double flClip : { CLIP_EXACT, options.m_flEpsilon } )
+	{
+		BaseWinding( *planes[ i ], WINDING_EXTENT, points );
+		// On a brush of many sides, a ball round what is left: a plane it lies wholly behind
+		// leaves the face as it is, which once the face is small is nearly every plane. (A
+		// brush of a few sides is quicker cut by every plane.)
+		const bool bMany = planes.size() > MANY_SIDES;
+		Point_t centre{};
+		double flRadius = 0;
+		const auto enclose = [ & ]() {
+			if ( !bMany || points.empty() )
+				return;
+			centre = {};
+			for ( const Point_t &p : points )
+				centre = Add( centre, p );
+			centre = Scale( centre, 1.0 / static_cast<double>( points.size() ) );
+			flRadius = 0;
+			for ( const Point_t &p : points )
+				flRadius = std::max( flRadius, Length( Subtract( p, centre ) ) );
+		};
+		enclose();
+		const auto clip = [ & ]( std::size_t j ) {
+			const Plane_t &plane = *planes[ j ];
+			// Nor does one with every corner behind it, though the ball reaches past it.
+			if ( bMany && ( plane.Distance( centre ) + flRadius <= flClip || std::ranges::all_of( points, [ & ]( const Point_t &p ) { return plane.Distance( p ) <= flClip; } ) ) )
+				return;
+			ClipPolygon( points, plane, flClip, scratch.m_Clipped );
+			std::swap( points, scratch.m_Clipped );
+			enclose();
+		};
+		// In the file's order, as Hammer cuts: where sides nearly coincide, which goes first
+		// decides which sliver is left.
+		for ( std::size_t j = 0; j < planes.size() && points.size() >= 3; j++ )
+		{
+			if ( j != i && planes[ j ] )
+				clip( j );
+		}
+		RemoveRepeats( points, options.m_flEpsilon );
+		if ( points.size() >= 3 )
+			break;
+	}
+	if ( points.size() < 3 )
+	{
+		nProblems |= SOLID_PROBLEM_SIDE_WITHOUT_FACE;
+		return std::nullopt;
+	}
+	FaceGeometry_t face;
+	face.m_nSide = static_cast<std::uint32_t>( i );
+	face.m_Plane = *planes[ i ];
+	face.m_bPlusVertices = UsablePlusVertices( solid.m_Sides[ i ].m_PlusVertices, i, planes, options.m_flPlusTolerance, scratch.m_Plus );
+	if ( solid.m_bChanged && !face.m_bPlusVertices && solid.m_Sides[ i ].m_PlusVertices.size() >= 3 )
+	{
+		nProblems |= SOLID_PROBLEM_INVALID_VERTICES;
+		scratch.m_Plus = solid.m_Sides[ i ].m_PlusVertices;
+		face.m_bPlusVertices = true;
+	}
+	const std::vector<Point_t> &corners = face.m_bPlusVertices ? scratch.m_Plus : points;
+	face.m_Points.assign( corners.begin(), corners.end() );
+	return face;
+}
+
+} // namespace
+
 //-----------------------------------------------------------------------------
 // Purpose: Each side's plane as a big square, cut by every other side's plane.
 //-----------------------------------------------------------------------------
@@ -226,46 +309,29 @@ SolidGeometry_t BuildSolid( const Solid_t &solid, const BrushOptions_t &options 
 		geometry.m_nProblems |= SOLID_PROBLEM_TOO_FEW_SIDES;
 	}
 
-	for ( std::size_t i = 0; i < planes.size(); i++ )
+	// A brush of many sides (a fine sphere's thousands) builds its faces on all the cores; each
+	// face is cut on its own, with the thread's own scratch.
+	std::vector<std::optional<FaceGeometry_t>> &built = scratch.m_Built;
+	built.assign( planes.size(), std::nullopt );
+	std::atomic<std::uint32_t> nProblems{ 0 };
+	xv::ParallelFor( planes.size(), planes.size() > MANY_SIDES ? 32 : planes.size(), [ & ]( std::size_t nBegin, std::size_t nEnd ) {
+		BrushScratch_t &own = Scratch();
+		std::uint32_t nFound = 0;
+		for ( std::size_t i = nBegin; i < nEnd; i++ )
+			if ( planes[ i ] )
+				built[ i ] = BuildFace( solid, planes, i, options, own, nFound );
+		nProblems |= nFound;
+	} );
+	geometry.m_nProblems |= nProblems;
+	for ( auto &face : built )
 	{
-		if ( !planes[ i ] )
-		{
+		if ( !face )
 			continue;
-		}
-		std::vector<Point_t> &points = scratch.m_Points;
-		BaseWinding( *planes[ i ], WINDING_EXTENT, points );
-		for ( std::size_t j = 0; j < planes.size() && points.size() >= 3; j++ )
-		{
-			if ( j != i && planes[ j ] )
-			{
-				ClipPolygon( points, *planes[ j ], options.m_flEpsilon, scratch.m_Clipped );
-				std::swap( points, scratch.m_Clipped );
-			}
-		}
-		RemoveRepeats( points, options.m_flEpsilon );
-		if ( points.size() < 3 )
-		{
-			geometry.m_nProblems |= SOLID_PROBLEM_SIDE_WITHOUT_FACE;
-			continue;
-		}
-		FaceGeometry_t face;
-		face.m_nSide = static_cast<std::uint32_t>( i );
-		face.m_Plane = *planes[ i ];
-		face.m_bPlusVertices = UsablePlusVertices( solid.m_Sides[ i ].m_PlusVertices, i, planes, options.m_flPlusTolerance, scratch.m_Plus );
-		if ( solid.m_bChanged && !face.m_bPlusVertices && solid.m_Sides[ i ].m_PlusVertices.size() >= 3 )
-		{
-			geometry.m_nProblems |= SOLID_PROBLEM_INVALID_VERTICES;
-			scratch.m_Plus = solid.m_Sides[ i ].m_PlusVertices;
-			face.m_bPlusVertices = true;
-		}
-		const std::vector<Point_t> &corners = face.m_bPlusVertices ? scratch.m_Plus : points;
-		face.m_Points.assign( corners.begin(), corners.end() );
-		for ( const Point_t &p : face.m_Points )
-		{
+		for ( const Point_t &p : face->m_Points )
 			geometry.m_Bounds.Add( p );
-		}
-		scratch.m_Faces.push_back( std::move( face ) );
+		scratch.m_Faces.push_back( std::move( *face ) );
 	}
+	built.clear();
 	geometry.m_Faces.reserve( scratch.m_Faces.size() );
 	std::ranges::move( scratch.m_Faces, std::back_inserter( geometry.m_Faces ) );
 	scratch.m_Faces.clear();

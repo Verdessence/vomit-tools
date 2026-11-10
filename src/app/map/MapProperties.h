@@ -99,7 +99,9 @@ public:
 	// What Browse picks from: the names of a key type ("sound", "particlesystem", "studio",
 	// "sprite"), and the texture browser for materials and decals (the name picked, if one was).
 	void SetNameSource( std::function<QStringList( const std::string &szType )> pfnNames ) { m_pfnNames = std::move( pfnNames ); }
-	void SetMaterialPicker( std::function<std::optional<QString>( const QString &szCurrent )> pfnPick ) { m_pfnPickMaterial = std::move( pfnPick ); }
+	// Browse for material, decal, sprite and model keys: the texture or model browser, given
+	// the key's type.
+	void SetPicker( std::function<std::optional<QString>( const std::string &szType, const QString &szCurrent )> pfnPick ) { m_pfnPick = std::move( pfnPick ); }
 	void BrowseKey( std::size_t nRow );
 	[[nodiscard]] static bool IsBrowsable( const std::string &szType );
 
@@ -134,7 +136,7 @@ private:
 	QPushButton *m_pPickFaces = nullptr;
 	QPushButton *m_pBrowseKey = nullptr;
 	std::function<QStringList( const std::string &szType )> m_pfnNames;
-	std::function<std::optional<QString>( const QString &szCurrent )> m_pfnPickMaterial;
+	std::function<std::optional<QString>( const std::string &szType, const QString &szCurrent )> m_pfnPick;
 	QString m_szFacePickKey;
 	QPushButton *m_pAddKey = nullptr;
 	QPushButton *m_pRemoveKey = nullptr;

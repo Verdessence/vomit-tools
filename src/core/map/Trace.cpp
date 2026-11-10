@@ -141,4 +141,41 @@ std::vector<TraceHit_t> TraceScene( const RasterScene_t &scene, bool bToolTextur
 	return hits;
 }
 
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+bool TraceBlocked( const RasterScene_t &scene, bool bToolTextures, bool bNodraw, Point_t from, Point_t dir, double flMax, std::span<const CMapMesh *const> occluders, std::uint32_t nSkip )
+{
+	for ( const CMapMesh *pMesh : scene.m_Meshes )
+	{
+		if ( std::ranges::find( occluders, pMesh ) == occluders.end() )
+			continue;
+		const CMapMesh &mesh = *pMesh;
+		std::vector<std::uint8_t> chunkHit( mesh.m_Chunks.size(), 2 ); // 2: not tested yet
+		for ( const MeshBatch_t &batch : mesh.m_Batches )
+		{
+			if ( batch.m_nChunk < mesh.m_Chunks.size() )
+			{
+				std::uint8_t &nHit = chunkHit[ batch.m_nChunk ];
+				if ( nHit == 2 )
+					nHit = HitsBox( mesh.m_Chunks[ batch.m_nChunk ].m_Bounds, from, dir, flMax ) ? 1 : 0;
+				if ( nHit == 0 )
+					continue;
+			}
+			if ( batch.m_nMaterial < scene.m_Materials.size() && IsToggledOff( scene.m_Materials[ batch.m_nMaterial ], bToolTextures, bNodraw ) )
+				continue;
+			for ( std::uint32_t i = batch.m_nFirstIndex; i < batch.m_nFirstIndex + batch.m_nIndexCount; i += 3 )
+			{
+				const MeshVertex_t &a = mesh.m_Vertices[ mesh.m_Indices[ i ] ];
+				if ( a.m_nObject == nSkip || ( a.m_nObject < scene.m_ObjectFlags.size() && !IsDrawn( scene, &mesh, scene.m_ObjectFlags[ a.m_nObject ] ) ) )
+					continue;
+				const auto t = HitsTriangle( ToPoint( a.m_vecPosition ), ToPoint( mesh.m_Vertices[ mesh.m_Indices[ i + 1 ] ].m_vecPosition ), ToPoint( mesh.m_Vertices[ mesh.m_Indices[ i + 2 ] ].m_vecPosition ), from, dir );
+				if ( t && *t <= flMax )
+					return true;
+			}
+		}
+	}
+	return false;
+}
+
 } // namespace xv::map

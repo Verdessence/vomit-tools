@@ -46,6 +46,8 @@ public:
 	[[nodiscard]] QVariant data( const QModelIndex &index, int nRole ) const override;
 
 	void SetNames( QStringList names );
+	// Which rows are sprites (see CMaterialBrowser), in the names' order.
+	void SetSprites( std::vector<bool> sprites );
 	// A picture made at nPictureSize; one made for the size before a change is dropped.
 	void SetPicture( int nRow, const QImage &picture, int nPictureSize );
 	// The size rows are shown at; past 128 the pictures are made again, bigger.
@@ -56,6 +58,7 @@ public:
 	[[nodiscard]] std::vector<int> TakeWanted();
 
 	static constexpr int ROLE_NAME = Qt::UserRole;
+	static constexpr int ROLE_SPRITE = Qt::UserRole + 1;
 
 private:
 	QTimer *m_pNotify = nullptr;
@@ -63,6 +66,7 @@ private:
 	int m_nLastPending = -1;
 	QStringList m_Names;
 	std::vector<QIcon> m_Pictures;
+	std::vector<bool> m_Sprites;
 	mutable std::mutex m_Mutex;
 	mutable std::vector<int> m_Wanted;
 	int m_nSize = 64;
@@ -75,11 +79,15 @@ class CMaterialBrowser : public QDialog
 
 public:
 	// used: the map's materials, for "Only used textures"; szCurrent: picked to start with.
-	CMaterialBrowser( const xv::vfs::CGameInfo &game, QStringList used, const QString &szCurrent, QWidget *pParent = nullptr );
+	// bSprites: for a sprite key, which starts on "Only sprites" (materials drawn with the
+	// Sprite or SpriteCard shader, and everything under sprites/), the rest a tick away.
+	CMaterialBrowser( const xv::vfs::CGameInfo &game, QStringList used, const QString &szCurrent, QWidget *pParent = nullptr, bool bSprites = false );
 	~CMaterialBrowser() override;
 
 	// Runs the browser; the material picked (as Hammer writes it), if one was.
 	static std::optional<QString> Pick( QWidget *pParent, const xv::vfs::CGameInfo &game, const QStringList &used, const QString &szCurrent );
+	// The same for a sprite key: the value as sprite keys write it ("sprites/glow01.vmt").
+	static std::optional<QString> PickSprite( QWidget *pParent, const xv::vfs::CGameInfo &game, const QStringList &used, const QString &szCurrent );
 	[[nodiscard]] QString GetPicked() const { return m_szPicked; }
 	[[nodiscard]] CMaterialList &GetList() { return *m_pList; }
 	[[nodiscard]] QListView *GetView() const { return m_pView; }
@@ -102,6 +110,8 @@ private:
 	QLineEdit *m_pWords = nullptr;
 	QComboBox *m_pSize = nullptr;
 	QCheckBox *m_pOnlyUsed = nullptr;
+	QCheckBox *m_pOnlySprites = nullptr;
+	bool m_bSprites = false;
 	std::thread m_Worker;
 	std::atomic<bool> m_bStop{ false };
 	std::atomic<bool> m_bListed{ false };

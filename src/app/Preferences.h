@@ -10,7 +10,9 @@
 #include <cstdint>
 
 #include <QColor>
+#include <QFont>
 #include <QObject>
+#include <QHash>
 #include <QStringList>
 
 #include "Graphics.h"
@@ -64,6 +66,7 @@ struct MapColors_t
 	QColor m_Grid = mapstyle::GRID;
 	QColor m_GridHighlight = mapstyle::GRID_10;
 	QColor m_Grid1024 = mapstyle::GRID_1024;
+	QColor m_GridBeyond = mapstyle::GRID_BEYOND;  // the grid past the map's size
 	QColor m_Axis = mapstyle::AXIS;
 	QColor m_Brush = mapstyle::BRUSH;
 	QColor m_Entity = mapstyle::ENTITY;            // entities whose game data gives no colour
@@ -145,9 +148,13 @@ struct MapPreferences_t
 	bool m_bOnePanel = false;        // the side shows the panel whose tab was picked alone, as Blender's tabs do
 	bool m_bAutosave = true;         // a modified map is written to <map>.vmf.autosave now and then
 	int m_nAutosaveMinutes = 5;      // how often
+	// The keys (Preferences > Keys): a preset, or the user's own (map/MapKeys.h's settings list).
+	MapKeyPreset_t m_nKeyPreset = MapKeyPreset_t::MAP_KEY_PRESET_HAMMER_PLUS_PLUS;
+	QStringList m_CustomKeys;
 
 	// The 2D views.
 	bool m_bHideSmallGrid = true;
+	bool m_bGridBeyond = false;      // the grid also past the map's size, in a colour of its own
 	double m_flHideGridBelow = mapstyle::HIDE_GRID_BELOW_PIXELS;
 	int m_nHighlightEvery = mapstyle::GRID_HIGHLIGHT_EVERY;
 	bool m_bDrawVertices = false;

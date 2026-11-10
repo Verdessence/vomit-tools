@@ -8,6 +8,7 @@
 #pragma once
 
 #include <cstdint>
+#include <span>
 #include <vector>
 
 #include "map/Raster.h"
@@ -27,5 +28,8 @@ struct TraceHit_t
 // nearest first. Hidden objects, and tool textures and nodraw when they're toggled off, are passed
 // through.
 [[nodiscard]] std::vector<TraceHit_t> TraceScene( const RasterScene_t &scene, bool bToolTextures, bool bNodraw, Point_t from, Point_t dir, double flMax );
+// Whether anything of the meshes in occluders but object nSkip lies along the ray within flMax
+// (passing through what TraceScene passes through): stops at the first hit.
+[[nodiscard]] bool TraceBlocked( const RasterScene_t &scene, bool bToolTextures, bool bNodraw, Point_t from, Point_t dir, double flMax, std::span<const CMapMesh *const> occluders, std::uint32_t nSkip );
 
 } // namespace xv::map

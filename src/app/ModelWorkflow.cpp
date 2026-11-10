@@ -22,7 +22,6 @@
 #include <QPlainTextEdit>
 #include <QPushButton>
 #include <QSaveFile>
-#include <QSettings>
 #include <QSpinBox>
 #include <QDoubleSpinBox>
 #include <QTabWidget>

@@ -53,8 +53,8 @@ struct MapEdit_t
 	// through their editor notes.
 	std::optional<std::vector<Visgroup_t>> m_Visgroups;
 
-	[[nodiscard]] bool IsEmpty() const { return m_Solids.empty() && m_Entities.empty() && !m_World && m_Groups.empty() && m_RemovedGroups.empty() && !m_Cordons && !m_Cameras && !m_Visgroups; }
-	[[nodiscard]] bool IsCameraEdit() const { return m_Cameras && m_Solids.empty() && m_Entities.empty() && m_SolidTransforms.empty() && !m_World && m_Groups.empty() && m_RemovedGroups.empty() && !m_Cordons && !m_Visgroups; }
+	[[nodiscard]] bool IsEmpty() const { return m_Solids.empty() && m_Entities.empty() && !m_World && m_Groups.empty() && m_RemovedGroups.empty() && !m_Cordons && !m_Splines && !m_Cameras && !m_Visgroups; }
+	[[nodiscard]] bool IsCameraEdit() const { return m_Cameras && m_Solids.empty() && m_Entities.empty() && m_SolidTransforms.empty() && !m_World && m_Groups.empty() && m_RemovedGroups.empty() && !m_Cordons && !m_Splines && !m_Visgroups; }
 };
 
 inline constexpr std::uint32_t NEW_MATERIAL = ~0u;

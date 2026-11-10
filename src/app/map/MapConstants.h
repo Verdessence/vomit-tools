@@ -21,6 +21,7 @@ inline const QColor AXIS{ 0, 100, 100 };
 inline const QColor GRID{ 60, 60, 60 };
 inline const QColor GRID_10{ 115, 115, 115 };    // every GRID_HIGHLIGHT_EVERY lines, and every 64 units
 inline const QColor GRID_1024{ 100, 50, 5 };
+inline const QColor GRID_BEYOND{ 35, 35, 75 }; // past the FGD's @mapsize, when shown (not Hammer++'s)
 inline const QColor BACKGROUND{ 0, 0, 0 };
 inline const QColor BRUSH{ 255, 255, 255 };
 inline const QColor ENTITY{ 220, 30, 220 };

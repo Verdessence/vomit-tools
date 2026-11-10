@@ -10,6 +10,7 @@
 #include <QFile>
 #include <QMetaObject>
 
+#include "DebugLog.h"
 #include "util/Memory.h"
 
 //-----------------------------------------------------------------------------
@@ -174,6 +175,13 @@ void CMapLighting::Run()
 		const std::vector<xv::map::LightMaterial_t> none;
 		std::shared_ptr<const xv::map::CLighting> pLighting = xv::map::BakeLighting( *request.m_pScene, request.m_pMaterials ? std::span<const xv::map::LightMaterial_t>{ *request.m_pMaterials } : std::span<const xv::map::LightMaterial_t>{ none }, options, request.m_Extras );
 		const double flMs = static_cast<double>( timer.nsecsElapsed() ) / 1e6;
+		if ( pLighting )
+		{
+			QStringList stages;
+			for ( const xv::map::BakeStage_t &stage : pLighting->m_Stages )
+				stages << QStringLiteral( "%1 %2 ms" ).arg( QString::fromStdString( stage.m_szName ) ).arg( stage.m_flMs, 0, 'f', 0 );
+			DebugLog() << "lighting baked in" << qRound( flMs ) << "ms:" << pLighting->m_nLuxels << "luxels," << pLighting->m_nTriangles << "triangles," << pLighting->m_nLights << "lights;" << stages.join( QStringLiteral( ", " ) );
+		}
 		request = {};
 		xv::ReleaseFreedMemory();
 		if ( !pLighting )

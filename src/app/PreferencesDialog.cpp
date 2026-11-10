@@ -20,6 +20,7 @@
 #include <QDialogButtonBox>
 #include <QPushButton>
 #include <QDir>
+#include <QFontComboBox>
 #include <QFormLayout>
 #include <QHBoxLayout>
 #include <QLabel>
@@ -37,7 +38,8 @@
 #include "Preferences.h"
 #include "SourceTools.h"
 #include <QLineEdit>
-#include <QSettings>
+
+#include "map/MapKeysPage.h"
 #include <QFileInfo>
 
 namespace
@@ -93,7 +95,9 @@ CPreferencesDialog::CPreferencesDialog( QWidget *pParent )
 	AddPage( tr( "Graphics" ), BuildGraphicsPage() );
 	AddPage( tr( "Particles" ), BuildParticlesPage() );
 	AddPage( tr( "Materials" ), BuildMaterialsPage() );
+	AddPage( tr( "Text Editor" ), BuildTextEditorPage() );
 	AddPage( tr( "Maps" ), BuildMapsPage() );
+	AddPage( tr( "Keys" ), new CMapKeysPage );
 	AddPage( tr( "Source Tools" ), BuildSourceToolsPage() );
 	AddPage( tr( "Advanced" ), BuildAdvancedPage() );
 	for ( const auto &[ szTitle, pfnMake ] : LocalPages() )
@@ -606,6 +610,7 @@ QWidget *CPreferencesDialog::BuildMapsPage()
 		pForm->addRow( tr( "Closest zoom (pixels a unit)" ), spin( QStringLiteral( "preferencesMapZoomLargest" ), current.m_flZoomLargest, 1, 1024, 8, 0, []( MapPreferences_t &p, double fl ) { p.m_flZoomLargest = fl; } ) );
 		pLayout->addLayout( pForm );
 		pLayout->addWidget( check( QStringLiteral( "preferencesMapHideSmallGrid" ), tr( "Hide grid lines that come too close together" ), current.m_bHideSmallGrid, []( MapPreferences_t &p, bool b ) { p.m_bHideSmallGrid = b; } ) );
+		pLayout->addWidget( check( QStringLiteral( "preferencesMapGridBeyond" ), tr( "Draw the grid past the map's size too, in its own colour (Colours)" ), current.m_bGridBeyond, []( MapPreferences_t &p, bool b ) { p.m_bGridBeyond = b; } ) );
 		pLayout->addWidget( check( QStringLiteral( "preferencesMapVertices" ), tr( "Draw brushes' corners" ), current.m_bDrawVertices, []( MapPreferences_t &p, bool b ) { p.m_bDrawVertices = b; } ) );
 		pLayout->addWidget( check( QStringLiteral( "preferencesMapCenterHandles" ), tr( "Draw centre handles" ), current.m_bCenterHandles, []( MapPreferences_t &p, bool b ) { p.m_bCenterHandles = b; } ) );
 		pLayout->addWidget( check( QStringLiteral( "preferencesMapModels2D" ), tr( "Draw models" ), current.m_bModels2D, []( MapPreferences_t &p, bool b ) { p.m_bModels2D = b; } ) );
@@ -631,6 +636,7 @@ QWidget *CPreferencesDialog::BuildMapsPage()
 			{ "Grid", tr( "Grid" ), &MapColors_t::m_Grid, false },
 			{ "GridHighlight", tr( "Brighter grid lines" ), &MapColors_t::m_GridHighlight, false },
 			{ "Grid1024", tr( "Grid every 1024 units" ), &MapColors_t::m_Grid1024, false },
+			{ "GridBeyond", tr( "Grid past the map's size" ), &MapColors_t::m_GridBeyond, false },
 			{ "Axis", tr( "Axes" ), &MapColors_t::m_Axis, false },
 			{ "Brush", tr( "World brushes" ), &MapColors_t::m_Brush, false },
 			{ "Entity", tr( "Entities without a colour of their own" ), &MapColors_t::m_Entity, false },

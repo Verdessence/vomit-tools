@@ -62,6 +62,41 @@ QString HammerName( const std::string &szPath )
 	return szName.toUpper();
 }
 
+//-----------------------------------------------------------------------------
+// Purpose: A VMT's shader: its first word, quoted or not, past any // comments. Reading only
+//          that keeps listing every material's shader quick.
+//-----------------------------------------------------------------------------
+std::string_view ShaderOf( std::string_view szVmt )
+{
+	std::size_t i = 0;
+	while ( i < szVmt.size() )
+	{
+		const char ch = szVmt[ i ];
+		if ( ch == ' ' || ch == '\t' || ch == '\r' || ch == '\n' || static_cast<unsigned char>( ch ) == 0xEF || static_cast<unsigned char>( ch ) == 0xBB || static_cast<unsigned char>( ch ) == 0xBF )
+		{
+			i++;
+		}
+		else if ( szVmt.substr( i, 2 ) == "//" )
+		{
+			const std::size_t nEnd = szVmt.find( '\n', i );
+			i = nEnd == std::string_view::npos ? szVmt.size() : nEnd;
+		}
+		else
+		{
+			break;
+		}
+	}
+	if ( i < szVmt.size() && szVmt[ i ] == '"' )
+	{
+		const std::size_t nEnd = szVmt.find( '"', i + 1 );
+		return nEnd == std::string_view::npos ? std::string_view{} : szVmt.substr( i + 1, nEnd - i - 1 );
+	}
+	std::size_t nEnd = i;
+	while ( nEnd < szVmt.size() && szVmt[ nEnd ] != ' ' && szVmt[ nEnd ] != '\t' && szVmt[ nEnd ] != '\r' && szVmt[ nEnd ] != '\n' && szVmt[ nEnd ] != '{' )
+		nEnd++;
+	return szVmt.substr( i, nEnd - i );
+}
+
 // Every word typed must be in the name; "Only used" keeps the map's materials.
 class CMaterialFilter : public QSortFilterProxyModel
 {
@@ -69,11 +104,17 @@ public:
 	QStringList m_Words;
 	QStringList m_Used; // upper case, sorted
 	bool m_bOnlyUsed = false;
+	bool m_bOnlySprites = false;
 
 protected:
 	bool filterAcceptsRow( int nRow, const QModelIndex &parent ) const override
 	{
-		const QString szName = sourceModel()->index( nRow, 0, parent ).data( CMaterialList::ROLE_NAME ).toString();
+		const QModelIndex index = sourceModel()->index( nRow, 0, parent );
+		const QString szName = index.data( CMaterialList::ROLE_NAME ).toString();
+		if ( m_bOnlySprites && !index.data( CMaterialList::ROLE_SPRITE ).toBool() )
+		{
+			return false;
+		}
 		if ( m_bOnlyUsed && !std::ranges::binary_search( m_Used, szName ) )
 		{
 			return false;
@@ -141,6 +182,8 @@ QVariant CMaterialList::data( const QModelIndex &index, int nRole ) const
 		}
 		case Qt::SizeHintRole:
 			return QSize( m_nSize + 12, m_nSize + 28 );
+		case ROLE_SPRITE:
+			return static_cast<std::size_t>( index.row() ) < m_Sprites.size() && m_Sprites[ static_cast<std::size_t>( index.row() ) ];
 		default:
 			return {};
 	}
@@ -157,7 +200,16 @@ void CMaterialList::SetNames( QStringList names )
 	beginResetModel();
 	m_Names = std::move( names );
 	m_Pictures.assign( static_cast<std::size_t>( m_Names.size() ), QIcon{} );
+	m_Sprites.clear();
 	endResetModel();
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+void CMaterialList::SetSprites( std::vector<bool> sprites )
+{
+	m_Sprites = std::move( sprites );
 }
 
 //-----------------------------------------------------------------------------
@@ -214,14 +266,15 @@ std::vector<int> CMaterialList::TakeWanted()
 //-----------------------------------------------------------------------------
 // Purpose:
 //-----------------------------------------------------------------------------
-CMaterialBrowser::CMaterialBrowser( const xv::vfs::CGameInfo &game, QStringList used, const QString &szCurrent, QWidget *pParent )
+CMaterialBrowser::CMaterialBrowser( const xv::vfs::CGameInfo &game, QStringList used, const QString &szCurrent, QWidget *pParent, bool bSprites )
 	: QDialog( pParent ),
 	  m_Game( game ),
 	  m_Used( std::move( used ) ),
-	  m_szPicked( szCurrent )
+	  m_szPicked( szCurrent ),
+	  m_bSprites( bSprites )
 {
 	setObjectName( QStringLiteral( "materialBrowser" ) );
-	setWindowTitle( tr( "Textures" ) );
+	setWindowTitle( bSprites ? tr( "Sprites" ) : tr( "Textures" ) );
 	resize( 760, 560 );
 	for ( QString &szName : m_Used )
 	{
@@ -247,6 +300,14 @@ CMaterialBrowser::CMaterialBrowser( const xv::vfs::CGameInfo &game, QStringList 
 	m_pOnlyUsed = new QCheckBox( tr( "Only used textures" ) );
 	m_pOnlyUsed->setObjectName( QStringLiteral( "materialBrowserOnlyUsed" ) );
 	pTop->addWidget( m_pOnlyUsed );
+	if ( bSprites )
+	{
+		m_pOnlySprites = new QCheckBox( tr( "Only sprites" ) );
+		m_pOnlySprites->setObjectName( QStringLiteral( "materialBrowserOnlySprites" ) );
+		m_pOnlySprites->setToolTip( tr( "Materials drawn with the Sprite or SpriteCard shader, and everything under sprites/" ) );
+		m_pOnlySprites->setChecked( true );
+		pTop->addWidget( m_pOnlySprites );
+	}
 	pLayout->addLayout( pTop );
 
 	m_pList = new CMaterialList( this );
@@ -271,6 +332,8 @@ CMaterialBrowser::CMaterialBrowser( const xv::vfs::CGameInfo &game, QStringList 
 
 	connect( m_pWords, &QLineEdit::textChanged, this, &CMaterialBrowser::ApplyFilter );
 	connect( m_pOnlyUsed, &QCheckBox::toggled, this, &CMaterialBrowser::ApplyFilter );
+	if ( m_pOnlySprites )
+		connect( m_pOnlySprites, &QCheckBox::toggled, this, &CMaterialBrowser::ApplyFilter );
 	connect( m_pSize, &QComboBox::currentIndexChanged, this, [ this ] {
 		const int nSize = m_pSize->currentData().toInt();
 		m_pView->setIconSize( QSize( nSize, nSize ) );
@@ -346,6 +409,23 @@ std::optional<QString> CMaterialBrowser::Pick( QWidget *pParent, const xv::vfs::
 }
 
 //-----------------------------------------------------------------------------
+// Purpose: Sprite keys name the material's file below materials/, with its extension; an old
+//          .spr name finds the material of the same name.
+//-----------------------------------------------------------------------------
+std::optional<QString> CMaterialBrowser::PickSprite( QWidget *pParent, const xv::vfs::CGameInfo &game, const QStringList &used, const QString &szCurrent )
+{
+	QString szStart = szCurrent;
+	if ( szStart.endsWith( QStringLiteral( ".vmt" ), Qt::CaseInsensitive ) || szStart.endsWith( QStringLiteral( ".spr" ), Qt::CaseInsensitive ) )
+		szStart.chop( 4 );
+	if ( szStart.startsWith( QStringLiteral( "materials/" ), Qt::CaseInsensitive ) )
+		szStart.remove( 0, 10 );
+	CMaterialBrowser browser( game, used, szStart, pParent, true );
+	if ( browser.exec() != QDialog::Accepted || browser.GetPicked().isEmpty() )
+		return std::nullopt;
+	return browser.GetPicked().toLower() + QStringLiteral( ".vmt" );
+}
+
+//-----------------------------------------------------------------------------
 // Purpose: Lists the materials (every VMT under materials/ but the models'), then makes
 //          pictures: the rows the view asks for first, then the rest in order. A picture is a
 //          material's base texture, 128 px across, kept on disk by the material's name; at the
@@ -370,8 +450,28 @@ void CMaterialBrowser::Run()
 	{
 		names << HammerName( szPath );
 	}
-	QMetaObject::invokeMethod( this, [ this, names ] {
+	// For a sprite key: which are sprites, from each VMT's shader (its first key).
+	std::vector<bool> sprites;
+	if ( m_bSprites )
+	{
+		sprites.reserve( paths.size() );
+		for ( const std::string &szPath : paths )
+		{
+			if ( m_bStop )
+				return;
+			bool bSprite = szPath.size() > 18 && xv::kv1::EqualsIgnoreCase( std::string_view{ szPath }.substr( 0, 18 ), "materials/sprites/" );
+			if ( !bSprite )
+			{
+				const std::optional<std::string> vmt = fileSystem.ReadText( szPath );
+				const std::string_view szShader = vmt ? ShaderOf( *vmt ) : std::string_view{};
+				bSprite = xv::kv1::EqualsIgnoreCase( szShader, "Sprite" ) || xv::kv1::EqualsIgnoreCase( szShader, "SpriteCard" );
+			}
+			sprites.push_back( bSprite );
+		}
+	}
+	QMetaObject::invokeMethod( this, [ this, names, sprites = std::move( sprites ) ]() mutable {
 		m_pList->SetNames( names );
+		m_pList->SetSprites( std::move( sprites ) );
 		m_bListed = true;
 		ApplyFilter(); }, Qt::QueuedConnection );
 	std::vector<bool> done( paths.size(), false );
@@ -431,6 +531,7 @@ void CMaterialBrowser::ApplyFilter()
 	pFilter->m_Words = m_pWords->text().split( QLatin1Char( ' ' ), Qt::SkipEmptyParts );
 	pFilter->m_Used = m_Used;
 	pFilter->m_bOnlyUsed = m_pOnlyUsed->isChecked();
+	pFilter->m_bOnlySprites = m_pOnlySprites && m_pOnlySprites->isChecked();
 	pFilter->invalidate();
 	// The current texture, where it is listed, starts selected.
 	for ( int i = 0; !m_szPicked.isEmpty() && i < m_pFilter->rowCount(); i++ )

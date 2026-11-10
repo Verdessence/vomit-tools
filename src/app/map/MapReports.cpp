@@ -10,6 +10,7 @@
 #include <QCheckBox>
 #include <QDialogButtonBox>
 #include <QFormLayout>
+#include <QGridLayout>
 #include <QGroupBox>
 #include <QHBoxLayout>
 #include <QLabel>
@@ -17,11 +18,13 @@
 #include <QListWidget>
 #include <QPushButton>
 #include <QRadioButton>
+#include <QShowEvent>
 #include <QVBoxLayout>
 
 #include "map/MapDocument.h"
 #include "map/MapEditor.h"
 #include "map/MapKeys.h"
+#include "map/MapParticles.h"
 #include "map/MaterialBrowser.h"
 
 //-----------------------------------------------------------------------------
@@ -361,51 +364,68 @@ void CMapEntityReport::GoTo()
 //-----------------------------------------------------------------------------
 // Purpose:
 //-----------------------------------------------------------------------------
-CMapCheckDialog::CMapCheckDialog( CMapEditor &editor )
-	: QDialog( &editor ),
-	  m_Editor( editor )
+CMapCheckPanel::CMapCheckPanel( CMapEditor &editor )
+	: m_Editor( editor )
 {
-	setWindowTitle( tr( "Check for Problems" ) );
-	setObjectName( QStringLiteral( "mapCheckDialog" ) );
-	setAttribute( Qt::WA_DeleteOnClose );
-	auto *pLayout = new QHBoxLayout( this );
-	auto *pLeft = new QVBoxLayout;
+	setObjectName( QStringLiteral( "mapCheckPanel" ) );
+	auto *pLayout = new QVBoxLayout( this );
+	pLayout->setContentsMargins( 0, 0, 0, 0 );
 	m_pList = new QListWidget;
 	m_pList->setObjectName( QStringLiteral( "mapCheckList" ) );
-	pLeft->addWidget( m_pList, 1 );
+	m_pList->setWordWrap( true );
+	m_pList->setResizeMode( QListView::Adjust );
+	// Room for a few problems, and a long one wrapped, beside the other panels.
+	setMinimumHeight( 300 );
+	pLayout->addWidget( m_pList, 1 );
 	m_pVisibleOnly = new QCheckBox( tr( "Check visible parts of the map only" ) );
 	m_pVisibleOnly->setObjectName( QStringLiteral( "mapCheckVisibleOnly" ) );
-	connect( m_pVisibleOnly, &QCheckBox::toggled, this, &CMapCheckDialog::Run );
-	pLeft->addWidget( m_pVisibleOnly );
-	pLayout->addLayout( pLeft, 1 );
-	auto *pSide = new QVBoxLayout;
-	m_pGoTo = new QPushButton( tr( "Go to error" ) );
+	connect( m_pVisibleOnly, &QCheckBox::toggled, this, &CMapCheckPanel::Run );
+	pLayout->addWidget( m_pVisibleOnly );
+	auto *pButtons = new QGridLayout;
+	m_pGoTo = new QPushButton( tr( "Go to" ) );
 	m_pGoTo->setObjectName( QStringLiteral( "mapCheckGoTo" ) );
-	connect( m_pGoTo, &QPushButton::clicked, this, &CMapCheckDialog::GoTo );
-	connect( m_pList, &QListWidget::itemDoubleClicked, this, &CMapCheckDialog::GoTo );
+	connect( m_pGoTo, &QPushButton::clicked, this, &CMapCheckPanel::GoTo );
+	connect( m_pList, &QListWidget::itemDoubleClicked, this, &CMapCheckPanel::GoTo );
 	m_pFix = new QPushButton( tr( "Fix" ) );
 	m_pFix->setObjectName( QStringLiteral( "mapCheckFix" ) );
-	connect( m_pFix, &QPushButton::clicked, this, &CMapCheckDialog::Fix );
+	connect( m_pFix, &QPushButton::clicked, this, &CMapCheckPanel::Fix );
 	m_pFixAll = new QPushButton( tr( "Fix all (of type)" ) );
 	m_pFixAll->setObjectName( QStringLiteral( "mapCheckFixAll" ) );
-	connect( m_pFixAll, &QPushButton::clicked, this, &CMapCheckDialog::FixAll );
-	pSide->addWidget( m_pGoTo );
-	pSide->addWidget( m_pFix );
-	pSide->addWidget( m_pFixAll );
-	pSide->addStretch( 1 );
-	auto *pClose = new QPushButton( tr( "Close" ) );
-	connect( pClose, &QPushButton::clicked, this, &QDialog::close );
-	pSide->addWidget( pClose );
-	pLayout->addLayout( pSide );
-	connect( m_pList, &QListWidget::currentRowChanged, this, &CMapCheckDialog::Pick );
-	connect( &m_Editor.GetDocument(), &CMapDocument::SceneEdited, this, [ this ] { m_Editor.GetDocument().MeasureEditListener( tr( "Check for Problems" ), [ this ] { Run(); } ); } );
+	connect( m_pFixAll, &QPushButton::clicked, this, &CMapCheckPanel::FixAll );
+	auto *pRefresh = new QPushButton( tr( "Check again" ) );
+	pRefresh->setObjectName( QStringLiteral( "mapCheckRun" ) );
+	connect( pRefresh, &QPushButton::clicked, this, &CMapCheckPanel::Run );
+	pButtons->addWidget( m_pGoTo, 0, 0 );
+	pButtons->addWidget( pRefresh, 0, 1 );
+	pButtons->addWidget( m_pFix, 1, 0 );
+	pButtons->addWidget( m_pFixAll, 1, 1 );
+	pLayout->addLayout( pButtons );
+	connect( m_pList, &QListWidget::currentRowChanged, this, &CMapCheckPanel::Pick );
+	// Only while it shows: a check of a big map is not free, and showing it checks again.
+	connect( &m_Editor.GetDocument(), &CMapDocument::SceneEdited, this, [ this ] {
+		if ( isVisible() )
+			m_Editor.GetDocument().MeasureEditListener( tr( "Check for Problems" ), [ this ] { Run(); } );
+	} );
+	// The particle checks wait for the game's particle files.
+	connect( &m_Editor.GetParticles(), &CMapParticles::Ready, this, [ this ] {
+		if ( isVisible() )
+			Run();
+	} );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+void CMapCheckPanel::showEvent( QShowEvent *pEvent )
+{
+	QWidget::showEvent( pEvent );
 	Run();
 }
 
 //-----------------------------------------------------------------------------
 // Purpose:
 //-----------------------------------------------------------------------------
-void CMapCheckDialog::Run()
+void CMapCheckPanel::Run()
 {
 	CMapDocument &document = m_Editor.GetDocument();
 	const xv::map::CScene *pScene = document.GetScene();
@@ -419,11 +439,18 @@ void CMapCheckDialog::Run()
 		{
 			pfnInclude = [ &document ]( std::uint32_t nObject ) { return document.IsShown( nObject ); };
 		}
-		m_Problems = xv::map::CheckMap( *pScene, pfnInclude );
+		const CMapParticles &particles = m_Editor.GetParticles();
+		xv::map::ParticleLookup_t pfnParticle;
+		if ( particles.IsReady() && particles.GetFileSystem() )
+		{
+			pfnParticle = [ &particles ]( std::string_view szEffect ) { return particles.FindSource( szEffect ).value_or( xv::map::ParticleSource_t{ true, {} } ); };
+		}
+		m_Problems = xv::map::CheckMap( *pScene, pfnInclude, pfnParticle );
 	}
 	for ( const xv::map::Problem_t &problem : m_Problems )
 	{
-		m_pList->addItem( QString::fromStdString( problem.m_szMessage ) );
+		auto *pItem = new QListWidgetItem( QString::fromStdString( problem.m_szMessage ), m_pList );
+		pItem->setToolTip( pItem->text() );
 	}
 	if ( m_Problems.empty() )
 	{
@@ -436,7 +463,7 @@ void CMapCheckDialog::Run()
 //-----------------------------------------------------------------------------
 // Purpose: The problem's object selected in the views, and the buttons that apply to it.
 //-----------------------------------------------------------------------------
-void CMapCheckDialog::Pick()
+void CMapCheckPanel::Pick()
 {
 	const int nRow = m_pList->currentRow();
 	const bool bProblem = nRow >= 0 && static_cast<std::size_t>( nRow ) < m_Problems.size();
@@ -453,7 +480,7 @@ void CMapCheckDialog::Pick()
 //-----------------------------------------------------------------------------
 // Purpose:
 //-----------------------------------------------------------------------------
-void CMapCheckDialog::GoTo()
+void CMapCheckPanel::GoTo()
 {
 	Pick();
 	const xv::map::Box_t bounds = m_Editor.GetDocument().GetSelectionBounds();
@@ -466,7 +493,7 @@ void CMapCheckDialog::GoTo()
 //-----------------------------------------------------------------------------
 // Purpose: The edit makes the document say SceneEdited, which runs the check again.
 //-----------------------------------------------------------------------------
-void CMapCheckDialog::Fix()
+void CMapCheckPanel::Fix()
 {
 	const int nRow = m_pList->currentRow();
 	const xv::map::CScene *pScene = m_Editor.GetDocument().GetScene();
@@ -484,7 +511,7 @@ void CMapCheckDialog::Fix()
 //-----------------------------------------------------------------------------
 // Purpose:
 //-----------------------------------------------------------------------------
-void CMapCheckDialog::FixAll()
+void CMapCheckPanel::FixAll()
 {
 	const int nRow = m_pList->currentRow();
 	const xv::map::CScene *pScene = m_Editor.GetDocument().GetScene();

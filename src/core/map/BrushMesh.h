@@ -66,6 +66,11 @@ public:
 // Offset a convex face's boundary inward by a world-space distance, leaving a coplanar ring.
 [[nodiscard]] bool InsetFace( CBrushMesh &mesh, std::uint32_t nFace, double flDistance );
 
+// Partition a brush through an inset face's outline; every returned piece has distinct planes.
+[[nodiscard]] std::vector<Solid_t> InsetBrush( const CMap &map, const Solid_t &source, const SolidGeometry_t &shape, std::uint32_t nFace, double flDistance );
+// Split between two edge midpoints, sharing the inserted corners with adjacent faces.
+[[nodiscard]] bool SplitFaceEdges( CBrushMesh &mesh, std::uint32_t nFirst, std::uint32_t nSecond );
+
 // What turning a mesh back into solids does with a shape that isn't convex.
 enum class BrushConcave_t
 {
@@ -106,13 +111,39 @@ struct BrushPart_t
 	friend auto operator<=>( const BrushPart_t &, const BrushPart_t & ) = default;
 };
 
+// A solid's mesh with its edges worked out once, for code asking about many of its parts (a fine
+// sphere's edges take longer to list than to look anything up in).
+struct BrushMeshParts_t
+{
+	CBrushMesh m_Mesh;
+	std::vector<std::pair<std::uint32_t, std::uint32_t>> m_Edges; // m_Mesh.GetEdges()
+
+	[[nodiscard]] static BrushMeshParts_t FromGeometry( const SolidGeometry_t &shape );
+};
+
 // The corners a part moves.
 [[nodiscard]] std::vector<std::uint32_t> CornersOf( const CBrushMesh &mesh, BrushPartKind_t nKind, std::uint32_t nIndex );
+[[nodiscard]] std::vector<std::uint32_t> CornersOf( const BrushMeshParts_t &parts, BrushPartKind_t nKind, std::uint32_t nIndex );
 // Where a part's handle is: the corner, the edge's middle, the face's centre.
 [[nodiscard]] Point_t PartPosition( const CBrushMesh &mesh, BrushPartKind_t nKind, std::uint32_t nIndex );
+[[nodiscard]] Point_t PartPosition( const BrushMeshParts_t &parts, BrushPartKind_t nKind, std::uint32_t nIndex );
 
 // The edit moving the parts' corners by transform, solid by solid; pAdded gets the objects of
 // pieces a split made (grouped with the solid they came from by the caller).
 [[nodiscard]] MapEdit_t MoveParts( const CScene &scene, std::span<const BrushPart_t> parts, const Transform_t &transform, BrushConcave_t nConcave, std::vector<std::uint32_t> *pAdded = nullptr, std::string *pProblem = nullptr );
+
+// A corner of a solid object moved to a place; bLocked when the lock's transform put it there
+// (texture lock follows a face all of whose corners are).
+struct BrushCornerMove_t
+{
+	std::uint32_t m_nObject = 0;
+	std::uint32_t m_nCorner = 0; // as CBrushMesh::FromGeometry numbers them
+	Point_t m_To{};
+	bool m_bLocked = false;
+};
+
+// The edit moving each named corner (the first move of a corner named twice), solid by solid,
+// as MoveParts; pLock is the transform texture lock follows, or none.
+[[nodiscard]] MapEdit_t MoveCorners( const CScene &scene, std::span<const BrushCornerMove_t> moves, const Transform_t *pLock, BrushConcave_t nConcave, std::vector<std::uint32_t> *pAdded = nullptr, std::string *pProblem = nullptr );
 
 } // namespace xv::map

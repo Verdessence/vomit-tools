@@ -7,6 +7,9 @@
 #include "Cordon.h"
 
 #include <algorithm>
+#include <charconv>
+#include <cmath>
+#include <map>
 
 #include "kv1/Kv1.h"
 #include "map/Brushes.h"
@@ -310,6 +313,167 @@ std::string CordonedMapText( const CScene &scene, std::string_view szMaterial, c
 	}
 	pCordoned = ApplyEdit( *pCordoned, edit );
 	return WriteVmf( pCordoned->m_Map );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Twice a polygon's area (Newell's normal's length).
+//-----------------------------------------------------------------------------
+static double PolygonArea( const std::vector<Point_t> &points )
+{
+	Point_t normal{ 0, 0, 0 };
+	for ( std::size_t i = 0; i < points.size(); i++ )
+		normal = Add( normal, Cross( points[ i ], points[ ( i + 1 ) % points.size() ] ) );
+	return Length( normal );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: The corners a merged neighbour left in the middle of a straight edge.
+//-----------------------------------------------------------------------------
+static bool DropCollinear( std::vector<Point_t> &points )
+{
+	bool bDropped = false;
+	for ( std::size_t i = 0; points.size() > 3 && i < points.size(); )
+	{
+		const Point_t &previous = points[ ( i + points.size() - 1 ) % points.size() ];
+		const Point_t &next = points[ ( i + 1 ) % points.size() ];
+		const Point_t along = Subtract( next, previous );
+		const double flLength = Length( along );
+		if ( flLength > 0 && Length( Cross( Subtract( points[ i ], previous ), along ) ) / flLength < 0.001 )
+		{
+			points.erase( points.begin() + static_cast<std::ptrdiff_t>( i ) );
+			bDropped = true;
+			continue;
+		}
+		i++;
+	}
+	return bDropped;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Sides on one plane by the solid's own faces (Hammer's 0.01 for the distance); the
+//          piece with the largest face stays, the rest go, and the one kept loses its precise
+//          polygon so its face is the whole cross-section again.
+//-----------------------------------------------------------------------------
+MapEdit_t MergeCoplanarSides( const CScene &scene, std::size_t *pMerged )
+{
+	MapEdit_t edit;
+	std::map<int, int> movedSides; // side id gone -> side id kept
+	for ( std::uint32_t nSolid = 0; nSolid < scene.m_Map.m_Solids.size() && nSolid < scene.m_Solids.size(); nSolid++ )
+	{
+		const Solid_t &solid = scene.m_Map.m_Solids[ nSolid ];
+		const std::vector<FaceGeometry_t> &faces = std::as_const( scene.m_Solids )[ nSolid ].m_Faces;
+		if ( solid.m_bDeleted || faces.size() < 2 )
+			continue;
+		std::vector<int> group( faces.size(), -1 );
+		bool bAny = false;
+		for ( std::size_t i = 0; i < faces.size(); i++ )
+		{
+			if ( group[ i ] >= 0 )
+				continue;
+			group[ i ] = static_cast<int>( i );
+			for ( std::size_t j = i + 1; j < faces.size(); j++ )
+			{
+				if ( group[ j ] < 0 && Dot( faces[ i ].m_Plane.m_Normal, faces[ j ].m_Plane.m_Normal ) > 1.0 - 1e-6 && std::abs( faces[ i ].m_Plane.m_flDistance - faces[ j ].m_Plane.m_flDistance ) < 0.01 )
+				{
+					group[ j ] = static_cast<int>( i );
+					bAny = true;
+				}
+			}
+		}
+		if ( !bAny )
+			continue;
+		bool bDisplaced = false;
+		std::map<int, std::vector<std::size_t>> members;
+		for ( std::size_t i = 0; i < faces.size(); i++ )
+		{
+			members[ group[ i ] ].push_back( i );
+		}
+		for ( const auto &[ nGroup, pieces ] : members )
+		{
+			for ( const std::size_t nFace : pieces )
+				bDisplaced = bDisplaced || ( pieces.size() > 1 && solid.m_Sides[ faces[ nFace ].m_nSide ].m_pDisp );
+		}
+		if ( bDisplaced )
+			continue;
+		Solid_t merged = solid;
+		std::vector<bool> gone( solid.m_Sides.size(), false );
+		for ( const auto &[ nGroup, pieces ] : members )
+		{
+			if ( pieces.size() < 2 )
+				continue;
+			const std::size_t nKept = *std::ranges::max_element( pieces, {}, [ & ]( std::size_t nFace ) { return PolygonArea( faces[ nFace ].m_Points ); } );
+			const std::uint32_t nKeptSide = faces[ nKept ].m_nSide;
+			merged.m_Sides[ nKeptSide ].m_PlusVertices.clear();
+			for ( const std::size_t nFace : pieces )
+			{
+				if ( nFace == nKept )
+					continue;
+				gone[ faces[ nFace ].m_nSide ] = true;
+				movedSides[ solid.m_Sides[ faces[ nFace ].m_nSide ].m_nId ] = solid.m_Sides[ nKeptSide ].m_nId;
+			}
+		}
+		std::vector<Side_t> sides;
+		for ( std::size_t i = 0; i < merged.m_Sides.size(); i++ )
+		{
+			if ( gone[ i ] )
+				continue;
+			DropCollinear( merged.m_Sides[ i ].m_PlusVertices );
+			sides.push_back( std::move( merged.m_Sides[ i ] ) );
+		}
+		merged.m_Sides = std::move( sides );
+		merged.m_bChanged = true;
+		edit.m_Solids.emplace_back( nSolid, std::move( merged ) );
+	}
+	if ( pMerged )
+		*pMerged = edit.m_Solids.size();
+	if ( movedSides.empty() )
+		return edit;
+	// Overlays (and cubemaps) name the faces they are on by side id.
+	for ( std::uint32_t nEntity = 0; nEntity < scene.m_Map.m_Entities.size(); nEntity++ )
+	{
+		const Entity_t &entity = scene.m_Map.m_Entities[ nEntity ];
+		if ( entity.m_bDeleted )
+			continue;
+		Entity_t moved = entity;
+		bool bMoved = false;
+		for ( const char *pszKey : { "sides", "sides2" } )
+		{
+			const std::string_view szSides = entity.GetValue( pszKey );
+			if ( szSides.empty() )
+				continue;
+			std::vector<int> ids;
+			bool bChanged = false;
+			for ( std::size_t nAt = 0; nAt < szSides.size(); )
+			{
+				while ( nAt < szSides.size() && szSides[ nAt ] == ' ' )
+					nAt++;
+				std::size_t nEnd = szSides.find( ' ', nAt );
+				nEnd = nEnd == std::string_view::npos ? szSides.size() : nEnd;
+				int nId = 0;
+				if ( nEnd > nAt && std::from_chars( szSides.data() + nAt, szSides.data() + nEnd, nId ).ec == std::errc{} )
+				{
+					if ( const auto found = movedSides.find( nId ); found != movedSides.end() )
+					{
+						nId = found->second;
+						bChanged = true;
+					}
+					if ( std::ranges::find( ids, nId ) == ids.end() )
+						ids.push_back( nId );
+				}
+				nAt = nEnd;
+			}
+			if ( !bChanged )
+				continue;
+			std::string szNew;
+			for ( const int nId : ids )
+				szNew += ( szNew.empty() ? "" : " " ) + std::to_string( nId );
+			SetKeyValue( scene.m_Map, moved, pszKey, szNew );
+			bMoved = true;
+		}
+		if ( bMoved )
+			edit.m_Entities.emplace_back( nEntity, std::move( moved ) );
+	}
+	return edit;
 }
 
 } // namespace xv::map

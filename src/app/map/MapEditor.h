@@ -8,6 +8,8 @@
 //===========================================================================//
 #pragma once
 
+#include <QVariantMap>
+
 #include <array>
 #include <map>
 #include <memory>
@@ -27,6 +29,7 @@
 #include "map/Prefab.h"
 #include "map/Faces.h"
 #include "map/Vertex.h"
+#include "map/BrushMesh.h"
 #include "map/MapDocument.h"
 #include "map/MapGizmo.h"
 #include "map/MapRenderData.h"
@@ -35,7 +38,7 @@
 #include "map/MapView.h"
 
 class CMapBrushEdit;
-class CMapCheckDialog;
+class CMapCheckPanel;
 class CMapEntityReport;
 class CMapFaceEdit;
 class CMapSprinklePanel;
@@ -175,6 +178,9 @@ public:
 		xv::map::Point_t m_From;
 		xv::map::Point_t m_To;
 		int m_nAxis = 2;
+		std::optional<xv::map::Point_t> m_Third;
+		std::optional<xv::map::Point_t> m_NormalAxis;
+		bool m_bThreePoints = false;
 	};
 	[[nodiscard]] const std::optional<ClipLine_t> &GetClipLine() const { return m_ClipLine; }
 	void SetClipLine( std::optional<ClipLine_t> line );
@@ -185,6 +191,9 @@ public:
 	[[nodiscard]] std::shared_ptr<const xv::map::CScene> GetClipPreview() const { return m_pClipPreview; }
 	void ApplyClip();
 	// Carve (Ctrl+Shift+C) with the selection; Make Hollow (the Map menu) with a wall width.
+	void MergeBrushes();
+	bool CreatePolygon( const std::vector<xv::map::Point_t> &points, int nAxis, double flDepth );
+	bool ConfirmVertexMerge( const std::vector<xv::map::BrushPart_t> &parts, const xv::map::Transform_t &transform );
 	void Carve();
 	void MakeHollow();
 	void MakeHollow( double flWallWidth );
@@ -205,7 +214,7 @@ public:
 	std::size_t ReplaceTextures( const xv::map::ReplaceTextures_t &how, bool bMarkOnly, bool bSelectedOnly, bool bHiddenToo );
 	// The Entity Report and Check for Problems (Alt+P) windows, one of each, beside the views.
 	CMapEntityReport *ShowEntityReport();
-	CMapCheckDialog *ShowCheckForProblems();
+	CMapCheckPanel *ShowCheckForProblems();
 	// Find Entities (Ctrl+Shift+F): the entities named exactly so selected and centred on.
 	void ShowFindEntities();
 	bool FindEntitiesByName( const QString &szName );
@@ -260,8 +269,11 @@ public:
 	void ShowObjectMenu( CMapView *pView, QPoint globalAt, std::optional<std::uint32_t> nObject, std::optional<xv::map::FaceRef_t> face = std::nullopt );
 	// Every shown entity of a class, selected.
 	void SelectClass( const QString &szClass );
-	// What Object Properties' Browse offers for a key type ("sound", "particlesystem", "studio",
-	// "sprite").
+	// The Recent panel's model onto the selected entities (copied, with none).
+	void ApplyModel( const QString &szModel );
+	[[nodiscard]] CMapRecentPanel *GetRecent() const { return m_pRecent; }
+	// What Object Properties' Browse lists for a key type ("sound", "particlesystem"); materials,
+	// sprites and models have browsers of their own.
 	[[nodiscard]] QStringList KeyNames( const std::string &szType );
 	[[nodiscard]] CMapFaceEdit &GetFaceEdit() { return *m_pFaceEdit; }
 	// Tools > Building Generator: its panel, with the block tool's box (else the selection's
@@ -324,12 +336,17 @@ public:
 	bool Save() override;
 	bool SaveAs() override;
 
+public:
+	[[nodiscard]] QVariantMap GetSideState() const;
+	void SetSideState( const QVariantMap &state );
+
 protected:
 	// The Face Edit window goes with the tab: hidden while another tab shows.
 	void showEvent( QShowEvent *pEvent ) override;
 	void hideEvent( QHideEvent *pEvent ) override;
 
 signals:
+	void SideStateChanged();
 	void OpenInstanceRequested( const QString &szPath );
 	void FacePickChanged( const QString &szKey );
 	void StatusMessage( const QString &szText );
@@ -341,6 +358,8 @@ signals:
 
 private:
 	void BuildToolBars();
+	bool m_bApplyingSideState = false;
+	QVariantMap m_SideState;
 	[[nodiscard]] QWidget *BuildNewObjects();
 	[[nodiscard]] QWidget *BuildTexturePanel();
 	void HighlightSides( const QString &szKey, const QString &szValue );
@@ -380,6 +399,8 @@ private:
 	[[nodiscard]] QString GetCameraKey() const;
 	[[nodiscard]] QString GetFileName() const;
 	void PreferencesChanged();
+	void SetKeyTip( QObject *pObject, const QString &szName, MapAction_t nAction );
+	void RefreshKeyTips();
 	[[nodiscard]] CMapPane *PaneOf( const CMapView *pView ) const;
 	// The timer as Preferences says (on or off, how often).
 	void UpdateAutosaveTimer();
@@ -451,7 +472,7 @@ private:
 	MapVertexMode_t m_nVertexMode = MapVertexMode_t::MAP_VERTEX_MODE_BOTH;
 	std::vector<xv::map::VertexRef_t> m_VertexHandles;
 	QPointer<CMapEntityReport> m_pEntityReport;
-	QPointer<CMapCheckDialog> m_pCheck;
+	CMapCheckPanel *m_pCheck = nullptr;
 	QComboBox *m_pPrimitive = nullptr; // the block tool's shape (Hammer's Objects box)
 	QSpinBox *m_pSides = nullptr;      // its Faces box
 	QPointer<QDialog> m_pCompileDialog;

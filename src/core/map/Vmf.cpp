@@ -33,7 +33,7 @@ using kv1::TokenKind_t;
 using Severity_t = Diagnostic_t::Severity_t;
 
 constexpr int MAX_DEPTH = 64;
-constexpr std::size_t MAX_SIDES = 1024;    // beyond this a solid is junk, not a brush
+constexpr std::size_t MAX_SIDES = 8192;    // beyond this a solid is junk, not a brush
 constexpr std::size_t MANY_SIDES = 128;    // vbsp's own limit
 constexpr std::size_t MAX_PLUS_VERTICES = 64;
 constexpr double COORDINATE_LIMIT = 16384.0;

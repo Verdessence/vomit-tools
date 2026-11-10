@@ -77,6 +77,54 @@ public:
 		m_Document.SetSelection( m_SelectionBefore );
 	}
 
+	//-----------------------------------------------------------------------------
+	// Purpose: Keep the largest generated slot set bounded while replacing a repeatable command.
+	//-----------------------------------------------------------------------------
+	void Replace( xv::map::MapEdit_t forward, const xv::map::CScene &base, const std::vector<std::uint32_t> &selectionBefore, const QString &szName )
+	{
+		std::map<std::uint32_t, xv::map::Solid_t> solids;
+		for ( auto &[ n, solid ] : forward.m_Solids )
+			solids[ n ] = std::move( solid );
+		for ( const auto &[ n, solid ] : m_Forward.m_Solids )
+			if ( n >= base.m_Map.m_Solids.size() && !solids.contains( n ) )
+			{
+				auto removed = solid;
+				removed.m_bDeleted = true;
+				removed.m_bChanged = true;
+				solids[ n ] = std::move( removed );
+			}
+		forward.m_Solids.clear();
+		for ( auto &[ n, solid ] : solids )
+			forward.m_Solids.emplace_back( n, std::move( solid ) );
+		std::map<std::uint32_t, xv::map::Entity_t> entities;
+		for ( auto &[ n, entity ] : forward.m_Entities )
+			entities[ n ] = std::move( entity );
+		for ( const auto &[ n, entity ] : m_Forward.m_Entities )
+			if ( n >= base.m_Map.m_Entities.size() && !entities.contains( n ) )
+			{
+				auto removed = entity;
+				removed.m_bDeleted = true;
+				entities[ n ] = std::move( removed );
+			}
+		forward.m_Entities.clear();
+		for ( auto &[ n, entity ] : entities )
+			forward.m_Entities.emplace_back( n, std::move( entity ) );
+		m_Back = xv::map::InverseOf( base, forward );
+		m_Forward = std::move( forward );
+		m_SelectionBefore = selectionBefore;
+		m_SelectionAfter.reset();
+		m_bDisplacements = false;
+		auto prepared = xv::map::ApplyEdit( base, m_Forward );
+		prepared->m_nRevision = m_Document.GetScene()->m_nRevision + 1;
+		m_pPrepared = std::move( prepared );
+		setText( szName );
+		redo();
+	}
+	//-----------------------------------------------------------------------------
+	// Purpose: Record a selection discovered from generated side IDs after the scene is built.
+	//-----------------------------------------------------------------------------
+	void SetSelectionAfter( std::vector<std::uint32_t> objects ) { m_SelectionAfter = std::move( objects ); }
+
 private:
 	CMapDocument &m_Document;
 	xv::map::MapEdit_t m_Forward;
@@ -135,6 +183,32 @@ void CMapDocument::Edit( xv::map::MapEdit_t edit, const QString &szName, std::op
 	}
 	xv::map::MapEdit_t back = xv::map::InverseOf( *m_pScene, edit );
 	m_pUndo->push( new CMapEditCommand( *this, std::move( edit ), std::move( back ), m_Selection, std::move( selectAfter ), szName ) );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Change the last operation's parameters without adding commands or cumulative copy slots.
+//-----------------------------------------------------------------------------
+bool CMapDocument::ReplaceLastEdit( xv::map::MapEdit_t edit, const QString &szName, std::shared_ptr<const xv::map::CScene> pBase, const std::vector<std::uint32_t> &selectionBefore )
+{
+	if ( !m_pScene || !pBase || edit.IsEmpty() || m_pUndo->index() != m_pUndo->count() || m_pUndo->index() < 1 )
+		return false;
+	auto *pCommand = dynamic_cast<CMapEditCommand *>( const_cast<QUndoCommand *>( m_pUndo->command( m_pUndo->index() - 1 ) ) );
+	if ( !pCommand )
+		return false;
+	if ( m_pUndo->isClean() )
+		m_pUndo->resetClean();
+	pCommand->Replace( std::move( edit ), *pBase, selectionBefore, szName );
+	return true;
+}
+//-----------------------------------------------------------------------------
+// Purpose: Keep generated selections identical when a modeling operation is redone.
+//-----------------------------------------------------------------------------
+void CMapDocument::SetLastEditSelection( std::vector<std::uint32_t> objects )
+{
+	if ( m_pUndo->index() > 0 )
+		if ( auto *pCommand = dynamic_cast<CMapEditCommand *>( const_cast<QUndoCommand *>( m_pUndo->command( m_pUndo->index() - 1 ) ) ) )
+			pCommand->SetSelectionAfter( objects );
+	SetSelection( std::move( objects ) );
 }
 
 //-----------------------------------------------------------------------------
@@ -268,7 +342,7 @@ void CMapDocument::Preview( const xv::map::MapEdit_t &edit, bool bDisplacements 
 			return false;
 		return std::ranges::none_of( entry.second.m_Sides, []( const xv::map::Side_t &side ) { return side.m_nMaterial == xv::map::NEW_MATERIAL; } );
 	} );
-	const bool bExistingObjects = !bDisplacements && ( !edit.m_Solids.empty() || !edit.m_Entities.empty() ) && bExistingSolids && !edit.m_World && edit.m_Groups.empty() && edit.m_RemovedGroups.empty() && !edit.m_Cordons &&
+	const bool bExistingObjects = !bDisplacements && ( !edit.m_Solids.empty() || !edit.m_Entities.empty() ) && bExistingSolids && !edit.m_World && edit.m_Groups.empty() && edit.m_RemovedGroups.empty() && !edit.m_Cordons && !edit.m_Splines &&
 		std::ranges::all_of( edit.m_Entities, [ & ]( const auto &entry ) { return entry.first < base.m_Entities.size() && !entry.second.m_bDeleted; } );
 	// A copy preview introduces object IDs and placements. Keep the ordinary edit path for the
 	// rest of that gesture so dropping Shift also removes its temporary resources.
@@ -505,7 +579,23 @@ void CMapDocument::Run( Source_t source, int nGeneration )
 	}
 
 	progress( 10, "game data" );
-	std::vector<std::filesystem::path> fgds = source.m_Fgds;
+	// FGDs named in Preferences that are gone (the game moved to another drive, say) are left
+	// out; with none left the game's own are read, rather than none and every entity a box.
+	std::vector<std::filesystem::path> fgds;
+	QStringList missing;
+	for ( const std::filesystem::path &fgd : source.m_Fgds )
+	{
+		std::error_code error;
+		const std::filesystem::path found = xv::map::FindFileIgnoringCase( fgd );
+		if ( std::filesystem::is_regular_file( found, error ) )
+		{
+			fgds.push_back( found );
+		}
+		else
+		{
+			missing << QString::fromStdString( fgd.string() );
+		}
+	}
 	QString szFgdSource = tr( "Preferences" );
 	// The game's Hammer configuration also says what new objects get, whichever FGDs are read.
 	xv::map::HammerDefaults_t defaults;
@@ -522,6 +612,10 @@ void CMapDocument::Run( Source_t source, int nGeneration )
 	if ( fgds.empty() )
 	{
 		szFgdSource.clear();
+	}
+	else if ( !missing.isEmpty() )
+	{
+		szFgdSource = tr( "%1 (not found, from Preferences: %2)" ).arg( szFgdSource, missing.join( QStringLiteral( ", " ) ) );
 	}
 	std::shared_ptr<const xv::map::CFgd> pFgd = xv::map::LoadFgds( fgds );
 
@@ -624,6 +718,21 @@ void CMapDocument::Changed( bool bVisibility )
 	{
 		emit SelectionChanged();
 	}
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Each entity's worked out once per scene, when it is first asked for.
+//-----------------------------------------------------------------------------
+const xv::map::EntityHelpers_t &CMapDocument::GetHelpers( std::uint32_t nEntity ) const
+{
+	if ( m_pHelperScene.lock() != m_pScene )
+	{
+		m_Helpers.clear();
+		m_pHelperScene = m_pScene;
+	}
+	if ( const auto found = m_Helpers.find( nEntity ); found != m_Helpers.end() )
+		return found->second;
+	return m_Helpers.emplace( nEntity, m_pScene ? xv::map::DescribeHelpers( *m_pScene, nEntity ) : xv::map::EntityHelpers_t{} ).first->second;
 }
 
 //-----------------------------------------------------------------------------

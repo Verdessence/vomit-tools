@@ -87,6 +87,10 @@ enum class HammerKind_t
 // its program (nothing when it isn't installed).
 [[nodiscard]] std::filesystem::path HammerConfigFile( const std::filesystem::path &gameDir, HammerKind_t nKind );
 [[nodiscard]] std::optional<std::filesystem::path> HammerProgram( const std::filesystem::path &gameDir, HammerKind_t nKind );
+// Hammer++'s own folder (bin/x64/hammerplusplus), which it searches after the game's paths: its
+// editor models and their materials are only there (light_spot's lightprop names
+// models/editor/spot_color.mdl). Nothing when Hammer++ isn't installed.
+[[nodiscard]] std::optional<std::filesystem::path> HammerPlusPlusContent( const std::filesystem::path &gameDir );
 // The entry for the game in gameDir in a configuration's text, if it has one.
 [[nodiscard]] std::optional<HammerSetup_t> ReadHammerSetup( std::string_view szText, const std::filesystem::path &gameDir );
 // An entry for the game from what is in its folders: its FGDs, the compilers and Hammer's

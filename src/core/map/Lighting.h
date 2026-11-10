@@ -158,7 +158,7 @@ class CLighting;
 struct LightingOptions_t
 {
 	bool m_bHdr = false;
-	int m_nBounces = 3;           // passes of light bounced between faces
+	int m_nBounces = 3;           // at most this many passes when converging, else exactly this many
 	bool m_bConverge = true;      // the passes not made estimated from the last two (as vrad bounces until it settles)
 	bool m_bSmoothShadows = true; // luxels on a shadow's edge lit as the mean across them (as vrad's -final), not at their middle alone
 	int m_nSkySamples = 48;       // rays toward the sky per sample, for its ambient
@@ -211,6 +211,13 @@ struct LightingExtras_t
 	bool m_bPropShadows = true;
 };
 
+// How long one stage of a bake took, for the Lighting panel and the debug log.
+struct BakeStage_t
+{
+	std::string m_szName;
+	double m_flMs = 0.0;
+};
+
 // A finished bake. Texels are linear light over 255 (1: a fully lit face), as half floats in RGBA
 // order, so the graphics card takes them as they are.
 class CLighting
@@ -230,6 +237,9 @@ public:
 	std::map<std::uint32_t, std::array<float, 3>> m_Points; // the extras' points, by object
 	std::size_t m_nLights = 0;
 	std::uint64_t m_nRevision = 0;           // the scene's, when it was baked
+	std::vector<BakeStage_t> m_Stages;       // in the order they ran
+	std::size_t m_nLuxels = 0;               // samples lit
+	std::size_t m_nTriangles = 0;            // in the way of light (props' included)
 
 	// The light a texel holds, linear (1: fully lit), RGB.
 	[[nodiscard]] std::array<float, 3> GetTexel( int x, int y ) const;

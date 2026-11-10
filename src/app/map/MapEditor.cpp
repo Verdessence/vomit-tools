@@ -6,6 +6,7 @@
 //===========================================================================//
 #include "MapEditor.h"
 #include "MapBrushEdit.h"
+#include "map/BrushOperations.h"
 
 #include "kv1/Kv1.h"
 #include "map/Check.h"
@@ -33,6 +34,8 @@
 #include <QCryptographicHash>
 #include <QDateTime>
 #include <QSettings>
+#include <QScrollArea>
+#include <QScrollBar>
 #include <QCheckBox>
 #include <QRegularExpression>
 #include <QStringListModel>
@@ -56,6 +59,7 @@
 #include <QSplitter>
 #include <QStackedWidget>
 #include <QToolBar>
+#include <QToolButton>
 #include <QClipboard>
 #include <QComboBox>
 #include <QSpinBox>
@@ -63,6 +67,7 @@
 #include <QDialogButtonBox>
 #include <QCompleter>
 #include <QFormLayout>
+#include <QGridLayout>
 #include <QLineEdit>
 #include <QRandomGenerator>
 #include <QCoreApplication>
@@ -83,9 +88,11 @@
 #include "map/MapFaceEdit.h"
 #include "map/MapFilterControl.h"
 #include "PanelColumn.h"
+#include "ModelBrowser.h"
 #include "map/MaterialBrowser.h"
 #include "map/MapPanes.h"
 #include "map/MapProperties.h"
+#include "map/MapRecent.h"
 #include "map/MapLighting.h"
 #include "map/MapParticles.h"
 #include "map/MapFogPanel.h"
@@ -106,6 +113,8 @@ namespace
 constexpr char SIDE_PANELS_SETTING[] = "maps/sidePanels";
 // The side's width, as last dragged.
 constexpr char SIDE_WIDTH_SETTING[] = "maps/sideWidth";
+// Where the side is split between the Filter Control and the panels, as last dragged.
+constexpr char SIDE_SPLIT_SETTING[] = "maps/sideSplit";
 
 //-----------------------------------------------------------------------------
 // Purpose: A power of two the grid can be, nearest to a map's saved spacing.
@@ -320,13 +329,22 @@ CMapEditor::CMapEditor( const QString &szPath, bool bFromGame, QWidget *pParent 
 	for ( CMapProperties *pSheet : { m_pProperties, m_pWorldProperties } )
 	{
 		pSheet->SetNameSource( [ this ]( const std::string &szType ) { return KeyNames( szType ); } );
-		pSheet->SetMaterialPicker( [ this ]( const QString &szCurrent ) -> std::optional<QString> {
+		pSheet->SetPicker( [ this ]( const std::string &szType, const QString &szCurrent ) -> std::optional<QString> {
 			const std::optional<xv::vfs::CGameInfo> &game = m_pDocument->GetGame();
 			if ( !game )
 				return std::nullopt;
+			if ( szType == "studio" )
+			{
+				std::optional<QString> picked = CModelBrowser::Pick( this, *game, szCurrent );
+				if ( picked )
+					m_pRecent->AddModel( *picked );
+				return picked;
+			}
 			QStringList used;
 			for ( const std::string &szMaterial : m_pDocument->GetScene() ? m_pDocument->GetScene()->m_Materials : std::vector<std::string>{} )
 				used << QString::fromStdString( szMaterial );
+			if ( szType == "sprite" )
+				return CMaterialBrowser::PickSprite( this, *game, used, szCurrent );
 			return CMaterialBrowser::Pick( this, *game, used, szCurrent );
 		} );
 	}
@@ -340,23 +358,40 @@ CMapEditor::CMapEditor( const QString &szPath, bool bFromGame, QWidget *pParent 
 	} );
 	m_pPanels->AddPanel( QStringLiteral( "newObjects" ), tr( "New Objects" ), MakeMapIcon( MapIcon_t::MAP_ICON_BLOCK, panelIconColor ), BuildNewObjects() );
 	m_pPanels->AddPanel( QStringLiteral( "texture" ), tr( "Texture" ), MakeMapIcon( MapIcon_t::MAP_ICON_MATERIAL, panelIconColor ), BuildTexturePanel() );
+	// What was used lately, a click away: the side's spare height goes to its lists.
+	m_pRecent = new CMapRecentPanel;
+	m_pPanels->AddPanel( QStringLiteral( "recent" ), tr( "Recent" ), MakeMapIcon( MapIcon_t::MAP_ICON_RECENT, panelIconColor ), m_pRecent, true );
+	connect( m_pRecent, &CMapRecentPanel::TexturePicked, this, &CMapEditor::SetCurrentMaterial );
+	connect( m_pRecent, &CMapRecentPanel::ClassPicked, this, [ this ]( const QString &szClass ) {
+		m_pObjectCategory->setCurrentIndex( 0 );
+		m_pEntityClass->setCurrentText( szClass );
+		emit StatusMessage( tr( "The entity tool places %1" ).arg( szClass ) );
+	} );
+	connect( m_pRecent, &CMapRecentPanel::ModelPicked, this, &CMapEditor::ApplyModel );
 	auto *pLighting = new CMapLightingPanel( *this );
 	pLighting->setObjectName( QStringLiteral( "mapLightingPanel" ) );
 	pLighting->layout()->setContentsMargins( 0, 0, 0, 0 );
 	pLighting->setMinimumHeight( 320 );
 	m_pPanels->AddPanel( QStringLiteral( "lighting" ), tr( "Lighting" ), MakeMapIcon( MapIcon_t::MAP_ICON_LIGHT, panelIconColor ), pLighting, true );
+	m_pPanels->SetMenu( QStringLiteral( "lighting" ), [ pLighting ]( QMenu &menu ) { menu.addAction( tr( "Reset to Default" ), pLighting, &CMapLightingPanel::ResetToDefault ); } );
 	auto *pFog = new CMapFogPanel( *this );
 	pFog->setObjectName( QStringLiteral( "mapFogPanel" ) );
 	pFog->layout()->setContentsMargins( 0, 0, 0, 0 );
 	m_pPanels->AddPanel( QStringLiteral( "fog" ), tr( "Fog" ), MakeMapIcon( MapIcon_t::MAP_ICON_FOG, panelIconColor ), pFog );
+	m_pCheck = new CMapCheckPanel( *this );
+	m_pPanels->AddPanel( QStringLiteral( "problems" ), tr( "Check for Problems" ), MakeMapIcon( MapIcon_t::MAP_ICON_PROBLEMS, panelIconColor ), m_pCheck, true );
+	m_pPanels->SetHiddenByDefault( QStringLiteral( "problems" ) );
 	// Lighting and Fog start folded: their headers are there, their settings out of the way until wanted.
 	m_pPanels->SetState( QSettings{}.value( QLatin1String( SIDE_PANELS_SETTING ), QVariantMap{ { QStringLiteral( "folded" ), QStringList{ QStringLiteral( "lighting" ), QStringLiteral( "fog" ) } } } ).toMap() );
 	m_pPanels->SetOnePanel( CPreferences::Instance().GetMapPreferences().m_bOnePanel );
 	PlaceFaceEdit();
-	connect( m_pPanels, &CPanelColumn::StateChanged, this, [ this ] { QSettings{}.setValue( QLatin1String( SIDE_PANELS_SETTING ), m_pPanels->GetState() ); } );
+	connect( m_pPanels, &CPanelColumn::StateChanged, this, [ this ] { QSettings{}.setValue( QLatin1String( SIDE_PANELS_SETTING ), m_pPanels->GetState() ); if ( !m_bApplyingSideState ) { m_SideState = GetSideState(); emit SideStateChanged(); } } );
 	m_pSidePanel->addWidget( m_pPanels );
 	m_pSidePanel->setStretchFactor( 0, 1 );
 	m_pSidePanel->setStretchFactor( 1, 3 );
+	if ( const QByteArray split = QSettings{}.value( QLatin1String( SIDE_SPLIT_SETTING ) ).toByteArray(); !split.isEmpty() )
+		m_pSidePanel->restoreState( split );
+	connect( m_pSidePanel, &QSplitter::splitterMoved, this, [ this ] { QSettings{}.setValue( QLatin1String( SIDE_SPLIT_SETTING ), m_pSidePanel->saveState() ); if ( !m_bApplyingSideState ) { m_SideState = GetSideState(); emit SideStateChanged(); } } );
 
 	auto *pMiddle = new QSplitter( Qt::Horizontal );
 	pMiddle->addWidget( m_pSplitter );
@@ -366,9 +401,22 @@ CMapEditor::CMapEditor( const QString &szPath, bool bFromGame, QWidget *pParent 
 	// The side as wide as it was last left (dragged), else as narrow as its panels allow.
 	const int nSideWidth = QSettings{}.value( QLatin1String( SIDE_WIDTH_SETTING ), 0 ).toInt();
 	pMiddle->setSizes( { 1000, std::max( nSideWidth, m_pSidePanel->minimumSizeHint().width() ) } );
-	connect( pMiddle, &QSplitter::splitterMoved, this, [ pMiddle ] {
+	connect( pMiddle, &QSplitter::splitterMoved, this, [ this, pMiddle ] {
 		if ( const QList<int> sizes = pMiddle->sizes(); sizes.size() == 2 && sizes[ 1 ] > 0 )
 			QSettings{}.setValue( QLatin1String( SIDE_WIDTH_SETTING ), sizes[ 1 ] );
+		if ( !m_bApplyingSideState )
+		{
+			m_SideState = GetSideState();
+			emit SideStateChanged();
+		}
+	} );
+
+	connect( m_pPanels->findChild<QScrollArea *>()->verticalScrollBar(), &QScrollBar::valueChanged, this, [ this ] {
+		if ( !m_bApplyingSideState && isVisible() )
+		{
+			m_SideState = GetSideState();
+			emit SideStateChanged();
+		}
 	} );
 
 	m_pTools = new QActionGroup( this );
@@ -390,7 +438,6 @@ CMapEditor::CMapEditor( const QString &szPath, bool bFromGame, QWidget *pParent 
 		{ MapTool_t::MAP_TOOL_DECAL, MapIcon_t::MAP_ICON_DECAL, tr( "Apply Decals" ), MapAction_t::MAP_ACTION_TOOL_DECAL },
 		{ MapTool_t::MAP_TOOL_CLIP, MapIcon_t::MAP_ICON_CLIP, tr( "Clipping Tool" ), MapAction_t::MAP_ACTION_TOOL_CLIP },
 		{ MapTool_t::MAP_TOOL_VERTEX, MapIcon_t::MAP_ICON_VERTEX, tr( "Vertex Tool" ), MapAction_t::MAP_ACTION_TOOL_VERTEX },
-		{ MapTool_t::MAP_TOOL_BRUSH_EDIT, MapIcon_t::MAP_ICON_VERTEX, tr( "Brush Edit" ), MapAction_t::MAP_ACTION_TOOL_BRUSH_EDIT },
 		{ MapTool_t::MAP_TOOL_SPRINKLE, MapIcon_t::MAP_ICON_SPRINKLE, tr( "Sprinkle Tool" ), MapAction_t::MAP_ACTION_TOOL_SPRINKLE },
 		{ MapTool_t::MAP_TOOL_CORDON, MapIcon_t::MAP_ICON_CORDON, tr( "Edit Cordon Bounds" ), MapAction_t::MAP_ACTION_TOOL_CORDON },
 	};
@@ -400,7 +447,7 @@ CMapEditor::CMapEditor( const QString &szPath, bool bFromGame, QWidget *pParent 
 		auto *pAction = new QAction( MakeMapIcon( tool.m_nIcon, iconColor ), tool.m_szName, this );
 		pAction->setCheckable( true );
 		pAction->setChecked( tool.m_nTool == m_nTool );
-		pAction->setToolTip( QStringLiteral( "%1 (%2)" ).arg( tool.m_szName, MapActionKey( tool.m_nKey ).toString( QKeySequence::NativeText ) ) );
+		SetKeyTip( pAction, tool.m_szName, tool.m_nKey );
 		pAction->setData( static_cast<int>( tool.m_nTool ) );
 		pAction->setObjectName( QStringLiteral( "mapTool%1" ).arg( static_cast<int>( tool.m_nTool ) ) );
 		m_pTools->addAction( pAction );
@@ -411,6 +458,135 @@ CMapEditor::CMapEditor( const QString &szPath, bool bFromGame, QWidget *pParent 
 	m_ToolBarSpecs.insert( m_ToolBarSpecs.begin(), toolSpec );
 	m_pToolHost = new CMapToolHost( std::move( m_ToolBarSpecs ), m_ToolBarActions );
 	m_ToolBarSpecs.clear();
+	if ( auto *pBar = m_pToolHost->GetBar( QStringLiteral( "mapTools" ) ) )
+	{
+		pBar->addSeparator()->setProperty( "mapToolSection", true );
+		auto *pHeader = new QToolButton( pBar );
+		pHeader->setObjectName( QStringLiteral( "brushToolsFold" ) );
+		pHeader->setToolTip( tr( "Brush Edit tools" ) );
+		pHeader->setCheckable( true );
+		pHeader->setArrowType( Qt::RightArrow );
+		pHeader->setIconSize( pBar->iconSize() );
+		pBar->addWidget( pHeader )->setProperty( "mapToolSection", true );
+		auto *pScroll = new QScrollArea( pBar );
+		pScroll->setObjectName( QStringLiteral( "brushToolPalette" ) );
+		pScroll->setFrameShape( QFrame::NoFrame );
+		pScroll->setWidgetResizable( true );
+		pScroll->setHorizontalScrollBarPolicy( Qt::ScrollBarAlwaysOff );
+		pScroll->setMinimumHeight( 64 );
+		pScroll->setMaximumHeight( 320 );
+		auto *pPalette = new QWidget( pScroll );
+		auto *pGrid = new QGridLayout( pPalette );
+		pGrid->setContentsMargins( 2, 2, 2, 2 );
+		pGrid->setSpacing( 1 );
+		pGrid->setAlignment( Qt::AlignTop | Qt::AlignLeft );
+		pScroll->setWidget( pPalette );
+		auto *pPaletteAction = pBar->addWidget( pScroll );
+		pPaletteAction->setProperty( "mapToolSection", true );
+		pPaletteAction->setVisible( false );
+		QList<QAction *> brushActions;
+		auto add = [ & ]( MapIcon_t nIcon, const QString &szName, const std::function<void()> &pfnAction, int nOperation = -1, MapAction_t nKey = MapAction_t::MAP_ACTION_COUNT ) {
+			const int nIndex = brushActions.size();
+			auto *pAction = new QAction( MakeMapIcon( nIcon, iconColor ), szName, pPalette );
+			pAction->setProperty( "brushEditAction", true );
+			pAction->setProperty( "brushEditIndex", nIndex );
+			pAction->setProperty( "brushModelOperation", nOperation );
+			SetKeyTip( pAction, szName, nKey );
+			pAction->setCheckable( true );
+			brushActions.append( pAction );
+			auto *pButton = new QToolButton( pPalette );
+			pButton->setDefaultAction( pAction );
+			pButton->setToolButtonStyle( Qt::ToolButtonIconOnly );
+			pButton->setIconSize( pBar->iconSize() );
+			pButton->setAutoRaise( true );
+			pButton->setObjectName( QStringLiteral( "brushToolButton%1" ).arg( nIndex ) );
+			pGrid->addWidget( pButton, nIndex / 3, nIndex % 3 );
+			connect( pAction, &QAction::triggered, this, [ this, pfnAction ] {if(GetTool()!=MapTool_t::MAP_TOOL_BRUSH_EDIT)SetTool(MapTool_t::MAP_TOOL_BRUSH_EDIT);pfnAction(); } );
+		};
+		add( MapIcon_t::MAP_ICON_GIZMO_MOVE, tr( "Move" ), [ this ] { m_pBrushEdit->BeginTransform( MapGizmoMode_t::MAP_GIZMO_MODE_TRANSLATE ); }, -1, MapAction_t::MAP_ACTION_BRUSH_MOVE );
+		add( MapIcon_t::MAP_ICON_GIZMO_ROTATE, tr( "Rotate" ), [ this ] { m_pBrushEdit->BeginTransform( MapGizmoMode_t::MAP_GIZMO_MODE_ROTATE ); }, -1, MapAction_t::MAP_ACTION_BRUSH_ROTATE );
+		add( MapIcon_t::MAP_ICON_GIZMO_SCALE, tr( "Scale" ), [ this ] { m_pBrushEdit->BeginTransform( MapGizmoMode_t::MAP_GIZMO_MODE_SCALE ); }, -1, MapAction_t::MAP_ACTION_BRUSH_SCALE );
+		add( MapIcon_t::MAP_ICON_BRUSH_SPLIT, tr( "Split Face" ), [ this ] { m_pBrushEdit->ApplyOperation( 0 ); }, -1, MapAction_t::MAP_ACTION_BRUSH_SPLIT_FACE );
+		add( MapIcon_t::MAP_ICON_BRUSH_INSET, tr( "Inset" ), [ this ] { m_pBrushEdit->ApplyOperation( 1 ); }, -1, MapAction_t::MAP_ACTION_BRUSH_INSET );
+		for ( int i = 0; i < 3; ++i )
+			add( MapIcon_t::MAP_ICON_BRUSH_RING, tr( "Cut Ring on %1" ).arg( QChar( 'X' + i ) ), [ this, i ] { m_pBrushEdit->ApplyOperation( 2 + i ); } );
+		add( MapIcon_t::MAP_ICON_VERTEX_MERGE, tr( "Merge Vertices at Centre" ), [ this ] { m_pBrushEdit->MergeVertices( true ); } );
+		add( MapIcon_t::MAP_ICON_VERTEX_MERGE, tr( "Merge Vertices by Distance" ), [ this ] {bool bOk=false;const double flDistance=QInputDialog::getDouble(this,tr("Merge Vertices"),tr("Maximum distance:"),1,0.001,16384,3,&bOk);if(bOk)m_pBrushEdit->MergeVertices(false,flDistance); } );
+		add( MapIcon_t::MAP_ICON_MODEL_EXTRUDE, tr( "Extrude" ), [ this ] { m_pBrushEdit->ApplyOperation( 5 ); }, 5, MapAction_t::MAP_ACTION_BRUSH_EXTRUDE );
+		add( MapIcon_t::MAP_ICON_MODEL_BEVEL, CMapBrushEdit::OperationName( 6 ), [ this ] { m_pBrushEdit->ApplyOperation( 6 ); }, 6, MapAction_t::MAP_ACTION_BRUSH_BEVEL );
+		add( MapIcon_t::MAP_ICON_MODEL_LOOP, CMapBrushEdit::OperationName( 7 ), [ this ] { m_pBrushEdit->ApplyOperation( 7 ); }, 7, MapAction_t::MAP_ACTION_BRUSH_LOOP_CUT );
+		add( MapIcon_t::MAP_ICON_MODEL_KNIFE, tr( "Knife" ), [ this ] { m_pBrushEdit->ApplyOperation( 8 ); }, 8, MapAction_t::MAP_ACTION_BRUSH_KNIFE );
+		add( MapIcon_t::MAP_ICON_MODEL_DISSOLVE, CMapBrushEdit::OperationName( 9 ), [ this ] { m_pBrushEdit->ApplyOperation( 9 ); }, 9 );
+		add( MapIcon_t::MAP_ICON_MODEL_HULL, CMapBrushEdit::OperationName( 10 ), [ this ] { m_pBrushEdit->ApplyOperation( 10 ); }, 10 );
+		add( MapIcon_t::MAP_ICON_MODEL_INTERSECT, CMapBrushEdit::OperationName( 11 ), [ this ] { m_pBrushEdit->ApplyOperation( 11 ); }, 11 );
+		add( MapIcon_t::MAP_ICON_MODEL_BRIDGE, CMapBrushEdit::OperationName( 12 ), [ this ] { m_pBrushEdit->ApplyOperation( 12 ); }, 12 );
+		add( MapIcon_t::MAP_ICON_MODEL_MIRROR, CMapBrushEdit::OperationName( 13 ), [ this ] { m_pBrushEdit->ApplyOperation( 13 ); }, 13 );
+		add( MapIcon_t::MAP_ICON_MODEL_ARRAY, CMapBrushEdit::OperationName( 14 ), [ this ] { m_pBrushEdit->ApplyOperation( 14 ); }, 14 );
+		add( MapIcon_t::MAP_ICON_MODEL_SPIN, CMapBrushEdit::OperationName( 15 ), [ this ] { m_pBrushEdit->ApplyOperation( 15 ); }, 15 );
+		add( MapIcon_t::MAP_ICON_MODEL_FLATTEN, CMapBrushEdit::OperationName( 16 ), [ this ] { m_pBrushEdit->ApplyOperation( 16 ); }, 16 );
+		add( MapIcon_t::MAP_ICON_MODEL_ALIGN_FACE, CMapBrushEdit::OperationName( 17 ), [ this ] { m_pBrushEdit->ApplyOperation( 17 ); }, 17 );
+		pScroll->setFixedWidth( pPalette->sizeHint().width() + pScroll->verticalScrollBar()->sizeHint().width() + 2 );
+		connect( m_pBrushEdit, &CMapBrushEdit::ToolChanged, this, [ this, brushActions ] {
+			for ( auto *pAction : brushActions )
+			{
+				const int nIndex = pAction->property( "brushEditIndex" ).toInt(), nOperation = pAction->property( "brushModelOperation" ).toInt();
+				bool bChecked = false;
+				if ( nIndex < 3 )
+				{
+					const MapGizmoMode_t modes[]{ MapGizmoMode_t::MAP_GIZMO_MODE_TRANSLATE, MapGizmoMode_t::MAP_GIZMO_MODE_ROTATE, MapGizmoMode_t::MAP_GIZMO_MODE_SCALE };
+					bChecked = m_pBrushEdit->IsTransformArmed( modes[ nIndex ] );
+				}
+				if ( nIndex >= 3 && nIndex < 8 )
+					bChecked = m_pBrushEdit->GetOperation() == nIndex - 3;
+				if ( nOperation >= 5 )
+					bChecked = m_pBrushEdit->GetOperation() == nOperation;
+				pAction->setChecked( bChecked );
+			}
+		} );
+		connect( pHeader, &QToolButton::toggled, this, [ pPaletteAction, pHeader ]( bool bOpen ) {pHeader->setArrowType(bOpen?Qt::DownArrow:Qt::RightArrow);pPaletteAction->setVisible(bOpen); } );
+	}
+	auto *pModeBar = new QWidget;
+	pModeBar->setObjectName( QStringLiteral( "brushModeBar" ) );
+	auto *pModes = new QHBoxLayout( pModeBar );
+	pModes->setContentsMargins( 4, 2, 4, 2 );
+	pModes->setSpacing( 2 );
+	auto *pMode = new QComboBox( pModeBar );
+	pMode->setObjectName( QStringLiteral( "brushEditingMode" ) );
+	pMode->addItems( { tr( "Brush Mode" ), tr( "Edit Mode" ) } );
+	pMode->setToolTip( tr( "Select whole brushes or edit their parts" ) );
+	pModes->addWidget( pMode );
+	QList<QToolButton *> partButtons;
+	const MapIcon_t partIcons[]{ MapIcon_t::MAP_ICON_VERTEX, MapIcon_t::MAP_ICON_BRUSH_EDGE, MapIcon_t::MAP_ICON_BRUSH_FACE };
+	const QStringList partNames{ tr( "Vertices" ), tr( "Edges" ), tr( "Faces" ) };
+	for ( int i = 0; i < 3; ++i )
+	{
+		auto *pButton = new QToolButton( pModeBar );
+		pButton->setObjectName( QStringLiteral( "brushPartButton%1" ).arg( i + 1 ) );
+		pButton->setIcon( MakeMapIcon( partIcons[ i ], iconColor ) );
+		pButton->setIconSize( QSize( 24, 24 ) );
+		pButton->setToolTip( partNames[ i ] );
+		pButton->setCheckable( true );
+		pButton->setAutoRaise( true );
+		pModes->addWidget( pButton );
+		partButtons.append( pButton );
+		connect( pButton, &QToolButton::clicked, this, [ this, i ] {SetTool(MapTool_t::MAP_TOOL_BRUSH_EDIT);m_pBrushEdit->SetMode(i+1); } );
+	}
+	pModes->addStretch();
+	connect( pMode, &QComboBox::currentIndexChanged, this, [ this ]( int nMode ) { SetTool( nMode ? MapTool_t::MAP_TOOL_BRUSH_EDIT : MapTool_t::MAP_TOOL_SELECT ); } );
+	auto syncMode = [ this, pMode, partButtons ] {
+		const bool bEdit = GetTool() == MapTool_t::MAP_TOOL_BRUSH_EDIT;
+		const QSignalBlocker blocker( pMode );
+		pMode->setCurrentIndex( bEdit ? 1 : 0 );
+		for ( int i = 0; i < partButtons.size(); ++i )
+			partButtons[ i ]->setChecked( bEdit && m_pBrushEdit->GetMode() == i + 1 );
+	};
+	connect( m_pBrushEdit, &CMapBrushEdit::ToolChanged, this, syncMode );
+	syncMode();
+	if ( auto *pSelectBar = m_pToolHost->GetBar( QStringLiteral( "mapSelectBar" ) ) )
+	{
+		auto *pModeAction = pSelectBar->insertWidget( pSelectBar->actions().isEmpty() ? nullptr : pSelectBar->actions().front(), pModeBar );
+		pModeAction->setProperty( "mapToolPrefix", true );
+	}
 	m_pToolHost->setCentralWidget( pMiddle );
 	pLayout->addWidget( m_pToolHost, 1 );
 
@@ -558,7 +734,7 @@ QWidget *CMapEditor::BuildNewObjects()
 	m_pEntityClass->setObjectName( QStringLiteral( "mapNewEntityClass" ) );
 	m_pEntityClass->setEditable( true );
 	m_pEntityClass->setInsertPolicy( QComboBox::NoInsert );
-	m_pEntityClass->setToolTip( tr( "The class the entity tool places (%1)" ).arg( MapActionKey( MapAction_t::MAP_ACTION_TOOL_ENTITY ).toString( QKeySequence::NativeText ) ) );
+	SetKeyTip( m_pEntityClass, tr( "The class the entity tool places" ), MapAction_t::MAP_ACTION_TOOL_ENTITY );
 	m_pEntityClass->addItem( QString::fromStdString( m_pDocument->GetDefaults().m_szPointEntity ) );
 	m_pObjectCategory = new QComboBox;
 	m_pObjectCategory->setObjectName( QStringLiteral( "mapNewObjectCategory" ) );
@@ -573,7 +749,7 @@ QWidget *CMapEditor::BuildNewObjects()
 	m_pMaterial = new QLineEdit( QStringLiteral( "DEV/DEV_MEASUREGENERIC01" ) );
 	connect( m_pMaterial, &QLineEdit::editingFinished, this, [ this ] { SetCurrentMaterial( m_pMaterial->text() ); } );
 	m_pMaterial->setObjectName( QStringLiteral( "mapNewMaterial" ) );
-	m_pMaterial->setToolTip( tr( "The material the block tool gives new blocks (%1)" ).arg( MapActionKey( MapAction_t::MAP_ACTION_TOOL_BLOCK ).toString( QKeySequence::NativeText ) ) );
+	SetKeyTip( m_pMaterial, tr( "The material the block tool gives new blocks" ), MapAction_t::MAP_ACTION_TOOL_BLOCK );
 	// Hammer's Objects box: the block tool's shape, and its Faces box for the round ones.
 	m_pPrimitive = new QComboBox;
 	m_pPrimitive->setObjectName( QStringLiteral( "mapNewPrimitive" ) );
@@ -904,8 +1080,7 @@ void CMapEditor::BuildToolBars()
 
 	auto command = [ & ]( MapIcon_t nIcon, const QString &szName, MapAction_t nAction, const char *pszObjectName, bool bCheckable = false, bool bChecked = false ) {
 		QAction *pAction = add( make( nIcon, szName, QString::fromLatin1( pszObjectName ) ) );
-		const QKeySequence key = MapActionKey( nAction );
-		pAction->setToolTip( key.isEmpty() ? szName : QStringLiteral( "%1 (%2)" ).arg( szName, key.toString( QKeySequence::NativeText ) ) );
+		SetKeyTip( pAction, szName, nAction );
 		pAction->setCheckable( bCheckable );
 		pAction->setChecked( bChecked );
 		connect( pAction, &QAction::triggered, this, [ this, nAction ] { RunAction( nAction, m_pActiveView ); } );
@@ -961,6 +1136,7 @@ void CMapEditor::BuildToolBars()
 	toggle( MapIcon_t::MAP_ICON_DETAIL_PROPS, tr( "Detail Props" ), MapAction_t::MAP_ACTION_TOGGLE_DETAIL_PROPS, "mapToggleDetailProps", m_Settings.m_bDetailProps );
 
 	bar( "mapObjectBar", tr( "Objects" ) );
+	command( MapIcon_t::MAP_ICON_GROUP, tr( "Merge Brushes" ), MapAction_t::MAP_ACTION_MERGE_BRUSHES, "mapMergeBrushes" );
 	command( MapIcon_t::MAP_ICON_CARVE, tr( "Carve" ), MapAction_t::MAP_ACTION_CARVE, "mapCarve" );
 	command( MapIcon_t::MAP_ICON_HOLLOW, tr( "Hollow" ), MapAction_t::MAP_ACTION_HOLLOW, "mapHollow" );
 	command( MapIcon_t::MAP_ICON_GROUP, tr( "Group" ), MapAction_t::MAP_ACTION_GROUP, "mapGroup" );
@@ -989,8 +1165,11 @@ void CMapEditor::BuildToolBars()
 //-----------------------------------------------------------------------------
 void CMapEditor::Load( CMapDocument::Source_t source )
 {
+	// Reload metadata needs no copy of the VMF; clear() would retain its full allocation.
+	std::vector<char> text;
+	text.swap( source.m_Text );
 	m_LastSource = source;
-	m_LastSource.m_Text.clear();
+	source.m_Text.swap( text );
 	m_LastSource.m_bRecovered = false;
 	m_pLoading->show();
 	m_pLoading->raise();
@@ -1053,7 +1232,7 @@ void CMapEditor::Loaded()
 //-----------------------------------------------------------------------------
 void CMapEditor::SetTool( MapTool_t nTool )
 {
-	if ( m_nTool == MapTool_t::MAP_TOOL_BRUSH_EDIT && nTool != m_nTool )
+	if ( nTool != m_nTool )
 		m_pBrushEdit->Cancel();
 	m_pPanels->SetAvailable( QStringLiteral( "brushEdit" ), nTool == MapTool_t::MAP_TOOL_BRUSH_EDIT );
 	if ( nTool == MapTool_t::MAP_TOOL_BRUSH_EDIT )
@@ -1119,6 +1298,8 @@ void CMapEditor::SetTool( MapTool_t nTool )
 	{
 		pAction->setChecked( pAction->data().toInt() == static_cast<int>( nTool ) );
 	}
+	if ( auto *pHeader = m_pToolHost->findChild<QToolButton *>( QStringLiteral( "brushToolsFold" ) ) )
+		pHeader->setChecked( nTool == MapTool_t::MAP_TOOL_BRUSH_EDIT );
 	// The sprinkle settings are its tool's panel, as Face Edit is the texture tool's.
 	const bool bSprinkle = nTool == MapTool_t::MAP_TOOL_SPRINKLE;
 	const bool bWasSprinkle = m_pPanels->IsAvailable( QStringLiteral( "sprinkle" ) );
@@ -1137,6 +1318,7 @@ void CMapEditor::SetTool( MapTool_t nTool )
 		else if ( auto *p2D = qobject_cast<CMapView2D *>( pView ); p2D && nTool != MapTool_t::MAP_TOOL_CAMERA )
 			p2D->CancelCameraDrag();
 	}
+	emit m_pBrushEdit->ToolChanged();
 }
 
 //-----------------------------------------------------------------------------
@@ -1145,6 +1327,8 @@ void CMapEditor::SetTool( MapTool_t nTool )
 void CMapEditor::showEvent( QShowEvent *pEvent )
 {
 	QWidget::showEvent( pEvent );
+	if ( !m_SideState.isEmpty() )
+		SetSideState( m_SideState );
 	PlaceFaceEdit();
 }
 
@@ -1410,7 +1594,35 @@ void CMapEditor::PreferencesChanged()
 		StartResources();
 	}
 	UpdateAutosaveTimer();
+	RefreshKeyTips();
 	SettingsChanged();
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: A tooltip that names the action's key, kept up to date as the keys change.
+//-----------------------------------------------------------------------------
+void CMapEditor::SetKeyTip( QObject *pObject, const QString &szName, MapAction_t nAction )
+{
+	pObject->setProperty( "mapKeyName", szName );
+	pObject->setProperty( "mapKeyAction", static_cast<int>( nAction ) );
+	const QString szTip = nAction == MapAction_t::MAP_ACTION_COUNT ? szName : MapActionTip( szName, nAction );
+	if ( auto *pAction = qobject_cast<QAction *>( pObject ) )
+		pAction->setToolTip( szTip );
+	else if ( auto *pWidget = qobject_cast<QWidget *>( pObject ) )
+		pWidget->setToolTip( szTip );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+void CMapEditor::RefreshKeyTips()
+{
+	for ( QObject *pObject : findChildren<QObject *>() )
+	{
+		const QVariant action = pObject->property( "mapKeyAction" );
+		if ( action.isValid() )
+			SetKeyTip( pObject, pObject->property( "mapKeyName" ).toString(), static_cast<MapAction_t>( action.toInt() ) );
+	}
 }
 
 //-----------------------------------------------------------------------------
@@ -1713,13 +1925,25 @@ std::optional<xv::map::Plane_t> CMapEditor::GetClipPlane() const
 		return std::nullopt;
 	}
 	xv::map::Point_t axis{};
-	axis[ static_cast<std::size_t>( std::clamp( m_ClipLine->m_nAxis, 0, 2 ) ) ] = 1.0;
+	if ( m_ClipLine->m_bThreePoints )
+	{
+		if ( !m_ClipLine->m_Third )
+			return std::nullopt;
+		axis = xv::map::Subtract( *m_ClipLine->m_Third, m_ClipLine->m_From );
+	}
+	else if ( m_ClipLine->m_NormalAxis )
+		axis = *m_ClipLine->m_NormalAxis;
+	else
+		axis[ static_cast<std::size_t>( std::clamp( m_ClipLine->m_nAxis, 0, 2 ) ) ] = 1.0;
 	const xv::map::Point_t along = xv::map::Subtract( m_ClipLine->m_To, m_ClipLine->m_From );
 	if ( xv::map::Length( along ) < 1e-6 )
 	{
 		return std::nullopt;
 	}
-	const xv::map::Point_t normal = xv::map::Normalized( xv::map::Cross( axis, along ) );
+	const auto cross = xv::map::Cross( axis, along );
+	if ( xv::map::Length( cross ) < 1e-6 )
+		return std::nullopt;
+	const xv::map::Point_t normal = xv::map::Normalized( cross );
 	return xv::map::Plane_t{ normal, xv::map::Dot( normal, m_ClipLine->m_From ) };
 }
 
@@ -2040,6 +2264,7 @@ void CMapEditor::ShowObjectMenu( CMapView *pView, QPoint globalAt, std::optional
 		add( tr( "Tie to Entity" ), MapAction_t::MAP_ACTION_TIE_TO_ENTITY );
 		add( tr( "Move to World" ), MapAction_t::MAP_ACTION_MOVE_TO_WORLD );
 		menu.addSeparator();
+		add( tr( "Merge Brushes" ), MapAction_t::MAP_ACTION_MERGE_BRUSHES );
 		add( tr( "Carve" ), MapAction_t::MAP_ACTION_CARVE );
 		add( tr( "Hollow" ), MapAction_t::MAP_ACTION_HOLLOW );
 		add( tr( "Transform…" ), MapAction_t::MAP_ACTION_TRANSFORM );
@@ -2084,7 +2309,7 @@ void CMapEditor::ShowObjectMenu( CMapView *pView, QPoint globalAt, std::optional
 //-----------------------------------------------------------------------------
 // Purpose: The names Browse offers for a key type, read once from the game as the particles
 //          mounted it: soundscripts' entries and the sound files (as sound/ keys write them),
-//          the particle systems, models/*.mdl, and materials/sprites (as sprite keys write them).
+//          and the particle systems.
 //-----------------------------------------------------------------------------
 QStringList CMapEditor::KeyNames( const std::string &szType )
 {
@@ -2105,14 +2330,6 @@ QStringList CMapEditor::KeyNames( const std::string &szType )
 	{
 		for ( const std::string &szName : m_pParticles->GetSystemNames() )
 			names << QString::fromStdString( szName );
-	}
-	else if ( pFileSystem && szType == "studio" )
-	{
-		add( pFileSystem->Find( "models", ".mdl", true ), 0 );
-	}
-	else if ( pFileSystem && szType == "sprite" )
-	{
-		add( pFileSystem->Find( "materials/sprites", ".vmt", true ), static_cast<int>( std::string_view{ "materials/" }.size() ) );
 	}
 	else if ( pFileSystem && szType == "sound" )
 	{
@@ -2643,6 +2860,7 @@ void CMapEditor::SetVertexMode( MapVertexMode_t nMode )
 	m_nVertexMode = nMode;
 	// Handles of the kind no longer shown go.
 	std::erase_if( m_VertexHandles, [ nMode ]( const xv::map::VertexRef_t &h ) { return ( nMode == MapVertexMode_t::MAP_VERTEX_MODE_VERTICES && h.m_bEdge ) || ( nMode == MapVertexMode_t::MAP_VERTEX_MODE_EDGES && !h.m_bEdge ); } );
+	m_pBrushEdit->SyncLegacyParts();
 	emit StatusMessage( nMode == MapVertexMode_t::MAP_VERTEX_MODE_BOTH ? tr( "Vertex tool: vertices and edges" ) : nMode == MapVertexMode_t::MAP_VERTEX_MODE_VERTICES ? tr( "Vertex tool: vertices only" )
 																																									  : tr( "Vertex tool: edges only" ) );
 	RepaintTools();
@@ -2656,6 +2874,7 @@ void CMapEditor::SetVertexHandles( std::vector<xv::map::VertexRef_t> handles )
 	std::ranges::sort( handles );
 	handles.erase( std::ranges::unique( handles ).begin(), handles.end() );
 	m_VertexHandles = std::move( handles );
+	m_pBrushEdit->SyncLegacyParts();
 	RepaintTools();
 }
 
@@ -2687,11 +2906,8 @@ void CMapEditor::MoveVertexHandles( const xv::map::Point_t &offset )
 	{
 		return;
 	}
-	xv::map::MapEdit_t edit = xv::map::MoveHandles( *pScene, m_VertexHandles, offset );
-	if ( !edit.IsEmpty() )
-	{
-		m_pDocument->Edit( std::move( edit ), tr( "Move Vertices" ), m_pDocument->GetSelection() );
-	}
+	m_pBrushEdit->SyncLegacyParts();
+	m_pBrushEdit->Transform( xv::map::Transform_t::Translation( offset ) );
 }
 
 //-----------------------------------------------------------------------------
@@ -3187,6 +3403,31 @@ void CMapEditor::PlaceEntity( const xv::map::Point_t &origin )
 	std::vector<std::uint32_t> added;
 	xv::map::MapEdit_t edit = xv::map::AddObjects( *pScene, {}, { xv::map::MakePointEntity( pScene->m_Map, pScene->m_pFgd.get(), szClass, origin ) }, &added );
 	m_pDocument->Edit( std::move( edit ), tr( "Create Entity" ), std::move( added ) );
+	m_pRecent->AddClass( QString::fromStdString( szClass ) );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: A model from the Recent panel onto the selected entities, one step to undo; with
+//          none selected it is copied, to paste where it's wanted.
+//-----------------------------------------------------------------------------
+void CMapEditor::ApplyModel( const QString &szModel )
+{
+	const xv::map::CScene *pScene = m_pDocument->GetScene();
+	std::vector<std::uint32_t> entities;
+	for ( const std::uint32_t nObject : m_pDocument->GetSelection() )
+	{
+		if ( pScene && !pScene->IsSolidObject( nObject ) && !pScene->IsDeleted( nObject ) )
+			entities.push_back( nObject );
+	}
+	if ( entities.empty() )
+	{
+		QGuiApplication::clipboard()->setText( szModel );
+		emit StatusMessage( tr( "Copied %1: select entities to give them a model" ).arg( szModel ) );
+		return;
+	}
+	const std::string szValue = szModel.toStdString();
+	m_pDocument->Edit( xv::map::EditEntities( *pScene, entities, [ & ]( xv::map::Entity_t &entity ) { xv::map::SetKeyValue( pScene->m_Map, entity, "model", szValue ); } ), tr( "Change model" ) );
+	m_pRecent->AddModel( szModel );
 }
 
 //-----------------------------------------------------------------------------
@@ -3265,6 +3506,8 @@ void CMapEditor::SetCurrentMaterial( const QString &szMaterial )
 		m_pRecentMaterials->clear();
 		m_pRecentMaterials->addItems( recent );
 		QSettings{}.setValue( QStringLiteral( "mapTextures/" ) + GetCameraKey(), recent );
+		if ( m_pRecent )
+			m_pRecent->SetTextures( recent );
 	}
 	QStringList suggestions;
 	for ( const auto &szName : m_pDocument->GetScene() ? m_pDocument->GetScene()->m_Materials : std::vector<std::string>{} )
@@ -3979,19 +4222,11 @@ CMapEntityReport *CMapEditor::ShowEntityReport()
 //-----------------------------------------------------------------------------
 // Purpose:
 //-----------------------------------------------------------------------------
-CMapCheckDialog *CMapEditor::ShowCheckForProblems()
+CMapCheckPanel *CMapEditor::ShowCheckForProblems()
 {
-	if ( !m_pCheck )
-	{
-		m_pCheck = new CMapCheckDialog( *this );
-	}
-	else
-	{
-		m_pCheck->Run();
-	}
-	m_pCheck->show();
-	m_pCheck->raise();
-	m_pCheck->activateWindow();
+	OpenSide();
+	m_pPanels->Reveal( QStringLiteral( "problems" ) );
+	m_pCheck->Run();
 	return m_pCheck;
 }
 
@@ -4129,6 +4364,8 @@ bool CMapEditor::Save()
 	{
 		return m_pDocument->IsLoaded() && SaveAs();
 	}
+	if ( !m_pBrushEdit->CommitPendingOperation() )
+		return false;
 	QString szError;
 	if ( !m_pDocument->Save( std::filesystem::path{ m_szPath.toStdString() }, &szError ) )
 	{
@@ -4164,6 +4401,8 @@ bool CMapEditor::SaveAs()
 		QMessageBox::warning( this, tr( "Save failed" ), tr( "A manifest is saved as one map: choose a .vmf name." ) );
 		return false;
 	}
+	if ( !m_pBrushEdit->CommitPendingOperation() )
+		return false;
 	QString szError;
 	if ( !m_pDocument->Save( std::filesystem::path{ szFile.toStdString() }, &szError ) )
 	{
@@ -4695,4 +4934,97 @@ void CMapEditor::CameraMoved( CMapView *pView )
 			pOther->update();
 		}
 	}
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: The shared layout, apart from each panel's document and tool availability.
+//-----------------------------------------------------------------------------
+QVariantMap CMapEditor::GetSideState() const
+{
+	if ( !isVisible() && !m_SideState.isEmpty() )
+	{
+		QVariantMap state = m_SideState;
+		state[ QStringLiteral( "panels" ) ] = m_pPanels->GetState();
+		return state;
+	}
+	const auto *pMiddle = qobject_cast<QSplitter *>( m_pSidePanel->parentWidget() );
+	return { { QStringLiteral( "panels" ), m_pPanels->GetState() },
+		{ QStringLiteral( "split" ), m_pSidePanel->saveState() },
+		{ QStringLiteral( "width" ), pMiddle->sizes().value( 1 ) },
+		{ QStringLiteral( "scroll" ), m_pPanels->findChild<QScrollArea *>()->verticalScrollBar()->value() } };
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Apply another tab's layout without broadcasting the changes back to it.
+//-----------------------------------------------------------------------------
+void CMapEditor::SetSideState( const QVariantMap &state )
+{
+	m_SideState = state;
+	m_bApplyingSideState = true;
+	const bool bOnePanel = m_pPanels->IsOnePanel();
+	m_pPanels->SetOnePanel( false );
+	m_pPanels->SetState( state.value( QStringLiteral( "panels" ) ).toMap() );
+	m_pPanels->SetOnePanel( bOnePanel );
+	m_pSidePanel->restoreState( state.value( QStringLiteral( "split" ) ).toByteArray() );
+	auto *pMiddle = qobject_cast<QSplitter *>( m_pSidePanel->parentWidget() );
+	const int nWidth = state.value( QStringLiteral( "width" ) ).toInt();
+	pMiddle->setSizes( { std::max( 0, pMiddle->width() - pMiddle->handleWidth() - nWidth ), nWidth } );
+	m_pPanels->findChild<QScrollArea *>()->verticalScrollBar()->setValue( state.value( QStringLiteral( "scroll" ) ).toInt() );
+	m_bApplyingSideState = false;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Merge only a convex union and keep the surviving brush selected in one undo step.
+//-----------------------------------------------------------------------------
+void CMapEditor::MergeBrushes()
+{
+	const auto *pScene = m_pDocument->GetScene();
+	if ( !pScene )
+		return;
+	std::string szProblem;
+	auto edit = xv::map::MergeBrushes( *pScene, m_pDocument->GetSelection(), &szProblem );
+	if ( edit.IsEmpty() )
+	{
+		emit StatusMessage( QString::fromStdString( szProblem ) );
+		return;
+	}
+	const auto nObject = pScene->SolidObject( edit.m_Solids.front().first );
+	m_pDocument->Edit( std::move( edit ), tr( "Merge Brushes" ), std::vector<std::uint32_t>{ nObject } );
+}
+//-----------------------------------------------------------------------------
+// Purpose: Add a convex polygon prism with the current material and the game's face defaults.
+//-----------------------------------------------------------------------------
+bool CMapEditor::CreatePolygon( const std::vector<xv::map::Point_t> &points, int nAxis, double flDepth )
+{
+	const auto *pScene = m_pDocument->GetScene();
+	if ( !pScene )
+		return false;
+	xv::map::FaceDefaults_t faces;
+	const auto &defaults = m_pDocument->GetDefaults();
+	const std::string szMaterial = GetCurrentMaterial().trimmed().toUpper().toStdString();
+	if ( !szMaterial.empty() )
+		faces.m_szMaterial = szMaterial;
+	faces.m_flTextureScale = defaults.m_flTextureScale;
+	faces.m_nLightmapScale = defaults.m_nLightmapScale;
+	std::string szProblem;
+	auto solid = xv::map::MakePolygonPrism( pScene->m_Map, points, nAxis, flDepth, faces, &szProblem );
+	if ( !solid )
+	{
+		emit StatusMessage( QString::fromStdString( szProblem ) );
+		return false;
+	}
+	std::vector<std::uint32_t> added;
+	auto edit = xv::map::AddObjects( *pScene, { std::move( *solid ) }, {}, &added );
+	m_pDocument->Edit( std::move( edit ), tr( "Create Polygon Brush" ), added );
+	return true;
+}
+//-----------------------------------------------------------------------------
+// Purpose: A drag that joins corners needs a choice before changing topology permanently.
+//-----------------------------------------------------------------------------
+bool CMapEditor::ConfirmVertexMerge( const std::vector<xv::map::BrushPart_t> &parts, const xv::map::Transform_t &transform )
+{
+	const auto *pScene = m_pDocument->GetScene();
+	if ( !pScene || !xv::map::PartsWouldMerge( *pScene, parts, transform ) )
+		return true;
+	return QMessageBox::question( this, tr( "Merge Vertices" ), tr( "This move joins vertices. Merge them and apply the move?" ), QMessageBox::Yes | QMessageBox::No, QMessageBox::No ) == QMessageBox::Yes;
 }

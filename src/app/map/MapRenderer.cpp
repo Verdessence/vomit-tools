@@ -623,8 +623,7 @@ bool CMapRenderer::UploadSky( const MapFrame_t &frame, QRhiResourceUpdateBatch *
 			uniforms.m_Translate[ i ][ 2 ] = 1.0f;
 		}
 	}
-	uniforms.m_Translate[ 0 ][ 3 ] = m_pSkyFor ? 1.0f : 0.0f;
-	uniforms.m_Translate[ 1 ][ 3 ] = m_pEnvAtlas ? 1.0f : 0.0f;
+	SkyUniforms_t uniforms = MakeSkyUniforms( m_pSkyFor, m_pSkyTransformsFor.get(), m_SkyFaces, m_pEnvAtlas != nullptr );
 	pUpdates->updateDynamicBuffer( m_pSkyUniforms.get(), 0, sizeof uniforms, &uniforms );
 	return true;
 }

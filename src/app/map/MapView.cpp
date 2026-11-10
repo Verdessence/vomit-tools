@@ -42,7 +42,9 @@ bool CMapView::event( QEvent *pEvent )
 	if ( pEvent->type() == QEvent::ShortcutOverride )
 	{
 		auto *pKey = static_cast<QKeyEvent *>( pEvent );
-		if ( MapActionFor( *pKey, GetKeyContext() ) || ( pKey->key() == Qt::Key_Space && pKey->modifiers() == Qt::NoModifier ) )
+		const MapTool_t nTool = m_Editor.GetTool();
+		const bool bBrush = nTool == MapTool_t::MAP_TOOL_BRUSH_EDIT || nTool == MapTool_t::MAP_TOOL_VERTEX;
+		if ( MapActionFor( *pKey, GetKeyContext() ) || ( bBrush && MapActionFor( *pKey, MapKeyContext_t::MAP_KEY_CONTEXT_BRUSH ) ) || ( pKey->key() == Qt::Key_Space && pKey->modifiers() == Qt::NoModifier ) )
 		{
 			pEvent->accept();
 			return true;

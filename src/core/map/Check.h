@@ -33,7 +33,17 @@ enum class ProblemKind_t
 	PROBLEM_MISSING_TARGET,      // an output to a name nothing has
 	PROBLEM_OVERLAY_NO_FACES,    // overlay with no assigned faces
 	PROBLEM_NO_PLAYER_START,     // no info_player_* entity
+	PROBLEM_PARTICLE_UNLISTED,   // an effect only a .pcf no particle manifest lists has
+	PROBLEM_PARTICLE_MISSING,    // an effect no .pcf has
 };
+
+// Where an effect name is found among the game's particle files.
+struct ParticleSource_t
+{
+	bool m_bFound = false;
+	std::string m_szUnlistedFile; // when only a file no manifest lists has it: the game won't load that file
+};
+using ParticleLookup_t = std::function<ParticleSource_t( std::string_view szEffect )>;
 
 struct Problem_t
 {
@@ -46,8 +56,8 @@ struct Problem_t
 
 // Every problem, in object order; pfnInclude (when given) leaves out objects it says no to
 // (Hammer's "check visible parts of the map only"). Without game data the class checks are
-// skipped.
-[[nodiscard]] std::vector<Problem_t> CheckMap( const CScene &scene, const std::function<bool( std::uint32_t )> &pfnInclude );
+// skipped, and without pfnParticle (the game's particles not read yet) the particle checks.
+[[nodiscard]] std::vector<Problem_t> CheckMap( const CScene &scene, const std::function<bool( std::uint32_t )> &pfnInclude, const ParticleLookup_t &pfnParticle = {} );
 // Hammer's Fix: an empty edit for what can't be fixed.
 [[nodiscard]] MapEdit_t FixProblem( const CScene &scene, const Problem_t &problem );
 // Fix all of the kind: the fixes together in one edit.

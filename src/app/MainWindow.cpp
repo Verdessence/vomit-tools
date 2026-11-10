@@ -80,6 +80,7 @@
 #include "DiscordPresence.h"
 #include "map/MapAutosave.h"
 #include "map/MapEditor.h"
+#include "map/MapBrushEdit.h"
 #include "map/Write.h"
 #include "PreferencesDialog.h"
 #include "PremiumDialog.h"
@@ -829,10 +830,26 @@ void CMainWindow::BuildMenus( QAction *pSearchPathsToggle )
 			pMap->RunAction( MapAction_t::MAP_ACTION_HOLLOW, pMap->GetActiveView() );
 		}
 	} );
+	m_pMapMenu->addAction( tr( "Merge Brushes" ), this, [ this ] {
+				  if ( auto *pMap = GetCurrentMap() )
+					  pMap->MergeBrushes();
+			  } )
+		->setObjectName( QStringLiteral( "mapMergeBrushesAction" ) );
 	m_pMapMenu->addAction( tr( "&Carve" ), this, [ this ] {
 		if ( CMapEditor *pMap = GetCurrentMap() )
 		{
 			pMap->RunAction( MapAction_t::MAP_ACTION_CARVE, pMap->GetActiveView() );
+		}
+	} );
+	auto *pVertices = m_pMapMenu->addMenu( tr( "Merge Vertices" ) );
+	pVertices->addAction( tr( "At Centre" ), this, [ this ] {if(auto *pMap=GetCurrentMap())pMap->GetBrushEdit().MergeVertices(true); } );
+	pVertices->addAction( tr( "By Distance…" ), this, [ this ] {
+		if ( auto *pMap = GetCurrentMap() )
+		{
+			bool bOk = false;
+			const double flDistance = QInputDialog::getDouble( this, tr( "Merge Vertices" ), tr( "Maximum distance:" ), 1, 0.001, 16384, 3, &bOk );
+			if ( bOk )
+				pMap->GetBrushEdit().MergeVertices( false, flDistance );
 		}
 	} );
 	auto *pInstancing = m_pMapMenu->addMenu( tr( "Instancing" ) );
@@ -1194,7 +1211,7 @@ void CMainWindow::UpdateDiscord()
 		szFile.remove( u'&' );
 		szFile.remove( u'*' );
 		szFile = szFile.trimmed();
-		activity.m_szState = DiscordVerb( CTabGroups::KindOf( m_pTabs->widget( nIndex ) ), szFile ) + u' ' + szFile;
+		activity.m_szState = DiscordVerb( CTabGroups::KindOf( m_pTabs->widget( nIndex ) ) ) + u' ' + szFile;
 	}
 	m_pDiscord->SetActivity( activity );
 }
@@ -1959,8 +1976,7 @@ void CMainWindow::PreviewDiskFile( const QString &szPath )
 	else if ( const auto sky = SkyFilesFor( szPath ) )
 	{
 		const auto face = xv::sky::FaceFromFileName( info.fileName().toStdString() );
-		pView = WithEditButton( pView, tr( "This is the %1 face of the sky %2 (%3 of its 6 faces are here)." ).arg( face ? QString::fromUtf8( xv::sky::Suffix( *face ) ) : QString{}, QString::fromStdString( sky->m_szName ) ).arg( sky->Count() ),
-			tr( "Open Sky in Editor" ), [ this, szPath ] { OpenDiskFile( szPath ); } );
+		pView = WithEditButton( pView, tr( "This is the %1 face of the sky %2 (%3 of its 6 faces are here)." ).arg( face ? QString::fromUtf8( xv::sky::Suffix( *face ) ) : QString{}, QString::fromStdString( sky->m_szName ) ).arg( sky->Count() ), tr( "Open Sky in Editor" ), [ this, szPath ] { OpenDiskFile( szPath ); }, info.suffix().compare( u"vmt", Qt::CaseInsensitive ) == 0 ? tr( "Edit Material" ) : tr( "Open in Texture Editor" ), [ this, szPath ] { OpenSkyFaceFile( szPath ); } );
 	}
 	else if ( info.suffix().compare( u"vbsp", Qt::CaseInsensitive ) == 0 )
 	{
@@ -5395,6 +5411,14 @@ void CMainWindow::UpdateMapMenu()
 //-----------------------------------------------------------------------------
 void CMainWindow::AddMapTab( CMapEditor *pEditor )
 {
+	if ( !m_MapSideState.isEmpty() )
+		pEditor->SetSideState( m_MapSideState );
+	connect( pEditor, &CMapEditor::SideStateChanged, this, [ this, pEditor ] {
+		m_MapSideState = pEditor->GetSideState();
+		for ( CMapEditor *pOther : findChildren<CMapEditor *>() )
+			if ( pOther != pEditor )
+				pOther->SetSideState( m_MapSideState );
+	} );
 	connect( pEditor, &CMapEditor::OpenInstanceRequested, this, [ this ]( const QString &szPath ) { OpenMapFile( szPath ); } );
 	connect( &pEditor->GetDocument(), &CMapDocument::Saved, this, [ this ]( const QString &szPath ) {
 		for ( int n = 0; n < m_pTabs->count(); ++n )

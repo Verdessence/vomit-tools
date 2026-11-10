@@ -16,6 +16,8 @@
 #include <QClipboard>
 #include <QComboBox>
 #include <QCryptographicHash>
+#include <QDialog>
+#include <QDialogButtonBox>
 #include <QDir>
 #include <QFile>
 #include <QHBoxLayout>
@@ -416,14 +418,23 @@ CModelBrowser::CModelBrowser( const xv::vfs::CGameInfo &game, QWidget *pParent )
 		resize();
 		askSoon();
 	} );
-	connect( m_pView, &QListView::activated, this, [ this ]( const QModelIndex &index ) { emit OpenModelRequested( index.data( CModelList::ROLE_PATH ).toString() ); } );
+	connect( m_pView, &QListView::activated, this, [ this ]( const QModelIndex &index ) {
+		const QString szPath = index.data( CModelList::ROLE_PATH ).toString();
+		if ( m_bPicking )
+			emit ModelPicked( szPath );
+		else
+			emit OpenModelRequested( szPath );
+	} );
 	connect( m_pView, &QListView::customContextMenuRequested, this, [ this ]( const QPoint &point ) {
 		const QModelIndex index = m_pView->indexAt( point );
 		if ( !index.isValid() )
 			return;
 		const QString szPath = index.data( CModelList::ROLE_PATH ).toString();
 		QMenu menu;
-		menu.addAction( tr( "Open in Model Viewer" ), this, [ this, szPath ] { emit OpenModelRequested( szPath ); } );
+		if ( m_bPicking )
+			menu.addAction( tr( "Use" ), this, [ this, szPath ] { emit ModelPicked( szPath ); } );
+		else
+			menu.addAction( tr( "Open in Model Viewer" ), this, [ this, szPath ] { emit OpenModelRequested( szPath ); } );
 		menu.addAction( tr( "Copy Path" ), this, [ szPath ] { QApplication::clipboard()->setText( szPath ); } );
 		menu.exec( m_pView->viewport()->mapToGlobal( point ) );
 	} );
@@ -450,6 +461,77 @@ void CModelBrowser::SetGame( const xv::vfs::CGameInfo &game )
 	m_pDetails->SetGame( game, m_pfnDetailsRead, m_pfnWhere );
 	Stop();
 	Start( game );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+void CModelBrowser::SetPicking( const QString &szCurrent )
+{
+	m_bPicking = true;
+	m_szStart = szCurrent;
+	m_pDetails->SetPicking( true );
+	if ( !szCurrent.isEmpty() )
+		SelectPath( szCurrent );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: The model selected in the grid, if it is shown.
+//-----------------------------------------------------------------------------
+QString CModelBrowser::GetCurrent() const
+{
+	const QModelIndex index = m_pView->currentIndex();
+	return index.isValid() ? index.data( CModelList::ROLE_PATH ).toString() : QString{};
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: A model selected and scrolled to, its case as the game lists it or not.
+//-----------------------------------------------------------------------------
+void CModelBrowser::SelectPath( const QString &szPath )
+{
+	QString szWanted = szPath;
+	szWanted.replace( u'\\', u'/' );
+	for ( int i = 0; i < m_pFilter->rowCount(); i++ )
+	{
+		const QModelIndex index = m_pFilter->index( i, 0 );
+		if ( index.data( CModelList::ROLE_PATH ).toString().compare( szWanted, Qt::CaseInsensitive ) == 0 )
+		{
+			m_pView->setCurrentIndex( index );
+			m_pView->scrollTo( index, QAbstractItemView::PositionAtCenter );
+			return;
+		}
+	}
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: The browser in a window of its own, with OK and Cancel; its details panel is kept
+//          as the browser tab leaves it.
+//-----------------------------------------------------------------------------
+std::optional<QString> CModelBrowser::Pick( QWidget *pParent, const xv::vfs::CGameInfo &game, const QString &szCurrent )
+{
+	QDialog dialog( pParent );
+	dialog.setObjectName( QStringLiteral( "modelPicker" ) );
+	dialog.setWindowTitle( tr( "Models" ) );
+	dialog.resize( 1100, 680 );
+	auto *pLayout = new QVBoxLayout( &dialog );
+	auto *pBrowser = new CModelBrowser( game );
+	pBrowser->SetPicking( szCurrent );
+	pLayout->addWidget( pBrowser, 1 );
+	auto *pButtons = new QDialogButtonBox( QDialogButtonBox::Ok | QDialogButtonBox::Cancel );
+	pLayout->addWidget( pButtons );
+	QString szPicked;
+	connect( pBrowser, &CModelBrowser::ModelPicked, &dialog, [ & ]( const QString &szPath ) {
+		szPicked = szPath;
+		dialog.accept();
+	} );
+	connect( pButtons, &QDialogButtonBox::accepted, &dialog, [ & ] {
+		szPicked = pBrowser->GetCurrent();
+		dialog.accept();
+	} );
+	connect( pButtons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject );
+	if ( dialog.exec() != QDialog::Accepted || szPicked.isEmpty() )
+		return std::nullopt;
+	return szPicked;
 }
 
 //-----------------------------------------------------------------------------
@@ -543,6 +625,8 @@ void CModelBrowser::Run( xv::vfs::CGameInfo game )
 		names << QString::fromStdString( szPath );
 	post( [ this, names ] {
 		m_pList->SetPaths( names );
+		if ( !m_szStart.isEmpty() )
+			SelectPath( m_szStart );
 		emit Progress();
 	} );
 

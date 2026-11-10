@@ -63,6 +63,9 @@ add_library(vomit_tools_core STATIC
         map/Cordon.h
         map/Vertex.cpp
         map/BrushMesh.cpp
+        map/BrushOperations.cpp
+        map/BrushModeling.cpp
+        map/BrushSelect.cpp
         map/Vertex.h
         map/Compile.cpp
         map/Compile.h

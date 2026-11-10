@@ -14,6 +14,7 @@
 #include <atomic>
 #include <deque>
 #include <mutex>
+#include <optional>
 #include <thread>
 #include <vector>
 
@@ -69,6 +70,14 @@ public:
 	explicit CModelBrowser( const xv::vfs::CGameInfo &game, QWidget *pParent = nullptr );
 	~CModelBrowser() override;
 
+	// Runs the browser as a picker (for a map's model keys): a double click or OK picks; the
+	// path picked ("models/props_c17/oildrum001.mdl"), if one was. szCurrent starts selected.
+	static std::optional<QString> Pick( QWidget *pParent, const xv::vfs::CGameInfo &game, const QString &szCurrent );
+	// A double click picks the model (ModelPicked) in place of opening it, and the menus offer
+	// Use in place of opening; szCurrent is selected once it is listed.
+	void SetPicking( const QString &szCurrent );
+	[[nodiscard]] QString GetCurrent() const;
+
 	// Reads the game again (after it was mounted again, or another game was opened).
 	void SetGame( const xv::vfs::CGameInfo &game );
 	void SetDetailsReader( xv::model::Reader_t pfnRead, CModelDetails::Location_t pfnWhere );
@@ -85,6 +94,7 @@ public:
 	[[nodiscard]] static QString CacheFolder();
 
 signals:
+	void ModelPicked( const QString &szPath );
 	void OpenModelRequested( const QString &szPath );
 	void OpenMaterialRequested( const QString &szPath );
 	void ShowInGameBrowser( const QString &szPath );
@@ -97,6 +107,7 @@ private:
 	void Run( xv::vfs::CGameInfo game );
 	void AskForVisible();
 	void UpdateCount();
+	void SelectPath( const QString &szPath );
 
 	xv::vfs::CGameInfo m_Game;
 	xv::model::Reader_t m_pfnDetailsRead;
@@ -111,6 +122,8 @@ private:
 	QCheckBox *m_pWithoutMesh = nullptr;
 	QSlider *m_pSize = nullptr;
 	QLabel *m_pCount = nullptr;
+	bool m_bPicking = false;
+	QString m_szStart; // selected once listed, when picking
 
 	std::thread m_Worker;
 	std::atomic<bool> m_bStop = false;

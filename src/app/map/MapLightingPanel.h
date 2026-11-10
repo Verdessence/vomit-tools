@@ -32,6 +32,7 @@ public:
 
 	// The lights listed again from the map (after an edit or another map).
 	void Refresh();
+	void ResetToDefault();
 	// The bake's progress, or what the last one made.
 	void UpdateStatus();
 

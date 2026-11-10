@@ -259,6 +259,23 @@ fs::path HammerConfigFile( const fs::path &gameDir, HammerKind_t nKind )
 }
 
 //-----------------------------------------------------------------------------
+// Purpose: The folder holding hammerplusplus_fgd.fgd, which Hammer++ also reads models and
+//          materials from.
+//-----------------------------------------------------------------------------
+std::optional<fs::path> HammerPlusPlusContent( const fs::path &gameDir )
+{
+	const fs::path root = gameDir.parent_path();
+	std::error_code error;
+	for ( const fs::path &candidate : { root / "bin" / "x64" / "hammerplusplus", root / "bin" / "hammerplusplus" } )
+	{
+		const fs::path found = FindFileIgnoringCase( candidate );
+		if ( fs::is_directory( found, error ) && fs::exists( FindFileIgnoringCase( found / "hammerplusplus_fgd.fgd" ), error ) )
+			return found;
+	}
+	return std::nullopt;
+}
+
+//-----------------------------------------------------------------------------
 // Purpose: Hammer++ for the 64-bit games is bin/x64/hammerplusplus.exe; Hammer is in bin, or
 //          bin/x64 for those games.
 //-----------------------------------------------------------------------------

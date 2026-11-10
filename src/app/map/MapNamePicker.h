@@ -1,7 +1,7 @@
 //===========================================================================//
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
-// Purpose: A name picked from a long list (sounds, particle systems, models, sprites): words
+// Purpose: A name picked from a long list (sounds, particle systems): words
 //          typed narrow it, a double-click or OK picks. For Object Properties' Browse.
 //
 //===========================================================================//

@@ -54,6 +54,124 @@ QIcon MakeMapIcon( MapIcon_t nIcon, const QColor &color )
 	painter.setPen( QPen{ color, 2.5, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin } );
 	switch ( nIcon )
 	{
+		case MapIcon_t::MAP_ICON_MODEL_EXTRUDE:
+			painter.drawRect( 5, 17, 22, 10 );
+			painter.drawLine( 16, 19, 16, 4 );
+			painter.drawLine( 16, 4, 11, 9 );
+			painter.drawLine( 16, 4, 21, 9 );
+			break;
+		case MapIcon_t::MAP_ICON_MODEL_BEVEL:
+			painter.drawPolygon( QPolygonF{ { { 5, 27 }, { 5, 14 }, { 14, 5 }, { 27, 5 }, { 27, 27 } } } );
+			painter.drawLine( 5, 18, 18, 5 );
+			break;
+		case MapIcon_t::MAP_ICON_MODEL_LOOP:
+			painter.drawRect( 5, 5, 22, 22 );
+			painter.drawLine( 5, 13, 27, 13 );
+			painter.drawLine( 5, 19, 27, 19 );
+			break;
+		case MapIcon_t::MAP_ICON_MODEL_KNIFE:
+			painter.drawPolygon( QPolygonF{ { { 6, 26 }, { 10, 13 }, { 26, 5 }, { 19, 21 } } } );
+			painter.drawLine( 10, 13, 19, 21 );
+			break;
+		case MapIcon_t::MAP_ICON_MODEL_DISSOLVE:
+			painter.drawRect( 5, 5, 22, 22 );
+			painter.setPen( QPen( color, 1.5, Qt::DashLine ) );
+			painter.drawLine( 5, 27, 27, 5 );
+			break;
+		case MapIcon_t::MAP_ICON_MODEL_HULL:
+			painter.drawPolygon( QPolygonF{ { { 4, 24 }, { 9, 5 }, { 25, 7 }, { 28, 24 } } } );
+			painter.drawEllipse( QPointF( 13, 17 ), 2, 2 );
+			painter.drawEllipse( QPointF( 22, 19 ), 2, 2 );
+			break;
+		case MapIcon_t::MAP_ICON_MODEL_INTERSECT:
+			painter.drawRect( 4, 4, 17, 17 );
+			painter.drawRect( 11, 11, 17, 17 );
+			painter.setBrush( color );
+			painter.drawRect( 11, 11, 10, 10 );
+			break;
+		case MapIcon_t::MAP_ICON_MODEL_BRIDGE:
+			painter.drawRect( 3, 7, 6, 18 );
+			painter.drawRect( 23, 7, 6, 18 );
+			painter.drawLine( 9, 9, 23, 9 );
+			painter.drawLine( 9, 23, 23, 23 );
+			painter.drawLine( 9, 16, 23, 16 );
+			break;
+		case MapIcon_t::MAP_ICON_MODEL_MIRROR:
+			painter.drawPolygon( QPolygonF{ { { 4, 25 }, { 12, 8 }, { 12, 25 } } } );
+			painter.drawPolygon( QPolygonF{ { { 28, 25 }, { 20, 8 }, { 20, 25 } } } );
+			painter.setPen( QPen( color, 1.5, Qt::DashLine ) );
+			painter.drawLine( 16, 3, 16, 29 );
+			break;
+		case MapIcon_t::MAP_ICON_MODEL_ARRAY:
+			for ( int i = 0; i < 3; ++i )
+				painter.drawRect( 3 + i * 10, 9, 7, 14 );
+			break;
+		case MapIcon_t::MAP_ICON_MODEL_SPIN:
+			painter.drawArc( QRectF( 5, 5, 22, 22 ), 20 * 16, 290 * 16 );
+			painter.drawRect( 23, 4, 6, 6 );
+			painter.drawRect( 3, 13, 6, 6 );
+			painter.drawRect( 17, 24, 6, 6 );
+			break;
+		case MapIcon_t::MAP_ICON_MODEL_FLATTEN:
+			painter.drawLine( 4, 25, 28, 25 );
+			painter.drawLine( 8, 5, 8, 19 );
+			painter.drawLine( 24, 11, 24, 19 );
+			painter.drawLine( 8, 19, 5, 15 );
+			painter.drawLine( 8, 19, 11, 15 );
+			painter.drawLine( 24, 19, 21, 15 );
+			painter.drawLine( 24, 19, 27, 15 );
+			break;
+		case MapIcon_t::MAP_ICON_MODEL_ALIGN_FACE:
+			painter.drawPolygon( QPolygonF{ { { 4, 11 }, { 14, 5 }, { 19, 17 }, { 9, 23 } } } );
+			painter.drawLine( 23, 4, 23, 27 );
+			painter.drawLine( 21, 25, 29, 25 );
+			break;
+		case MapIcon_t::MAP_ICON_POLYGON:
+			painter.drawPolygon( QPolygonF{ { { 5, 24 }, { 9, 6 }, { 23, 5 }, { 28, 19 }, { 18, 28 } } } );
+			painter.drawEllipse( QPointF( 9, 6 ), 3, 3 );
+			break;
+		case MapIcon_t::MAP_ICON_SPLINE:
+		{
+			// A road's curve through three handles.
+			QPainterPath path( QPointF( 4, 26 ) );
+			path.cubicTo( QPointF( 10, 4 ), QPointF( 22, 28 ), QPointF( 28, 6 ) );
+			painter.drawPath( path );
+			for ( const QPointF &at : { QPointF( 4, 26 ), QPointF( 16, 16 ), QPointF( 28, 6 ) } )
+				painter.drawRect( QRectF( at - QPointF( 2.5, 2.5 ), QSizeF( 5, 5 ) ) );
+			break;
+		}
+		case MapIcon_t::MAP_ICON_VERTEX_MERGE:
+			painter.drawLine( 5, 6, 16, 16 );
+			painter.drawLine( 27, 6, 16, 16 );
+			painter.drawLine( 5, 26, 16, 16 );
+			painter.drawLine( 27, 26, 16, 16 );
+			painter.setBrush( color );
+			painter.drawEllipse( QPointF( 16, 16 ), 4, 4 );
+			break;
+		case MapIcon_t::MAP_ICON_BRUSH_EDGE:
+			painter.drawLine( 6, 26, 26, 6 );
+			painter.drawRect( 3, 23, 6, 6 );
+			painter.drawRect( 23, 3, 6, 6 );
+			break;
+		case MapIcon_t::MAP_ICON_BRUSH_FACE:
+			painter.setBrush( color );
+			painter.drawPolygon( QPolygonF{ { { 5, 24 }, { 10, 6 }, { 27, 9 }, { 23, 27 } } } );
+			break;
+		case MapIcon_t::MAP_ICON_BRUSH_SPLIT:
+			painter.drawRect( 5, 5, 22, 22 );
+			painter.drawLine( 5, 27, 27, 5 );
+			break;
+		case MapIcon_t::MAP_ICON_BRUSH_INSET:
+			painter.drawRect( 4, 4, 24, 24 );
+			painter.drawRect( 11, 11, 10, 10 );
+			for ( const QPoint &at : { QPoint( 4, 4 ), QPoint( 28, 4 ), QPoint( 4, 28 ), QPoint( 28, 28 ) } )
+				painter.drawLine( at, QPoint( at.x() < 16 ? 11 : 21, at.y() < 16 ? 11 : 21 ) );
+			break;
+		case MapIcon_t::MAP_ICON_BRUSH_RING:
+			painter.drawRect( 5, 5, 22, 22 );
+			painter.drawLine( 5, 16, 27, 16 );
+			painter.drawLine( 16, 5, 16, 27 );
+			break;
 		case MapIcon_t::MAP_ICON_SELECT:
 		{
 			QPainterPath arrow;
@@ -339,6 +457,18 @@ QIcon MakeMapIcon( MapIcon_t nIcon, const QColor &color )
 			painter.drawLine( QPointF{ 18, 27 }, QPointF{ 22, 10 } );
 			painter.drawLine( QPointF{ 23, 27 }, QPointF{ 27, 17 } );
 			break;
+		case MapIcon_t::MAP_ICON_RECENT:
+			// A clock: what was used lately.
+			painter.drawEllipse( QPointF{ 16, 16 }, 12, 12 );
+			painter.drawLine( QPointF{ 16, 16 }, QPointF{ 16, 8 } );
+			painter.drawLine( QPointF{ 16, 16 }, QPointF{ 22, 19 } );
+			break;
+		case MapIcon_t::MAP_ICON_PROBLEMS:
+			// A warning triangle.
+			painter.drawPolygon( QPolygonF{ { { 16, 4 }, { 29, 27 }, { 3, 27 } } } );
+			painter.drawLine( QPointF{ 16, 12 }, QPointF{ 16, 19 } );
+			painter.drawPoint( QPointF{ 16, 23.5 } );
+			break;
 		case MapIcon_t::MAP_ICON_FOG:
 			// Wavy bands of mist, fading off.
 			for ( int i = 0; i < 4; i++ )
@@ -623,7 +753,15 @@ void CMapToolHost::SetLayout( const MapToolBarLayout_t &layout, bool bSave )
 	QSet<QString> used;
 	for ( QToolBar *pBar : m_Bars )
 	{
+		QList<QAction *> section, prefix;
+		for ( auto *pAction : pBar->actions() )
+			if ( pAction->property( "mapToolSection" ).toBool() )
+				section.append( pAction );
+			else if ( pAction->property( "mapToolPrefix" ).toBool() )
+				prefix.append( pAction );
 		pBar->clear();
+		for ( auto *pAction : prefix )
+			pBar->addAction( pAction );
 		QStringList entries;
 		for ( const auto &[ szBar, list ] : layout )
 		{
@@ -668,6 +806,8 @@ void CMapToolHost::SetLayout( const MapToolBarLayout_t &layout, bool bSave )
 			bGapWanted = false;
 			pBar->addAction( pAction );
 		}
+		for ( auto *pAction : section )
+			pBar->addAction( pAction );
 		placed.emplace_back( pBar->objectName(), kept );
 	}
 	m_Layout = placed;

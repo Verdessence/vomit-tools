@@ -77,12 +77,13 @@ private:
 	bool m_bFollowing = false;           // the list is being set from the selection
 };
 
-class CMapCheckDialog : public QDialog
+// Check for Problems, a panel of the side: it checks the map again on each edit while it shows.
+class CMapCheckPanel : public QWidget
 {
 	Q_OBJECT
 
 public:
-	explicit CMapCheckDialog( CMapEditor &editor );
+	explicit CMapCheckPanel( CMapEditor &editor );
 
 	// The map checked again.
 	void Run();
@@ -95,6 +96,10 @@ private:
 	void Pick();
 	void GoTo();
 
+protected:
+	void showEvent( QShowEvent *pEvent ) override;
+
+private:
 	CMapEditor &m_Editor;
 	QListWidget *m_pList = nullptr;
 	QCheckBox *m_pVisibleOnly = nullptr;

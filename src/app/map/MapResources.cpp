@@ -13,6 +13,7 @@
 #include <utility>
 
 #include "kv1/Kv1.h"
+#include "map/GameConfig.h"
 #include "map/Instance.h"
 #include "map/Materials.h"
 #include "map/Overlay.h"
@@ -27,6 +28,17 @@ namespace
 {
 
 constexpr std::size_t BATCH = 16;
+
+//-----------------------------------------------------------------------------
+// Purpose: The game's search paths, then Hammer++'s folder for the editor's own models (it is
+//          searched last, so the game's files win).
+//-----------------------------------------------------------------------------
+void MountForMap( xv::vfs::CFileSystem &fileSystem, const xv::vfs::CGameInfo &game )
+{
+	fileSystem.Mount( game );
+	if ( const auto folder = xv::map::HammerPlusPlusContent( game.m_GameDir ) )
+		fileSystem.AddDirectory( *folder, { "game" } );
+}
 
 //-----------------------------------------------------------------------------
 // Purpose: A tool material: what Hammer++'s tool texture toggle hides (the sky stays).
@@ -242,7 +254,7 @@ void CMapResources::Run( std::shared_ptr<const xv::map::CScene> pScene, xv::vfs:
 			Qt::QueuedConnection );
 	};
 	xv::vfs::CFileSystem fileSystem;
-	fileSystem.Mount( game );
+	MountForMap( fileSystem, game );
 	const xv::material::Reader_t read = [ &fileSystem ]( std::string_view szPath ) { return fileSystem.Read( szPath ); };
 
 	// The sky first: it fills the most of the screen.
@@ -787,7 +799,7 @@ void CMapResources::Refresh( std::shared_ptr<const xv::map::CScene> pScene, std:
 			if ( !pFileSystem )
 			{
 				pFileSystem = std::make_unique<xv::vfs::CFileSystem>();
-				pFileSystem->Mount( game );
+				MountForMap( *pFileSystem, game );
 			}
 			return *pFileSystem;
 		};
@@ -926,7 +938,7 @@ bool CMapResources::LoadMaterials( std::shared_ptr<const xv::map::CScene> pScene
 	const int nGeneration = m_nGeneration;
 	m_Extras.emplace_back( [ this, todo = std::move( todo ), game = *m_Game, nMaxSize = m_nMaxSize, bDecoded = m_bDecoded, nGeneration ] {
 		xv::vfs::CFileSystem fileSystem;
-		fileSystem.Mount( game );
+		MountForMap( fileSystem, game );
 		const xv::material::Reader_t read = [ &fileSystem ]( std::string_view szPath ) { return fileSystem.Read( szPath ); };
 		std::vector<Loaded_t> batch = ReadMaterials( todo, MaterialUse_t::MATERIAL_USE_FACES, read, nMaxSize, bDecoded, {} );
 		QMetaObject::invokeMethod(

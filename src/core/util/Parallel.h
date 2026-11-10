@@ -25,11 +25,15 @@ namespace xv
 
 // Calls body(begin, end) on slices of [0, count) about grain long, in parallel. Small loops run
 // on the calling thread.
+// Whether this thread is running a ParallelFor's body: a loop inside one (a big solid built while
+// a map's solids are) runs on its own thread, as the cores are already busy.
+inline thread_local bool g_bInParallelFor = false;
+
 template <typename Body>
 void ParallelFor( std::size_t nCount, std::size_t nGrain, Body &&body )
 {
 	nGrain = std::max<std::size_t>( nGrain, 1 );
-	const std::size_t nThreads = std::min( ThreadCount(), ( nCount + nGrain - 1 ) / nGrain );
+	const std::size_t nThreads = g_bInParallelFor ? 1 : std::min( ThreadCount(), ( nCount + nGrain - 1 ) / nGrain );
 	if ( nThreads <= 1 )
 	{
 		if ( nCount > 0 )
@@ -40,11 +44,14 @@ void ParallelFor( std::size_t nCount, std::size_t nGrain, Body &&body )
 	}
 	std::atomic<std::size_t> nNext{ 0 };
 	auto work = [ & ] {
+		const bool bWasInside = g_bInParallelFor;
+		g_bInParallelFor = true;
 		for ( ;; )
 		{
 			const std::size_t nBegin = nNext.fetch_add( nGrain );
 			if ( nBegin >= nCount )
 			{
+				g_bInParallelFor = bWasInside;
 				return;
 			}
 			body( nBegin, std::min( nCount, nBegin + nGrain ) );

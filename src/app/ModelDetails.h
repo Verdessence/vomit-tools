@@ -8,12 +8,15 @@
 #include <memory>
 #include <mutex>
 #include <thread>
+#include <QElapsedTimer>
 #include <QWidget>
 #include "model/Model.h"
 #include "vfs/Vfs.h"
 class CModelView;
 class QLabel;
+class QCheckBox;
 class QComboBox;
+class QPushButton;
 class QTimer;
 class QVBoxLayout;
 struct ModelDetailsData_t;
@@ -26,6 +29,11 @@ public:
 	~CModelDetails() override;
 	void SetGame( const xv::vfs::CGameInfo &game, xv::model::Reader_t pfnRead = {}, Location_t pfnWhere = {} );
 	void SelectModel( const QString &szPath );
+	// For a picker: the buttons that open the model elsewhere are hidden.
+	void SetPicking( bool bPicking );
+	// A sequence played in the view, by name; empty for the model at rest.
+	void PlaySequence( const QString &szName );
+	[[nodiscard]] QString GetSequence() const { return m_szSequence; }
 	[[nodiscard]] const QString &GetPath() const { return m_szPath; }
 	[[nodiscard]] bool IsLoading() const { return m_bLoading; }
 	[[nodiscard]] int GetLoadCount() const { return m_nLoads; }
@@ -47,6 +55,10 @@ private:
 	void Run();
 	void Present( std::shared_ptr<ModelDetailsData_t> pData, int nGeneration );
 	void Clear();
+	void ShowSequences();
+	void Animate();
+	void Pose();
+	void ApplyOverlays();
 	xv::vfs::CGameInfo m_Game;
 	xv::model::Reader_t m_pfnRead;
 	Location_t m_pfnWhere;
@@ -54,6 +66,16 @@ private:
 	CModelView *m_pView = nullptr;
 	QLabel *m_pWarning = nullptr, *m_pName = nullptr;
 	QComboBox *m_pSkin = nullptr;
+	QLabel *m_pSkinLabel = nullptr;
+	QComboBox *m_pSequence = nullptr;
+	QPushButton *m_pPlay = nullptr;
+	QCheckBox *m_pBounds = nullptr, *m_pCollision = nullptr;
+	QPushButton *m_pOpen = nullptr, *m_pShow = nullptr;
+	QTimer *m_pAnimate = nullptr;
+	QElapsedTimer m_Clock;
+	QString m_szSequence; // kept while the same model is loaded again (another skin or body)
+	float m_flCycle = 0;
+	std::optional<xv::model::CModel> m_Posed;
 	QWidget *m_pBody = nullptr, *m_pFacts = nullptr;
 	QVBoxLayout *m_pBodyLayout = nullptr, *m_pFactLayout = nullptr;
 	QTimer *m_pDebounce = nullptr, *m_pOrbit = nullptr;

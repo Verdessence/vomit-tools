@@ -15,6 +15,7 @@
 #include <optional>
 #include <thread>
 #include <utility>
+#include <span>
 #include <vector>
 
 #include <QElapsedTimer>
@@ -104,6 +105,11 @@ public:
 	[[nodiscard]] QString GetPaintCosts() const;
 	// The brush face under a widget point (the nearest hit's triangle, when it is a brush's).
 	[[nodiscard]] std::optional<xv::map::FaceRef_t> FaceAt( QPointF at, bool bThroughOverlays = false );
+	// FaceAt for many points, with the frame made once (a fine brush's handles each ask).
+	[[nodiscard]] std::vector<std::optional<xv::map::FaceRef_t>> FacesAt( std::span<const QPointF> points, bool bThroughOverlays = false );
+	// For each point, whether a brush other than its own object hides it (the brush tools'
+	// handles: a part facing the view can't be behind its own convex brush).
+	[[nodiscard]] std::vector<bool> BrushesHide( std::span<const xv::map::Point_t> points, std::span<const std::uint32_t> objects );
 	[[nodiscard]] xv::map::CViewCamera GetSizedCamera() const;
 
 protected:

@@ -192,13 +192,20 @@ add_library(vomit_tools_ui STATIC
         map/MapModalTransform.h
         map/MapKeys.cpp
         map/MapKeys.h
+        map/MapKeysPage.cpp
+        map/MapKeysPage.h
         map/MapPanes.cpp
         map/MapParticles.cpp
         map/MapParticles.h
         map/MapPanes.h
         map/MapProperties.cpp
+        map/MapRecent.cpp
+        map/MapRecent.h
         map/MapProperties.h
         map/MapBrushEdit.cpp
+        map/MapBrushConstruction.cpp
+        map/MapBrushModeling.cpp
+        map/MapBrushSelect.cpp
         map/MapBrushEdit.h
         map/MapSprinkle.cpp
         map/MapSprinkle.h
@@ -264,7 +271,7 @@ if(Qt6_VERSION VERSION_GREATER_EQUAL 6.7 AND TARGET Qt6::ShaderTools AND TARGET 
             GLSL "300es,330"
             HLSL 50
             MSL 12
-            FILES shaders/map.vert shaders/map.frag shaders/mapline.vert shaders/mapline.frag shaders/mapalpha.vert shaders/mapalpha.frag shaders/mapalphasky.frag)
+            FILES shaders/map.vert shaders/map.frag shaders/mapline.vert shaders/mapline.frag shaders/mapalpha.vert shaders/mapalpha.frag shaders/mapalphasky.frag shaders/mapsky.vert shaders/mapsky.frag)
     target_link_libraries(vomit_tools_ui PRIVATE Qt6::GuiPrivate)
     target_compile_definitions(vomit_tools_ui PUBLIC VOMIT_TOOLS_GPU)
     message(STATUS "vomit-tools: previews on the graphics card")

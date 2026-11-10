@@ -8,8 +8,26 @@
 
 #include "DebugLog.h"
 
+#include <algorithm>
+#include <array>
+#include <charconv>
+#include <cmath>
+#include <map>
+#include <set>
+#include <span>
 #include <type_traits>
 
+#include <QApplication>
+#include <QDateTime>
+#include <QDir>
+#include <QFile>
+#include <QFileInfo>
+#include <QFileSystemWatcher>
+#include <QFontDatabase>
+#include <QKeySequence>
+#include <QPalette>
+#include <QRegularExpression>
+#include <QSaveFile>
 #include <QSettings>
 
 namespace

@@ -9,7 +9,10 @@
 
 #include <algorithm>
 #include <cmath>
+#include <array>
+#include <cstdint>
 #include <map>
+#include <unordered_map>
 
 namespace xv::map
 {
@@ -19,21 +22,64 @@ namespace
 
 constexpr double VERTEX_WELD = 1e-3; // corners this close are one
 
-//-----------------------------------------------------------------------------
-// Purpose: The index of p among the vertices, added when it is new.
-//-----------------------------------------------------------------------------
-std::uint32_t IndexOf( std::vector<Point_t> &vertices, const Point_t &p )
+// The corners found so far, in cells of the weld's size: a corner can only weld with one in its
+// own cell or the cells beside it. A fine sphere has thousands of corners, and comparing each
+// with all the others made building its handles take longer than a frame.
+class CWeld
 {
-	for ( std::size_t i = 0; i < vertices.size(); i++ )
+public:
+	explicit CWeld( std::vector<Point_t> &vertices )
+		: m_Vertices( vertices )
+	{}
+
+	//-----------------------------------------------------------------------------
+	// Purpose: The index of p among the vertices (the first one within the weld), added when it
+	//          is new.
+	//-----------------------------------------------------------------------------
+	std::uint32_t IndexOf( const Point_t &p )
 	{
-		if ( Length( Subtract( vertices[ i ], p ) ) <= VERTEX_WELD )
-		{
-			return static_cast<std::uint32_t>( i );
-		}
+		const Cell_t cell = CellOf( p );
+		std::uint32_t nFound = ~0u;
+		for ( std::int64_t x = -1; x <= 1; x++ )
+			for ( std::int64_t y = -1; y <= 1; y++ )
+				for ( std::int64_t z = -1; z <= 1; z++ )
+				{
+					const auto it = m_Cells.find( { cell[ 0 ] + x, cell[ 1 ] + y, cell[ 2 ] + z } );
+					if ( it == m_Cells.end() )
+						continue;
+					for ( const std::uint32_t n : it->second )
+						if ( n < nFound && Length( Subtract( m_Vertices[ n ], p ) ) <= VERTEX_WELD )
+							nFound = n;
+				}
+		if ( nFound != ~0u )
+			return nFound;
+		const auto n = static_cast<std::uint32_t>( m_Vertices.size() );
+		m_Vertices.push_back( p );
+		m_Cells[ cell ].push_back( n );
+		return n;
 	}
-	vertices.push_back( p );
-	return static_cast<std::uint32_t>( vertices.size() - 1 );
-}
+
+private:
+	using Cell_t = std::array<std::int64_t, 3>;
+	struct CellHash_t
+	{
+		std::size_t operator()( const Cell_t &cell ) const
+		{
+			return static_cast<std::size_t>( cell[ 0 ] * 73856093 ^ cell[ 1 ] * 19349663 ^ cell[ 2 ] * 83492791 );
+		}
+	};
+
+	//-----------------------------------------------------------------------------
+	// Purpose:
+	//-----------------------------------------------------------------------------
+	static Cell_t CellOf( const Point_t &p )
+	{
+		return { static_cast<std::int64_t>( std::floor( p[ 0 ] / VERTEX_WELD ) ), static_cast<std::int64_t>( std::floor( p[ 1 ] / VERTEX_WELD ) ), static_cast<std::int64_t>( std::floor( p[ 2 ] / VERTEX_WELD ) ) };
+	}
+
+	std::vector<Point_t> &m_Vertices;
+	std::unordered_map<Cell_t, std::vector<std::uint32_t>, CellHash_t> m_Cells;
+};
 
 } // namespace
 
@@ -52,13 +98,14 @@ Point_t SolidVertices_t::EdgeMiddle( std::size_t nEdge ) const
 SolidVertices_t VerticesOf( const SolidGeometry_t &shape )
 {
 	SolidVertices_t out;
+	CWeld weld( out.m_Vertices );
 	std::vector<std::pair<std::uint32_t, std::uint32_t>> edges;
 	for ( const FaceGeometry_t &face : shape.m_Faces )
 	{
 		std::vector<std::uint32_t> corners;
 		for ( const Point_t &p : face.m_Points )
 		{
-			const std::uint32_t n = IndexOf( out.m_Vertices, p );
+			const std::uint32_t n = weld.IndexOf( p );
 			if ( corners.empty() || corners.back() != n )
 			{
 				corners.push_back( n );

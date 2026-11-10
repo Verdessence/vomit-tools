@@ -12,11 +12,13 @@
 #include "kv1/Kv1.h"
 #include "QtPaths.h"
 #include <QApplication>
+#include <QCheckBox>
 #include <QClipboard>
 #include <QComboBox>
 #include <QCursor>
 #include <QFormLayout>
 #include <QGroupBox>
+#include <QHBoxLayout>
 #include <QHideEvent>
 #include <QLabel>
 #include <QPushButton>
@@ -25,11 +27,13 @@
 #include <QSignalBlocker>
 #include <QTimer>
 #include <QVBoxLayout>
+#include <cmath>
 #include <set>
 
 struct ModelDetailsData_t
 {
 	std::optional<xv::model::CStudioFile> m_Studio;
+	std::vector<xv::model::CStudioFile> m_Includes; // $includemodel's files, whose sequences the model plays too
 	std::optional<xv::model::CModel> m_Model;
 	std::optional<xv::model::Physics_t> m_Physics;
 	std::vector<xv::particles::Sprite_t> m_Sprites;
@@ -110,29 +114,71 @@ CModelDetails::CModelDetails( QWidget *pParent )
 	m_pView = new CModelView;
 	m_pView->setFixedHeight( 230 );
 	pLayout->addWidget( m_pView );
+	auto *pOverlays = new QHBoxLayout;
+	m_pBounds = new QCheckBox( tr( "Bounds" ) );
+	m_pBounds->setObjectName( QStringLiteral( "modelDetailsBounds" ) );
+	m_pBounds->setToolTip( tr( "The mesh's bounds (grey), the hull (orange) and the view bounds (blue)" ) );
+	m_pCollision = new QCheckBox( tr( "Collision" ) );
+	m_pCollision->setObjectName( QStringLiteral( "modelDetailsCollision" ) );
+	m_pCollision->setToolTip( tr( "The physics hull from the .phy" ) );
+	pOverlays->addWidget( m_pBounds );
+	pOverlays->addWidget( m_pCollision );
+	pOverlays->addStretch();
+	pLayout->addLayout( pOverlays );
+	connect( m_pBounds, &QCheckBox::toggled, this, &CModelDetails::ApplyOverlays );
+	connect( m_pCollision, &QCheckBox::toggled, this, &CModelDetails::ApplyOverlays );
+	auto *pChoices = new QFormLayout;
+	pChoices->setFieldGrowthPolicy( QFormLayout::AllNonFixedFieldsGrow );
+	auto *pSequenceRow = new QHBoxLayout;
+	m_pSequence = new QComboBox;
+	m_pSequence->setObjectName( QStringLiteral( "modelDetailsSequence" ) );
+	m_pSequence->setSizeAdjustPolicy( QComboBox::AdjustToMinimumContentsLengthWithIcon );
+	m_pSequence->setMinimumContentsLength( 8 );
+	m_pPlay = new QPushButton( tr( "Pause" ) );
+	m_pPlay->setObjectName( QStringLiteral( "modelDetailsPlay" ) );
+	m_pPlay->setCheckable( true );
+	m_pPlay->setChecked( true );
+	pSequenceRow->addWidget( m_pSequence, 1 );
+	pSequenceRow->addWidget( m_pPlay );
+	pChoices->addRow( tr( "Sequence" ), pSequenceRow );
 	m_pSkin = new QComboBox;
 	m_pSkin->setObjectName( QStringLiteral( "modelDetailsSkin" ) );
-	pLayout->addWidget( m_pSkin );
+	m_pSkinLabel = new QLabel( tr( "Skin" ) );
+	pChoices->addRow( m_pSkinLabel, m_pSkin );
+	pLayout->addLayout( pChoices );
 	m_pSkin->hide();
+	m_pSkinLabel->hide();
+	connect( m_pSequence, &QComboBox::currentIndexChanged, this, [ this ] {
+		m_szSequence = m_pSequence->currentIndex() > 0 ? m_pSequence->currentText() : QString{};
+		m_flCycle = 0;
+		Pose();
+	} );
+	connect( m_pPlay, &QPushButton::toggled, this, [ this ]( bool bPlay ) {
+		m_pPlay->setText( bPlay ? tr( "Pause" ) : tr( "Play" ) );
+		Pose();
+	} );
+	m_pAnimate = new QTimer( this );
+	m_pAnimate->setInterval( 33 );
+	connect( m_pAnimate, &QTimer::timeout, this, &CModelDetails::Animate );
 	m_pBody = new QWidget;
 	m_pBodyLayout = new QVBoxLayout( m_pBody );
 	m_pBodyLayout->setContentsMargins( 0, 0, 0, 0 );
 	pLayout->addWidget( m_pBody );
 	connect( m_pSkin, &QComboBox::currentIndexChanged, this, [ this ]( int n ) {if(n>=0&&n!=m_Selection.m_nSkin){m_Selection.m_nSkin=n;StartLoad();} } );
-	auto *pOpen = new QPushButton( tr( "Open in Model Viewer" ) );
-	pOpen->setObjectName( QStringLiteral( "modelDetailsOpen" ) );
-	pLayout->addWidget( pOpen );
-	connect( pOpen, &QPushButton::clicked, this, [ this ] {if(!m_szPath.isEmpty())emit OpenModelRequested(m_szPath); } );
+	m_pOpen = new QPushButton( tr( "Open in Model Viewer" ) );
+	m_pOpen->setObjectName( QStringLiteral( "modelDetailsOpen" ) );
+	pLayout->addWidget( m_pOpen );
+	connect( m_pOpen, &QPushButton::clicked, this, [ this ] {if(!m_szPath.isEmpty())emit OpenModelRequested(m_szPath); } );
 	auto *pButtons = new QHBoxLayout;
 	auto *pCopy = new QPushButton( tr( "Copy Path" ) );
 	pCopy->setObjectName( QStringLiteral( "modelDetailsCopy" ) );
-	auto *pShow = new QPushButton( tr( "Show in Game Browser" ) );
-	pShow->setObjectName( QStringLiteral( "modelDetailsShow" ) );
+	m_pShow = new QPushButton( tr( "Show in Game Browser" ) );
+	m_pShow->setObjectName( QStringLiteral( "modelDetailsShow" ) );
 	pButtons->addWidget( pCopy );
-	pButtons->addWidget( pShow );
+	pButtons->addWidget( m_pShow );
 	pLayout->addLayout( pButtons );
 	connect( pCopy, &QPushButton::clicked, this, [ this ] { QApplication::clipboard()->setText( m_szPath ); } );
-	connect( pShow, &QPushButton::clicked, this, [ this ] {if(!m_szPath.isEmpty())emit ShowInGameBrowser(m_szPath); } );
+	connect( m_pShow, &QPushButton::clicked, this, [ this ] {if(!m_szPath.isEmpty())emit ShowInGameBrowser(m_szPath); } );
 	m_pFacts = new QWidget;
 	m_pFactLayout = new QVBoxLayout( m_pFacts );
 	m_pFactLayout->setContentsMargins( 0, 0, 0, 0 );
@@ -182,6 +228,8 @@ void CModelDetails::SelectModel( const QString &szPath )
 	++m_nGeneration;
 	m_szPath = szPath;
 	m_Selection = {};
+	m_szSequence.clear();
+	m_flCycle = 0;
 	Clear();
 	m_pName->setText( szPath.isEmpty() ? tr( "Select a model" ) : tr( "Loading %1…" ).arg( szPath ) );
 	m_bLoading = !szPath.isEmpty();
@@ -194,11 +242,21 @@ void CModelDetails::SelectModel( const QString &szPath )
 //-----------------------------------------------------------------------------
 void CModelDetails::Clear()
 {
+	m_pAnimate->stop();
 	m_pView->SetModel( nullptr, nullptr, nullptr );
+	m_pView->SetPhysics( nullptr, false );
 	m_pView->SetResources( nullptr, nullptr );
 	m_pView->ForgetTextures();
+	m_Posed.reset();
 	m_pData.reset();
+	{
+		const QSignalBlocker block( m_pSequence );
+		m_pSequence->clear();
+	}
+	m_pSequence->setEnabled( false );
+	m_pPlay->setEnabled( false );
 	m_pSkin->hide();
+	m_pSkinLabel->hide();
 	m_pBody->hide();
 	m_pWarning->clear();
 	m_pWarning->hide();
@@ -264,6 +322,10 @@ void CModelDetails::Run()
 			if ( !data->m_Studio )
 				throw std::runtime_error( szError );
 			const auto &studio = *data->m_Studio;
+			std::vector<std::string> includeProblems;
+			data->m_Includes = xv::model::LoadIncludes( studio, read, includeProblems );
+			for ( const std::string &szProblem : includeProblems )
+				data->m_Problems << QString::fromStdString( szProblem );
 			data->m_Model = xv::model::LoadModel( szPath, read, &szError, job.m_Selection );
 			if ( !data->m_Model && studio.m_Bodygroups.empty() )
 			{
@@ -373,6 +435,8 @@ void CModelDetails::Present( std::shared_ptr<ModelDetailsData_t> data, int nGene
 			m_pSkin->addItem( tr( "Skin %1" ).arg( i ) );
 		m_pSkin->setCurrentIndex( m_Selection.m_nSkin );
 		m_pSkin->setVisible( file.m_Skins.size() > 1 );
+		m_pSkinLabel->setVisible( file.m_Skins.size() > 1 );
+		m_pSkin->setToolTip( tr( "%n skin(s)", nullptr, static_cast<int>( file.m_Skins.size() ) ) );
 	}
 	while ( auto *p = m_pBodyLayout->takeAt( 0 ) )
 	{
@@ -396,9 +460,10 @@ void CModelDetails::Present( std::shared_ptr<ModelDetailsData_t> data, int nGene
 	{
 		m_pView->SetResources( &*m_pData->m_Model, &m_pData->m_Materials );
 		m_pView->SetModel( &*m_pData->m_Model, &file, &m_pData->m_Sprites );
-		m_pView->SetOverlays( false, false, m_pData->m_Model->m_Vertices.empty(), false, false, false, false, true );
+		ApplyOverlays();
 		if ( bFirst )
 			m_pView->Frame();
+		ShowSequences();
 	}
 	const auto group = [ & ]( const QString &szTitle ) {auto *p=new QGroupBox(szTitle);auto *pForm=new QFormLayout(p);pForm->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);pForm->setRowWrapPolicy(QFormLayout::WrapLongRows);m_pFactLayout->addWidget(p);return pForm; };
 	auto *pIdentity = group( tr( "Identity" ) );
@@ -485,6 +550,131 @@ void CModelDetails::Present( std::shared_ptr<ModelDetailsData_t> data, int nGene
 	emit Loaded( m_szPath );
 }
 //-----------------------------------------------------------------------------
+// Purpose: The sequences of the model and of its include models, as the game merges them (its
+//          own first), the one played before a reload picked again.
+//-----------------------------------------------------------------------------
+void CModelDetails::ShowSequences()
+{
+	const QSignalBlocker block( m_pSequence );
+	m_pSequence->clear();
+	m_pSequence->addItem( tr( "(at rest)" ) );
+	QStringList seen;
+	const auto add = [ & ]( const xv::model::CStudioFile &file, int nSource ) {
+		for ( std::size_t i = 0; i < file.m_Sequences.size(); i++ )
+		{
+			const QString szName = QString::fromStdString( file.m_Sequences[ i ].m_szName );
+			if ( seen.contains( szName, Qt::CaseInsensitive ) )
+				continue;
+			seen << szName;
+			m_pSequence->addItem( szName, QPoint( nSource, static_cast<int>( i ) ) );
+		}
+	};
+	add( *m_pData->m_Studio, -1 );
+	for ( std::size_t i = 0; i < m_pData->m_Includes.size(); i++ )
+		add( m_pData->m_Includes[ i ], static_cast<int>( i ) );
+	const int nFound = m_szSequence.isEmpty() ? 0 : m_pSequence->findText( m_szSequence );
+	m_pSequence->setCurrentIndex( std::max( 0, nFound ) );
+	if ( nFound < 0 )
+		m_szSequence.clear();
+	m_pSequence->setEnabled( m_pSequence->count() > 1 && !m_pData->m_Model->m_Bones.empty() );
+	m_pPlay->setEnabled( m_pSequence->isEnabled() );
+	Pose();
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+void CModelDetails::PlaySequence( const QString &szName )
+{
+	const int nFound = szName.isEmpty() ? 0 : m_pSequence->findText( szName );
+	if ( nFound >= 0 )
+		m_pSequence->setCurrentIndex( nFound );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: One step of the playing sequence, by the time that passed, looping.
+//-----------------------------------------------------------------------------
+void CModelDetails::Animate()
+{
+	const QVariant source = m_pSequence->currentData();
+	if ( !m_pData || !m_pData->m_Studio || !source.isValid() )
+		return;
+	const QPoint at = source.toPoint();
+	const xv::model::CStudioFile &file = at.x() < 0 ? *m_pData->m_Studio : m_pData->m_Includes[ static_cast<std::size_t>( at.x() ) ];
+	const auto &seq = file.m_Sequences[ static_cast<std::size_t>( at.y() ) ];
+	const float flStep = static_cast<float>( m_Clock.restart() ) / 1000.0f;
+	if ( !seq.m_Animations.empty() && seq.m_Animations[ 0 ] >= 0 && seq.m_Animations[ 0 ] < static_cast<int>( file.m_Animations.size() ) )
+	{
+		const auto &anim = file.m_Animations[ static_cast<std::size_t>( seq.m_Animations[ 0 ] ) ];
+		m_flCycle = std::fmod( m_flCycle + flStep * anim.m_flFps / static_cast<float>( std::max( 1, anim.m_nFrames - 1 ) ), 1.0f );
+	}
+	Pose();
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: The model in the picked sequence at the cycle reached (pose parameters at rest),
+//          or as it was read; the clock runs while a sequence plays.
+//-----------------------------------------------------------------------------
+void CModelDetails::Pose()
+{
+	if ( !m_pData || !m_pData->m_Studio || !m_pData->m_Model )
+		return;
+	const QVariant source = m_pSequence->currentData();
+	if ( !source.isValid() )
+	{
+		m_pAnimate->stop();
+		m_Posed.reset();
+		m_pView->SetModel( &*m_pData->m_Model, &*m_pData->m_Studio, &m_pData->m_Sprites );
+		return;
+	}
+	const QPoint at = source.toPoint();
+	const xv::model::CStudioFile &file = at.x() < 0 ? *m_pData->m_Studio : m_pData->m_Includes[ static_cast<std::size_t>( at.x() ) ];
+	std::vector<float> parameters;
+	for ( const auto &param : file.m_Parameters )
+		parameters.push_back( std::clamp( 0.0f, std::min( param.m_flStart, param.m_flEnd ), std::max( param.m_flStart, param.m_flEnd ) ) );
+	std::string szError;
+	if ( auto pose = xv::model::SampleSequence( file, static_cast<std::size_t>( at.y() ), m_flCycle, parameters, *m_pData->m_Model, &szError ) )
+	{
+		m_Posed = xv::model::Deform( *m_pData->m_Model, *pose );
+		m_pView->SetModel( &*m_Posed, &*m_pData->m_Studio, &m_pData->m_Sprites );
+		m_pSequence->setToolTip( {} );
+	}
+	else
+	{
+		m_pSequence->setToolTip( QString::fromStdString( szError ) );
+		m_pAnimate->stop();
+		return;
+	}
+	if ( m_pPlay->isChecked() && !m_pAnimate->isActive() && isVisible() )
+	{
+		m_Clock.restart();
+		m_pAnimate->start();
+	}
+	else if ( !m_pPlay->isChecked() )
+		m_pAnimate->stop();
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: The bones for a model without a mesh, the bounds and the collision hull when ticked.
+//-----------------------------------------------------------------------------
+void CModelDetails::ApplyOverlays()
+{
+	if ( !m_pData || !m_pData->m_Model )
+		return;
+	m_pView->SetOverlays( false, false, m_pData->m_Model->m_Vertices.empty(), false, false, m_pBounds->isChecked(), false, true );
+	m_pView->SetPhysics( m_pData->m_Physics ? &*m_pData->m_Physics : nullptr, m_pCollision->isChecked() );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+void CModelDetails::SetPicking( bool bPicking )
+{
+	m_pOpen->setVisible( !bPicking );
+	m_pShow->setVisible( !bPicking );
+}
+
+//-----------------------------------------------------------------------------
 // Purpose: Exposes warnings for tests and accessibility.
 //-----------------------------------------------------------------------------
 QString CModelDetails::GetWarnings() const
@@ -509,6 +699,7 @@ void CModelDetails::showEvent( QShowEvent *pEvent )
 {
 	QWidget::showEvent( pEvent );
 	m_pOrbit->start();
+	Pose();
 }
 //-----------------------------------------------------------------------------
 // Purpose: Suspends the orbit when the browser tab or collapsed panel is hidden.
@@ -516,5 +707,6 @@ void CModelDetails::showEvent( QShowEvent *pEvent )
 void CModelDetails::hideEvent( QHideEvent *pEvent )
 {
 	m_pOrbit->stop();
+	m_pAnimate->stop();
 	QWidget::hideEvent( pEvent );
 }

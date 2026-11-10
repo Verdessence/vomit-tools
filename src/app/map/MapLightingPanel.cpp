@@ -16,6 +16,7 @@
 #include <QHBoxLayout>
 #include <QHeaderView>
 #include <QLabel>
+#include <QLocale>
 #include <QMenu>
 #include <QPushButton>
 #include <QSpinBox>
@@ -129,7 +130,7 @@ CMapLightingPanel::CMapLightingPanel( CMapEditor &editor, QWidget *pParent )
 	m_pBounces = new QSpinBox;
 	m_pBounces->setObjectName( QStringLiteral( "mapLightingBounces" ) );
 	m_pBounces->setRange( 0, 8 );
-	m_pBounces->setToolTip( tr( "Passes of light bounced between faces; the rest are estimated, as vrad bounces until the light settles" ) );
+	m_pBounces->setToolTip( tr( "At most this many passes of bounced light, stopping when a pass adds under 1%; the rest are estimated, as vrad bounces until the light settles" ) );
 	pForm->addRow( tr( "Bounces" ), m_pBounces );
 	m_pLuxels = new QSpinBox;
 	m_pLuxels->setObjectName( QStringLiteral( "mapLightingLuxels" ) );
@@ -317,6 +318,13 @@ void CMapLightingPanel::UpdateStatus()
 	else if ( const auto &pLighting = lighting.GetLighting() )
 	{
 		QString szText = tr( "%n light(s), %1 by %2 luxels (every %3), in %4 s", nullptr, static_cast<int>( pLighting->m_nLights ) ).arg( pLighting->m_nWidth ).arg( pLighting->m_nHeight ).arg( pLighting->m_nStep ).arg( lighting.GetBakeMs() / 1000.0, 0, 'f', 1 );
+		// Where the time went, stage by stage (none yet while only the direct light is in).
+		if ( !pLighting->m_Stages.empty() )
+		{
+			szText += u'\n' + tr( "%1 luxels, %2 triangles in the way:" ).arg( QLocale{}.toString( static_cast<qulonglong>( pLighting->m_nLuxels ) ), QLocale{}.toString( static_cast<qulonglong>( pLighting->m_nTriangles ) ) );
+			for ( const xv::map::BakeStage_t &stage : pLighting->m_Stages )
+				szText += u'\n' + tr( "  %1: %2 s" ).arg( QString::fromStdString( stage.m_szName ) ).arg( stage.m_flMs / 1000.0, 0, 'f', 2 );
+		}
 		m_pStatus->setText( szText );
 	}
 	else
@@ -492,4 +500,29 @@ void CMapLightingPanel::PickColour( int nRow )
 	}
 	value.m_Color = { colour.red(), colour.green(), colour.blue() };
 	SetKey( row.m_nEntity, row.m_szKey, WriteValue( value ), tr( "Light Colour" ) );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Restore the lighting choices together, then bake with those defaults.
+//-----------------------------------------------------------------------------
+void CMapLightingPanel::ResetToDefault()
+{
+	const MapPreferences_t defaults;
+	MapPreferences_t preferences = CPreferences::Instance().GetMapPreferences();
+	preferences.m_flLightBrightness = defaults.m_flLightBrightness;
+	preferences.m_flLightMonitorGamma = defaults.m_flLightMonitorGamma;
+	preferences.m_nLightBounces = defaults.m_nLightBounces;
+	preferences.m_nLightLuxels = defaults.m_nLightLuxels;
+	preferences.m_bLightHdr = defaults.m_bLightHdr;
+	preferences.m_bLightOnly = defaults.m_bLightOnly;
+	preferences.m_bLightPropShadows = defaults.m_bLightPropShadows;
+	preferences.m_bLightSmoothShadows = defaults.m_bLightSmoothShadows;
+	preferences.m_bLightAutoBake = defaults.m_bLightAutoBake;
+	preferences.m_bLightInRadius = defaults.m_bLightInRadius;
+	preferences.m_flLightRadius = defaults.m_flLightRadius;
+	preferences.m_nLightDelay = defaults.m_nLightDelay;
+	preferences.m_nLightSkySamples = defaults.m_nLightSkySamples;
+	CPreferences::Instance().SetMapPreferences( preferences );
+	m_Editor.WantLighting();
+	m_Editor.BakeLightingNow();
 }
