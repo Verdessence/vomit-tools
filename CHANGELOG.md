@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+### Shaders (new)
+- Compiled shader files (.vcs, versions 4 to 6: every one of HL2's and the game folder's own) are
+  read, each combo's Direct3D 9 bytecode (vs_1_1 to ps_3_0) disassembled with its constants'
+  and samplers' names. `vomit-tools-cli shader <file.vcs>` prints it.
+
 ### Hammer maps (new)
 - Right-click menus: in the 2D and 3D views (the object under the cursor, or the selection:
   cut, copy, paste, delete, group, hide, carve, select all of a class, properties; in 3D, a

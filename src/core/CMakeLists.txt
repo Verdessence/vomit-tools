@@ -117,6 +117,10 @@ add_library(vomit_tools_core STATIC
         material/Parameters.h
         material/Preview.cpp
         material/Preview.h
+        shader/Bytecode.cpp
+        shader/Bytecode.h
+        shader/Vcs.cpp
+        shader/Vcs.h
         model/Anim.cpp
         model/Anim.h
         model/Binary.h

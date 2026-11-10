@@ -26,6 +26,7 @@
 
 int ModelCommand( int argc, char **argv );
 int MapCommand( int argc, char **argv );
+int ShaderCommand( int argc, char **argv );
 
 namespace fs = std::filesystem;
 using namespace xv::texture;
@@ -42,6 +43,7 @@ const char *const USAGE = R"(vomit-tools-cli: Valve texture (VTF) tools
   vomit-tools-cli thumbnail <vtf> <out.png> [size]
   vomit-tools-cli model --help
   vomit-tools-cli map --help
+  vomit-tools-cli shader --help
 
 create:
   --format F            DXT1, DXT5, BGRA8888... (default: DXT5 with alpha, else DXT1)
@@ -930,6 +932,8 @@ int main( int argc, char **argv )
 		return ModelCommand( argc - 2, argv + 2 );
 	if ( argc > 1 && std::string_view( argv[ 1 ] ) == "map" )
 		return MapCommand( argc - 2, argv + 2 );
+	if ( argc > 1 && std::string_view( argv[ 1 ] ) == "shader" )
+		return ShaderCommand( argc - 2, argv + 2 );
 	const Arguments_t arguments = Parse( argc, argv );
 	if ( arguments.m_szMode.empty() || arguments.Has( "--help" ) || arguments.Has( "-h" ) )
 	{
