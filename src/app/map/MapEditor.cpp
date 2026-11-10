@@ -385,10 +385,15 @@ CMapEditor::CMapEditor( const QString &szPath, bool bFromGame, QWidget *pParent 
 		connect( m_pBuildingFold, &QToolButton::toggled, this, [ this ]( bool bOpen ) {
 			m_pBuildingFold->setArrowType( bOpen ? Qt::DownArrow : Qt::RightArrow );
 			m_pBuilding->setVisible( bOpen );
+			QSettings().setValue( QStringLiteral( "map/buildingGeneratorOpen" ), bOpen );
 		} );
 		pNewLayout->addWidget( m_pBuildingFold );
 		pNewLayout->addWidget( m_pBuilding );
-		m_pBuilding->hide();
+		// Open unless it was folded: it keeps the object lists from taking the whole panel.
+		const bool bOpen = QSettings().value( QStringLiteral( "map/buildingGeneratorOpen" ), true ).toBool();
+		m_pBuildingFold->setChecked( bOpen );
+		m_pBuildingFold->setArrowType( bOpen ? Qt::DownArrow : Qt::RightArrow );
+		m_pBuilding->setVisible( bOpen );
 		m_pPanels->AddPanel( QStringLiteral( "newObjects" ), tr( "New Objects" ), MakeMapIcon( MapIcon_t::MAP_ICON_BLOCK, panelIconColor ), pNewObjects );
 	}
 	m_pPanels->AddPanel( QStringLiteral( "texture" ), tr( "Texture" ), MakeMapIcon( MapIcon_t::MAP_ICON_MATERIAL, panelIconColor ), BuildTexturePanel() );

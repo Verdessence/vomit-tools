@@ -284,8 +284,8 @@
 - Runs on Box3D (Erin Catto, MIT).
 
 ### Hammer maps
-- The Building Generator is a fold at the bottom of New Objects rather than a panel of its own;
-  Tools > Building Generator opens it there.
+- The Building Generator is a fold at the bottom of New Objects rather than a panel of its own,
+  open to start with (folding it is remembered); Tools > Building Generator opens it there.
 - A small edit, a selection or hiding something redraws only the part of each 2D view it
   touches, not the whole view: about 1 ms a view instead of 25 to 100 on a big map.
 - Check for Problems tells errors (the compile fails or the game breaks) from warnings: each row
