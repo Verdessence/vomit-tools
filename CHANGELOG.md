@@ -6,6 +6,10 @@
 - Compiled shader files (.vcs, versions 4 to 6: every one of HL2's and the game folder's own) are
   read, each combo's Direct3D 9 bytecode (vs_1_1 to ps_3_0) disassembled with its constants'
   and samplers' names. `vomit-tools-cli shader <file.vcs>` prints it.
+- Pixel shaders (ps_2_0 to ps_3_0) run in software, and screenspace_general materials over a
+  picture as the game draws them: their textures in s0 to s3 (the frame for _rt_FullFrameFB),
+  $c0_x to $c3_w in c0 to c3, texel sizes in c4 to c7, sRGB read and written unless
+  $linearread_*/$linearwrite, and $additive, $alpha_blend, $alpha_blend_color_overlay, $copyalpha.
 
 ### Hammer maps (new)
 - Right-click menus: in the 2D and 3D views (the object under the cursor, or the selection:

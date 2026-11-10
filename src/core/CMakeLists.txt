@@ -119,6 +119,10 @@ add_library(vomit_tools_core STATIC
         material/Preview.h
         shader/Bytecode.cpp
         shader/Bytecode.h
+        shader/Interpreter.cpp
+        shader/Interpreter.h
+        shader/ScreenEffect.cpp
+        shader/ScreenEffect.h
         shader/Vcs.cpp
         shader/Vcs.h
         model/Anim.cpp
