@@ -99,6 +99,7 @@ private:
 	QCheckBox *m_pSleep = nullptr;
 	QCheckBox *m_pAutoMass = nullptr;
 	QCheckBox *m_pPropsOnly = nullptr;
+	QCheckBox *m_pNoSelfCollisions = nullptr;
 	QCheckBox *m_pDrawMoving = nullptr;
 	QCheckBox *m_pDrawStatic = nullptr;
 };

@@ -11,12 +11,14 @@
 #include <cctype>
 #include <cmath>
 #include <regex>
+#include <numbers>
 #include <string>
 
 #include <box3d/box3d.h>
 
 #include "map/Brushes.h"
 #include "map/Displacement.h"
+#include "kv1/Kv1.h"
 #include "map/VmfValues.h"
 #include "model/Phy.h"
 #include "util/Numbers.h"
@@ -51,6 +53,14 @@ constexpr std::uint64_t CATEGORY_MOVING = 2;
 // Moves smaller than these are Box3D's float rounding, not motion (units, rotation entries).
 constexpr double NEGLIGIBLE_MOVE = 1e-3;
 constexpr double NEGLIGIBLE_TURN = 1e-5;
+
+//-----------------------------------------------------------------------------
+// Purpose: A direction as Box3D's vector, unscaled.
+//-----------------------------------------------------------------------------
+b3Vec3 ToUnit( const Point_t &v )
+{
+	return b3Vec3{ static_cast<float>( v[ 0 ] ), static_cast<float>( v[ 1 ] ), static_cast<float>( v[ 2 ] ) };
+}
 
 //-----------------------------------------------------------------------------
 // Purpose: Source's units to Box3D's metres, and back.
@@ -182,6 +192,147 @@ double PhysicsTextMass( std::string_view szText )
 	return flMass > 0.0 ? flMass : sum( "totalmass" );
 }
 
+namespace
+{
+
+//-----------------------------------------------------------------------------
+// Purpose: A ragdoll's parts from a .phy of several solids that its text joins: each solid's
+//          pieces (already in model space), its bone's origin and axes at rest, its mass, and the
+//          constraint to its parent. Empty when the text joins nothing (a prop moving as one).
+//-----------------------------------------------------------------------------
+std::vector<PropPart_t> ReadRagdollParts( const model::Physics_t &physics, const model::CStudioFile &studio, const std::vector<std::vector<Point_t>> &pieces, const std::vector<int> &pieceSolids, const std::vector<std::optional<model::CTransform>> &toModel )
+{
+	if ( physics.m_nSolids < 2 )
+	{
+		return {};
+	}
+	const kv1::CParseResult parsed = kv1::Parse( physics.m_szText );
+	const auto number = []( const kv1::CNode &block, std::string_view szKey ) {
+		const kv1::CNode *pNode = block.Find( szKey );
+		return pNode ? ParseNumber<double>( pNode->GetValue() ) : std::nullopt;
+	};
+	const auto nSolids = static_cast<std::size_t>( physics.m_nSolids );
+	std::vector<PropPart_t> parts( nSolids );
+	std::vector<int> bones( nSolids, -1 );
+	std::vector<bool> joined( nSolids, false );
+	bool bAnyJoint = false;
+	for ( std::size_t i = 0; i < pieces.size(); i++ )
+	{
+		const auto nSolid = static_cast<std::size_t>( pieceSolids[ i ] );
+		if ( nSolid < nSolids )
+		{
+			parts[ nSolid ].m_Pieces.push_back( pieces[ i ] );
+		}
+	}
+	for ( const model::Convex_t &convex : physics.m_Convexes )
+	{
+		if ( convex.m_nSolid >= 0 && static_cast<std::size_t>( convex.m_nSolid ) < nSolids && convex.m_nBone >= 0 )
+		{
+			bones[ static_cast<std::size_t>( convex.m_nSolid ) ] = convex.m_nBone;
+		}
+	}
+	for ( const kv1::CNode &root : parsed.m_Document.m_Roots )
+	{
+		if ( !root.IsBlock() )
+		{
+			continue;
+		}
+		const std::string szKind = Upper( root.GetKey() );
+		if ( szKind == "SOLID" )
+		{
+			const auto index = number( root, "index" );
+			if ( !index || *index < 0 || static_cast<std::size_t>( *index ) >= nSolids )
+			{
+				continue;
+			}
+			const auto nSolid = static_cast<std::size_t>( *index );
+			parts[ nSolid ].m_flMass = number( root, "mass" ).value_or( 0.0 );
+			if ( bones[ nSolid ] < 0 )
+			{
+				// The solid named after its bone, when its pieces don't say which.
+				const kv1::CNode *pName = root.Find( "name" );
+				const std::string szName = pName ? Upper( pName->GetValue() ) : std::string{};
+				for ( std::size_t b = 0; b < studio.m_Bones.size(); b++ )
+				{
+					if ( Upper( studio.m_Bones[ b ].m_szName ) == szName )
+					{
+						bones[ nSolid ] = static_cast<int>( b );
+					}
+				}
+			}
+		}
+		else if ( szKind == "RAGDOLLCONSTRAINT" )
+		{
+			const auto parent = number( root, "parent" );
+			const auto child = number( root, "child" );
+			if ( !parent || !child || *parent < 0 || *child < 0 || static_cast<std::size_t>( *parent ) >= nSolids || static_cast<std::size_t>( *child ) >= nSolids || *parent == *child )
+			{
+				continue;
+			}
+			PropPart_t &part = parts[ static_cast<std::size_t>( *child ) ];
+			part.m_nParent = static_cast<int>( *parent );
+			const char *const pszAxes[ 3 ][ 2 ] = { { "xmin", "xmax" }, { "ymin", "ymax" }, { "zmin", "zmax" } };
+			for ( std::size_t a = 0; a < 3; a++ )
+			{
+				part.m_flMin[ a ] = number( root, pszAxes[ a ][ 0 ] ).value_or( 0.0 );
+				part.m_flMax[ a ] = number( root, pszAxes[ a ][ 1 ] ).value_or( 0.0 );
+			}
+			joined[ static_cast<std::size_t>( *child ) ] = true;
+			bAnyJoint = true;
+		}
+	}
+	if ( !bAnyJoint )
+	{
+		return {};
+	}
+	for ( std::size_t i = 0; i < nSolids; i++ )
+	{
+		const int nBone = bones[ i ];
+		if ( nBone >= 0 && static_cast<std::size_t>( nBone ) < toModel.size() && toModel[ static_cast<std::size_t>( nBone ) ] )
+		{
+			const model::CTransform &bone = *toModel[ static_cast<std::size_t>( nBone ) ];
+			const CVec3 origin = bone.GetOrigin();
+			parts[ i ].m_vecJoint = { origin.m_flX, origin.m_flY, origin.m_flZ };
+			const CVec3 units[ 3 ] = { { 1, 0, 0 }, { 0, 1, 0 }, { 0, 0, 1 } };
+			for ( std::size_t a = 0; a < 3; a++ )
+			{
+				const CVec3 axis = bone.Rotate( units[ a ] );
+				parts[ i ].m_Axes[ a ] = Normalized( Point_t{ axis.m_flX, axis.m_flY, axis.m_flZ } );
+			}
+		}
+		else
+		{
+			parts[ i ].m_Axes = { Point_t{ 1, 0, 0 }, Point_t{ 0, 1, 0 }, Point_t{ 0, 0, 1 } };
+		}
+	}
+	// The root first (the solid nothing joins to a parent), the parents' numbers following.
+	const auto root = std::ranges::find( joined, false );
+	const std::size_t nRoot = root == joined.end() ? 0 : static_cast<std::size_t>( root - joined.begin() );
+	std::vector<std::size_t> order{ nRoot };
+	for ( std::size_t i = 0; i < nSolids; i++ )
+	{
+		if ( i != nRoot )
+		{
+			order.push_back( i );
+		}
+	}
+	std::vector<int> renumbered( nSolids, -1 );
+	for ( std::size_t i = 0; i < order.size(); i++ )
+	{
+		renumbered[ order[ i ] ] = static_cast<int>( i );
+	}
+	std::vector<PropPart_t> sorted;
+	for ( const std::size_t n : order )
+	{
+		PropPart_t part = std::move( parts[ n ] );
+		part.m_nParent = n == nRoot || part.m_nParent < 0 ? -1 : renumbered[ static_cast<std::size_t>( part.m_nParent ) ];
+		sorted.push_back( std::move( part ) );
+	}
+	return sorted;
+}
+
+} // namespace
+
 //-----------------------------------------------------------------------------
 // Purpose: The .phy beside the model, checked against it, its pieces placed in model space by
 //          their bones' rest pose (a piece of bone -1 is in model space already).
@@ -246,6 +397,7 @@ std::shared_ptr<const PropCollision_t> ReadPropCollision( std::string_view szMod
 		toModel.push_back( bone.m_PoseToBone.Inverse() );
 	}
 	auto pCollision = std::make_shared<PropCollision_t>();
+	std::vector<int> pieceSolids;
 	for ( const model::Convex_t &convex : physics->m_Convexes )
 	{
 		std::vector<bool> used( convex.m_Vertices.size(), false );
@@ -273,6 +425,7 @@ std::shared_ptr<const PropCollision_t> ReadPropCollision( std::string_view szMod
 		if ( piece.size() >= 4 )
 		{
 			pCollision->m_Pieces.push_back( std::move( piece ) );
+			pieceSolids.push_back( convex.m_nSolid );
 		}
 	}
 	if ( pCollision->m_Pieces.empty() )
@@ -280,6 +433,7 @@ std::shared_ptr<const PropCollision_t> ReadPropCollision( std::string_view szMod
 		return fail( "its collision model is empty" );
 	}
 	pCollision->m_flMass = PhysicsTextMass( physics->m_szText );
+	pCollision->m_Parts = ReadRagdollParts( *physics, *studio, pCollision->m_Pieces, pieceSolids, toModel );
 	return pCollision;
 }
 
@@ -295,8 +449,17 @@ struct CPhysicsScene::Impl_t
 		b3BodyId m_Id = b3_nullBodyId;
 		Point_t m_Start{}; // its origin at the start: a prop's origin, a brush's middle
 		std::vector<const b3HullData *> m_Hulls;
+		std::uint32_t m_nObject = 0;
+		bool m_bMain = true; // the body its object follows (a ragdoll's other parts aren't)
+	};
+	struct Joint_t
+	{
+		b3JointId m_Id = b3_nullJointId;
+		double m_flConeLimit = 0.0;
 	};
 	std::vector<Body_t> m_Bodies;
+	std::vector<Joint_t> m_Joints;
+	int m_nRagdolls = 0;
 	std::vector<std::uint32_t> m_Objects;
 	std::vector<b3HullData *> m_OwnedHulls;
 	std::vector<b3MeshData *> m_OwnedMeshes;
@@ -392,7 +555,7 @@ struct CPhysicsScene::Impl_t
 	//-----------------------------------------------------------------------------
 	// A moving body of convex pieces in Source units, its origin at start (unturned).
 	//-----------------------------------------------------------------------------
-	bool AddBody( std::uint32_t nObject, const Point_t &start, const std::vector<std::vector<Point_t>> &pieces, float flDensity, double flMass )
+	bool AddBody( std::uint32_t nObject, const Point_t &start, const std::vector<std::vector<Point_t>> &pieces, float flDensity, double flMass, bool bMain = true, int nGroup = 0 )
 	{
 		b3BodyDef def = b3DefaultBodyDef();
 		def.type = b3_dynamicBody;
@@ -402,6 +565,8 @@ struct CPhysicsScene::Impl_t
 		def.angularDamping = static_cast<float>( ANGULAR_DAMPING * m_Settings.m_flAirDensity );
 		Body_t body;
 		body.m_Start = start;
+		body.m_nObject = nObject;
+		body.m_bMain = bMain;
 		std::vector<std::pair<const b3HullData *, b3ShapeDef>> shapes;
 		for ( const auto &piece : pieces )
 		{
@@ -425,6 +590,7 @@ struct CPhysicsScene::Impl_t
 			b3ShapeDef shape = b3DefaultShapeDef();
 			shape.density = flDensity;
 			shape.filter.categoryBits = CATEGORY_MOVING;
+			shape.filter.groupIndex = nGroup;
 			b3CreateHullShape( body.m_Id, &shape, pHull );
 		}
 		if ( flMass > 0.0 )
@@ -442,8 +608,127 @@ struct CPhysicsScene::Impl_t
 			}
 		}
 		m_Bodies.push_back( std::move( body ) );
-		m_Objects.push_back( nObject );
+		if ( bMain )
+		{
+			m_Objects.push_back( nObject );
+		}
 		return true;
+	}
+
+	//-----------------------------------------------------------------------------
+	// A ragdoll: a body a part, each joined to its parent's at its bone's origin. The twist runs
+	// along the bone's axis that points most into the part (out from the joint), within that
+	// axis's range; the other two axes' ranges make the cone it may lean out in.
+	//-----------------------------------------------------------------------------
+	bool AddRagdoll( std::uint32_t nObject, const Transform_t &placement, const PropCollision_t &collision )
+	{
+		const auto placed = [ &placement ]( const std::vector<std::vector<Point_t>> &pieces ) {
+			std::vector<std::vector<Point_t>> out;
+			for ( const auto &piece : pieces )
+			{
+				std::vector<Point_t> one;
+				for ( const Point_t &p : piece )
+				{
+					one.push_back( placement.Apply( p ) );
+				}
+				out.push_back( std::move( one ) );
+			}
+			return out;
+		};
+		const int nGroup = m_Settings.m_bNoSelfCollisions ? -( ++m_nRagdolls ) : 0;
+		const std::size_t nFirst = m_Bodies.size();
+		std::vector<std::optional<std::size_t>> bodyOf( collision.m_Parts.size() );
+		for ( std::size_t i = 0; i < collision.m_Parts.size(); i++ )
+		{
+			const PropPart_t &part = collision.m_Parts[ i ];
+			const Point_t start = i == 0 ? placement.m_Offset : placement.Apply( part.m_vecJoint );
+			const double flMass = m_Settings.m_bAutoMass ? part.m_flMass : 0.0;
+			if ( AddBody( nObject, start, placed( part.m_Pieces ), PROP_DENSITY, flMass, i == 0, nGroup ) )
+			{
+				bodyOf[ i ] = m_Bodies.size() - 1;
+			}
+			else if ( i == 0 )
+			{
+				return false;
+			}
+		}
+		for ( std::size_t i = 1; i < collision.m_Parts.size(); i++ )
+		{
+			const PropPart_t &part = collision.m_Parts[ i ];
+			if ( !bodyOf[ i ] || part.m_nParent < 0 || !bodyOf[ static_cast<std::size_t>( part.m_nParent ) ] )
+			{
+				continue;
+			}
+			const Body_t &parent = m_Bodies[ *bodyOf[ static_cast<std::size_t>( part.m_nParent ) ] ];
+			const Body_t &child = m_Bodies[ *bodyOf[ i ] ];
+			const Point_t pivot = placement.Apply( part.m_vecJoint );
+			std::array<Point_t, 3> axes;
+			for ( std::size_t a = 0; a < 3; a++ )
+			{
+				axes[ a ] = Normalized( placement.Rotate( part.m_Axes[ a ] ) );
+			}
+			Point_t centre{};
+			std::size_t nPoints = 0;
+			for ( const auto &piece : placed( part.m_Pieces ) )
+			{
+				for ( const Point_t &p : piece )
+				{
+					centre = Add( centre, p );
+					nPoints++;
+				}
+			}
+			const Point_t out = nPoints ? Subtract( Scale( centre, 1.0 / static_cast<double>( nPoints ) ), pivot ) : Point_t{ 1, 0, 0 };
+			std::size_t nTwist = 0;
+			for ( std::size_t a = 1; a < 3; a++ )
+			{
+				if ( std::abs( Dot( axes[ a ], out ) ) > std::abs( Dot( axes[ nTwist ], out ) ) )
+				{
+					nTwist = a;
+				}
+			}
+			const double flSign = Dot( axes[ nTwist ], out ) < 0.0 ? -1.0 : 1.0;
+			const Point_t z = Scale( axes[ nTwist ], flSign );
+			const Point_t x = axes[ ( nTwist + 1 ) % 3 ];
+			const Point_t y = Cross( z, x );
+			const b3Matrix3 frame{ ToUnit( x ), ToUnit( y ), ToUnit( z ) };
+			const b3Quat q = b3MakeQuatFromMatrix( &frame );
+			constexpr double DEGREES = std::numbers::pi / 180.0;
+			double flCone = 0.0;
+			for ( std::size_t a = 0; a < 3; a++ )
+			{
+				if ( a != nTwist )
+				{
+					flCone = std::max( { flCone, std::abs( part.m_flMin[ a ] ), std::abs( part.m_flMax[ a ] ) } );
+				}
+			}
+			flCone = std::clamp( flCone * DEGREES, 0.0, std::numbers::pi );
+			// Against the axis flipped, the twist's range turns round.
+			double flLower = part.m_flMin[ nTwist ] * DEGREES;
+			double flUpper = part.m_flMax[ nTwist ] * DEGREES;
+			if ( flSign < 0.0 )
+			{
+				std::swap( flLower, flUpper );
+				flLower = -flLower;
+				flUpper = -flUpper;
+			}
+			constexpr double MOST_TWIST = 0.99 * std::numbers::pi;
+			flLower = std::clamp( flLower, -MOST_TWIST, 0.0 );
+			flUpper = std::clamp( flUpper, 0.0, MOST_TWIST );
+
+			b3SphericalJointDef def = b3DefaultSphericalJointDef();
+			def.base.bodyIdA = parent.m_Id;
+			def.base.bodyIdB = child.m_Id;
+			def.base.localFrameA = b3Transform{ ToBox( Subtract( pivot, parent.m_Start ) ), q };
+			def.base.localFrameB = b3Transform{ ToBox( Subtract( pivot, child.m_Start ) ), q };
+			def.base.collideConnected = false;
+			def.enableConeLimit = true;
+			def.coneAngle = static_cast<float>( flCone );
+			def.enableTwistLimit = true;
+			def.lowerTwistAngle = static_cast<float>( flLower );
+			def.upperTwistAngle = static_cast<float>( flUpper );
+			m_Joints.push_back( { b3CreateSphericalJoint( m_World, &def ), flCone } );
+		}
+		return m_Bodies.size() > nFirst;
 	}
 
 	//-----------------------------------------------------------------------------
@@ -525,6 +810,15 @@ CPhysicsScene::CPhysicsScene( const CScene &scene, const std::vector<std::uint32
 				impl.m_Problems.push_back( szModel + " has no .phy, so it falls as its bounds" );
 			}
 			const Transform_t placement = PlacementOf( entity );
+			if ( !pCollision->m_Parts.empty() )
+			{
+				if ( impl.AddRagdoll( nObject, placement, *pCollision ) )
+				{
+					movingEntity[ nEntity ] = true;
+					impl.m_Problems.push_back( szModel + " is a ragdoll: it is kept where its root lands, not its pose" );
+				}
+				continue;
+			}
 			std::vector<std::vector<Point_t>> pieces;
 			for ( const auto &piece : pCollision->m_Pieces )
 			{
@@ -737,6 +1031,28 @@ const std::vector<std::string> &CPhysicsScene::GetProblems() const
 }
 
 //-----------------------------------------------------------------------------
+// Purpose: Each joint's point as each of its bodies has it now.
+//-----------------------------------------------------------------------------
+std::vector<PhysicsJoint_t> CPhysicsScene::GetJoints() const
+{
+	std::vector<PhysicsJoint_t> joints;
+	const auto worldPoint = []( b3BodyId body, const b3Transform &frame ) {
+		const b3Pos p = b3Body_GetWorldPoint( body, frame.p );
+		return FromBox( b3Vec3{ static_cast<float>( p.x ), static_cast<float>( p.y ), static_cast<float>( p.z ) } );
+	};
+	for ( const Impl_t::Joint_t &joint : m_pImpl->m_Joints )
+	{
+		PhysicsJoint_t out;
+		out.m_vecParent = worldPoint( b3Joint_GetBodyA( joint.m_Id ), b3Joint_GetLocalFrameA( joint.m_Id ) );
+		out.m_vecChild = worldPoint( b3Joint_GetBodyB( joint.m_Id ), b3Joint_GetLocalFrameB( joint.m_Id ) );
+		out.m_flCone = b3SphericalJoint_GetConeAngle( joint.m_Id );
+		out.m_flConeLimit = joint.m_flConeLimit;
+		joints.push_back( out );
+	}
+	return joints;
+}
+
+//-----------------------------------------------------------------------------
 // Purpose: A body's pose against its start: turned by its rotation, then moved so its origin
 //          is where it is now.
 //-----------------------------------------------------------------------------
@@ -744,16 +1060,19 @@ std::vector<std::pair<std::uint32_t, Transform_t>> CPhysicsScene::GetMoves() con
 {
 	const Impl_t &impl = *m_pImpl;
 	std::vector<std::pair<std::uint32_t, Transform_t>> moves;
-	for ( std::size_t i = 0; i < impl.m_Bodies.size(); i++ )
+	for ( const Impl_t::Body_t &body : impl.m_Bodies )
 	{
-		const Impl_t::Body_t &body = impl.m_Bodies[ i ];
+		if ( !body.m_bMain )
+		{
+			continue;
+		}
 		const b3WorldTransform frame = b3Body_GetTransform( body.m_Id );
 		Transform_t move;
 		move.m_Rotation = RowsOf( frame.q );
 		const Point_t now = FromBox( b3Vec3{ static_cast<float>( frame.p.x ), static_cast<float>( frame.p.y ), static_cast<float>( frame.p.z ) } );
 		move.m_Offset = Subtract( now, Rotated( move.m_Rotation, body.m_Start ) );
 		move.m_Pivot = body.m_Start;
-		moves.emplace_back( impl.m_Objects[ i ], move );
+		moves.emplace_back( body.m_nObject, move );
 	}
 	return moves;
 }

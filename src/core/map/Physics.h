@@ -17,6 +17,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <array>
 #include <string_view>
 #include <vector>
 
@@ -37,8 +38,20 @@ struct PhysicsSettings_t
 	bool m_bSleepUntilTouched = false;  // the moving objects start asleep, waking when hit
 	bool m_bAutoMass = true;            // a prop's mass from its PHY ($mass), else from its volume
 	bool m_bPropsOnly = false;          // of the selection, only props move (brushes stay)
+	bool m_bNoSelfCollisions = true;    // a ragdoll's parts pass through one another
 
 	friend bool operator==( const PhysicsSettings_t &, const PhysicsSettings_t & ) = default;
+};
+
+// One part of a ragdoll: a solid of the .phy on its bone, and the joint it hangs from.
+struct PropPart_t
+{
+	std::vector<std::vector<Point_t>> m_Pieces; // model space, in the rest pose
+	double m_flMass = 0.0;
+	int m_nParent = -1;                         // the part it hangs from (-1: the root)
+	Point_t m_vecJoint{};                       // where it hangs: its bone's origin, model space
+	std::array<Point_t, 3> m_Axes{};            // its bone's x, y and z in model space
+	std::array<double, 3> m_flMin{}, m_flMax{}; // the constraint's range about each, degrees
 };
 
 // A model's collision as the simulation takes it: its convex pieces in model space (the PHY's,
@@ -50,7 +63,18 @@ struct PropCollision_t
 	std::vector<std::vector<Point_t>> m_Pieces;
 	double m_flMass = 0.0;
 	bool m_bBounds = false;
+	// A ragdoll (a .phy of several solids joined by ragdollconstraints): its parts, the root
+	// first. Empty for a prop that moves as one.
+	std::vector<PropPart_t> m_Parts;
 };
+// A ragdoll's joint as it is now: the point on each of its two bodies (one place while the joint
+// holds), and how far the child leans out of its cone against the cone's limit (radians).
+struct PhysicsJoint_t
+{
+	Point_t m_vecParent{}, m_vecChild{};
+	double m_flCone = 0.0, m_flConeLimit = 0.0;
+};
+
 // A model's collision by its path ("models/props_junk/wood_crate001a.mdl"); null when it has none.
 using PropCollisionLookup_t = std::function<std::shared_ptr<const PropCollision_t>( std::string_view szModel )>;
 
@@ -63,7 +87,7 @@ using PropCollisionLookup_t = std::function<std::shared_ptr<const PropCollision_
 // Where a ray meets a moving object.
 struct PhysicsHit_t
 {
-	std::size_t m_nBody = 0; // index into GetObjects()
+	std::size_t m_nBody = 0; // the body hit, as Grab takes it
 	Point_t m_Point{};
 	double m_flDistance = 0.0;
 };
@@ -81,8 +105,10 @@ public:
 	void SetSettings( const PhysicsSettings_t &settings );
 	// Advances by real seconds (the time scale applies), in fixed steps.
 	void Step( double flSeconds );
-	// The objects that move (one body each), in the order bodies are numbered.
+	// The objects that move: one body each, but a ragdoll one a part (the object follows its root).
 	[[nodiscard]] const std::vector<std::uint32_t> &GetObjects() const;
+	// The ragdolls' joints.
+	[[nodiscard]] std::vector<PhysicsJoint_t> GetJoints() const;
 	// Each moving object's move since the start, as TransformObjects takes it.
 	[[nodiscard]] std::vector<std::pair<std::uint32_t, Transform_t>> GetMoves() const;
 	// The edit that leaves each moving object where it is now (texture lock on, as by hand).

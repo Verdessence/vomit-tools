@@ -126,9 +126,11 @@ CMapPhysicsTool::CMapPhysicsTool( CMapEditor &editor )
 	m_pSleep = check( "physicsSleep", tr( "Sleep objects until touched" ), tr( "What moves starts at rest, until something hits it (or a shot, or the mouse)" ) );
 	m_pAutoMass = check( "physicsAutoMass", tr( "Autocalculate mass for entities" ), tr( "A prop's mass from its collision model ($mass), else from its size" ) );
 	m_pPropsOnly = check( "physicsPropsOnly", tr( "Simulate props only" ), tr( "Of the selection, only props move; brushes stay where they are" ) );
+	m_pNoSelfCollisions = check( "physicsNoSelfCollisions", tr( "Disable self collisions (ragdolls)" ), tr( "A ragdoll's parts pass through one another; only the world and other objects stop them" ) );
 	pLayout->addWidget( m_pSleep );
 	pLayout->addWidget( m_pAutoMass );
 	pLayout->addWidget( m_pPropsOnly );
+	pLayout->addWidget( m_pNoSelfCollisions );
 
 	auto *pDebug = new QGroupBox( tr( "Debug" ) );
 	auto *pDebugLayout = new QVBoxLayout( pDebug );
@@ -180,6 +182,7 @@ void CMapPhysicsTool::WritePanel()
 	m_pSleep->setChecked( p.m_bPhysicsSleep );
 	m_pAutoMass->setChecked( p.m_bPhysicsAutoMass );
 	m_pPropsOnly->setChecked( p.m_bPhysicsPropsOnly );
+	m_pNoSelfCollisions->setChecked( p.m_bPhysicsNoSelfCollisions );
 	m_pDrawMoving->setChecked( p.m_bPhysicsDrawMoving );
 	m_pDrawStatic->setChecked( p.m_bPhysicsDrawStatic );
 	m_bPanelUpdating = false;
@@ -206,6 +209,7 @@ void CMapPhysicsTool::SettingsChanged()
 	p.m_bPhysicsSleep = m_pSleep->isChecked();
 	p.m_bPhysicsAutoMass = m_pAutoMass->isChecked();
 	p.m_bPhysicsPropsOnly = m_pPropsOnly->isChecked();
+	p.m_bPhysicsNoSelfCollisions = m_pNoSelfCollisions->isChecked();
 	p.m_bPhysicsDrawMoving = m_pDrawMoving->isChecked();
 	p.m_bPhysicsDrawStatic = m_pDrawStatic->isChecked();
 	CPreferences::Instance().SetMapPreferences( p );
@@ -228,6 +232,7 @@ PhysicsSettings_t CMapPhysicsTool::GetSettings() const
 	settings.m_bSleepUntilTouched = m_pSleep->isChecked();
 	settings.m_bAutoMass = m_pAutoMass->isChecked();
 	settings.m_bPropsOnly = m_pPropsOnly->isChecked();
+	settings.m_bNoSelfCollisions = m_pNoSelfCollisions->isChecked();
 	return settings;
 }
 

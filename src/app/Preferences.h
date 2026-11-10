@@ -227,6 +227,7 @@ struct MapPreferences_t
 	bool m_bPhysicsSleep = false;      // objects asleep until touched
 	bool m_bPhysicsAutoMass = true;    // a prop's mass from its collision model
 	bool m_bPhysicsPropsOnly = false;  // brushes stay
+	bool m_bPhysicsNoSelfCollisions = true; // a ragdoll's parts pass through one another
 	bool m_bPhysicsDrawMoving = false; // the collision models drawn
 	bool m_bPhysicsDrawStatic = false;
 	bool m_bSprites = true;          // iconsprites and env_sprites drawn as such (else as boxes)

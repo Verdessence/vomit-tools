@@ -142,6 +142,7 @@ void ForEachMapPreference( Visit_t &&pfnVisit, Preferences_t &...maps )
 	pfnVisit( "maps/physicsSleep", maps.m_bPhysicsSleep... );
 	pfnVisit( "maps/physicsAutoMass", maps.m_bPhysicsAutoMass... );
 	pfnVisit( "maps/physicsPropsOnly", maps.m_bPhysicsPropsOnly... );
+	pfnVisit( "maps/physicsNoSelfCollisions", maps.m_bPhysicsNoSelfCollisions... );
 	pfnVisit( "maps/physicsDrawMoving", maps.m_bPhysicsDrawMoving... );
 	pfnVisit( "maps/physicsDrawStatic", maps.m_bPhysicsDrawStatic... );
 	pfnVisit( "maps/sprites", maps.m_bSprites... );

@@ -277,6 +277,10 @@
 - While it's stopped, a click in a 3D view picks what falls next, as the selection tool does.
 - A prop whose model has no .phy falls as its model's bounds, and the panel says so; one that
   isn't moving is nothing for the others to hit, as in the game.
+- Ragdolls: a model whose .phy is several solids jointed (a player, a zombie) falls as its
+  parts, each joint held within the angles its .phy gives, and lies where it lands; its parts
+  pass through one another unless Disable self collisions is unticked. The prop is kept where its
+  root part ends up; its pose isn't kept yet.
 - Runs on Box3D (Erin Catto, MIT).
 
 ### Hammer maps
