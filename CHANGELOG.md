@@ -302,6 +302,8 @@
   by words; the one under the mouse plays beside them, as the particle editor plays it.
   Each system is marked a parent, a child or both, and beside it what it spawns and what
   spawns it.
+- The particle editor's material field has Browse beside it: the texture browser, on sprite
+  materials to start with, the one under the mouse drawn live.
 - Check for Problems tells errors (the compile fails or the game breaks) from warnings: each row
   tagged ERROR or WARN with its icon and colour, errors first, a count of each, toggles to show
   either, and a badge on the side tab with the error count (or the warnings', when none).

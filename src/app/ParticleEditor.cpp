@@ -53,6 +53,7 @@
 #include "Language.h"
 #include "MenuPicker.h"
 #include "ParticlePreview.h"
+#include "map/MaterialBrowser.h"
 #include "QtPaths.h"
 #include "SpinBoxes.h"
 #include "Preferences.h"
@@ -1662,6 +1663,28 @@ QWidget *CParticleEditor::ValueEditor( std::int32_t nElement, const Attribute_t 
 			}
 			pField->setCursorPosition( 0 ); // long paths show their start
 			connect( pField, &QLineEdit::editingFinished, this, [ commit, pField ] { commit( pField->text().toStdString() ); } );
+			if ( attribute.m_szName == "material" && m_Game.m_Info )
+			{
+				// Beside it, the texture browser (on sprite materials to start with, the one under
+				// the mouse drawn live).
+				auto *pRow = new QWidget;
+				auto *pLayout = new QHBoxLayout( pRow );
+				pLayout->setContentsMargins( 0, 0, 0, 0 );
+				pLayout->addWidget( pField, 1 );
+				auto *pBrowse = new QToolButton;
+				pBrowse->setObjectName( QStringLiteral( "particleMaterialBrowse" ) );
+				pBrowse->setText( tr( "Browse..." ) );
+				pBrowse->setToolTip( tr( "Pick the material in the texture browser" ) );
+				pLayout->addWidget( pBrowse );
+				connect( pBrowse, &QToolButton::clicked, this, [ this, commit, pField ] {
+					if ( const std::optional<QString> picked = CMaterialBrowser::PickSprite( this, *m_Game.m_Info, {}, pField->text() ) )
+					{
+						pField->setText( *picked );
+						commit( picked->toStdString() );
+					}
+				} );
+				return pRow;
+			}
 			return pField;
 		}
 		case AttrType_t::ATTR_TYPE_COLOR:

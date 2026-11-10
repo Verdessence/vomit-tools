@@ -2779,6 +2779,7 @@ const ParticleGame_t &CMainWindow::ParticleGame()
 		game.m_pSchema = std::move( pSchema );
 		game.m_pfnFileExists = [ pFileSystem = m_pFileSystem.get() ]( std::string_view szPath ) { return pFileSystem->Resolve( szPath ) != nullptr; };
 		game.m_pfnReadFile = [ pFileSystem = m_pFileSystem.get() ]( std::string_view szPath ) { return pFileSystem->Read( szPath ); };
+		game.m_Info = m_Game;
 		game.m_Manifest = xv::particles::ManifestFiles( xv::kv1::Parse( m_pFileSystem->ReadText( xv::particles::MANIFEST_PATH ).value_or( std::string{} ) ).m_Document );
 		for ( const auto &[ path, mount ] : m_pFileSystem->Files() )
 		{

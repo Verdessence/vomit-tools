@@ -25,6 +25,7 @@
 #include "particles/Builtin.h"
 #include "particles/Particles.h"
 #include "particles/Render.h"
+#include "vfs/Vfs.h"
 
 class CParticleDocument;
 class CParticlePreview;
@@ -46,6 +47,7 @@ struct ParticleGame_t
 	xv::particles::FileReader_t m_pfnReadFile;                         // game files, for the preview's materials
 	std::vector<xv::particles::SystemSummary_t> m_Systems;          // every system in the game's particle files
 	QStringList m_Models;                                         // "models/player/ct_gign.mdl", for the preview's model
+	std::optional<xv::vfs::CGameInfo> m_Info;                     // the game, for the texture browser; nullopt without one
 };
 
 // Editor for one particle file: its systems on the left, the selected system's operators in the
