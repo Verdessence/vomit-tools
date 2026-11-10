@@ -32,6 +32,8 @@ add_library(vomit_tools_ui STATIC
         FileViews.cpp
         FileViews.h
         FolderBrowser.cpp
+        StickyTreeParents.cpp
+        StickyTreeParents.h
         FolderBrowser.h
         GpuView.cpp
         GpuView.h

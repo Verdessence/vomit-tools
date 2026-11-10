@@ -5,6 +5,7 @@
 //
 //===========================================================================//
 #include "MainWindow.h"
+#include "StickyTreeParents.h"
 #include "StripperEditor.h"
 #include "CrashHandler.h"
 #include "bsp/Stripper.h"
@@ -378,6 +379,7 @@ CMainWindow::CMainWindow( QWidget *pParent, xv::audio::CEngine::Output_t nAudio 
 	m_pTree = new QTreeView;
 	m_pTree->setModel( m_pFilter );
 	m_pTree->setUniformRowHeights( true );
+	new CStickyTreeParents( m_pTree ); // the open folders over the rows they hold
 	// Every column can be sized; the widths are kept between runs.
 	m_pTree->header()->setSectionResizeMode( QHeaderView::Interactive );
 	m_pTree->header()->setStretchLastSection( false );

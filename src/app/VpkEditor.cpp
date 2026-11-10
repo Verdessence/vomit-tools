@@ -5,6 +5,7 @@
 //
 //===========================================================================//
 #include "VpkEditor.h"
+#include "StickyTreeParents.h"
 
 #include <algorithm>
 #include <unordered_map>
@@ -403,6 +404,7 @@ CVpkEditor::CVpkEditor( std::unique_ptr<xv::vfs::CPackage> pPackage, CSoundPlaye
 	m_pTree = new QTreeView;
 	m_pTree->setModel( m_pFilter );
 	m_pTree->setUniformRowHeights( true );
+	new CStickyTreeParents( m_pTree ); // the open folders over the rows they hold
 	m_pTree->setSelectionMode( QAbstractItemView::ExtendedSelection );
 	m_pTree->setSortingEnabled( true );
 	m_pTree->sortByColumn( COLUMN_NAME, Qt::AscendingOrder );

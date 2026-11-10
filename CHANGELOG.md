@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Browsing
+- The game browser's, the folder browser's and archives' trees keep the open folders of the rows
+  at their top pinned over them while scrolling; a click on one folds it and scrolls to it.
+
 ### Shaders (new)
 - Compiled shader files (.vcs, versions 4 to 6: every one of HL2's and the game folder's own) are
   read, each combo's Direct3D 9 bytecode (vs_1_1 to ps_3_0) disassembled with its constants'

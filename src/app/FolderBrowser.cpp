@@ -5,6 +5,7 @@
 //
 //===========================================================================//
 #include "FolderBrowser.h"
+#include "StickyTreeParents.h"
 
 #include <QDir>
 #include <QFileInfo>
@@ -81,6 +82,7 @@ CFolderBrowser::CFolderBrowser( QWidget *pParent )
 	m_pView = new QTreeView;
 	m_pView->setModel( m_pModel );
 	m_pView->setUniformRowHeights( true );
+	new CStickyTreeParents( m_pView ); // the open folders over the rows they hold
 	m_pView->setSortingEnabled( true );
 	m_pView->sortByColumn( 0, Qt::AscendingOrder );
 	// Every column can be sized; the widths are kept between runs.
