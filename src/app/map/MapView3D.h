@@ -139,6 +139,7 @@ private:
 	void Select( QPointF at, bool bToggle );
 	// The block tool's box, the entity tool's marker and the gizmo, over the picture.
 	void PaintTools( QPainter &painter );
+	void PaintOriginAxes( QPainter &painter ) const;
 	void UpdateCollapsibleVertices();
 	bool BeginOverlayDrag( QPointF at );
 	// A selected overlay's corner (0 to 3) or centre (4) under the mouse, with the Overlay tool.

@@ -78,6 +78,8 @@ inline constexpr int CAMERA_PIXELS = 48;          // from the eye to the rectang
 inline const QColor AXIS_X{ 255, 64, 64 };
 inline const QColor AXIS_Y{ 64, 255, 64 };
 inline const QColor AXIS_Z{ 64, 128, 255 };
+inline constexpr double ORIGIN_AXIS_LENGTH = 64.0; // the world axes at 0 0 0 in the 3D views, in units
+inline constexpr double ORIGIN_AXIS_WIDTH = 2.0;   // and their lines' width in pixels
 inline constexpr int GIZMO_SIZE = 28;             // the axes' length in pixels
 inline constexpr double GIZMO_PIXELS = 140.0;     // the selection gizmo's axes, on screen (Verd: bigger)
 inline constexpr double GIZMO_THICKNESS = 1.0;    // [General] GizmoThiccness: times our lines' widths

@@ -213,6 +213,7 @@ struct MapPreferences_t
 	double m_flLightMonitorGamma = 2.2; // the lighting preview's mat_monitorgamma (the game's brightness: 1.6 brightest, 2.6 darkest)
 	bool m_bSkybox3D = true;
 	bool m_bSky2D = true;            // the map's 2D sky behind everything in the textured 3D views
+	bool m_bOriginAxes = true;       // the world's axes at 0 0 0 in the 3D views
 	bool m_bSprites = true;          // iconsprites and env_sprites drawn as such (else as boxes)
 	bool m_bWireframeModels = true;  // props' edges in the wireframe view
 	MapSelectedModels_t m_nSelectedModels = MapSelectedModels_t::MAP_SELECTED_MODELS_PROPS;

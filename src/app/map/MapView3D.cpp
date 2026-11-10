@@ -554,6 +554,31 @@ void CMapView3D::RedrawLabels()
 }
 
 //-----------------------------------------------------------------------------
+// Purpose: The world's axes at 0 0 0, each a short line in its colour, over the picture so they
+//          show through walls: where the map's origin is, and which way each axis runs there.
+//-----------------------------------------------------------------------------
+void CMapView3D::PaintOriginAxes( QPainter &painter ) const
+{
+	if ( !m_Editor.GetSettings().m_bOriginAxes )
+	{
+		return;
+	}
+	const xv::map::CViewCamera camera = GetSizedCamera();
+	const std::array<std::pair<xv::map::Point_t, QColor>, 3> axes{ { { { mapstyle::ORIGIN_AXIS_LENGTH, 0, 0 }, mapstyle::AXIS_X }, { { 0, mapstyle::ORIGIN_AXIS_LENGTH, 0 }, mapstyle::AXIS_Y }, { { 0, 0, mapstyle::ORIGIN_AXIS_LENGTH }, mapstyle::AXIS_Z } } };
+	painter.save();
+	painter.setRenderHint( QPainter::Antialiasing, true );
+	for ( const auto &[ tip, color ] : axes )
+	{
+		if ( const auto projected = camera.ProjectLine( { 0, 0, 0 }, tip ) )
+		{
+			painter.setPen( QPen{ color, mapstyle::ORIGIN_AXIS_WIDTH, Qt::SolidLine, Qt::RoundCap } );
+			painter.drawLine( QPointF{ projected->first[ 0 ], projected->first[ 1 ] }, QPointF{ projected->second[ 0 ], projected->second[ 1 ] } );
+		}
+	}
+	painter.restore();
+}
+
+//-----------------------------------------------------------------------------
 // Purpose: What goes over the picture: the statistics (O) and the focus frame.
 //-----------------------------------------------------------------------------
 void CMapView3D::PaintLabels( QPainter &painter )
@@ -605,6 +630,7 @@ void CMapView3D::PaintLabels( QPainter &painter )
 			DebugLog() << "map 3D view:" << lines.join( QStringLiteral( "; " ) );
 		}
 	}
+	PaintOriginAxes( painter );
 	PaintTools( painter );
 	// The axes as the camera sees them, in the bottom left corner: which way is which.
 	{

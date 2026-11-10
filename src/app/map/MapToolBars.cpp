@@ -29,6 +29,8 @@
 #include <QTreeWidget>
 #include <QVBoxLayout>
 
+#include "map/MapConstants.h"
+
 namespace
 {
 
@@ -449,6 +451,18 @@ QIcon MakeMapIcon( MapIcon_t nIcon, const QColor &color )
 			painter.drawPolyline( QPolygonF{ { QPointF{ 4, 22 }, QPointF{ 12, 14 }, QPointF{ 17, 19 }, QPointF{ 21, 15 }, QPointF{ 28, 21 } } } );
 			painter.drawEllipse( QPointF{ 22, 10.5 }, 1.8, 1.8 );
 			break;
+		case MapIcon_t::MAP_ICON_ORIGIN_AXES:
+		{
+			// Three axes from one corner, in their colours.
+			const QPointF origin{ 10, 22 };
+			painter.setPen( QPen{ mapstyle::AXIS_X, 2.5, Qt::SolidLine, Qt::RoundCap } );
+			painter.drawLine( origin, QPointF{ 28, 22 } );
+			painter.setPen( QPen{ mapstyle::AXIS_Y, 2.5, Qt::SolidLine, Qt::RoundCap } );
+			painter.drawLine( origin, QPointF{ 20, 13 } );
+			painter.setPen( QPen{ mapstyle::AXIS_Z, 2.5, Qt::SolidLine, Qt::RoundCap } );
+			painter.drawLine( origin, QPointF{ 10, 4 } );
+			break;
+		}
 		case MapIcon_t::MAP_ICON_SKY_2D:
 		{
 			// A sun behind a cloud: the sky alone, with no box round it.

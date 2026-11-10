@@ -1136,6 +1136,7 @@ void CMapEditor::BuildToolBars()
 	toggle( MapIcon_t::MAP_ICON_NODRAW, tr( "Nodraw" ), MapAction_t::MAP_ACTION_TOGGLE_NODRAW, "mapToggleNodraw", m_Settings.m_bNodraw );
 	toggle( MapIcon_t::MAP_ICON_SKYBOX, tr( "3D Skybox" ), MapAction_t::MAP_ACTION_TOGGLE_SKYBOX_3D, "mapToggleSkybox3D", m_Settings.m_bSkybox3D );
 	toggle( MapIcon_t::MAP_ICON_SKY_2D, tr( "2D Sky" ), MapAction_t::MAP_ACTION_TOGGLE_SKY_2D, "mapToggleSky2D", m_Settings.m_bSky2D );
+	toggle( MapIcon_t::MAP_ICON_ORIGIN_AXES, tr( "Origin Axes" ), MapAction_t::MAP_ACTION_TOGGLE_ORIGIN_AXES, "mapToggleOriginAxes", m_Settings.m_bOriginAxes );
 	toggle( MapIcon_t::MAP_ICON_FOG, tr( "Fog" ), MapAction_t::MAP_ACTION_TOGGLE_FOG, "mapToggleFog", m_Settings.m_bFog );
 	toggle( MapIcon_t::MAP_ICON_WALKABLE, tr( "Walkable" ), MapAction_t::MAP_ACTION_TOGGLE_WALKABLE, "mapToggleWalkable", m_Settings.m_bWalkable );
 	toggle( MapIcon_t::MAP_ICON_PARTICLES, tr( "Particles" ), MapAction_t::MAP_ACTION_TOGGLE_PARTICLES, "mapToggleParticles", m_Settings.m_bParticles );
@@ -1562,6 +1563,7 @@ void CMapEditor::SettingsChanged()
 		if ( auto *p3D = qobject_cast<CMapView3D *>( pView ) )
 		{
 			p3D->Redraw();
+			p3D->RedrawLabels();
 		}
 		pView->update();
 	}
@@ -1584,6 +1586,7 @@ void CMapEditor::TakePreferences()
 	m_Settings.m_bUseGroupColors = preferences.m_bGroupColors;
 	m_Settings.m_bSkybox3D = preferences.m_bSkybox3D;
 	m_Settings.m_bSky2D = preferences.m_bSky2D;
+	m_Settings.m_bOriginAxes = preferences.m_bOriginAxes;
 	m_Settings.m_bFog = preferences.m_bFog;
 	m_Settings.m_bHideSmallGrid = preferences.m_bHideSmallGrid;
 	m_Settings.m_nHighlightEvery = preferences.m_nHighlightEvery;
@@ -2625,6 +2628,7 @@ bool CMapEditor::RunAction( MapAction_t nAction, CMapView *pFrom )
 		case MapAction_t::MAP_ACTION_TOGGLE_NODRAW: return toggle( m_Settings.m_bNodraw );
 		case MapAction_t::MAP_ACTION_TOGGLE_SKYBOX_3D: return toggle( m_Settings.m_bSkybox3D );
 		case MapAction_t::MAP_ACTION_TOGGLE_SKY_2D: return toggle( m_Settings.m_bSky2D );
+		case MapAction_t::MAP_ACTION_TOGGLE_ORIGIN_AXES: return toggle( m_Settings.m_bOriginAxes );
 		case MapAction_t::MAP_ACTION_TOGGLE_FOG: return toggle( m_Settings.m_bFog );
 		case MapAction_t::MAP_ACTION_TOGGLE_WALKABLE: return toggle( m_Settings.m_bWalkable );
 		case MapAction_t::MAP_ACTION_TOGGLE_PARTICLES: return toggle( m_Settings.m_bParticles );

@@ -129,6 +129,7 @@ void ForEachMapPreference( Visit_t &&pfnVisit, Preferences_t &...maps )
 	pfnVisit( "maps/lightMonitorGamma", maps.m_flLightMonitorGamma... );
 	pfnVisit( "maps/skybox3D", maps.m_bSkybox3D... );
 	pfnVisit( "maps/sky2D", maps.m_bSky2D... );
+	pfnVisit( "maps/originAxes", maps.m_bOriginAxes... );
 	pfnVisit( "maps/sprites", maps.m_bSprites... );
 	pfnVisit( "maps/wireframeModels", maps.m_bWireframeModels... );
 	pfnVisit( "maps/selectedModels", maps.m_nSelectedModels... );
