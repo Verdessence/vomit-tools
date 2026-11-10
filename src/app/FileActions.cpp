@@ -115,10 +115,10 @@ void RevealInFileManager( const QString &szPath )
 //-----------------------------------------------------------------------------
 // Purpose: The right-click menu for a file or folder on disk.
 //-----------------------------------------------------------------------------
-void ShowFileMenu( QWidget *pParent, const QPoint &globalAt, const QString &szPath, const std::function<void()> &pfnOpen )
+void ShowFileMenu( QWidget *pParent, const QPoint &globalAt, const QString &szPath, const std::function<void()> &pfnOpen, const QString &szOpenLabel )
 {
 #ifdef Q_OS_WIN
-	if ( ShowShellMenu( pParent, globalAt, szPath ) )
+	if ( szOpenLabel.isEmpty() && ShowShellMenu( pParent, globalAt, szPath ) )
 	{
 		return;
 	}
@@ -127,7 +127,9 @@ void ShowFileMenu( QWidget *pParent, const QPoint &globalAt, const QString &szPa
 	QMenu menu( pParent );
 	if ( pfnOpen )
 	{
-		menu.addAction( info.isDir() ? QObject::tr( "Open Folder" ) : QObject::tr( "Open" ), pfnOpen );
+		menu.addAction( !szOpenLabel.isEmpty() ? szOpenLabel : info.isDir() ? QObject::tr( "Open Folder" )
+																			: QObject::tr( "Open" ),
+			pfnOpen );
 	}
 	menu.addAction( QObject::tr( "Open with Default App" ), [ szPath ] { QDesktopServices::openUrl( QUrl::fromLocalFile( szPath ) ); } );
 	menu.addAction( QObject::tr( "Show in File Manager" ), [ szPath ] { RevealInFileManager( szPath ); } );

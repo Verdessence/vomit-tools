@@ -28,6 +28,7 @@
 class CDiscordPresence;
 class CMapEditor;
 class CModelBrowser;
+class CStripperEditor;
 class CModelEditor;
 class CDetailDocument;
 class CDetailEditor;
@@ -85,6 +86,8 @@ public:
 	// Opens a Hammer map (.vmf), from disk (an absolute path) or the mounted game, in the map
 	// viewer; the tab it already has, if open.
 	CMapEditor *OpenMapFile( const QString &szPath );
+	// A Stripper:Source config from disk in a tab of its own, previewed on its map when found.
+	CStripperEditor *OpenStripperFile( const QString &szPath );
 	// File > New > Map.
 	CMapEditor *NewMap();
 	[[nodiscard]] CMapEditor *GetCurrentMap() const;

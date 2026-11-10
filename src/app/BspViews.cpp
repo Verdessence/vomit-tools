@@ -9,20 +9,22 @@
 #include <algorithm>
 
 #include <fstream>
+#include <unordered_map>
+#include <unordered_set>
 
 #include <QCheckBox>
 #include <QClipboard>
+#include <QCoreApplication>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
-#include <QFontDatabase>
 #include <QGuiApplication>
 #include <QMenu>
 #include <QMessageBox>
 #include <QPlainTextEdit>
 #include <QRegularExpression>
 #include <QSaveFile>
-#include <QSyntaxHighlighter>
+#include <QTextBlock>
 #include <QTimer>
 #include <QFileSystemWatcher>
 #include <QHBoxLayout>
@@ -32,6 +34,7 @@
 #include <QLocale>
 #include <QPushButton>
 #include <QSplitter>
+#include <QStyle>
 #include <QTableWidget>
 #include <QTreeWidget>
 #include <QVBoxLayout>
@@ -61,43 +64,97 @@ const QColor MODIFIED_COLOUR( 200, 140, 40 );
 constexpr int ROLE_SHOWN_INDEX = Qt::UserRole + 1; // the row's place in m_Shown
 
 //-----------------------------------------------------------------------------
-// Purpose: Stripper configs: section words, quoted keys and values, and comment lines.
+// Purpose: Stripper configs as the parser reads them: section words, keys (a pair's first
+//          string), values (regular expressions apart), braces, and comments from ;, # or //.
 //-----------------------------------------------------------------------------
-class CStripperHighlighter : public QSyntaxHighlighter
+class CStripperHighlighter : public CCodeHighlighter
 {
 public:
-	using QSyntaxHighlighter::QSyntaxHighlighter;
+	using CCodeHighlighter::CCodeHighlighter;
 
 protected:
 	void highlightBlock( const QString &szText ) override
 	{
-		const QString szTrimmed = szText.trimmed();
-		if ( szTrimmed.startsWith( u';' ) || szTrimmed.startsWith( u'#' ) || szTrimmed.startsWith( QStringLiteral( "//" ) ) )
+		const CodeColors_t &colors = Colors();
+		const QTextCharFormat section = Format( colors.m_Keyword, true );
+		const QTextCharFormat key = Format( colors.m_Key );
+		const QTextCharFormat value = Format( colors.m_String );
+		const QTextCharFormat regex = Format( colors.m_Special );
+		const QTextCharFormat brace = Format( colors.m_Brace, true );
+		const QTextCharFormat comment = Format( colors.m_Comment, false, true );
+		const auto n = static_cast<int>( szText.size() );
+		int nStrings = 0;
+		for ( int i = 0; i < n; )
 		{
-			QTextCharFormat comment;
-			comment.setForeground( QColor( 128, 128, 128 ) );
-			setFormat( 0, static_cast<int>( szText.size() ), comment );
-			return;
-		}
-		static const QRegularExpression SECTION( QStringLiteral( "\\b(add|filter|remove|modify|match|replace|delete|insert):" ), QRegularExpression::CaseInsensitiveOption );
-		static const QRegularExpression STRING( QStringLiteral( "\"[^\"]*\"?" ) );
-		QTextCharFormat section;
-		section.setFontWeight( QFont::Bold );
-		section.setForeground( MODIFIED_COLOUR );
-		for ( auto it = SECTION.globalMatch( szText ); it.hasNext(); )
-		{
-			const auto match = it.next();
-			setFormat( static_cast<int>( match.capturedStart() ), static_cast<int>( match.capturedLength() ), section );
-		}
-		QTextCharFormat string;
-		string.setForeground( ADDED_COLOUR );
-		for ( auto it = STRING.globalMatch( szText ); it.hasNext(); )
-		{
-			const auto match = it.next();
-			setFormat( static_cast<int>( match.capturedStart() ), static_cast<int>( match.capturedLength() ), string );
+			const QChar c = szText[ i ];
+			if ( c.isSpace() )
+			{
+				i++;
+			}
+			else if ( c == u';' || c == u'#' || ( c == u'/' && i + 1 < n && szText[ i + 1 ] == u'/' ) )
+			{
+				setFormat( i, n - i, comment );
+				break;
+			}
+			else if ( c == u'{' || c == u'}' )
+			{
+				setFormat( i, 1, brace );
+				nStrings = 0;
+				i++;
+			}
+			else if ( c == u'"' )
+			{
+				const qsizetype nEnd = szText.indexOf( u'"', i + 1 );
+				const int nStop = nEnd < 0 ? n : static_cast<int>( nEnd ) + 1;
+				const QStringView inside = QStringView( szText ).mid( i + 1, std::max( 0, nStop - i - 2 ) );
+				const bool bRegex = nStrings % 2 == 1 && inside.size() >= 2 && inside.startsWith( u'/' ) && inside.endsWith( u'/' );
+				setFormat( i, nStop - i, nStrings % 2 == 0 ? key : bRegex ? regex
+																		  : value );
+				nStrings++;
+				i = nStop;
+			}
+			else
+			{
+				int nEnd = i;
+				while ( nEnd < n && !szText[ nEnd ].isSpace() && szText[ nEnd ] != u'"' && szText[ nEnd ] != u'{' && szText[ nEnd ] != u'}' )
+				{
+					nEnd++;
+				}
+				if ( szText[ nEnd - 1 ] == u':' )
+				{
+					setFormat( i, nEnd - i, section );
+				}
+				i = nEnd;
+			}
 		}
 	}
 };
+
+// What Stripper does with each section word, for the notes on hovering one.
+struct StripperWordNote_t
+{
+	const char *m_pszWord;
+	const char *m_pszNote;
+};
+
+constexpr StripperWordNote_t STRIPPER_WORD_NOTES[] = {
+	{ "add:", QT_TRANSLATE_NOOP( "CEntityView", "add: each block after it is a new entity, made as the map loads." ) },
+	{ "filter:", QT_TRANSLATE_NOOP( "CEntityView", "filter: each block after it removes every entity that has all of its pairs. A value between slashes (/.../) is a regular expression." ) },
+	{ "remove:", QT_TRANSLATE_NOOP( "CEntityView", "remove: the same as filter:. Each block removes every entity that has all of its pairs." ) },
+	{ "modify:", QT_TRANSLATE_NOOP( "CEntityView", "modify: each block after it changes the entities its match: block finds, with replace:, delete: and insert:." ) },
+	{ "match:", QT_TRANSLATE_NOOP( "CEntityView", "match: the pairs an entity must all have for this modify to change it. A value between slashes (/.../) is a regular expression." ) },
+	{ "replace:", QT_TRANSLATE_NOOP( "CEntityView", "replace: new values for keys the entity already has." ) },
+	{ "delete:", QT_TRANSLATE_NOOP( "CEntityView", "delete: pairs taken off the entity, each a key with this value (or a value its /regular expression/ finds)." ) },
+	{ "insert:", QT_TRANSLATE_NOOP( "CEntityView", "insert: pairs added to the entity." ) },
+};
+
+//-----------------------------------------------------------------------------
+// Purpose: Whether a key's values are outputs ("target,input,parameter,delay,times").
+//-----------------------------------------------------------------------------
+bool IsOutputValue( std::string_view szValue )
+{
+	return std::ranges::count( szValue, ',' ) >= 4 || std::ranges::count( szValue, '\x1b' ) >= 4;
+}
 
 enum LumpColumn_t
 {
@@ -141,6 +198,269 @@ public:
 
 } // namespace
 
+// The map's keys and their values, most used first, for suggesting what to type in a config.
+class CStripperWords
+{
+public:
+	explicit CStripperWords( const std::vector<xv::bsp::Entity_t> &entities )
+	{
+		// Counted by key in any case (Stripper matches keys so), shown as the map first spells them.
+		std::unordered_map<QString, std::pair<QString, int>> keys;
+		std::unordered_map<QString, std::unordered_map<QString, int>> values;
+		std::unordered_map<QString, int> inputs;
+		for ( const auto &entity : entities )
+		{
+			for ( const auto &[ szKey, szValue ] : entity.m_KeyValues )
+			{
+				const QString szName = Qs( szKey );
+				const QString szLower = szName.toLower();
+				auto &[ szSpelling, nCount ] = keys[ szLower ];
+				if ( szSpelling.isEmpty() )
+				{
+					szSpelling = szName;
+				}
+				nCount++;
+				values[ szLower ][ Qs( szValue ) ]++;
+				if ( IsOutputValue( szValue ) )
+				{
+					m_Outputs.insert( szLower );
+					const char chSeparator = szValue.find( '\x1b' ) != std::string::npos ? '\x1b' : ',';
+					const std::size_t nFirst = szValue.find( chSeparator );
+					const std::size_t nSecond = szValue.find( chSeparator, nFirst + 1 );
+					if ( nSecond != std::string::npos )
+					{
+						inputs[ Qs( std::string_view( szValue ).substr( nFirst + 1, nSecond - nFirst - 1 ) ) ]++;
+					}
+				}
+			}
+		}
+		// Keys every config uses, even on a map without them.
+		for ( const char *pszKey : { "classname", "targetname", "hammerid", "origin", "angles", "model", "parentname", "spawnflags" } )
+		{
+			keys.try_emplace( QString::fromLatin1( pszKey ), QString::fromLatin1( pszKey ), 0 );
+		}
+		std::vector<std::pair<QString, int>> sorted;
+		for ( const auto &[ szLower, spelling ] : keys )
+		{
+			sorted.push_back( spelling );
+		}
+		m_Keys = MostUsedFirst( std::move( sorted ) );
+		for ( auto &[ szKey, counts ] : values )
+		{
+			m_Counts[ szKey ] = counts;
+		}
+		m_Inputs = MostUsedFirst( { inputs.begin(), inputs.end() } );
+		const auto names = values.find( QStringLiteral( "targetname" ) );
+		std::vector<std::pair<QString, int>> targets = names == values.end() ? std::vector<std::pair<QString, int>>{} : std::vector<std::pair<QString, int>>( names->second.begin(), names->second.end() );
+		m_Targets = MostUsedFirst( std::move( targets ) );
+		for ( const char *pszSpecial : { "!activator", "!caller", "!self", "!player" } )
+		{
+			m_Targets.push_back( QString::fromLatin1( pszSpecial ) );
+		}
+	}
+
+	[[nodiscard]] const QStringList &GetKeys() const { return m_Keys; }
+	[[nodiscard]] const QStringList &GetTargets() const { return m_Targets; }
+	[[nodiscard]] const QStringList &GetInputs() const { return m_Inputs; }
+	[[nodiscard]] bool IsOutput( const QString &szKey ) const
+	{
+		const QString szLower = szKey.toLower();
+		// Outputs the map doesn't use are still named On... by every game's FGD.
+		return m_Outputs.contains( szLower ) || ( szLower.startsWith( QStringLiteral( "on" ) ) && szKey.size() > 2 && szKey[ 2 ].isUpper() );
+	}
+
+	// A key's values in the map, most used first (names for keys that hold one).
+	[[nodiscard]] QStringList GetValues( const QString &szKey ) const
+	{
+		static const QStringList NAME_KEYS = { QStringLiteral( "target" ), QStringLiteral( "parentname" ), QStringLiteral( "filtername" ), QStringLiteral( "damagefilter" ), QStringLiteral( "lightingorigin" ), QStringLiteral( "landmark" ) };
+		const QString szLower = szKey.toLower();
+		const auto it = m_Counts.find( szLower );
+		QStringList words = it == m_Counts.end() ? QStringList{} : MostUsedFirst( { it->second.begin(), it->second.end() } );
+		if ( NAME_KEYS.contains( szLower ) )
+		{
+			for ( const QString &szName : m_Targets )
+			{
+				if ( !words.contains( szName ) )
+				{
+					words.push_back( szName );
+				}
+			}
+		}
+		constexpr qsizetype MAX_VALUES = 3000;
+		if ( words.size() > MAX_VALUES )
+		{
+			words.resize( MAX_VALUES );
+		}
+		return words;
+	}
+
+private:
+	[[nodiscard]] static QStringList MostUsedFirst( std::vector<std::pair<QString, int>> counts )
+	{
+		std::ranges::sort( counts, []( const auto &a, const auto &b ) { return a.second != b.second ? a.second > b.second : a.first.compare( b.first, Qt::CaseInsensitive ) < 0; } );
+		QStringList words;
+		words.reserve( static_cast<qsizetype>( counts.size() ) );
+		for ( auto &[ szWord, nCount ] : counts )
+		{
+			if ( !szWord.isEmpty() )
+			{
+				words.push_back( std::move( szWord ) );
+			}
+		}
+		return words;
+	}
+
+	QStringList m_Keys;
+	QStringList m_Targets;
+	QStringList m_Inputs;
+	std::unordered_set<QString> m_Outputs;
+	std::unordered_map<QString, std::unordered_map<QString, int>> m_Counts;
+};
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+CEntityView::~CEntityView() = default;
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+const CStripperWords &CEntityView::Words()
+{
+	if ( !m_pWords )
+	{
+		m_pWords = std::make_unique<CStripperWords>( m_Bsp.GetEntities() );
+	}
+	return *m_pWords;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: What may be typed at the cursor: section words, a modify's parts, the map's keys, and
+//          a key's values (names for outputs' targets, then inputs).
+//-----------------------------------------------------------------------------
+CodeCompletion_t CEntityView::CompleteConfig( const QTextCursor &cursor )
+{
+	using Kind_t = xv::bsp::StripperCursor_t::Kind_t;
+	const QString szBefore = m_pConfigText->toPlainText().left( cursor.position() );
+	const QByteArray bytes = szBefore.toUtf8();
+	const xv::bsp::StripperCursor_t at = xv::bsp::StripperCursorAt( std::string_view( bytes.constData(), static_cast<std::size_t>( bytes.size() ) ) );
+	CodeCompletion_t completion;
+	const QString szTyped = QString::fromUtf8( bytes.mid( static_cast<qsizetype>( at.m_nStart ) ) );
+	completion.m_nStart = cursor.position() - static_cast<int>( szTyped.size() );
+	switch ( at.m_nKind )
+	{
+		case Kind_t::KIND_SECTION:
+			completion.m_Words = { QStringLiteral( "add:" ), QStringLiteral( "filter:" ), QStringLiteral( "modify:" ), QStringLiteral( "remove:" ) };
+			break;
+		case Kind_t::KIND_MODIFY_PART:
+			completion.m_Words = { QStringLiteral( "match:" ), QStringLiteral( "replace:" ), QStringLiteral( "delete:" ), QStringLiteral( "insert:" ) };
+			break;
+		case Kind_t::KIND_KEY:
+			completion.m_Words = Words().GetKeys();
+			completion.m_szSuffix = QStringLiteral( "\"" );
+			break;
+		case Kind_t::KIND_VALUE:
+		{
+			const QString szKey = Qs( at.m_szKey );
+			if ( Words().IsOutput( szKey ) )
+			{
+				// target,input,parameter,delay,times: suggest for the field being typed.
+				const QChar chSeparator = szTyped.contains( QChar( 0x1b ) ) ? QChar( 0x1b ) : QChar( u',' );
+				const qsizetype nField = szTyped.count( chSeparator );
+				completion.m_nStart = cursor.position() - static_cast<int>( szTyped.size() - szTyped.lastIndexOf( chSeparator ) - 1 );
+				completion.m_Words = nField == 0 ? Words().GetTargets() : nField == 1 ? Words().GetInputs()
+																					  : QStringList{};
+				completion.m_szSuffix = nField < 2 ? QString( chSeparator ) : QString{};
+			}
+			else
+			{
+				completion.m_Words = Words().GetValues( szKey );
+				completion.m_szSuffix = QStringLiteral( "\"" );
+			}
+			break;
+		}
+		default: break;
+	}
+	return completion;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: A note on what's under the pointer: what a section word does, how many of the map's
+//          entities have a key, or a pair (a /regular expression/ tried as Stripper would).
+//-----------------------------------------------------------------------------
+QString CEntityView::DescribeConfig( const QTextCursor &cursor )
+{
+	const QString szLine = cursor.block().text();
+	const int nColumn = cursor.positionInBlock();
+	// The pair the cursor is in, from the line's strings.
+	QStringList strings;
+	int nIn = -1;
+	for ( qsizetype i = 0; i < szLine.size(); )
+	{
+		const QChar c = szLine[ i ];
+		if ( c == u';' || c == u'#' || ( c == u'/' && i + 1 < szLine.size() && szLine[ i + 1 ] == u'/' ) )
+		{
+			break;
+		}
+		if ( c == u'"' )
+		{
+			const qsizetype nEnd = szLine.indexOf( u'"', i + 1 );
+			const qsizetype nStop = nEnd < 0 ? szLine.size() : nEnd;
+			if ( nColumn >= i && nColumn <= nStop )
+			{
+				nIn = static_cast<int>( strings.size() );
+			}
+			strings.push_back( szLine.mid( i + 1, nStop - i - 1 ) );
+			i = nStop + 1;
+			continue;
+		}
+		if ( !c.isSpace() && c != u'{' && c != u'}' )
+		{
+			qsizetype nEnd = i;
+			while ( nEnd < szLine.size() && !szLine[ nEnd ].isSpace() && szLine[ nEnd ] != u'"' && szLine[ nEnd ] != u'{' && szLine[ nEnd ] != u'}' )
+			{
+				nEnd++;
+			}
+			if ( nColumn >= i && nColumn <= nEnd )
+			{
+				const QString szWord = szLine.mid( i, nEnd - i ).toLower();
+				for ( const auto &note : STRIPPER_WORD_NOTES )
+				{
+					if ( szWord == QLatin1String( note.m_pszWord ) )
+					{
+						return QCoreApplication::translate( "CEntityView", note.m_pszNote );
+					}
+				}
+				return {};
+			}
+			i = nEnd;
+			continue;
+		}
+		i++;
+	}
+	const auto &entities = m_Bsp.GetEntities();
+	if ( nIn < 0 || entities.empty() )
+	{
+		return {};
+	}
+	const int nKey = nIn - nIn % 2;
+	const std::string szKey = strings[ nKey ].toStdString();
+	if ( nIn == nKey || nKey + 1 >= strings.size() )
+	{
+		const auto nHave = std::ranges::count_if( entities, [ &szKey ]( const xv::bsp::Entity_t &entity ) {
+			xv::bsp::Entity_t match;
+			match.m_KeyValues.emplace_back( szKey, "/.*/" );
+			return xv::bsp::StripperMatches( match, entity );
+		} );
+		return tr( "Entities in the map with the key \"%1\": %2" ).arg( strings[ nKey ] ).arg( nHave );
+	}
+	xv::bsp::Entity_t match;
+	match.m_KeyValues.emplace_back( szKey, strings[ nKey + 1 ].toStdString() );
+	const auto nMatch = std::ranges::count_if( entities, [ &match ]( const xv::bsp::Entity_t &entity ) { return xv::bsp::StripperMatches( match, entity ); } );
+	return nMatch == 0 ? tr( "No entity in the map has \"%1\" \"%2\"." ).arg( strings[ nKey ], strings[ nKey + 1 ] )
+					   : tr( "Entities in the map with \"%1\" \"%2\": %3" ).arg( strings[ nKey ], strings[ nKey + 1 ] ).arg( nMatch );
+}
+
 //-----------------------------------------------------------------------------
 // Purpose:
 //-----------------------------------------------------------------------------
@@ -161,6 +481,7 @@ CEntityView::CEntityView( const xv::bsp::CBsp &bsp, const std::filesystem::path 
 	m_pStripper->setToolTip( tr( "Show the entities as Stripper:Source changes them when the map loads (addons/stripper)" ) );
 	connect( m_pStripper, &QCheckBox::toggled, this, &CEntityView::Rebuild );
 	auto *pChoose = new QPushButton( tr( "Config…" ) );
+	pChoose->setObjectName( QStringLiteral( "entityStripperChoose" ) );
 	pChoose->setToolTip( tr( "Preview another Stripper config on this map" ) );
 	connect( pChoose, &QPushButton::clicked, this, [ this ] {
 		const QString szStart = m_Configs.empty() ? QString{} : QString::fromStdU16String( m_Configs.back().parent_path().u16string() );
@@ -207,12 +528,12 @@ CEntityView::CEntityView( const xv::bsp::CBsp &bsp, const std::filesystem::path 
 	m_pConfigPath = new QLabel;
 	m_pConfigPath->setWordWrap( true );
 	m_pConfigPath->setTextInteractionFlags( Qt::TextSelectableByMouse );
-	m_pConfigText = new QPlainTextEdit;
+	m_pConfigText = new CCodeEdit;
 	m_pConfigText->setObjectName( QStringLiteral( "entityStripperText" ) );
-	m_pConfigText->setFont( QFontDatabase::systemFont( QFontDatabase::FixedFont ) );
-	m_pConfigText->setLineWrapMode( QPlainTextEdit::NoWrap );
-	m_pConfigText->setTabStopDistance( 4 * m_pConfigText->fontMetrics().horizontalAdvance( u' ' ) );
-	new CStripperHighlighter( m_pConfigText->document() );
+	m_pConfigText->SetCompletionSource( [ this ]( const QTextCursor &cursor ) { return CompleteConfig( cursor ); } );
+	m_pConfigText->SetHoverSource( [ this ]( const QTextCursor &cursor ) { return DescribeConfig( cursor ); } );
+	m_pConfigText->SetBlockWords( { QStringLiteral( "add:" ), QStringLiteral( "filter:" ), QStringLiteral( "remove:" ), QStringLiteral( "modify:" ), QStringLiteral( "match:" ), QStringLiteral( "replace:" ), QStringLiteral( "delete:" ), QStringLiteral( "insert:" ) } );
+	new CStripperHighlighter( m_pConfigText );
 	m_pReparse = new QTimer( this );
 	m_pReparse->setSingleShot( true );
 	m_pReparse->setInterval( 300 );
@@ -247,6 +568,7 @@ CEntityView::CEntityView( const xv::bsp::CBsp &bsp, const std::filesystem::path 
 	m_pEditor->hide();
 
 	m_pList = new QTreeWidget;
+	m_pList->setObjectName( QStringLiteral( "entityList" ) );
 	m_pList->setColumnCount( ENTITY_COLUMN_COUNT );
 	m_pList->setHeaderLabels( { tr( "#" ), tr( "Class" ), tr( "Name" ), tr( "Origin" ) } );
 	m_pList->setRootIsDecorated( false );
@@ -277,21 +599,45 @@ CEntityView::CEntityView( const xv::bsp::CBsp &bsp, const std::filesystem::path 
 	pSplitter->addWidget( m_pEditor );
 	pSplitter->setSizes( { 560, 540, 0 } );
 
+	// The configs' problems in a panel of their own under the views, so a problem appearing or going
+	// away as the config is typed never moves the editor.
 	m_pSummary = new QLabel;
 	m_pSummary->setObjectName( QStringLiteral( "entityStripperSummary" ) );
-	m_pSummary->setWordWrap( true );
 	m_pSummary->setTextInteractionFlags( Qt::TextSelectableByMouse );
+	m_pProblems = new QTreeWidget;
+	m_pProblems->setObjectName( QStringLiteral( "entityStripperProblems" ) );
+	m_pProblems->setColumnCount( 3 );
+	m_pProblems->setHeaderLabels( { tr( "Line" ), tr( "Problem" ), tr( "Config" ) } );
+	m_pProblems->setRootIsDecorated( false );
+	m_pProblems->setUniformRowHeights( true );
+	m_pProblems->setColumnWidth( 0, 60 );
+	m_pProblems->setColumnWidth( 1, 520 );
+	m_pProblems->setToolTip( tr( "Double-click a problem in the config being edited to go to its line" ) );
+	connect( m_pProblems, &QTreeWidget::itemActivated, this, [ this ]( QTreeWidgetItem *pItem ) { GoToProblem( pItem ); } );
+	m_pProblemsPanel = new QWidget;
+	auto *pProblemsLayout = new QVBoxLayout( m_pProblemsPanel );
+	pProblemsLayout->setContentsMargins( 0, 0, 0, 0 );
+	pProblemsLayout->setSpacing( 2 );
+	pProblemsLayout->addWidget( m_pSummary );
+	pProblemsLayout->addWidget( m_pProblems, 1 );
+
+	auto *pMain = new QSplitter( Qt::Vertical );
+	pMain->addWidget( pSplitter );
+	pMain->addWidget( m_pProblemsPanel );
+	pMain->setStretchFactor( 0, 1 );
+	pMain->setStretchFactor( 1, 0 );
+	pMain->setCollapsible( 0, false );
+	pMain->setSizes( { 640, 120 } );
 
 	auto *pLayout = new QVBoxLayout( this );
 	pLayout->setContentsMargins( 6, 6, 6, 0 );
-	if ( !bsp.HasEntities() )
+	if ( !bsp.HasEntities() && !map.empty() )
 	{
 		pLayout->addWidget( new QLabel( tr( "This map's entity lump is compressed and wouldn't unpack; it may be damaged." ) ) );
 	}
 	pLayout->addLayout( pStripperBar );
 	pLayout->addWidget( m_pSearch );
-	pLayout->addWidget( pSplitter, 1 );
-	pLayout->addWidget( m_pSummary );
+	pLayout->addWidget( pMain, 1 );
 	LoadConfigText();
 	SetStripperConfigs( m_Configs );
 }
@@ -309,10 +655,11 @@ void CEntityView::SetStripperConfigs( std::vector<std::filesystem::path> configs
 	}
 	m_Parsed.clear();
 	QStringList names;
+	bool bDiagnosed = false;
 	for ( const auto &file : m_Configs )
 	{
 		std::string szText;
-		if ( m_bConfigModified && file == m_ConfigPath )
+		if ( ( m_bConfigModified || m_bConfigReadOnly ) && file == m_ConfigPath )
 		{
 			szText = m_pConfigText->toPlainText().toStdString();
 		}
@@ -323,12 +670,34 @@ void CEntityView::SetStripperConfigs( std::vector<std::filesystem::path> configs
 		}
 		const std::string szName = xv::vfs::ToUtf8( file.filename() ) + ( m_bConfigModified && file == m_ConfigPath ? " (unsaved)" : "" );
 		m_Parsed.push_back( xv::bsp::ParseStripper( szText, szName ) );
+		if ( file == m_ConfigPath )
+		{
+			// The problems of the config in the editor, marked on their lines.
+			const xv::bsp::StripperConfig_t &parsed = m_Parsed.back();
+			std::vector<CodeDiagnostic_t> diagnostics;
+			for ( std::size_t i = 0; i < parsed.m_Problems.size() && i < parsed.m_ProblemLines.size(); i++ )
+			{
+				std::string_view szProblem = parsed.m_Problems[ i ];
+				const std::string szWhere = szName + ":" + std::to_string( parsed.m_ProblemLines[ i ] ) + ": ";
+				if ( szProblem.starts_with( szWhere ) )
+				{
+					szProblem.remove_prefix( szWhere.size() );
+				}
+				diagnostics.push_back( { parsed.m_ProblemLines[ i ], Qs( szProblem ) } );
+			}
+			m_pConfigText->SetDiagnostics( std::move( diagnostics ) );
+			bDiagnosed = true;
+		}
 		names.push_back( QString::fromStdString( szName ) );
 		const QString szPath = QString::fromStdU16String( file.u16string() );
 		if ( QFileInfo::exists( szPath ) && !m_pWatcher->files().contains( szPath ) )
 		{
 			m_pWatcher->addPath( szPath );
 		}
+	}
+	if ( !bDiagnosed )
+	{
+		m_pConfigText->SetDiagnostics( {} );
 	}
 	m_pConfigs->setText( names.isEmpty() ? tr( "no Stripper config for this map (addons/stripper/global_filters.cfg, addons/stripper/maps/<map>.cfg)" ) : names.join( QStringLiteral( ", " ) ) );
 	m_pConfigs->setToolTip( [ this ] {
@@ -431,24 +800,65 @@ void CEntityView::Rebuild()
 	m_pList->setSortingEnabled( true );
 	m_pList->sortByColumn( m_pList->header()->sortIndicatorSection(), m_pList->header()->sortIndicatorOrder() );
 
+	m_pProblems->clear();
+	QList<QTreeWidgetItem *> problems;
+	for ( std::size_t nConfig = 0; nConfig < m_Parsed.size() && nConfig < m_Configs.size(); nConfig++ )
+	{
+		const xv::bsp::StripperConfig_t &config = m_Parsed[ nConfig ];
+		const QString szPath = QString::fromStdU16String( m_Configs[ nConfig ].u16string() );
+		for ( std::size_t i = 0; i < config.m_Problems.size(); i++ )
+		{
+			const int nLine = i < config.m_ProblemLines.size() ? config.m_ProblemLines[ i ] : 0;
+			// The parser puts "name:line: " in front, which the columns already say.
+			QString szProblem = QString::fromStdString( config.m_Problems[ i ] );
+			const QString szWhere = QStringLiteral( ":%1: " ).arg( nLine );
+			if ( const qsizetype nAt = szProblem.indexOf( szWhere ); nLine > 0 && nAt >= 0 )
+			{
+				szProblem.remove( 0, nAt + szWhere.size() );
+			}
+			auto *pItem = new QTreeWidgetItem( { nLine > 0 ? QString::number( nLine ) : QString{}, szProblem, QFileInfo( szPath ).fileName() } );
+			pItem->setData( 0, Qt::UserRole, szPath );
+			pItem->setData( 0, Qt::UserRole + 1, nLine );
+			pItem->setToolTip( 1, szProblem );
+			pItem->setToolTip( 2, szPath );
+			pItem->setIcon( 0, style()->standardIcon( QStyle::SP_MessageBoxWarning ) );
+			problems.push_back( pItem );
+		}
+	}
+	m_pProblems->addTopLevelItems( problems );
 	QStringList summary;
 	if ( bStripper )
 	{
-		summary << tr( "Stripper: %1 removed, %2 added, %3 modified." ).arg( nRemoved ).arg( nAdded ).arg( nModified );
+		summary << tr( "Stripper: %1 removed, %2 added, %3 modified" ).arg( nRemoved ).arg( nAdded ).arg( nModified );
 	}
-	for ( const auto &config : m_Parsed )
-	{
-		for ( const auto &szProblem : config.m_Problems )
-		{
-			summary << QString::fromStdString( szProblem );
-		}
-	}
-	m_pSummary->setText( summary.join( u'\n' ) );
-	m_pSummary->setVisible( !summary.isEmpty() );
+	summary << ( problems.isEmpty() ? tr( "No problems in the configs" ) : tr( "%n problem(s)", nullptr, static_cast<int>( problems.size() ) ) );
+	m_pSummary->setText( summary.join( QStringLiteral( " · " ) ) );
+	m_pProblemsPanel->setVisible( !m_Configs.empty() );
 	SetSearch( m_pSearch->text() );
 	if ( current )
 	{
 		SelectEntity( static_cast<int>( *current ) );
+	}
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Puts the cursor on a problem's line when it's in the config being edited.
+//-----------------------------------------------------------------------------
+void CEntityView::GoToProblem( QTreeWidgetItem *pItem )
+{
+	const int nLine = pItem ? pItem->data( 0, Qt::UserRole + 1 ).toInt() : 0;
+	if ( nLine <= 0 || m_ConfigPath.empty() || pItem->data( 0, Qt::UserRole ).toString() != QString::fromStdU16String( m_ConfigPath.u16string() ) )
+	{
+		return;
+	}
+	ShowConfigEditor( true );
+	const QTextBlock block = m_pConfigText->document()->findBlockByNumber( nLine - 1 );
+	if ( block.isValid() )
+	{
+		QTextCursor cursor( block );
+		cursor.movePosition( QTextCursor::EndOfBlock );
+		m_pConfigText->setTextCursor( cursor );
+		m_pConfigText->centerCursor();
 	}
 }
 
@@ -490,6 +900,26 @@ void CEntityView::SetConfigText( const QString &szText )
 }
 
 //-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+void CEntityView::EditConfig( const std::filesystem::path &config )
+{
+	m_ConfigPath = config;
+	SetConfigModified( false );
+	LoadConfigText();
+	std::vector<std::filesystem::path> configs = m_Configs;
+	if ( std::ranges::find( configs, config ) == configs.end() )
+	{
+		configs = { config };
+	}
+	m_pEdit->setEnabled( true );
+	m_pEdit->setToolTip( tr( "Edit %1, seeing the changes in the list as you type" ).arg( QString::fromStdU16String( config.u16string() ) ) );
+	SetStripperConfigs( std::move( configs ) );
+	m_pStripper->setChecked( true );
+	ShowConfigEditor( true );
+}
+
+//-----------------------------------------------------------------------------
 // Purpose: A blank line between the rules already there and the new ones.
 //-----------------------------------------------------------------------------
 void CEntityView::AppendToConfig( const std::string &szText )
@@ -516,16 +946,18 @@ void CEntityView::AppendToConfig( const std::string &szText )
 //-----------------------------------------------------------------------------
 void CEntityView::LoadConfigText()
 {
-	QString szText;
+	QString szText = m_bConfigReadOnly ? m_szConfigData : QString{};
 	QFile file( QString::fromStdU16String( m_ConfigPath.u16string() ) );
-	if ( !m_ConfigPath.empty() && file.open( QIODevice::ReadOnly ) )
+	if ( !m_bConfigReadOnly && !m_ConfigPath.empty() && file.open( QIODevice::ReadOnly ) )
 	{
 		szText = QString::fromUtf8( file.readAll() );
 	}
 	m_bLoadingText = true;
 	m_pConfigText->setPlainText( szText );
 	m_bLoadingText = false;
-	m_pConfigPath->setText( m_ConfigPath.empty() ? QString{} : QDir::toNativeSeparators( QString::fromStdU16String( m_ConfigPath.u16string() ) ) + ( file.exists() ? QString{} : tr( " (new; made when saved)" ) ) );
+	const QString szState = m_bConfigReadOnly ? tr( " (archive; read-only)" ) : file.exists() ? QString{}
+																							  : tr( " (new; made when saved)" );
+	m_pConfigPath->setText( m_ConfigPath.empty() ? QString{} : QDir::toNativeSeparators( QString::fromStdU16String( m_ConfigPath.u16string() ) ) + szState );
 }
 
 //-----------------------------------------------------------------------------
@@ -545,6 +977,8 @@ void CEntityView::SetConfigModified( bool bModified )
 //-----------------------------------------------------------------------------
 bool CEntityView::SaveConfig()
 {
+	if ( m_bConfigReadOnly )
+		return SaveConfigAs();
 	if ( m_ConfigPath.empty() )
 	{
 		return false;
@@ -583,7 +1017,7 @@ void CEntityView::ShowListMenu( const QPoint &at )
 	const auto &shown = m_Shown[ static_cast<std::size_t>( pItem->data( ENTITY_COLUMN_INDEX, ROLE_SHOWN_INDEX ).toInt() ) ];
 	const xv::bsp::Entity_t entity = shown.m_Entity;
 	QMenu menu( this );
-	const bool bCanWrite = !m_ConfigPath.empty() && shown.m_nStatus != xv::bsp::StrippedEntity_t::Status_t::STATUS_REMOVED;
+	const bool bCanWrite = !m_bConfigReadOnly && !m_ConfigPath.empty() && shown.m_nStatus != xv::bsp::StrippedEntity_t::Status_t::STATUS_REMOVED;
 	QAction *pRemove = menu.addAction( tr( "Remove With Stripper" ), this, [ this, entity ] { AppendToConfig( xv::bsp::StripperFilterFor( entity ) ); } );
 	QAction *pChange = menu.addAction( tr( "Change With Stripper" ), this, [ this, entity ] { AppendToConfig( xv::bsp::StripperModifyFor( entity ) ); } );
 	QAction *pCopy = menu.addAction( tr( "Add a Copy With Stripper" ), this, [ this, entity ] { AppendToConfig( xv::bsp::StripperAddFor( entity ) ); } );
@@ -759,4 +1193,35 @@ CLumpView::CLumpView( const xv::bsp::CBsp &bsp, QWidget *pParent )
 	pLayout->setContentsMargins( 6, 6, 6, 0 );
 	pLayout->addWidget( new QLabel( tr( "BSP version %1, map revision %2. %3 of %4 lumps hold data." ).arg( bsp.GetVersion() ).arg( bsp.GetRevision() ).arg( nUsed ).arg( xv::bsp::LUMP_COUNT ) ) );
 	pLayout->addWidget( pTree, 1 );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: An archived config is previewed from its bytes and cannot overwrite a loose file.
+//-----------------------------------------------------------------------------
+void CEntityView::ReadConfigData( const std::filesystem::path &config, const QString &szText )
+{
+	m_bConfigReadOnly = true;
+	m_szConfigData = szText;
+	EditConfig( config );
+	m_pConfigText->setReadOnly( true );
+	findChild<QPushButton *>( QStringLiteral( "entityStripperChoose" ) )->setEnabled( false );
+	findChild<QPushButton *>( QStringLiteral( "entityStripperSave" ) )->setText( tr( "Save As…" ) );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Export a config to a loose file, where Stripper can read it.
+//-----------------------------------------------------------------------------
+bool CEntityView::SaveConfigAs()
+{
+	const QString szPath = AskSaveFile( this, tr( "Save Stripper Config" ), QString::fromStdU16String( m_ConfigPath.filename().u16string() ), tr( "Stripper configs (*.cfg);;All files (*)" ) );
+	if ( szPath.isEmpty() )
+		return false;
+	QSaveFile file( szPath );
+	const QByteArray bytes = GetConfigText().toUtf8();
+	if ( !file.open( QIODevice::WriteOnly ) || file.write( bytes ) != bytes.size() || !file.commit() )
+	{
+		QMessageBox::critical( this, tr( "Stripper Config" ), tr( "Could not write %1:\n%2" ).arg( szPath, file.errorString() ) );
+		return false;
+	}
+	return true;
 }

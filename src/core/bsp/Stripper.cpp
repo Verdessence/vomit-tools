@@ -10,6 +10,7 @@
 #include <map>
 #include <regex>
 
+#include "kv1/Kv1.h"
 #include "vfs/Vfs.h"
 
 namespace fs = std::filesystem;
@@ -122,6 +123,107 @@ bool ValueMatches( const std::string &szPattern, std::string_view szValue )
 } // namespace
 
 //-----------------------------------------------------------------------------
+// Purpose: Reads the text as the parser does, keeping the section, the block depth and the
+//          strings of the block the text ends in.
+//-----------------------------------------------------------------------------
+StripperCursor_t StripperCursorAt( std::string_view szBefore )
+{
+	using Kind_t = StripperCursor_t::Kind_t;
+	StripperCursor_t at;
+	int nDepth = 0;
+	int nStrings = 0; // strings so far in the innermost open block
+	std::string szLastString;
+	const auto lower = []( std::string_view sz ) {
+		std::string szLower( sz );
+		std::ranges::transform( szLower, szLower.begin(), []( unsigned char c ) { return static_cast<char>( std::tolower( c ) ); } );
+		return szLower;
+	};
+	const auto inEntity = [ & ] { return !at.m_szSection.empty() && nDepth == ( at.m_szSection == "modify:" ? 2 : 1 ); };
+	for ( std::size_t i = 0; i < szBefore.size(); )
+	{
+		const char ch = szBefore[ i ];
+		if ( ch == ' ' || ch == '\t' || ch == '\r' || ch == '\n' )
+		{
+			i++;
+		}
+		else if ( ch == ';' || ch == '#' || szBefore.substr( i, 2 ) == "//" )
+		{
+			const std::size_t nEnd = szBefore.find( '\n', i );
+			if ( nEnd == std::string_view::npos )
+			{
+				return {}; // in a comment
+			}
+			i = nEnd;
+		}
+		else if ( ch == '{' || ch == '}' )
+		{
+			nDepth = ch == '{' ? nDepth + 1 : std::max( 0, nDepth - 1 );
+			nStrings = 0;
+			if ( nDepth == 0 )
+			{
+				at.m_szPart.clear();
+			}
+			i++;
+		}
+		else if ( ch == '"' )
+		{
+			const std::size_t nEnd = szBefore.find( '"', i + 1 );
+			if ( nEnd == std::string_view::npos )
+			{
+				if ( !inEntity() )
+				{
+					return {};
+				}
+				at.m_nStart = i + 1;
+				at.m_nKind = nStrings % 2 == 0 ? Kind_t::KIND_KEY : Kind_t::KIND_VALUE;
+				if ( at.m_nKind == Kind_t::KIND_VALUE )
+				{
+					at.m_szKey = szLastString;
+				}
+				return at;
+			}
+			szLastString = std::string( szBefore.substr( i + 1, nEnd - i - 1 ) );
+			nStrings++;
+			i = nEnd + 1;
+		}
+		else
+		{
+			std::size_t nEnd = i;
+			while ( nEnd < szBefore.size() && std::string_view( " \t\r\n{}\"" ).find( szBefore[ nEnd ] ) == std::string_view::npos )
+			{
+				nEnd++;
+			}
+			if ( nEnd == szBefore.size() )
+			{
+				at.m_nStart = i; // the word being typed
+				break;
+			}
+			const std::string szWord = lower( szBefore.substr( i, nEnd - i ) );
+			if ( nDepth == 0 )
+			{
+				at.m_szSection = szWord == "remove:" ? "filter:" : szWord;
+				at.m_szPart.clear();
+			}
+			else if ( nDepth == 1 && at.m_szSection == "modify:" )
+			{
+				at.m_szPart = szWord;
+			}
+			i = nEnd;
+		}
+		at.m_nStart = szBefore.size();
+	}
+	if ( nDepth == 0 )
+	{
+		at.m_nKind = Kind_t::KIND_SECTION;
+	}
+	else if ( nDepth == 1 && at.m_szSection == "modify:" )
+	{
+		at.m_nKind = Kind_t::KIND_MODIFY_PART;
+	}
+	return at;
+}
+
+//-----------------------------------------------------------------------------
 // Purpose: Section words hold until the next one; each block after them is one rule.
 //-----------------------------------------------------------------------------
 StripperConfig_t ParseStripper( std::string_view szText, std::string_view szName )
@@ -129,6 +231,10 @@ StripperConfig_t ParseStripper( std::string_view szText, std::string_view szName
 	StripperConfig_t config;
 	const std::vector<Token_t> tokens = Tokenize( szText );
 	const auto where = [ &szName ]( int nLine ) { return std::string( szName ) + ":" + std::to_string( nLine ); };
+	const auto problem = [ & ]( int nLine, std::string_view szWhat ) {
+		config.m_Problems.push_back( where( nLine ) + ": " + std::string( szWhat ) );
+		config.m_ProblemLines.push_back( nLine );
+	};
 	std::optional<StripperRule_t::Kind_t> section;
 	bool bUnknownSection = false; // its blocks are skipped without another word
 
@@ -144,13 +250,13 @@ StripperConfig_t ParseStripper( std::string_view szText, std::string_view szName
 			}
 			if ( !bQuiet )
 			{
-				config.m_Problems.push_back( where( tokens[ i ].m_nLine ) + ": expected a \"key\" \"value\" pair" );
+				problem( tokens[ i ].m_nLine, "expected a \"key\" \"value\" pair" );
 			}
 			i++;
 		}
 		if ( i >= tokens.size() )
 		{
-			config.m_Problems.push_back( std::string( szName ) + ": a block isn't closed" );
+			problem( tokens.empty() ? 1 : tokens.back().m_nLine, "a block isn't closed" );
 		}
 		i++;
 	};
@@ -174,7 +280,7 @@ StripperConfig_t ParseStripper( std::string_view szText, std::string_view szName
 			}
 			else
 			{
-				config.m_Problems.push_back( where( token.m_nLine ) + ": unknown section \"" + token.m_szText + "\"; its blocks are skipped" );
+				problem( token.m_nLine, "unknown section \"" + token.m_szText + "\"; its blocks are skipped" );
 				section.reset();
 				bUnknownSection = true;
 				i++;
@@ -186,17 +292,18 @@ StripperConfig_t ParseStripper( std::string_view szText, std::string_view szName
 		}
 		if ( token.m_nKind != Token_t::Kind_t::KIND_OPEN )
 		{
-			config.m_Problems.push_back( where( token.m_nLine ) + ": expected a section (add:, filter:, modify:) or a block" );
+			problem( token.m_nLine, "expected a section (add:, filter:, modify:) or a block" );
 			i++;
 			continue;
 		}
 		if ( !section && !bUnknownSection )
 		{
-			config.m_Problems.push_back( where( token.m_nLine ) + ": a block before any section; it's skipped" );
+			problem( token.m_nLine, "a block before any section; it's skipped" );
 		}
 		StripperRule_t rule;
 		rule.m_nKind = section.value_or( StripperRule_t::Kind_t::KIND_ADD );
 		rule.m_szWhere = where( token.m_nLine );
+		const int nRuleLine = token.m_nLine;
 		i++;
 		if ( rule.m_nKind != StripperRule_t::Kind_t::KIND_MODIFY || !section )
 		{
@@ -218,7 +325,7 @@ StripperConfig_t ParseStripper( std::string_view szText, std::string_view szName
 				}
 				if ( !pInto || i + 1 >= tokens.size() || tokens[ i + 1 ].m_nKind != Token_t::Kind_t::KIND_OPEN )
 				{
-					config.m_Problems.push_back( where( tokens[ i ].m_nLine ) + ": expected match:, replace:, delete: or insert: and a block" );
+					problem( tokens[ i ].m_nLine, "expected match:, replace:, delete: or insert: and a block" );
 					i++;
 					continue;
 				}
@@ -228,7 +335,7 @@ StripperConfig_t ParseStripper( std::string_view szText, std::string_view szName
 			i++;
 			if ( rule.m_Entity.m_KeyValues.empty() )
 			{
-				config.m_Problems.push_back( rule.m_szWhere + ": modify without a match: block changes nothing" );
+				problem( nRuleLine, "modify without a match: block changes nothing" );
 				continue;
 			}
 		}
@@ -388,6 +495,51 @@ fs::path StripperMapConfigPath( const fs::path &map )
 		}
 	}
 	return {};
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Up from the config: maps/, then addons/stripper/ above it, whose parent is the game.
+//-----------------------------------------------------------------------------
+std::vector<fs::path> FindStripperMaps( const fs::path &config )
+{
+	std::vector<fs::path> found;
+	const fs::path maps = config.parent_path();
+	const fs::path stripper = maps.parent_path();
+	const fs::path addons = stripper.parent_path();
+	if ( !kv1::EqualsIgnoreCase( vfs::ToUtf8( maps.filename() ), "maps" ) || !kv1::EqualsIgnoreCase( vfs::ToUtf8( stripper.filename() ), "stripper" ) || !kv1::EqualsIgnoreCase( vfs::ToUtf8( addons.filename() ), "addons" ) )
+	{
+		return found;
+	}
+	const fs::path game = addons.parent_path();
+	const fs::path name = fs::path( config.stem().native() + fs::path( ".bsp" ).native() );
+	std::vector<fs::path> candidates{ game / "maps" / name, game / "download" / "maps" / name };
+	std::error_code ec;
+	const fs::path custom = vfs::FindCaseInsensitive( game / "custom" );
+	if ( fs::is_directory( custom, ec ) )
+	{
+		std::vector<fs::path> packs;
+		for ( const fs::directory_entry &entry : fs::directory_iterator( custom, ec ) )
+		{
+			if ( entry.is_directory( ec ) )
+			{
+				packs.push_back( entry.path() );
+			}
+		}
+		std::ranges::sort( packs );
+		for ( const fs::path &pack : packs )
+		{
+			candidates.push_back( pack / "maps" / name );
+		}
+	}
+	for ( const fs::path &candidate : candidates )
+	{
+		const fs::path real = vfs::FindCaseInsensitive( candidate );
+		if ( fs::is_regular_file( real, ec ) )
+		{
+			found.push_back( real );
+		}
+	}
+	return found;
 }
 
 namespace

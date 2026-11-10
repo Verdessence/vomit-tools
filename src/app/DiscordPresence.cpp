@@ -144,9 +144,9 @@ QStringList DiscordSocketPaths()
 }
 
 //-----------------------------------------------------------------------------
-// Purpose: An archive tab is a BSP's (its entities, lumps and Stripper config) or a VPK's.
+// Purpose: The verb for a tab's kind; a map's archive is viewed, its Stripper config stripped.
 //-----------------------------------------------------------------------------
-QString DiscordVerb( const QString &szKind, const QString &szFile )
+QString DiscordVerb( const QString &szKind )
 {
 	if ( szKind == QLatin1String( "Maps" ) )
 		return QStringLiteral( "Mapping" );
@@ -160,7 +160,7 @@ QString DiscordVerb( const QString &szKind, const QString &szFile )
 		return QStringLiteral( "Soundscaping" );
 	if ( szKind == QLatin1String( "Skies" ) )
 		return QStringLiteral( "Skyboxing" );
-	if ( szKind == QLatin1String( "Archives" ) && szFile.endsWith( QStringLiteral( ".bsp" ), Qt::CaseInsensitive ) )
+	if ( szKind == QLatin1String( "Stripper" ) )
 		return QStringLiteral( "Stripping" );
 	return QStringLiteral( "Viewing" );
 }

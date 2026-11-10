@@ -39,12 +39,32 @@ struct StripperConfig_t
 {
 	std::vector<StripperRule_t> m_Rules;
 	std::vector<std::string> m_Problems; // with their line numbers
+	std::vector<int> m_ProblemLines;     // each problem's line (from 1), for marking it in the text
 };
 
 // Reads a config; szName goes in front of each rule's line number. Sections are add:, filter:
 // (remove: too) and modify: with match:, replace:, delete: and insert: inside. Lines starting with
 // ;, // or # are comments.
 [[nodiscard]] StripperConfig_t ParseStripper( std::string_view szText, std::string_view szName );
+
+// What the text up to a cursor is in the middle of, for suggesting what goes there.
+struct StripperCursor_t
+{
+	enum class Kind_t
+	{
+		KIND_NONE,
+		KIND_SECTION,     // a word outside any block: add:, filter:, modify:
+		KIND_MODIFY_PART, // a word in a modify block: match:, replace:, delete:, insert:
+		KIND_KEY,         // the first string of a pair in an entity's block
+		KIND_VALUE        // the second, with m_szKey the first
+	};
+	Kind_t m_nKind = Kind_t::KIND_NONE;
+	std::string m_szSection; // the section the cursor is under ("remove:" is "filter:"); empty for none
+	std::string m_szPart;    // in a modify block: the part it's in, empty for none
+	std::string m_szKey;
+	std::size_t m_nStart = 0; // where the word or string being typed starts (after its quote)
+};
+[[nodiscard]] StripperCursor_t StripperCursorAt( std::string_view szBefore );
 
 // Whether a match block holds for an entity: every pair in it has a pair in the entity with the
 // same key (in any case) and the same value, or a value its /regex/ finds.
@@ -80,6 +100,11 @@ struct StrippedEntity_t
 // addons/stripper up from the map, else under the game folder (the nearest one up holding
 // gameinfo.txt). Empty when neither is found.
 [[nodiscard]] std::filesystem::path StripperMapConfigPath( const std::filesystem::path &map );
+
+// The maps a config belongs to, existing ones only, likeliest first: for
+// <game>/addons/stripper/maps/<map>.cfg, <game>/maps/<map>.bsp, then download/maps/ and
+// custom/<pack>/maps/. Empty for any other config (global_filters.cfg, one kept elsewhere).
+[[nodiscard]] std::vector<std::filesystem::path> FindStripperMaps( const std::filesystem::path &config );
 
 // Config text for one entity, to add to a config. Entities are matched by hammerid when they have
 // one (unique in a map), else by classname, targetname and origin.

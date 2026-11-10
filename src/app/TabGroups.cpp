@@ -38,6 +38,7 @@ constexpr Kind_t KINDS[] = {
 	{ "CSkyEditor", QT_TRANSLATE_NOOP( "CTabGroups", "Skies" ) },
 	{ "CDetailEditor", QT_TRANSLATE_NOOP( "CTabGroups", "Details" ) },
 	{ "CVpkEditor", QT_TRANSLATE_NOOP( "CTabGroups", "Archives" ) },
+	{ "CStripperEditor", QT_TRANSLATE_NOOP( "CTabGroups", "Stripper" ) },
 };
 constexpr char OTHER[] = QT_TRANSLATE_NOOP( "CTabGroups", "Other" );
 

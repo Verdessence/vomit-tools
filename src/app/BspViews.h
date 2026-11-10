@@ -8,14 +8,17 @@
 #pragma once
 
 #include <filesystem>
+#include <memory>
 #include <vector>
 
 #include <QWidget>
 
+#include "CodeEdit.h"
 #include "bsp/Stripper.h"
 
 class QCheckBox;
-class QPlainTextEdit;
+class CCodeEdit;
+class CStripperWords;
 class QPushButton;
 class QTimer;
 class QFileSystemWatcher;
@@ -23,6 +26,7 @@ class QLabel;
 class QLineEdit;
 class QTableWidget;
 class QTreeWidget;
+class QTreeWidgetItem;
 
 // Every entity by class and name, a search over their keyvalues, and the picked one's keyvalues;
 // with the Stripper tick, as the map's Stripper:Source configs leave them when it loads.
@@ -31,8 +35,10 @@ class CEntityView : public QWidget
 	Q_OBJECT
 
 public:
-	// bsp must outlive the view. map is the .bsp's file, for finding its Stripper configs.
+	// bsp must outlive the view. map is the .bsp's file, for finding its Stripper configs; empty
+	// for a config edited without its map (bsp then holds no entities).
 	CEntityView( const xv::bsp::CBsp &bsp, const std::filesystem::path &map, QWidget *pParent = nullptr );
+	~CEntityView() override;
 
 	// The Stripper configs to preview, in the order they run (found beside the map at first).
 	void SetStripperConfigs( std::vector<std::filesystem::path> configs );
@@ -47,6 +53,11 @@ public:
 	void ShowConfigEditor( bool bShown );
 	[[nodiscard]] QString GetConfigText() const;
 	void SetConfigText( const QString &szText );
+	// Edits another config, previewed after the map's global one when it is the map's own, else
+	// by itself; the editor opens on it.
+	void EditConfig( const std::filesystem::path &config );
+	void ReadConfigData( const std::filesystem::path &config, const QString &szText );
+	bool SaveConfigAs();
 	// Adds rules at the end of the config, opening the editor.
 	void AppendToConfig( const std::string &szText );
 	[[nodiscard]] bool IsConfigModified() const { return m_bConfigModified; }
@@ -66,8 +77,12 @@ private:
 	void Rebuild();
 	void ShowKeyValues( int nShown );
 	void ShowListMenu( const QPoint &at );
+	void GoToProblem( QTreeWidgetItem *pItem );
 	void LoadConfigText();
 	void SetConfigModified( bool bModified );
+	[[nodiscard]] const CStripperWords &Words();
+	[[nodiscard]] CodeCompletion_t CompleteConfig( const QTextCursor &cursor );
+	[[nodiscard]] QString DescribeConfig( const QTextCursor &cursor );
 
 	const xv::bsp::CBsp &m_Bsp;
 	std::vector<std::filesystem::path> m_Configs;
@@ -76,15 +91,20 @@ private:
 	QCheckBox *m_pStripper = nullptr;
 	QLabel *m_pConfigs = nullptr;
 	QLabel *m_pSummary = nullptr;
+	QWidget *m_pProblemsPanel = nullptr;
+	QTreeWidget *m_pProblems = nullptr; // each config's problems: line, what, which config
 	QFileSystemWatcher *m_pWatcher = nullptr;
 	QLineEdit *m_pSearch = nullptr;
 	std::filesystem::path m_ConfigPath;
 	QPushButton *m_pEdit = nullptr;
 	QWidget *m_pEditor = nullptr;
 	QLabel *m_pConfigPath = nullptr;
-	QPlainTextEdit *m_pConfigText = nullptr;
+	CCodeEdit *m_pConfigText = nullptr;
+	std::unique_ptr<CStripperWords> m_pWords; // the map's keys and values, made at the first suggestion
 	QTimer *m_pReparse = nullptr;
 	bool m_bConfigModified = false;
+	bool m_bConfigReadOnly = false;
+	QString m_szConfigData;
 	bool m_bLoadingText = false;
 	QTreeWidget *m_pList = nullptr;
 	QTableWidget *m_pKeyValues = nullptr;

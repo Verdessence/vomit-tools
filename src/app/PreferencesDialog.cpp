@@ -28,6 +28,7 @@
 #include <QStackedWidget>
 #include <QVBoxLayout>
 
+#include "CodeEdit.h"
 #include "DebugLog.h"
 #include "FileActions.h"
 #include "FileDialogs.h"
@@ -305,6 +306,71 @@ QWidget *CPreferencesDialog::BuildMaterialsPage()
 	pLayout->addWidget( pLive );
 	pLayout->addWidget( Hint( tr( "Off: the preview waits for Refresh, for heavy materials. Typing in the text always redraws "
 								  "it after a pause." ) ) );
+	pLayout->addStretch();
+	return pPage;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: The text editors (Stripper configs, materials' text): colours, font, suggestions.
+//-----------------------------------------------------------------------------
+QWidget *CPreferencesDialog::BuildTextEditorPage()
+{
+	auto *pPage = new QWidget;
+	CPreferences &preferences = CPreferences::Instance();
+	auto *pScheme = new QComboBox;
+	pScheme->setObjectName( QStringLiteral( "preferencesCodeScheme" ) );
+	for ( int i = 0; i < static_cast<int>( CodeScheme_t::CODE_SCHEME_COUNT ); i++ )
+	{
+		pScheme->addItem( CodeSchemeName( static_cast<CodeScheme_t>( i ) ) );
+	}
+	pScheme->setCurrentIndex( static_cast<int>( preferences.GetCodeScheme() ) );
+	connect( pScheme, &QComboBox::currentIndexChanged, this, []( int nIndex ) { CPreferences::Instance().SetCodeScheme( static_cast<CodeScheme_t>( nIndex ) ); } );
+
+	auto *pSystemFont = new QCheckBox( tr( "The system's fixed-width font" ) );
+	pSystemFont->setObjectName( QStringLiteral( "preferencesCodeSystemFont" ) );
+	auto *pFont = new QFontComboBox;
+	pFont->setObjectName( QStringLiteral( "preferencesCodeFont" ) );
+	pFont->setFontFilters( QFontComboBox::MonospacedFonts );
+	pFont->setCurrentFont( preferences.GetCodeFont() );
+	auto *pSize = new QSpinBox;
+	pSize->setObjectName( QStringLiteral( "preferencesCodeFontSize" ) );
+	pSize->setRange( 0, 72 );
+	pSize->setSpecialValueText( tr( "System" ) );
+	pSize->setSuffix( tr( " pt" ) );
+	pSize->setValue( preferences.GetCodeFontSize() );
+	pSystemFont->setChecked( preferences.GetCodeFontFamily().isEmpty() );
+	pFont->setEnabled( !pSystemFont->isChecked() );
+	const auto applyFont = [ pSystemFont, pFont, pSize ] {
+		pFont->setEnabled( !pSystemFont->isChecked() );
+		CPreferences::Instance().SetCodeFont( pSystemFont->isChecked() ? QString{} : pFont->currentFont().family(), pSize->value() );
+	};
+	connect( pSystemFont, &QCheckBox::toggled, this, applyFont );
+	connect( pFont, &QFontComboBox::currentFontChanged, this, applyFont );
+	connect( pSize, &QSpinBox::valueChanged, this, applyFont );
+	auto *pFontRow = new QHBoxLayout;
+	pFontRow->setContentsMargins( 0, 0, 0, 0 );
+	pFontRow->addWidget( pFont, 1 );
+	pFontRow->addWidget( pSize );
+
+	auto *pForm = new QFormLayout;
+	pForm->setContentsMargins( 0, 0, 0, 0 );
+	pForm->addRow( tr( "Colours" ), pScheme );
+	pForm->addRow( QString{}, pSystemFont );
+	pForm->addRow( tr( "Font" ), pFontRow );
+
+	auto *pCompletion = new QCheckBox( tr( "Suggest words as they're typed" ) );
+	pCompletion->setObjectName( QStringLiteral( "preferencesCodeCompletion" ) );
+	pCompletion->setChecked( preferences.IsCodeCompletion() );
+	connect( pCompletion, &QCheckBox::toggled, this, []( bool bOn ) { CPreferences::Instance().SetCodeCompletion( bOn ); } );
+
+	QVBoxLayout *pLayout = PageLayout( pPage );
+	pLayout->addLayout( pForm );
+	pLayout->addWidget( Hint( tr( "For the Stripper config editor and materials' text. Desktop colours follow your desktop's theme; "
+								  "the others keep their own whatever the theme is." ) ) );
+	pLayout->addSpacing( 12 );
+	pLayout->addWidget( pCompletion );
+	pLayout->addWidget( Hint( tr( "In a Stripper config: section words, the map's keys, and each key's values in the map "
+								  "(names, then inputs, for outputs). Off, Ctrl+Space still shows them." ) ) );
 	pLayout->addStretch();
 	return pPage;
 }

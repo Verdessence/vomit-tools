@@ -9,23 +9,21 @@
 #include <QButtonGroup>
 #include <QCheckBox>
 #include <QFileInfo>
-#include <QFontDatabase>
 #include <QHBoxLayout>
 #include <QHeaderView>
 #include <QLabel>
-#include <QPainter>
 #include <QPlainTextEdit>
 #include <QPushButton>
 #include <QSplitter>
 #include <QStackedWidget>
 #include <QStyle>
-#include <QSyntaxHighlighter>
 #include <QTextBlock>
 #include <QTimer>
 #include <QToolButton>
 #include <QTreeWidget>
 #include <QVBoxLayout>
 
+#include "CodeEdit.h"
 #include "Language.h"
 #include "MaterialForm.h"
 #include "MaterialView.h"
@@ -37,97 +35,24 @@
 namespace
 {
 
-// A plain text box with line numbers down its left side.
-class CNumberedEdit : public QPlainTextEdit
-{
-public:
-	CNumberedEdit()
-		: m_pNumbers( new CNumbers( this ) )
-	{
-		connect( this, &QPlainTextEdit::blockCountChanged, this, [ this ] { setViewportMargins( NumberWidth(), 0, 0, 0 ); } );
-		connect( this, &QPlainTextEdit::updateRequest, this, [ this ]( const QRect &area, int nScrolled ) {
-			nScrolled ? m_pNumbers->scroll( 0, nScrolled ) : m_pNumbers->update( 0, area.y(), m_pNumbers->width(), area.height() );
-		} );
-		setViewportMargins( NumberWidth(), 0, 0, 0 );
-	}
-
-protected:
-	void resizeEvent( QResizeEvent *pEvent ) override
-	{
-		QPlainTextEdit::resizeEvent( pEvent );
-		const QRect inside = contentsRect();
-		m_pNumbers->setGeometry( inside.left(), inside.top(), NumberWidth(), inside.height() );
-	}
-
-private:
-	class CNumbers : public QWidget
-	{
-	public:
-		explicit CNumbers( CNumberedEdit *pEdit )
-			: QWidget( pEdit ),
-			  m_pEdit( pEdit )
-		{}
-
-	protected:
-		void paintEvent( QPaintEvent *pEvent ) override
-		{
-			QPainter painter( this );
-			painter.fillRect( pEvent->rect(), palette().color( QPalette::AlternateBase ) );
-			painter.setPen( palette().color( QPalette::PlaceholderText ) );
-			QTextBlock block = m_pEdit->firstVisibleBlock();
-			int nTop = qRound( m_pEdit->blockBoundingGeometry( block ).translated( m_pEdit->contentOffset() ).top() );
-			while ( block.isValid() && nTop <= pEvent->rect().bottom() )
-			{
-				const int nHeight = qRound( m_pEdit->blockBoundingRect( block ).height() );
-				if ( block.isVisible() )
-				{
-					painter.drawText( 0, nTop, width() - 4, nHeight, Qt::AlignRight | Qt::AlignTop, QString::number( block.blockNumber() + 1 ) );
-				}
-				nTop += nHeight;
-				block = block.next();
-			}
-		}
-
-	private:
-		CNumberedEdit *m_pEdit;
-	};
-
-	[[nodiscard]] int NumberWidth() const { return 12 + fontMetrics().horizontalAdvance( QString::number( std::max( 1, blockCount() ) ) ) + fontMetrics().horizontalAdvance( u'9' ); }
-
-	CNumbers *m_pNumbers;
-};
-
 // Colours a material's text: parameters, shader and block names, values (numbers apart),
 // conditions such as [$X360], braces and comments.
-class CVmtHighlighter : public QSyntaxHighlighter
+class CVmtHighlighter : public CCodeHighlighter
 {
 public:
-	explicit CVmtHighlighter( QPlainTextEdit *pEdit )
-		: QSyntaxHighlighter( pEdit->document() )
-	{
-		const bool bDark = pEdit->palette().color( QPalette::Base ).lightness() < 128;
-		const auto format = [ bDark ]( const char *pszLight, const char *pszDark, bool bBold = false, bool bItalic = false ) {
-			QTextCharFormat chars;
-			chars.setForeground( QColor( QString::fromLatin1( bDark ? pszDark : pszLight ) ) );
-			if ( bBold )
-			{
-				chars.setFontWeight( QFont::Bold );
-			}
-			chars.setFontItalic( bItalic );
-			return chars;
-		};
-		m_Parameter = format( "#1f5fbf", "#7cb7ff" );
-		m_Block = format( "#8a3fbf", "#d7a3ff", true );
-		m_String = format( "#2d7d2d", "#a5d68a" );
-		m_Number = format( "#b35900", "#f0b070" );
-		m_Comment = format( "#7a7f88", "#8a8f98", false, true );
-		m_Condition = format( "#12827a", "#6fd3c7" );
-		m_Brace = format( "#444444", "#cccccc", true );
-	}
+	using CCodeHighlighter::CCodeHighlighter;
 
 protected:
 	void highlightBlock( const QString &szLine ) override
 	{
+		const CodeColors_t &colors = Colors();
+		m_Parameter = Format( colors.m_Key );
+		m_Block = Format( colors.m_Keyword, true );
+		m_String = Format( colors.m_String );
+		m_Number = Format( colors.m_Number );
+		m_Comment = Format( colors.m_Comment, false, true );
+		m_Condition = Format( colors.m_Special );
+		m_Brace = Format( colors.m_Brace, true );
 		// The words of the line: the first of two is a key, the second its value; a word alone
 		// names a block.
 		struct Word_t
@@ -231,14 +156,12 @@ CMaterialEditor::CMaterialEditor( QString szGamePath, const QString &szText, xv:
 	  m_szGamePath( std::move( szGamePath ) ),
 	  m_pfnRead( std::move( pfnRead ) )
 {
-	m_pText = new CNumberedEdit;
+	auto *pText = new CCodeEdit;
+	m_pText = pText;
 	m_pText->setObjectName( QStringLiteral( "materialText" ) );
-	m_pText->setFont( QFontDatabase::systemFont( QFontDatabase::FixedFont ) );
-	m_pText->setTabStopDistance( m_pText->fontMetrics().horizontalAdvance( u' ' ) * 4 );
-	m_pText->setLineWrapMode( QPlainTextEdit::NoWrap );
 	m_pText->setPlainText( szText );
 	m_pText->document()->setModified( false );
-	new CVmtHighlighter( m_pText );
+	new CVmtHighlighter( pText );
 	m_pForm = new CMaterialForm;
 	m_pForm->SetText( szText );
 	m_pStack = new QStackedWidget;

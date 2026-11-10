@@ -57,7 +57,7 @@ struct DiscordSettings_t
 // folder, then Flatpak's and Snap's; on Windows, the pipe names.
 [[nodiscard]] QStringList DiscordSocketPaths();
 // The verb for an editor's kind ("Maps" is "Mapping"...), from CTabGroups::KindOf.
-[[nodiscard]] QString DiscordVerb( const QString &szKind, const QString &szFile );
+[[nodiscard]] QString DiscordVerb( const QString &szKind );
 // The settings' fields (on or off, the application ID, details, picture, button), each saved
 // as it is left. Not in Preferences: a local build puts it on its Dev page.
 [[nodiscard]] QWidget *MakeDiscordSettings();

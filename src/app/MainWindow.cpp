@@ -5,6 +5,9 @@
 //
 //===========================================================================//
 #include "MainWindow.h"
+#include "StripperEditor.h"
+#include "CrashHandler.h"
+#include "bsp/Stripper.h"
 #include "HammerSetupDialog.h"
 #include "map/Manifest.h"
 
@@ -394,13 +397,19 @@ CMainWindow::CMainWindow( QWidget *pParent, xv::audio::CEngine::Output_t nAudio 
 		{
 			disk = pMount->DiskPath( szGamePath ).value_or( fs::path{} );
 		}
+		bool bStripper = false;
+		if ( !bFolder && szPath.endsWith( u".cfg", Qt::CaseInsensitive ) )
+			if ( const auto bytes = m_pFileSystem->Read( szGamePath ) )
+				bStripper = CStripperEditor::IsStripperConfig( ToPath( szPath ), std::string_view{ reinterpret_cast<const char *>( bytes->data() ), bytes->size() } );
 		// A loose file gets the file's own menu; one in a VPK, what can be done with it here.
 		if ( !disk.empty() )
 		{
-			ShowFileMenu( m_pTree, m_pTree->viewport()->mapToGlobal( at ), ToQString( disk ), [ this, proxyIndex ] { emit m_pTree->activated( proxyIndex ); } );
+			ShowFileMenu( m_pTree, m_pTree->viewport()->mapToGlobal( at ), ToQString( disk ), [ this, proxyIndex ] { emit m_pTree->activated( proxyIndex ); }, bStripper ? tr( "Open in Stripper Editor" ) : QString{} );
 			return;
 		}
 		QMenu menu( this );
+		if ( bStripper )
+			menu.addAction( tr( "Open in Stripper Editor" ), this, [ this, szPath ] { OpenStripperFile( szPath ); } );
 		if ( !bFolder )
 		{
 			menu.addAction( tr( "Open" ), this, [ this, proxyIndex ] { emit m_pTree->activated( proxyIndex ); } );
@@ -424,7 +433,13 @@ CMainWindow::CMainWindow( QWidget *pParent, xv::audio::CEngine::Output_t nAudio 
 	connect( m_pTree->selectionModel(), &QItemSelectionModel::currentChanged, this, &CMainWindow::PreviewFile );
 	connect( m_pTree, &QTreeView::activated, this, [ this ]( const QModelIndex &proxyIndex ) {
 		const QString szPath = m_pFilter->mapToSource( proxyIndex ).data( CVfsModel::ROLE_PATH_ROLE ).toString();
-		if ( xv::sound::FileKindForPath( szPath.toStdString() ) != FileKind_t::FILE_KIND_UNKNOWN )
+		if ( szPath.endsWith( u".cfg", Qt::CaseInsensitive ) )
+		{
+			const auto bytes = m_pFileSystem->Read( szPath.toStdString() );
+			if ( bytes && CStripperEditor::IsStripperConfig( ToPath( szPath ), std::string_view{ reinterpret_cast<const char *>( bytes->data() ), bytes->size() } ) )
+				OpenStripperFile( szPath );
+		}
+		else if ( xv::sound::FileKindForPath( szPath.toStdString() ) != FileKind_t::FILE_KIND_UNKNOWN )
 		{
 			OpenSoundFile( szPath );
 		}
@@ -1093,7 +1108,7 @@ void CMainWindow::ChooseFiles()
 	const QString szStart = LastFolderOr( m_pFolders->GetFolder().isEmpty() && m_Game ? ToQString( m_Game->m_GameDir ) : m_pFolders->GetFolder() );
 	const QStringList files = AskOpenFiles( this, tr( "Open File" ), szStart,
 		tr( "Soundscapes and soundscripts (*.txt);;Detail files (*.vbsp);;Sounds (*.wav *.mp3);;Textures (*.vtf);;Models (*.mdl *.vvd *.vtx *.phy *.ani);;Sky faces and textures (*.vmt *.vtf *.png *.tga *.jpg *.jpeg *.bmp *.psd *.hdr);;Particles (*.pcf *.dmx);;"
-			"KeyValues (*.txt *.vmt *.vdf *.res);;Hammer maps (*.vmf *.vmm);;Archives and maps (*.vpk *.bsp *.gcf *.gma *.pak *.wad *.xzp *.zip);;Game info (gameinfo.txt);;All files (*)" ) );
+			"KeyValues (*.txt *.vmt *.vdf *.res);;Hammer maps (*.vmf *.vmm);;Archives and maps (*.vpk *.bsp *.gcf *.gma *.pak *.wad *.xzp *.zip);;Stripper configs (*.cfg);;Game info (gameinfo.txt);;All files (*)" ) );
 	OpenPaths( files );
 }
 
@@ -1834,7 +1849,11 @@ void CMainWindow::PreviewGameFile( const QString &szPath, const QString &szSourc
 	const xv::material::Reader_t pfnRead = [ this ]( std::string_view szGamePath ) { return m_pFileSystem->Read( szGamePath ); };
 	QWidget *pView = CreateFileView( szPath, szSource, *bytes, m_pPlayer, nullptr, pfnRead );
 	LinkMaterial( pView, pfnRead, szPath, [ this, szPath, szSource ] { PreviewGameFile( szPath, szSource ); } );
-	if ( szPath.endsWith( u".mdl", Qt::CaseInsensitive ) )
+	if ( CStripperEditor::IsStripperConfig( ToPath( szPath ), std::string_view{ reinterpret_cast<const char *>( bytes->data() ), bytes->size() } ) )
+	{
+		pView = WithEditButton( pView, tr( "This is a Stripper config." ), tr( "Open in Stripper Editor" ), [ this, szPath ] { OpenStripperFile( szPath ); } );
+	}
+	else if ( szPath.endsWith( u".mdl", Qt::CaseInsensitive ) )
 	{
 		pView = WithEditButton( pView, tr( "This is a model." ), tr( "Open Model Viewer" ), [ this, szPath ] { OpenModelFile( szPath ); } );
 	}
@@ -1933,7 +1952,11 @@ void CMainWindow::PreviewDiskFile( const QString &szPath )
 	const xv::material::Reader_t pfnRead = xv::material::DiskReader( ToPath( szPath ), m_Game ? m_pFileSystem.get() : nullptr );
 	QWidget *pView = CreateFileView( info.fileName(), QDir::toNativeSeparators( info.absolutePath() ), AsBytes( *data ), m_pPlayer, nullptr, pfnRead );
 	LinkMaterial( pView, pfnRead, info.fileName(), [ this, szPath ] { PreviewDiskFile( szPath ); } );
-	if ( const auto sky = SkyFilesFor( szPath ) )
+	if ( CStripperEditor::IsStripperConfig( ToPath( szPath ), std::string_view{ data->constData(), static_cast<std::size_t>( data->size() ) } ) )
+	{
+		pView = WithEditButton( pView, tr( "This is a Stripper config." ), tr( "Open in Stripper Editor" ), [ this, szPath ] { OpenStripperFile( szPath ); } );
+	}
+	else if ( const auto sky = SkyFilesFor( szPath ) )
 	{
 		const auto face = xv::sky::FaceFromFileName( info.fileName().toStdString() );
 		pView = WithEditButton( pView, tr( "This is the %1 face of the sky %2 (%3 of its 6 faces are here)." ).arg( face ? QString::fromUtf8( xv::sky::Suffix( *face ) ) : QString{}, QString::fromStdString( sky->m_szName ) ).arg( sky->Count() ),
@@ -2052,6 +2075,11 @@ void CMainWindow::OpenDiskFile( const QString &szPath )
 	if ( !data )
 	{
 		QMessageBox::warning( this, tr( "Cannot open" ), tr( "Could not read %1." ).arg( QDir::toNativeSeparators( szPath ) ) );
+		return;
+	}
+	if ( CStripperEditor::IsStripperConfig( file, std::string_view{ data->constData(), static_cast<std::size_t>( data->size() ) } ) )
+	{
+		OpenStripperFile( info.absoluteFilePath() );
 		return;
 	}
 	if ( info.suffix().compare( u"vbsp", Qt::CaseInsensitive ) == 0 )
@@ -3563,6 +3591,10 @@ void CMainWindow::RestoreSessionEntry( const QString &szEntry )
 	else if ( szKind == u"sound" )
 	{
 		OpenSoundFile( szPath );
+	}
+	else if ( szKind == u"stripper" )
+	{
+		OpenStripperFile( szPath );
 	}
 	else if ( szKind == u"particles" )
 	{
@@ -5205,6 +5237,45 @@ CMapEditor *CMainWindow::OpenMapFile( const QString &szPath )
 	auto *pEditor = new CMapEditor( szOrigin, !bDisk );
 	AddMapTab( pEditor );
 	pEditor->Load( std::move( source ) );
+	return pEditor;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: The map is the one Stripper would load the config for, beside it on disk, else the
+//          mounted game's when it is a loose file.
+//-----------------------------------------------------------------------------
+CStripperEditor *CMainWindow::OpenStripperFile( const QString &szPath )
+{
+	const QString szDisk = QFileInfo( szPath ).isAbsolute() || QFileInfo( szPath ).isFile() ? szPath : DiskPathForGame( szPath );
+	const bool bGame = szDisk.isEmpty();
+	const fs::path config = bGame ? ToPath( szPath ) : ToPath( QFileInfo( szDisk ).absoluteFilePath() );
+	const auto bytes = bGame ? m_pFileSystem->Read( szPath.toStdString() ) : std::nullopt;
+	if ( bGame && !bytes )
+		return nullptr;
+	std::error_code ec;
+	for ( int i = 0; i < m_pTabs->count(); i++ )
+	{
+		if ( auto *pOpen = qobject_cast<CStripperEditor *>( m_pTabs->widget( i ) ); pOpen && pOpen->IsFromGame() == bGame && ( bGame ? pOpen->GetConfig() == config : fs::equivalent( pOpen->GetConfig(), config, ec ) ) )
+		{
+			m_pTabs->setCurrentWidget( pOpen );
+			return pOpen;
+		}
+	}
+	fs::path map;
+	if ( const std::vector<fs::path> maps = xv::bsp::FindStripperMaps( config ); !maps.empty() )
+		map = maps.front();
+	else if ( m_Game )
+		map = ToPath( DiskPathForGame( QStringLiteral( "maps/%1.bsp" ).arg( ToQString( config.stem() ) ) ) );
+	auto *pEditor = new CStripperEditor( config, map );
+	if ( bGame )
+		pEditor->SetGameData( QString::fromUtf8( reinterpret_cast<const char *>( bytes->data() ), static_cast<qsizetype>( bytes->size() ) ) );
+	connect( pEditor, &CStripperEditor::ModifiedChanged, this, [ this, pEditor ] {
+		m_pTabs->setTabText( m_pTabs->indexOf( pEditor ), pEditor->GetTabTitle() );
+		UpdateTitle();
+	} );
+	const int nIndex = m_pTabs->addTab( pEditor, pEditor->GetTabTitle() );
+	m_pTabs->setTabToolTip( nIndex, QDir::toNativeSeparators( ToQString( config ) ) );
+	m_pTabs->setCurrentIndex( nIndex );
 	return pEditor;
 }
 

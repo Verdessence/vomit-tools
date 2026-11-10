@@ -21,4 +21,4 @@ class QWidget;
 void RevealInFileManager( const QString &szPath );
 // The right-click menu for a file or folder on disk, at a point on the screen. pfnOpen opens it in
 // vomit-tools; it may be empty.
-void ShowFileMenu( QWidget *pParent, const QPoint &globalAt, const QString &szPath, const std::function<void()> &pfnOpen );
+void ShowFileMenu( QWidget *pParent, const QPoint &globalAt, const QString &szPath, const std::function<void()> &pfnOpen, const QString &szOpenLabel = {} );

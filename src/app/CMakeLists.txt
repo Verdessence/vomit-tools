@@ -7,6 +7,12 @@ add_library(vomit_tools_ui STATIC
         BuildInfo.h
         BspViews.cpp
         BspViews.h
+        CodeEdit.cpp
+        CodeEdit.h
+        CrashHandler.cpp
+        CrashHandler.h
+        StripperEditor.cpp
+        StripperEditor.h
         ChoiceBoxes.cpp
         ChoiceBoxes.h
         ${CMAKE_CURRENT_BINARY_DIR}/BuildInfo.cpp
