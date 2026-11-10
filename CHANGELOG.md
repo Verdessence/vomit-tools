@@ -291,6 +291,9 @@
 - A selected sprite (env_sprite, a light's or an FGD's sprite) shows its picture in the 2D
   views, facing the view, as the 3D views draw it; see-through sprites let what is under them show.
 - New Objects' Objects box is as tall as a box: the side's spare height goes below the panel.
+- A 3D view can be orthographic (its pane's menu, or the View_3D_Orthographic key; keypad 5
+  in the Blender keys): no perspective, what it looks at the same size as before, the wheel
+  zooming about the pointer. The 2D views draw its camera as a box.
 - Check for Problems tells errors (the compile fails or the game breaks) from warnings: each row
   tagged ERROR or WARN with its icon and colour, errors first, a count of each, toggles to show
   either, and a badge on the side tab with the error count (or the warnings', when none).

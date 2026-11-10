@@ -139,6 +139,12 @@ namespace
 constexpr int TICK_MS = 16;
 constexpr int SETTLE_MS = 150;
 constexpr double SLOW_RENDER_MS = 40.0; // slower than this, moving pictures drop to half size
+// The orthographic view: a wheel notch's zoom, its limits (pixels a unit, as the 2D views'), and
+// how far ahead it keeps the size of when nothing is under the middle.
+constexpr double ORTHO_WHEEL_ZOOM = 1.2;
+constexpr double ORTHO_SMALLEST = 1.0 / 64.0;
+constexpr double ORTHO_LARGEST = 64.0;
+constexpr double ORTHO_DEFAULT_DISTANCE = 512.0;
 
 //-----------------------------------------------------------------------------
 // Purpose:
@@ -1017,6 +1023,32 @@ std::optional<CMapGizmo> CMapView3D::GetGizmo() const
 	gizmo.SetBounds( bounds );
 	gizmo.SetMode( m_Editor.GetGizmoMode() );
 	return gizmo;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: The scale that keeps what the middle of the view looks at (or 512 units ahead) the
+//          size the field of view showed it; back, the field of view as before.
+//-----------------------------------------------------------------------------
+void CMapView3D::SetOrthographic( bool bOrthographic )
+{
+	if ( bOrthographic == IsOrthographic() )
+	{
+		return;
+	}
+	if ( !bOrthographic )
+	{
+		m_Camera.m_flOrthoScale = 0.0;
+		Changed();
+		return;
+	}
+	double flDistance = ORTHO_DEFAULT_DISTANCE;
+	if ( const auto surface = SurfaceAt( QPointF{ width() / 2.0, height() / 2.0 } ) )
+	{
+		flDistance = std::max( 16.0, xv::map::Dot( xv::map::Subtract( surface->first, m_Camera.m_Eye ), m_Camera.GetForward() ) );
+	}
+	const double flFocal = std::max( 1, width() ) / 2.0 / std::tan( std::clamp( m_Camera.m_flFov, 1.0, 179.0 ) * std::numbers::pi / 360.0 );
+	m_Camera.m_flOrthoScale = std::clamp( flFocal / flDistance, ORTHO_SMALLEST, ORTHO_LARGEST );
+	Changed();
 }
 
 //-----------------------------------------------------------------------------
@@ -2375,6 +2407,18 @@ void CMapView3D::wheelEvent( QWheelEvent *pEvent )
 		return;
 	}
 	const double flNotches = pEvent->angleDelta().y() / 120.0;
+	if ( IsOrthographic() )
+	{
+		// Zoomed about the pointer: the point under it stays there.
+		const xv::map::CViewCamera before = GetSizedCamera();
+		m_Camera.m_flOrthoScale = std::clamp( m_Camera.m_flOrthoScale * std::pow( ORTHO_WHEEL_ZOOM, flNotches ), ORTHO_SMALLEST, ORTHO_LARGEST );
+		const auto from = before.Ray( pEvent->position().x(), pEvent->position().y() ).first;
+		const auto to = GetSizedCamera().Ray( pEvent->position().x(), pEvent->position().y() ).first;
+		m_Camera.m_Eye = xv::map::Add( m_Camera.m_Eye, xv::map::Subtract( from, to ) );
+		Changed();
+		pEvent->accept();
+		return;
+	}
 	m_Camera.m_Eye = xv::map::Add( m_Camera.m_Eye, xv::map::Scale( m_Camera.GetForward(), flNotches * CPreferences::Instance().GetMapPreferences().m_flWheelStep ) );
 	Changed();
 	pEvent->accept();

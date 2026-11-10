@@ -69,6 +69,10 @@ public:
 	// The HDR lighting preview's auto exposure, as this view last measured it.
 	[[nodiscard]] float GetExposure() const { return m_flExposure; }
 	void SetCamera( const xv::map::CViewCamera &camera );
+	// A parallel projection (Blender's orthographic view), scaled so what is ahead keeps its size
+	// on screen; the wheel then zooms rather than moving.
+	void SetOrthographic( bool bOrthographic );
+	[[nodiscard]] bool IsOrthographic() const { return m_Camera.IsOrthographic(); }
 	// The map's state changed (selection, visibility, settings): draw it again.
 	void Redraw() { RequestRender(); }
 	// Only what is drawn over the picture changed (the tools' box or marker).

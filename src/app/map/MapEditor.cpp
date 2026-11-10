@@ -2513,6 +2513,13 @@ bool CMapEditor::RunAction( MapAction_t nAction, CMapView *pFrom )
 		case MapAction_t::MAP_ACTION_VIEW_FRONT: return switchTo( MapViewType_t::MAP_VIEW_TYPE_FRONT );
 		case MapAction_t::MAP_ACTION_VIEW_TEXTURED: return switchTo( MapViewType_t::MAP_VIEW_TYPE_3D_TEXTURED );
 		case MapAction_t::MAP_ACTION_VIEW_TEXTURED_SHADED: return switchTo( MapViewType_t::MAP_VIEW_TYPE_3D_TEXTURED_SHADED );
+		case MapAction_t::MAP_ACTION_TOGGLE_ORTHOGRAPHIC:
+			if ( auto *p3D = qobject_cast<CMapView3D *>( pPane ? pPane->GetView() : pFrom ) )
+			{
+				p3D->SetOrthographic( !p3D->IsOrthographic() );
+				return true;
+			}
+			return false;
 		case MapAction_t::MAP_ACTION_NEXT_PANE:
 		case MapAction_t::MAP_ACTION_PREVIOUS_PANE:
 		{

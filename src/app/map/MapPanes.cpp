@@ -127,6 +127,15 @@ void CMapPane::ShowMenu()
 		pAction->setCheckable( true );
 		pAction->setChecked( nType == GetType() );
 	}
+	if ( auto *p3D = qobject_cast<CMapView3D *>( m_pView ) )
+	{
+		menu.addSeparator();
+		QAction *pOrtho = menu.addAction( tr( "Orthographic" ), [ p3D ] { p3D->SetOrthographic( !p3D->IsOrthographic() ); } );
+		pOrtho->setObjectName( QStringLiteral( "mapPaneOrthographic" ) );
+		pOrtho->setCheckable( true );
+		pOrtho->setChecked( p3D->IsOrthographic() );
+		pOrtho->setToolTip( tr( "Parallel lines stay parallel: no perspective; the wheel zooms" ) );
+	}
 	menu.exec( m_pCaption->mapToGlobal( QPoint{ 0, m_pCaption->height() } ) );
 }
 

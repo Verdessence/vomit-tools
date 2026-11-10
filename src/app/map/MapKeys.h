@@ -28,6 +28,7 @@ enum class MapAction_t
 	MAP_ACTION_VIEW_FRONT,           // F4: 2D y/z
 	MAP_ACTION_VIEW_TEXTURED,        // F5
 	MAP_ACTION_VIEW_TEXTURED_SHADED, // Shift+F5
+	MAP_ACTION_TOGGLE_ORTHOGRAPHIC,  // none (Blender's keypad 5): the 3D view's parallel projection
 	MAP_ACTION_NEXT_PANE,            // F7
 	MAP_ACTION_PREVIOUS_PANE,        // Shift+F7
 	MAP_ACTION_GRID_SMALLER,         // [

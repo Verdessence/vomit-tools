@@ -32,6 +32,7 @@ const MapActionInfo_t ACTIONS[] = {
 	{ A::MAP_ACTION_VIEW_FRONT, "View_2D_Y_Z", QT_TRANSLATE_NOOP( "MapKeys", "Front view (y/z)" ), "View", BOTH },
 	{ A::MAP_ACTION_VIEW_TEXTURED, "View_3D_Textured", QT_TRANSLATE_NOOP( "MapKeys", "3D textured" ), "View", BOTH },
 	{ A::MAP_ACTION_VIEW_TEXTURED_SHADED, "View_3D_Textured_Shaded", QT_TRANSLATE_NOOP( "MapKeys", "3D textured, shaded" ), "View", BOTH },
+	{ A::MAP_ACTION_TOGGLE_ORTHOGRAPHIC, "View_3D_Orthographic", QT_TRANSLATE_NOOP( "MapKeys", "3D view orthographic" ), "View", ONLY_3D },
 	{ A::MAP_ACTION_NEXT_PANE, "View_Next_Pane", QT_TRANSLATE_NOOP( "MapKeys", "Next pane" ), "View", BOTH },
 	{ A::MAP_ACTION_PREVIOUS_PANE, "View_Prev_Pane", QT_TRANSLATE_NOOP( "MapKeys", "Previous pane" ), "View", BOTH },
 	{ A::MAP_ACTION_MAXIMIZE, "View_Maximize_Pane", QT_TRANSLATE_NOOP( "MapKeys", "Maximize pane" ), "View", BOTH },
@@ -328,6 +329,7 @@ const Default_t BLENDER[] = {
 	{ A::MAP_ACTION_BRUSH_MODE_VERTEX, NONE, Qt::Key_1 },
 	{ A::MAP_ACTION_BRUSH_MODE_EDGE, NONE, Qt::Key_2 },
 	{ A::MAP_ACTION_BRUSH_MODE_FACE, NONE, Qt::Key_3 },
+	{ A::MAP_ACTION_TOGGLE_ORTHOGRAPHIC, Qt::KeypadModifier, Qt::Key_5 },
 };
 
 constexpr Qt::KeyboardModifiers MODIFIERS = Qt::ShiftModifier | Qt::ControlModifier | Qt::AltModifier | Qt::MetaModifier;

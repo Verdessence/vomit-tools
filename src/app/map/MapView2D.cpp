@@ -1522,13 +1522,20 @@ void CMapView2D::PaintCamera( QPainter &painter ) const
 	};
 	const QPointF eye = ToWidget( Flatten( camera->m_Eye ) );
 	const std::array<QPointF, 4> corners{ at( -flHalfWidth, flHalfHeight ), at( flHalfWidth, flHalfHeight ), at( flHalfWidth, -flHalfHeight ), at( -flHalfWidth, -flHalfHeight ) };
+	// An orthographic camera is a box: its rectangle as big at the eye as ahead.
+	const auto back = [ & ]( double flRight, double flUp ) { return ToWidget( Flatten( xv::map::Add( xv::map::Add( camera->m_Eye, xv::map::Scale( right, flRight ) ), xv::map::Scale( up, flUp ) ) ) ); };
+	const std::array<QPointF, 4> from = camera->IsOrthographic() ? std::array<QPointF, 4>{ back( -flHalfWidth, flHalfHeight ), back( flHalfWidth, flHalfHeight ), back( flHalfWidth, -flHalfHeight ), back( -flHalfWidth, -flHalfHeight ) } : std::array<QPointF, 4>{ eye, eye, eye, eye };
 	painter.setRenderHint( QPainter::Antialiasing, true );
 	painter.setPen( QPen{ look.m_Colors.m_Camera, 0 } );
 	painter.setBrush( Qt::NoBrush );
 	for ( std::size_t i = 0; i < corners.size(); i++ )
 	{
-		painter.drawLine( eye, corners[ i ] );
+		painter.drawLine( from[ i ], corners[ i ] );
 		painter.drawLine( corners[ i ], corners[ ( i + 1 ) % corners.size() ] );
+		if ( camera->IsOrthographic() )
+		{
+			painter.drawLine( from[ i ], from[ ( i + 1 ) % from.size() ] );
+		}
 	}
 	const std::array<QPointF, 3> top{ at( -flHalfWidth * 0.6, flHalfHeight * 1.1 ), at( flHalfWidth * 0.6, flHalfHeight * 1.1 ), at( 0.0, flHalfHeight * 1.1 + flHalfWidth * 0.5 ) };
 	painter.setBrush( look.m_Colors.m_Camera );
