@@ -1,18 +1,18 @@
-<table>
-	<tr>
-		<td width="80%">
-			<img src=src/assets/logo_wide.png alt="Vomit Tools" width="100%" />
+<table style="border: none;">
+	<tr style="border: none;">
+		<td width="80%" style="border: none;">
+			<img src=src/assets/logo_wide.png alt="Vomit Editor" width="100%" />
 		</td>
-		<td width="20%">
-			<img src=src/assets/vomit-tools.png alt="Vomit Tools Logo" width="100%" />
+		<td width="20%" style="border: none;">
+			<img src=src/assets/vomit-tools.png alt="Vomit Editor Logo" width="100%" />
 		</td>
 	</tr>
 </table>
 <h1 align="center">Vomit Editor</h1>
 <p align="center">All in one IDE editor for Source Engine games, built in Qt.</p>
-
-> [!NOTE]
-> hi i need an image/video/jxl for preview (We do not say gif in this household.)
+<div align="center">
+	<img src=src/assets/previews/showcase.png alt="Showcase of the Map Editor in Vomit Editor" />
+</div>
 
 > [!WARNING]
 > This is a fully vibe coded project, using Claude and ChatGPT. Though some decisions in development are due to my experience in Source mapping, and almost every decision by the LLM are carefully observed and tested.
