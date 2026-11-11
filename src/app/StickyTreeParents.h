@@ -11,7 +11,9 @@
 
 #include <vector>
 
+#include <QAbstractItemModel>
 #include <QPersistentModelIndex>
+#include <QPointer>
 #include <QWidget>
 
 class QTreeView;
@@ -47,4 +49,5 @@ private:
 	int m_nRowHeight = 0;
 	int m_nHover = -1;
 	bool m_bPending = false;
+	QPointer<QAbstractItemModel> m_pWatched; // the model whose changes move the pins
 };

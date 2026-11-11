@@ -44,13 +44,17 @@ CStickyTreeParents::CStickyTreeParents( QTreeView *pView )
 	connect( pView, &QTreeView::collapsed, this, later );
 	pView->viewport()->installEventFilter( this );
 	const auto watch = [ this, later ] {
-		if ( QAbstractItemModel *pModel = m_pView->model() )
-		{
-			connect( pModel, &QAbstractItemModel::modelReset, this, later, Qt::UniqueConnection );
-			connect( pModel, &QAbstractItemModel::layoutChanged, this, later, Qt::UniqueConnection );
-			connect( pModel, &QAbstractItemModel::rowsInserted, this, later, Qt::UniqueConnection );
-			connect( pModel, &QAbstractItemModel::rowsRemoved, this, later, Qt::UniqueConnection );
-		}
+		// Qt can't tell lambdas apart, so the model already watched is remembered here.
+		QAbstractItemModel *pModel = m_pView->model();
+		if ( !pModel || pModel == m_pWatched )
+			return;
+		if ( m_pWatched )
+			disconnect( m_pWatched, nullptr, this, nullptr );
+		m_pWatched = pModel;
+		connect( pModel, &QAbstractItemModel::modelReset, this, later );
+		connect( pModel, &QAbstractItemModel::layoutChanged, this, later );
+		connect( pModel, &QAbstractItemModel::rowsInserted, this, later );
+		connect( pModel, &QAbstractItemModel::rowsRemoved, this, later );
 	};
 	watch();
 	// A model set later (the views make theirs after the tree).
