@@ -426,7 +426,7 @@ CMapEditor::CMapEditor( const QString &szPath, bool bFromGame, QWidget *pParent 
 	auto *pScreenEffect = new CMapScreenEffectPanel( *this );
 	pScreenEffect->setObjectName( QStringLiteral( "mapScreenEffectPanel" ) );
 	pScreenEffect->layout()->setContentsMargins( 0, 0, 0, 0 );
-	m_pPanels->AddPanel( QStringLiteral( "screenEffect" ), tr( "Screen Effect" ), MakeMapIcon( MapIcon_t::MAP_ICON_SCREEN_EFFECT, panelIconColor ), pScreenEffect );
+	m_pPanels->AddPanel( QStringLiteral( "screenEffect" ), tr( "Screenspace Shaders" ), MakeMapIcon( MapIcon_t::MAP_ICON_SCREEN_EFFECT, panelIconColor ), pScreenEffect );
 	m_pCheck = new CMapCheckPanel( *this );
 	m_pPanels->AddPanel( QStringLiteral( "problems" ), tr( "Check for Problems" ), MakeMapIcon( MapIcon_t::MAP_ICON_PROBLEMS, panelIconColor ), m_pCheck, true );
 	m_pPanels->SetHiddenByDefault( QStringLiteral( "problems" ) );

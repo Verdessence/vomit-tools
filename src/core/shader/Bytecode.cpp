@@ -6,9 +6,11 @@
 //===========================================================================//
 #include "Bytecode.h"
 
+#include <algorithm>
 #include <bit>
 #include <cstring>
 #include <format>
+#include <set>
 
 namespace xv::shader
 {
@@ -583,6 +585,58 @@ std::string Disassemble( const Program_t &program )
 			nDepth++;
 	}
 	return szOut;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+ProgramUse_t DescribeUse( const Program_t &program )
+{
+	ProgramUse_t use;
+	std::set<int> constants, samplers;
+	const auto temp = [ &use ]( const Register_t &reg ) {
+		if ( reg.m_nType == RegisterType_t::REGISTER_TYPE_TEMP )
+			use.m_nTemps = std::max( use.m_nTemps, static_cast<int>( reg.m_nIndex ) + 1 );
+	};
+	for ( const Instruction_t &instruction : program.m_Instructions )
+	{
+		switch ( instruction.m_nOpcode )
+		{
+			case Opcode_t::OPCODE_DCL:
+			case Opcode_t::OPCODE_DEF:
+			case Opcode_t::OPCODE_DEFI:
+			case Opcode_t::OPCODE_DEFB:
+			case Opcode_t::OPCODE_COMMENT:
+			case Opcode_t::OPCODE_END:
+			case Opcode_t::OPCODE_NOP:
+			case Opcode_t::OPCODE_PHASE:
+				continue;
+			default: break;
+		}
+		use.m_nInstructions++;
+		const Opcode_t nOp = instruction.m_nOpcode;
+		if ( nOp == Opcode_t::OPCODE_TEX || nOp == Opcode_t::OPCODE_TEXLDD || nOp == Opcode_t::OPCODE_TEXLDL || nOp == Opcode_t::OPCODE_TEXKILL )
+			use.m_nTextureReads += nOp == Opcode_t::OPCODE_TEXKILL ? 0 : 1;
+		if ( instruction.m_Dest )
+			temp( *instruction.m_Dest );
+		for ( const Register_t &source : instruction.m_Sources )
+		{
+			temp( source );
+			if ( source.m_nType == RegisterType_t::REGISTER_TYPE_CONST )
+				constants.insert( static_cast<int>( source.m_nIndex ) );
+			else if ( source.m_nType == RegisterType_t::REGISTER_TYPE_SAMPLER )
+				samplers.insert( static_cast<int>( source.m_nIndex ) );
+		}
+	}
+	// A def'd constant is the shader's own, not one the material feeds.
+	for ( const Instruction_t &instruction : program.m_Instructions )
+	{
+		if ( instruction.m_nOpcode == Opcode_t::OPCODE_DEF && instruction.m_Dest )
+			constants.erase( static_cast<int>( instruction.m_Dest->m_nIndex ) );
+	}
+	use.m_Constants.assign( constants.begin(), constants.end() );
+	use.m_Samplers.assign( samplers.begin(), samplers.end() );
+	return use;
 }
 
 } // namespace xv::shader

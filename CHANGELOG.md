@@ -26,6 +26,17 @@
   proxies moving it, its c0 to c3 changeable there. On the graphics card its pixel shader is
   written as GLSL and baked as the map draws (the scene to a texture, the effect from it); in
   software it runs through the interpreter.
+- The Screen Effect panel is now Screenspace Shaders. Under the material, the .vcs it runs and
+  its profile; "Enabled" shows it. Pick by Shader lists the map's own (env_screenoverlay,
+  r_screenoverlay, material_modify_control) and every screenspace_general material in the game
+  with the pixel shader it names (those whose .vcs is missing greyed, last), read once on a
+  thread, and a Shaders tab with each .vcs under shaders/fxc and the materials using it; a filter
+  takes words. The texture browser is "Any Material...".
+- Its Statistics: c0 to c3 as the shader sees them now (proxies and held values applied,
+  updating as they move), its instructions, texture reads and temporaries, the constants and
+  samplers it reads by their names in the shader with what each is (the material's $c, a
+  texture's size, the frame), its cost in software, and for screenspace_font_line its constants
+  unpacked (the box, rows, reveal, tint, parameter widths and runtime glyph cells).
 
 ### Hammer maps (new)
 - The Lighting panel's table of lights is a short list (picking one selects it for Object

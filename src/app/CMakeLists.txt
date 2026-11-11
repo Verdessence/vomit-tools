@@ -242,6 +242,8 @@ add_library(vomit_tools_ui STATIC
         map/MapScreenEffect.cpp
         map/MapScreenEffect.h
         map/MapScreenEffectPanel.cpp
+        map/ScreenShaderCatalog.cpp
+        map/ScreenShaderCatalog.h
         map/MapScreenEffectPanel.h
         map/ParticleBrowser.cpp
         map/ParticleBrowser.h

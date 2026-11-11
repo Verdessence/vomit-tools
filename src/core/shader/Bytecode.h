@@ -209,6 +209,19 @@ struct Program_t
 	[[nodiscard]] const Constant_t *FindConstant( int nSet, int nRegister ) const;
 };
 
+// What a program does and reads, as a shader compiler's summary counts it: instructions (not the
+// declarations and defs), texture reads among them, the temporaries, and the float constants and
+// samplers its instructions read (by register, each once, in order).
+struct ProgramUse_t
+{
+	int m_nInstructions = 0;
+	int m_nTextureReads = 0;
+	int m_nTemps = 0;
+	std::vector<int> m_Constants;
+	std::vector<int> m_Samplers;
+};
+[[nodiscard]] ProgramUse_t DescribeUse( const Program_t &program );
+
 // The program in tokens (the first the version); nullopt, with why, when they don't make one.
 [[nodiscard]] std::optional<Program_t> ReadBytecode( std::span<const std::uint32_t> tokens, std::string *pError = nullptr );
 // The assembler's text for it: one instruction a line, the constant table's names first.
