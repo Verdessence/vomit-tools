@@ -1,42 +1,6 @@
 # Changelog
 
-## Unreleased
-
-### Browsing
-- The game browser's, the folder browser's and archives' trees keep the open folders of the rows
-  at their top pinned over them while scrolling; a click on one folds it and scrolls to it.
-- The three trees look alike: the same icons (a file's by its kind, the Source formats included:
-  material, texture, model, particles, map, archive...; the folder open while expanded), and a
-  Type column in each.
-
-### Shaders (new)
-- Compiled shader files (.vcs, versions 4 to 6: every one of HL2's and the game folder's own) are
-  read, each combo's Direct3D 9 bytecode (vs_1_1 to ps_3_0) disassembled with its constants'
-  and samplers' names. `vomit-tools-cli shader <file.vcs>` prints it.
-- Pixel shaders (ps_2_0 to ps_3_0) run in software, and screenspace_general materials over a
-  picture as the game draws them: their textures in s0 to s3 (the frame for _rt_FullFrameFB),
-  $c0_x to $c3_w in c0 to c3, texel sizes in c4 to c7, sRGB read and written unless
-  $linearread_*/$linearwrite, and $additive, $alpha_blend, $alpha_blend_color_overlay, $copyalpha.
-- The material editor previews a screenspace_general material by running its pixel shader over
-  a sample scene (its proxies, CurrentTime say, moving it), with a Shader tab holding the
-  disassembly; a shader the game's files don't have is named, and the scene shows as it is.
-- Hammer maps: a Screen Effect panel draws a screenspace_general material over the 3D views, as
-  the game draws an env_screenoverlay's or a post effect: picked from what the map names
-  (env_screenoverlay's OverlayName keys, r_screenoverlay commands) or the texture browser, its
-  proxies moving it, its c0 to c3 changeable there. On the graphics card its pixel shader is
-  written as GLSL and baked as the map draws (the scene to a texture, the effect from it); in
-  software it runs through the interpreter.
-- The Screen Effect panel is now Screenspace Shaders. Under the material, the .vcs it runs and
-  its profile; "Enabled" shows it. Pick by Shader lists the map's own (env_screenoverlay,
-  r_screenoverlay, material_modify_control) and every screenspace_general material in the game
-  with the pixel shader it names (those whose .vcs is missing greyed, last), read once on a
-  thread, and a Shaders tab with each .vcs under shaders/fxc and the materials using it; a filter
-  takes words. "Any Material..." lists every material by name (the texture browser as a list).
-- Its Statistics: c0 to c3 as the shader sees them now (proxies and held values applied,
-  updating as they move), its instructions, texture reads and temporaries, the constants and
-  samplers it reads by their names in the shader with what each is (the material's $c, a
-  texture's size, the frame), its cost in software, and for screenspace_font_line its constants
-  unpacked (the box, rows, reveal, tint, parameter widths and runtime glyph cells).
+## 0.8.0 — The Hammer (2026-11-12)
 
 ### Hammer maps (new)
 - The Lighting panel's table of lights is a short list (picking one selects it for Object
@@ -364,6 +328,42 @@
 - Selecting an entity (a click, Find Entities, the Entity Report) brings Object Properties
   forward when another tab of its group was showing, without taking the keyboard; not while a
   tool's own panel is in charge or you're typing elsewhere. Preferences > Maps can turn it off.
+
+### Browsing
+- The game browser's, the folder browser's and archives' trees keep the open folders of the rows
+  at their top pinned over them while scrolling; a click on one folds it and scrolls to it.
+- The three trees look alike: the same icons (a file's by its kind, the Source formats included:
+  material, texture, model, particles, map, archive...; the folder open while expanded), and a
+  Type column in each.
+
+### Shaders (new)
+- Compiled shader files (.vcs, versions 4 to 6: every one of HL2's and the game folder's own) are
+  read, each combo's Direct3D 9 bytecode (vs_1_1 to ps_3_0) disassembled with its constants'
+  and samplers' names. `vomit-tools-cli shader <file.vcs>` prints it.
+- Pixel shaders (ps_2_0 to ps_3_0) run in software, and screenspace_general materials over a
+  picture as the game draws them: their textures in s0 to s3 (the frame for _rt_FullFrameFB),
+  $c0_x to $c3_w in c0 to c3, texel sizes in c4 to c7, sRGB read and written unless
+  $linearread_*/$linearwrite, and $additive, $alpha_blend, $alpha_blend_color_overlay, $copyalpha.
+- The material editor previews a screenspace_general material by running its pixel shader over
+  a sample scene (its proxies, CurrentTime say, moving it), with a Shader tab holding the
+  disassembly; a shader the game's files don't have is named, and the scene shows as it is.
+- Hammer maps: a Screen Effect panel draws a screenspace_general material over the 3D views, as
+  the game draws an env_screenoverlay's or a post effect: picked from what the map names
+  (env_screenoverlay's OverlayName keys, r_screenoverlay commands) or the texture browser, its
+  proxies moving it, its c0 to c3 changeable there. On the graphics card its pixel shader is
+  written as GLSL and baked as the map draws (the scene to a texture, the effect from it); in
+  software it runs through the interpreter.
+- The Screen Effect panel is now Screenspace Shaders. Under the material, the .vcs it runs and
+  its profile; "Enabled" shows it. Pick by Shader lists the map's own (env_screenoverlay,
+  r_screenoverlay, material_modify_control) and every screenspace_general material in the game
+  with the pixel shader it names (those whose .vcs is missing greyed, last), read once on a
+  thread, and a Shaders tab with each .vcs under shaders/fxc and the materials using it; a filter
+  takes words. "Any Material..." lists every material by name (the texture browser as a list).
+- Its Statistics: c0 to c3 as the shader sees them now (proxies and held values applied,
+  updating as they move), its instructions, texture reads and temporaries, the constants and
+  samplers it reads by their names in the shader with what each is (the material's $c, a
+  texture's size, the frame), its cost in software, and for screenspace_font_line its constants
+  unpacked (the box, rows, reveal, tint, parameter widths and runtime glyph cells).
 
 ### Settings file (new)
 - Settings live in `vomit-tools.nut` (beside Qt's settings: `~/.config/vomit-tools/` on Linux),
