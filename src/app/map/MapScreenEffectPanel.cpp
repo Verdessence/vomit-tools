@@ -106,7 +106,7 @@ CMapScreenEffectPanel::CMapScreenEffectPanel( CMapEditor &editor, QWidget *pPare
 	m_pBrowse = new QToolButton;
 	m_pBrowse->setObjectName( QStringLiteral( "mapScreenEffectBrowse" ) );
 	m_pBrowse->setText( tr( "Any Material..." ) );
-	m_pBrowse->setToolTip( tr( "Pick any material in the texture browser" ) );
+	m_pBrowse->setToolTip( tr( "Pick any material from the game's list" ) );
 	pRow->addWidget( m_pMaterial, 1 );
 	pRow->addWidget( m_pBrowse );
 	pLayout->addLayout( pRow );
@@ -209,7 +209,7 @@ CMapScreenEffectPanel::CMapScreenEffectPanel( CMapEditor &editor, QWidget *pPare
 		const auto &game = m_Editor.GetDocument().GetGame();
 		if ( !game )
 			return;
-		if ( const std::optional<QString> picked = CMaterialBrowser::Pick( this, *game, m_Named, m_pMaterial->currentText() ) )
+		if ( const std::optional<QString> picked = CMaterialBrowser::PickFromList( this, *game, m_Named, m_pMaterial->currentText() ) )
 			m_Editor.SetScreenEffect( *picked );
 	} );
 	connect( m_pShown, &QCheckBox::toggled, this, [ this ]( bool bOn ) {

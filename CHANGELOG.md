@@ -31,7 +31,7 @@
   r_screenoverlay, material_modify_control) and every screenspace_general material in the game
   with the pixel shader it names (those whose .vcs is missing greyed, last), read once on a
   thread, and a Shaders tab with each .vcs under shaders/fxc and the materials using it; a filter
-  takes words. The texture browser is "Any Material...".
+  takes words. "Any Material..." lists every material by name (the texture browser as a list).
 - Its Statistics: c0 to c3 as the shader sees them now (proxies and held values applied,
   updating as they move), its instructions, texture reads and temporaries, the constants and
   samplers it reads by their names in the shader with what each is (the material's $c, a

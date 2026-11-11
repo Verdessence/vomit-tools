@@ -55,6 +55,8 @@ public:
 	void SetPicture( int nRow, const QImage &picture, int nPictureSize );
 	// The size rows are shown at; past 128 the pictures are made again, bigger.
 	void SetSize( int nSize );
+	// Rows as a list's (the view sizes them) rather than the grid's cells.
+	void SetAsList( bool bList ) { m_bList = bList; }
 	[[nodiscard]] int GetPictureSize() const { return m_nPictureSize; }
 	[[nodiscard]] const QStringList &GetNames() const { return m_Names; }
 	// Rows whose pictures are wanted (shown, or asked for and not yet made), oldest first.
@@ -73,6 +75,7 @@ private:
 	mutable std::mutex m_Mutex;
 	mutable std::vector<int> m_Wanted;
 	int m_nSize = 64;
+	bool m_bList = false;
 	std::atomic<int> m_nPictureSize{ 128 };
 };
 
@@ -135,7 +138,12 @@ public:
 	// Runs the browser; the material picked (as Hammer writes it), if one was.
 	static std::optional<QString> Pick( QWidget *pParent, const xv::vfs::CGameInfo &game, const QStringList &used, const QString &szCurrent );
 	// The same for a sprite key: the value as sprite keys write it ("sprites/glow01.vmt").
+	// The same as a list of names with small pictures (for materials whose base texture says
+	// little, such as screen effects).
+	static std::optional<QString> PickFromList( QWidget *pParent, const xv::vfs::CGameInfo &game, const QStringList &used, const QString &szCurrent );
 	static std::optional<QString> PickSprite( QWidget *pParent, const xv::vfs::CGameInfo &game, const QStringList &used, const QString &szCurrent );
+	// The rows as a list, one name a line, instead of the grid (the size choice hidden).
+	void ShowAsList();
 	[[nodiscard]] QString GetPicked() const { return m_szPicked; }
 	[[nodiscard]] CMaterialList &GetList() { return *m_pList; }
 	[[nodiscard]] QListView *GetView() const { return m_pView; }

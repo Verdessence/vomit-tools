@@ -191,6 +191,8 @@ QVariant CMaterialList::data( const QModelIndex &index, int nRole ) const
 			return icon;
 		}
 		case Qt::SizeHintRole:
+			if ( m_bList )
+				return {};
 			return QSize( m_nSize + 12, m_nSize + 28 );
 		case ROLE_SPRITE:
 			return static_cast<std::size_t>( index.row() ) < m_Sprites.size() && m_Sprites[ static_cast<std::size_t>( index.row() ) ];
@@ -651,6 +653,40 @@ std::optional<QString> CMaterialBrowser::Pick( QWidget *pParent, const xv::vfs::
 		return std::nullopt;
 	}
 	return browser.GetPicked();
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+std::optional<QString> CMaterialBrowser::PickFromList( QWidget *pParent, const xv::vfs::CGameInfo &game, const QStringList &used, const QString &szCurrent )
+{
+	CMaterialBrowser browser( game, used, szCurrent, pParent );
+	browser.ShowAsList();
+	if ( browser.exec() != QDialog::Accepted || browser.GetPicked().isEmpty() )
+		return std::nullopt;
+	return browser.GetPicked();
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: The view as a list: small pictures beside the names, a line each. The pictures are
+//          still the 128 px ones, scaled down.
+//-----------------------------------------------------------------------------
+void CMaterialBrowser::ShowAsList()
+{
+	constexpr int LIST_ICON = 24;
+	setWindowTitle( tr( "Materials" ) );
+	resize( 860, 600 );
+	m_pSize->hide();
+	m_pList->SetAsList( true );
+	m_pList->SetSize( LIST_ICON );
+	m_pView->setViewMode( QListView::ListMode );
+	m_pView->setFlow( QListView::TopToBottom );
+	m_pView->setWrapping( false );
+	m_pView->setWordWrap( false );
+	m_pView->setSpacing( 0 );
+	m_pView->setAlternatingRowColors( true );
+	m_pView->setIconSize( QSize( LIST_ICON, LIST_ICON ) );
+	m_pView->setTextElideMode( Qt::ElideMiddle );
 }
 
 //-----------------------------------------------------------------------------

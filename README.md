@@ -1,8 +1,17 @@
-<div>
-	<!--suppress HtmlDEprecatedAttribute -->
-	<img align="center" style="object-fit: cover;" src=https://github.com/Verdessence/vomit-tools/blob/961476cd725300c52ca3caca093a632cb9d49d6d/src/assets/logo_wide.png alt="Vomit Tools" />
-</div>
-All in one IDE editor for Source Engine games, built in Qt.
+<table>
+	<tr>
+		<td width="80%">
+			<img src=src/assets/logo_wide.png alt="Vomit Tools" width="100%" />
+		</td>
+		<td width="20%">
+			<img src=src/assets/vomit-tools.png alt="Vomit Tools Logo" width="100%" />
+		</td>
+	</tr>
+</table>
+<h1 align="center">Vomit Editor</h1>
+<p align="center">All in one IDE editor for Source Engine games, built in Qt.</p>
+> [!NOTE]
+> hi i need an image/video/jxl for preview (We do not say gif in this household.)
 
 > [!WARNING]
 > This is a fully vibe coded project, using Claude and ChatGPT. Though some decisions in development are due to my experience in Source mapping, and almost every decision by the LLM are carefully observed and tested.
@@ -81,6 +90,37 @@ what else is there to note of lol
 > hi i need an image/video/jxl for preview (We do not say gif in this household.)
 
 Preview and edit strippers easily
+- Glorified text editor with syntax highlighting and completion
+- Check for Problems
+### Map Editor
+> [!NOTE]
+> hi i need an image/video/jxl for preview (We do not say gif in this household.)
+
+you know who it is
+- yeah buddy there's most of hammer++ features in here
+	- sorry man
+- dude there's like a bajillion additions i dont even know anymore
+- more tools (spline tool, brush/edit mode)
+- more complex and friendlier properties tab
+	- lighting tab with extra stuff like shadows and tonemap and cc and env sun and light env properties
+	- easily switch between multiple fogs
+	- check for problems
+	- screenspace general preview
+- ortho camera
+- door and rotating lip and angle and dir preview
+- import strippers as user group
+
+### HUD Editor
+> [!NOTE]
+> hi i need an image/video/jxl for preview (We do not say gif in this household.)
+
+Planned
+
+### Demo Viewer
+> [!NOTE]
+> hi i need an image/video/jxl for preview (We do not say gif in this household.)
+
+Planned
 
 ## Credits/Licenses
 - [craftablescience](https://github.com/craftablescience): MareTF, VPKEdit inspirations
@@ -110,9 +150,7 @@ vomit-tools is GPL-3.0-or-later; see [LICENSE](LICENSE). It's built with:
 
 CoACD also carries nanoflann (BSD-2-Clause), Bullet's convex hull (Zlib), QuickHull (public
 domain) and Sobol sequence routines (LGPL-3.0-only); CDT carries William C. Lenthe's robust
-predicates (BSD-3-Clause). Each build writes every notice, with the exact commits it fetched, to
-`THIRD-PARTY-NOTICES.txt`. Releases ship it beside `LICENSE`, and the app shows both under
-Help > About > Licenses. License texts not found in the fetched sources are in [LICENSES](LICENSES).
+predicates (BSD-3-Clause).
 ## Building
 ### Linux
 ```sh
