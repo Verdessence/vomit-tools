@@ -10,6 +10,7 @@
 </table>
 <h1 align="center">Vomit Editor</h1>
 <p align="center">All in one IDE editor for Source Engine games, built in Qt.</p>
+
 > [!NOTE]
 > hi i need an image/video/jxl for preview (We do not say gif in this household.)
 
