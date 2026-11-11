@@ -6,6 +6,7 @@
 //===========================================================================//
 #include "MapFogPanel.h"
 
+#include <algorithm>
 #include <cmath>
 
 #include <QHBoxLayout>
@@ -18,6 +19,7 @@
 
 #include "map/Lighting.h"
 #include "map/MapEditor.h"
+#include "map/MapEntityFields.h"
 
 namespace
 {
@@ -52,6 +54,7 @@ CMapFogPanel::CMapFogPanel( CMapEditor &editor, QWidget *pParent )
 	m_pList->setObjectName( QStringLiteral( "mapFogList" ) );
 	m_pList->setToolTip( tr( "The fog the textured 3D views show (with the Show bar's Fog on)" ) );
 	pLayout->addWidget( m_pList, 1 );
+	m_pList->setMinimumHeight( 60 );
 	auto *pRow = new QHBoxLayout;
 	m_pSelect = new QPushButton( tr( "Select" ) );
 	m_pSelect->setObjectName( QStringLiteral( "mapFogSelect" ) );
@@ -62,6 +65,20 @@ CMapFogPanel::CMapFogPanel( CMapEditor &editor, QWidget *pParent )
 	m_pNote = new QLabel;
 	m_pNote->setWordWrap( true );
 	pLayout->addWidget( m_pNote );
+
+	// The picked controller's keys (with "as the map starts", the one that starts on).
+	const std::vector<EntityField_t> fogKeys{ { "fogenable", {}, {}, {} }, { "fogcolor", {}, {}, {} }, { "fogcolor2", {}, {}, {} }, { "fogdir", {}, {}, {} }, { "fogstart", {}, {}, {} },
+		{ "fogend", {}, {}, {} }, { "fogmaxdensity", {}, {}, {} }, { "fogradial", {}, {}, {} }, { "farz", {}, {}, {} }, { "fogblend", {}, {}, {} }, { "use_angles", {}, {}, {} } };
+	m_pFields = new CMapEntityFields( m_Editor, { "env_fog_controller" }, fogKeys );
+	m_pFields->SetSelectButton( false ); // the list's Select does it
+	pLayout->addWidget( MakeFoldSection( tr( "Fog Values" ), m_pFields, QStringLiteral( "mapFogValues" ), true ) );
+	std::vector<EntityField_t> skyKeys = fogKeys;
+	std::erase_if( skyKeys, []( const EntityField_t &field ) { return field.m_szKey == "farz"; } );
+	m_pSkyFields = new CMapEntityFields( m_Editor, { "sky_camera" }, skyKeys );
+	m_pSkySection = MakeFoldSection( tr( "3D Skybox Fog (sky_camera)" ), m_pSkyFields, QStringLiteral( "mapFogSky" ), false );
+	pLayout->addWidget( m_pSkySection );
+	connect( m_pSkyFields, &CMapEntityFields::Changed, this, [ this ] { m_pSkySection->setVisible( m_pSkyFields->GetEntity().has_value() ); } );
+	pLayout->addStretch( 0 );
 
 	connect( m_pList, &QListWidget::currentRowChanged, this, [ this ]( int nRow ) {
 		if ( m_bFilling || nRow < 0 )
@@ -115,6 +132,15 @@ void CMapFogPanel::Refresh()
 	m_pSelect->setEnabled( nCurrent > 0 );
 	m_pNote->setText( tr( "The map has no env_fog_controller." ) );
 	m_pNote->setVisible( controllers.empty() );
+	// The fields follow the picked controller; at the map's start, the one that starts on.
+	int nShown = m_pList->item( nCurrent )->data( Qt::UserRole ).toInt();
+	if ( nShown == 0 )
+	{
+		const auto on = std::ranges::find_if( controllers, &xv::map::FogController_t::m_bEnabled );
+		nShown = on != controllers.end() ? on->m_nId : 0;
+	}
+	m_pFields->SetEntityId( nShown );
+	m_pSkySection->setVisible( m_pSkyFields->GetEntity().has_value() );
 	m_bFilling = false;
 	// The picked one deleted: back to the map's start.
 	if ( nCurrent == 0 && m_Editor.GetSettings().m_nFogController != 0 )

@@ -35,6 +35,8 @@
   (env_tonemap_controller: the exposure range, bloom scale and adapt rate a logic_auto sends it
   as the map starts, the logic_auto made when there is none) and Colour Correction. The HDR
   lighting preview's auto exposure keeps to the tone map's exposure range.
+- The Fog panel edits the picked env_fog_controller's values under its list (the views
+  following at once), and the 3D skybox's fog (sky_camera) when the map has one.
 - Right-click menus: in the 2D and 3D views (the object under the cursor, or the selection:
   cut, copy, paste, delete, group, hide, carve, select all of a class, properties; in 3D, a
   face's material), Object Properties' keys (reset to the FGD's default, copy and paste a
