@@ -21,6 +21,7 @@
 #include <QComboBox>
 #include <QCompleter>
 #include <QElapsedTimer>
+#include <QKeyEvent>
 #include <QFile>
 #include <QFileInfo>
 #include <QHBoxLayout>
@@ -77,6 +78,7 @@ namespace
 
 constexpr auto CLIPBOARD_TYPE = "application/x-vomit-tools-particles";
 constexpr auto GRID_VIEW_KEY = "particleGridView";
+constexpr auto STACK_SPLIT_KEY = "particleStackSplit"; // the stack over Add's list
 constexpr int THUMBNAIL_SIZE = 96;
 constexpr qint64 THUMBNAIL_BUDGET_MS = 30; // drawing pictures per turn of the event loop
 
@@ -528,14 +530,13 @@ CParticleEditor::CParticleEditor( CParticleDocument *pDocument, QWidget *pParent
 			m_szList = szList;
 			RebuildProperties();
 		}
+		SyncAddPanel();
 	} );
 	m_pAdd = new QToolButton;
 	m_pAdd->setObjectName( QStringLiteral( "particleAdd" ) );
 	m_pAdd->setText( tr( "Add" ) );
-	m_pAdd->setToolTip( tr( "Adds an operator of any kind, or a child system" ) );
-	m_pAdd->setPopupMode( QToolButton::InstantPopup );
-	m_pAdd->setMenu( new QMenu( m_pAdd ) );
-	connect( m_pAdd->menu(), &QMenu::aboutToShow, this, &CParticleEditor::FillAddMenu );
+	m_pAdd->setToolTip( tr( "Adds the function picked in the list above (double-click or Enter there does the same)" ) );
+	connect( m_pAdd, &QToolButton::clicked, this, &CParticleEditor::AddPicked );
 	auto *pRemove = new QToolButton;
 	pRemove->setText( tr( "Remove" ) );
 	connect( pRemove, &QToolButton::clicked, this, &CParticleEditor::RemoveSelected );
@@ -556,7 +557,20 @@ CParticleEditor::CParticleEditor( CParticleDocument *pDocument, QWidget *pParent
 	auto *pStackPanel = new QWidget;
 	auto *pStackLayout = new QVBoxLayout( pStackPanel );
 	pStackLayout->setContentsMargins( 0, 6, 6, 6 );
-	pStackLayout->addWidget( m_pStack );
+	BuildAddPanel();
+	m_pStackSplit = new QSplitter( Qt::Vertical );
+	m_pStackSplit->setObjectName( QStringLiteral( "particleStackSplit" ) );
+	m_pStackSplit->setChildrenCollapsible( false );
+	m_pStackSplit->addWidget( m_pStack );
+	m_pStackSplit->addWidget( m_pAddPanel );
+	m_pStackSplit->setStretchFactor( 0, 1 );
+	m_pStackSplit->setStretchFactor( 1, 1 );
+	if ( !m_pStackSplit->restoreState( QSettings{}.value( STACK_SPLIT_KEY ).toByteArray() ) )
+	{
+		m_pStackSplit->setSizes( { 500, 400 } );
+	}
+	connect( m_pStackSplit, &QSplitter::splitterMoved, this, [ this ] { QSettings{}.setValue( STACK_SPLIT_KEY, m_pStackSplit->saveState() ); } );
+	pStackLayout->addWidget( m_pStackSplit );
 	pStackLayout->addLayout( pStackBar );
 
 	// The selected item's properties
@@ -747,6 +761,7 @@ void CParticleEditor::ShowInPreview()
 void CParticleEditor::RebuildSchema()
 {
 	m_Schema = m_Game.m_pSchema ? *m_Game.m_pSchema : particles::CSchema{};
+	m_szAddFilled.clear(); // the functions listed may have changed
 	m_Schema.Add( m_pDocument->GetDocument() );
 	m_Schema.Finish();
 }
@@ -991,6 +1006,7 @@ void CParticleEditor::RebuildStack()
 	const Document_t &doc = m_pDocument->GetDocument();
 	if ( m_nSystem < 0 )
 	{
+		SyncAddPanel();
 		return;
 	}
 	const CElement &system = doc.m_Elements[ static_cast<std::size_t>( m_nSystem ) ];
@@ -1095,6 +1111,7 @@ void CParticleEditor::RebuildStack()
 		m_pStack->setCurrentItem( pCurrent );
 		m_pStack->scrollToItem( pCurrent );
 	}
+	SyncAddPanel();
 }
 
 //-----------------------------------------------------------------------------
@@ -1789,67 +1806,194 @@ QWidget *CParticleEditor::ValueEditor( std::int32_t nElement, const Attribute_t 
 }
 
 //-----------------------------------------------------------------------------
-// Purpose:
+// Purpose: Builds Add's list, under the stack: a kind, a filter and the functions of that kind.
 //-----------------------------------------------------------------------------
-void CParticleEditor::FillAddMenu()
+void CParticleEditor::BuildAddPanel()
 {
-	QMenu *pMenu = m_pAdd->menu();
-	ClearMenu( pMenu );
-	if ( m_nSystem < 0 )
-	{
-		pMenu->addAction( tr( "Add a system first" ) )->setEnabled( false );
-		return;
-	}
-	const std::optional<Category_t> selected = m_szList.isEmpty() && m_nElement >= 0 && PositionOf( m_nElement )
-		? particles::CategoryOf( PositionOf( m_nElement )->m_szList.toStdString() )
-		: particles::CategoryOf( m_szList.toStdString() );
+	m_pAddPanel = new QWidget;
+	m_pAddPanel->setObjectName( QStringLiteral( "particleAddPanel" ) );
+	m_pAddKind = new QComboBox;
+	m_pAddKind->setObjectName( QStringLiteral( "particleAddKind" ) );
+	m_pAddKind->setToolTip( tr( "Follows the kind picked in the stack" ) );
 	for ( std::string_view szList : STACK_ORDER )
 	{
-		if ( szList == particles::CHILDREN )
+		const std::optional<Category_t> nCategory = particles::CategoryOf( szList );
+		m_pAddKind->addItem( nCategory ? CategoryTitle( *nCategory ) : ListTitle( Qs( szList ) ), Qs( szList ) );
+	}
+	m_pAddKind->setCurrentIndex( m_pAddKind->findData( QStringLiteral( "operators" ) ) );
+	m_pAddFilter = new QLineEdit;
+	m_pAddFilter->setObjectName( QStringLiteral( "particleAddFilter" ) );
+	m_pAddFilter->setPlaceholderText( tr( "Filter functions..." ) );
+	m_pAddFilter->setClearButtonEnabled( true );
+	m_pAddFilter->installEventFilter( this );
+	m_pAddList = new QListWidget;
+	m_pAddList->setObjectName( QStringLiteral( "particleAddList" ) );
+	m_pAddList->setUniformItemSizes( true );
+	auto *pTop = new QHBoxLayout;
+	pTop->setContentsMargins( 0, 0, 0, 0 );
+	pTop->addWidget( m_pAddKind );
+	pTop->addWidget( m_pAddFilter, 1 );
+	auto *pLayout = new QVBoxLayout( m_pAddPanel );
+	pLayout->setContentsMargins( 0, 4, 0, 0 );
+	pLayout->setSpacing( 4 );
+	pLayout->addLayout( pTop );
+	pLayout->addWidget( m_pAddList, 1 );
+	connect( m_pAddKind, &QComboBox::currentIndexChanged, this, [ this ] { FillAddPanel( m_pAddKind->currentData().toString() ); } );
+	// Every word typed is in the name or the tooltip (the file's own name, what it does).
+	connect( m_pAddFilter, &QLineEdit::textChanged, this, [ this ]( const QString &szText ) {
+		const QStringList words = szText.split( u' ', Qt::SkipEmptyParts );
+		QListWidgetItem *pCurrent = m_pAddList->currentItem();
+		QListWidgetItem *pFirst = nullptr;
+		for ( int i = 0; i < m_pAddList->count(); i++ )
 		{
-			std::vector<PickerItem_t> systems;
-			const Document_t &doc = m_pDocument->GetDocument();
-			for ( std::int32_t nSystem : particles::Systems( doc ) )
-			{
-				if ( nSystem != m_nSystem )
-				{
-					systems.push_back( { Qs( doc.m_Elements[ static_cast<std::size_t>( nSystem ) ].m_szName ), {}, [ this, nSystem ] { AddChild( nSystem ); } } );
-				}
-			}
-			AddPicker( pMenu, tr( "Child System" ), std::move( systems ), tr( "No other systems in this file" ) );
-			continue;
+			QListWidgetItem *pItem = m_pAddList->item( i );
+			const bool bShown = std::all_of( words.begin(), words.end(), [ pItem ]( const QString &szWord ) {
+				return pItem->text().contains( szWord, Qt::CaseInsensitive ) || pItem->toolTip().contains( szWord, Qt::CaseInsensitive );
+			} );
+			pItem->setHidden( !bShown );
+			pFirst = !pFirst && bShown && ( pItem->flags() & Qt::ItemIsEnabled ) ? pItem : pFirst;
 		}
-		const Category_t nCategory = *particles::CategoryOf( szList );
-		std::vector<PickerItem_t> items;
-		for ( const particles::CFunctionInfo *pFunction : m_Schema.Functions( nCategory ) )
+		if ( !pCurrent || pCurrent->isHidden() )
 		{
-			const auto *pKnown = m_Game.m_pSchema ? m_Game.m_pSchema->Function( nCategory, pFunction->m_szName ) : nullptr;
+			m_pAddList->setCurrentItem( pFirst );
+		}
+	} );
+	connect( m_pAddList, &QListWidget::itemActivated, this, &CParticleEditor::AddPicked );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Puts Add's list on the kind picked in the stack, and refills it when what it lists can
+//          have changed (another system, the game's functions, the file's systems for children).
+//-----------------------------------------------------------------------------
+void CParticleEditor::SyncAddPanel()
+{
+	if ( !m_pAddKind )
+	{
+		return;
+	}
+	const std::optional<StackPosition_t> position = m_nElement >= 0 ? PositionOf( m_nElement ) : std::nullopt;
+	const QString szSelected = m_szList.isEmpty() && position ? position->m_szList : m_szList;
+	if ( const int nKind = m_pAddKind->findData( szSelected ); nKind >= 0 && nKind != m_pAddKind->currentIndex() )
+	{
+		m_pAddKind->setCurrentIndex( nKind ); // fills it
+		return;
+	}
+	const QString szList = m_pAddKind->currentData().toString();
+	if ( szList != m_szAddFilled || m_nSystem != m_nAddSystem || szList == Qs( particles::CHILDREN ) )
+	{
+		FillAddPanel( szList );
+	}
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Adds what is highlighted in Add's list. It runs once the event is over: the add
+//          refills the list the click came from.
+//-----------------------------------------------------------------------------
+void CParticleEditor::AddPicked()
+{
+	QListWidgetItem *pItem = m_pAddList->currentItem();
+	const int nRun = pItem && !pItem->isHidden() ? pItem->data( Qt::UserRole ).toInt() : -1;
+	if ( nRun < 0 || nRun >= static_cast<int>( m_AddRuns.size() ) )
+	{
+		m_pAddFilter->setFocus();
+		return;
+	}
+	QTimer::singleShot( 0, this, m_AddRuns[ static_cast<std::size_t>( nRun ) ] );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Up, down, page keys and Enter in Add's filter box work the list under it.
+//-----------------------------------------------------------------------------
+bool CParticleEditor::eventFilter( QObject *pObject, QEvent *pEvent )
+{
+	if ( pObject == m_pAddFilter && pEvent->type() == QEvent::KeyPress )
+	{
+		const int nKey = static_cast<QKeyEvent *>( pEvent )->key();
+		if ( nKey == Qt::Key_Up || nKey == Qt::Key_Down || nKey == Qt::Key_PageUp || nKey == Qt::Key_PageDown )
+		{
+			QCoreApplication::sendEvent( m_pAddList, pEvent );
+			return true;
+		}
+		if ( nKey == Qt::Key_Return || nKey == Qt::Key_Enter )
+		{
+			AddPicked();
+			return true;
+		}
+	}
+	return QWidget::eventFilter( pObject, pEvent );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Lists what Add can add of one kind: the functions, or the other systems as children.
+//-----------------------------------------------------------------------------
+void CParticleEditor::FillAddPanel( const QString &szList )
+{
+	const QString szWasCurrent = szList == m_szAddFilled && m_pAddList->currentItem() ? m_pAddList->currentItem()->text() : QString{};
+	m_szAddFilled = szList;
+	m_nAddSystem = m_nSystem;
+	const QSignalBlocker block( m_pAddList );
+	m_pAddList->clear();
+	m_AddRuns.clear();
+	const auto add = [ this ]( const QString &szText, const QString &szTip, std::function<void()> pfnRun ) {
+		auto *pItem = new QListWidgetItem( szText, m_pAddList );
+		pItem->setToolTip( szTip );
+		pItem->setData( Qt::UserRole, static_cast<int>( m_AddRuns.size() ) );
+		m_AddRuns.push_back( std::move( pfnRun ) );
+	};
+	if ( m_nSystem < 0 )
+	{
+		m_pAddList->addItem( tr( "Add a system first" ) );
+		m_pAddList->item( 0 )->setFlags( Qt::NoItemFlags );
+		return;
+	}
+	if ( szList == Qs( particles::CHILDREN ) )
+	{
+		const Document_t &doc = m_pDocument->GetDocument();
+		for ( std::int32_t nSystem : particles::Systems( doc ) )
+		{
+			if ( nSystem != m_nSystem )
+			{
+				add( Qs( doc.m_Elements[ static_cast<std::size_t>( nSystem ) ].m_szName ), {}, [ this, nSystem ] { AddChild( nSystem ); } );
+			}
+		}
+	}
+	else if ( const std::optional<Category_t> nCategory = particles::CategoryOf( szList.toStdString() ) )
+	{
+		for ( const particles::CFunctionInfo *pFunction : m_Schema.Functions( *nCategory ) )
+		{
+			const auto *pKnown = m_Game.m_pSchema ? m_Game.m_pSchema->Function( *nCategory, pFunction->m_szName ) : nullptr;
 			QString szTip = pKnown && pKnown->m_nUses > 0 ? tr( "Used %n time(s) in the game's files", nullptr, pKnown->m_nUses )
 				: pFunction->m_bBuiltin                   ? tr( "Built into the game" )
 														  : tr( "Only used in this file" );
-			if ( !particles::IsSimulated( nCategory, pFunction->m_szName ) )
+			if ( !particles::IsSimulated( *nCategory, pFunction->m_szName ) )
 			{
 				szTip += u'\n' + tr( "Not in the preview yet" );
 			}
-			else if ( const std::string_view szNote = particles::PreviewNote( nCategory, pFunction->m_szName ); !szNote.empty() )
+			else if ( const std::string_view szNote = particles::PreviewNote( *nCategory, pFunction->m_szName ); !szNote.empty() )
 			{
 				szTip += u'\n' + tr( "In the preview: %1" ).arg( Qs( szNote ) );
 			}
-			const auto [ szLabel, szAbout ] = FunctionLabel( nCategory, Qs( pFunction->m_szName ) );
+			const auto [ szLabel, szAbout ] = FunctionLabel( *nCategory, Qs( pFunction->m_szName ) );
 			if ( !szAbout.isEmpty() )
 			{
 				szTip = szAbout + u'\n' + szTip;
 			}
-			items.push_back( { szLabel, szTip, [ this, nCategory, szName = Qs( pFunction->m_szName ) ] { AddOperator( nCategory, szName ); } } );
-		}
-		QMenu *pSub = AddPicker( pMenu, CategorySingular( nCategory ), std::move( items ), tr( "No examples to copy from: open a game" ) );
-		if ( selected == nCategory )
-		{
-			QFont font = pSub->menuAction()->font();
-			font.setBold( true );
-			pSub->menuAction()->setFont( font );
+			add( szLabel, szTip, [ this, nCategory = *nCategory, szName = Qs( pFunction->m_szName ) ] { AddOperator( nCategory, szName ); } );
 		}
 	}
+	if ( m_pAddList->count() == 0 )
+	{
+		m_pAddList->addItem( szList == Qs( particles::CHILDREN ) ? tr( "No other systems in this file" ) : tr( "No examples to copy from: open a game" ) );
+		m_pAddList->item( 0 )->setFlags( Qt::NoItemFlags );
+		return;
+	}
+	const QList<QListWidgetItem *> was = szWasCurrent.isEmpty() ? QList<QListWidgetItem *>{} : m_pAddList->findItems( szWasCurrent, Qt::MatchExactly );
+	m_pAddList->setCurrentItem( was.isEmpty() ? m_pAddList->item( 0 ) : was.front() );
+	if ( !m_pAddFilter->text().isEmpty() )
+	{
+		emit m_pAddFilter->textChanged( m_pAddFilter->text() );
+	}
+	m_pAddList->scrollToItem( m_pAddList->currentItem() );
 }
 
 //-----------------------------------------------------------------------------
@@ -1859,8 +2003,10 @@ void CParticleEditor::ShowStackMenu( const QPoint &pos )
 {
 	// The same order as every right-click: add, then move, then remove.
 	QMenu menu;
-	FillAddMenu();
-	menu.addMenu( m_pAdd->menu() )->setText( tr( "Add" ) );
+	menu.addAction( tr( "Add…" ), this, [ this ] {
+		m_pAddFilter->setFocus();
+		m_pAddFilter->selectAll();
+	} );
 	if ( QTreeWidgetItem *pItem = m_pStack->itemAt( pos ); pItem && pItem->data( 0, ROLE_ELEMENT_ROLE ).toInt() >= 0 )
 	{
 		menu.addSeparator();

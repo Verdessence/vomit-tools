@@ -30,6 +30,8 @@
 class CParticleDocument;
 class CParticlePreview;
 class QAction;
+class QComboBox;
+class QSplitter;
 class QLabel;
 class QLineEdit;
 class QListWidget;
@@ -99,6 +101,10 @@ signals:
 	// Look for systems in every particle file (starting with the selected system's name).
 	void SearchRequested( const QString &szQuery );
 
+protected:
+	// Add's filter box sends the arrow keys and Enter to its list.
+	bool eventFilter( QObject *pObject, QEvent *pEvent ) override;
+
 private:
 	struct StackPosition_t
 	{
@@ -116,7 +122,12 @@ private:
 	void RebuildSchema();
 	void ShowInPreview();
 	[[nodiscard]] std::optional<StackPosition_t> PositionOf( std::int32_t nElement ) const;
-	void FillAddMenu();
+	// Add's list, under the stack: the functions of one kind (or the other systems, as children),
+	// on the kind picked in the stack.
+	void BuildAddPanel();
+	void SyncAddPanel();
+	void FillAddPanel( const QString &szList );
+	void AddPicked();
 	void ShowStackMenu( const QPoint &pos );
 	void ShowPropertyMenu( const QPoint &pos );
 	void ShowSystemMenu( QWidget *pView, const QPoint &pos );
@@ -152,6 +163,14 @@ private:
 	QListWidget *m_pIssueList = nullptr;
 	QLabel *m_pSummary = nullptr;
 	QToolButton *m_pAdd = nullptr;
+	QSplitter *m_pStackSplit = nullptr;
+	QWidget *m_pAddPanel = nullptr;
+	QComboBox *m_pAddKind = nullptr;
+	QLineEdit *m_pAddFilter = nullptr;
+	QListWidget *m_pAddList = nullptr;
+	std::vector<std::function<void()>> m_AddRuns; // by m_pAddList row
+	QString m_szAddFilled;                        // the kind m_pAddList holds
+	std::int32_t m_nAddSystem = -1;               // and for which system
 	CParticlePreview *m_pPreview = nullptr;
 	QAction *m_pAddToManifest = nullptr;
 

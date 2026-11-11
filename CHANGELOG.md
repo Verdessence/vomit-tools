@@ -349,6 +349,10 @@
   spawns it.
 - The particle editor's material field has Browse beside it: the texture browser, on sprite
   materials to start with, the one under the mouse drawn live.
+- The particle editor's Add is a list under the stack, always there, on the kind picked in the
+  stack (initializers when an initializer or their heading is picked...); a box beside its filter
+  switches kind (or to child systems). Double-click, Enter or Add adds the function highlighted;
+  the filter takes words. The split between the stack and the list is remembered.
 - Check for Problems tells errors (the compile fails or the game breaks) from warnings: each row
   tagged ERROR or WARN with its icon and colour, errors first, a count of each, toggles to show
   either, and a badge on the side tab with the error count (or the warnings', when none).
