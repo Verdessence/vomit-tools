@@ -191,7 +191,8 @@ private:
 	// Tools > Set Up Hammer: the open game's entry in Hammer++'s or Hammer's configuration.
 	void SetUpHammer();
 	QMenu *m_pMapMenu = nullptr;
-	void AddRecent( const QString &szPath );
+	// bSaved: the file was edited and saved here (the list marks it).
+	void AddRecent( const QString &szPath, bool bSaved = false );
 	void ChooseGameInfo();
 	void ChooseFiles();
 	void ChooseFolder();

@@ -69,6 +69,7 @@
 #include "BuildInfo.h"
 #include "FileActions.h"
 #include "FileDialogs.h"
+#include "FileIcons.h"
 #include "FileViews.h"
 #include "FolderBrowser.h"
 #include "ImageFiles.h"
@@ -130,7 +131,8 @@ constexpr auto SESSION_SIDE_KEY = "lastSessionSide";
 constexpr auto RECENT_KEY = "recentPaths";
 constexpr auto VOLUME_KEY = "volume";
 constexpr auto SKY_EXPORT_KEY = "skyExportFolder";
-constexpr int RECENT_LIMIT = 12;
+constexpr auto RECENT_EDITED_KEY = "recentEdited"; // path: when it was last saved here
+constexpr int RECENT_LIMIT = 100;
 
 //-----------------------------------------------------------------------------
 // Purpose:
@@ -1066,23 +1068,38 @@ void CMainWindow::FillGameMenu( QMenu *pMenu )
 void CMainWindow::FillRecentMenu( QMenu *pMenu )
 {
 	ClearMenu( pMenu );
-	const QStringList recent = QSettings{}.value( RECENT_KEY ).toStringList();
-	if ( recent.isEmpty() )
-	{
-		pMenu->addAction( tr( "Nothing yet" ) )->setEnabled( false );
-		return;
-	}
+	QSettings settings;
+	const QStringList recent = settings.value( RECENT_KEY ).toStringList();
+	const QVariantMap edited = settings.value( RECENT_EDITED_KEY ).toMap();
+	// A long list: searchable, each file with its kind's icon, its name first and its folder
+	// after it; the ones saved here say when.
+	std::vector<PickerItem_t> items;
+	std::vector<QIcon> icons;
 	for ( const QString &szPath : recent )
 	{
 		const QFileInfo info{ szPath };
-		const QString szLabel = info.fileName().compare( u"gameinfo.txt", Qt::CaseInsensitive ) == 0
-			? tr( "%1 (game)" ).arg( QDir::toNativeSeparators( info.absolutePath() ) )
-			: QDir::toNativeSeparators( szPath );
-		QAction *pAction = pMenu->addAction( szLabel, this, [ this, szPath ] { OpenPath( szPath ); } );
-		pAction->setEnabled( info.exists() );
+		if ( !info.exists() )
+			continue;
+		const bool bGame = info.fileName().compare( u"gameinfo.txt", Qt::CaseInsensitive ) == 0;
+		QString szLabel = bGame ? tr( "%1 (game)" ).arg( info.dir().dirName() ) : info.fileName();
+		const QString szFolder = QDir::toNativeSeparators( info.absolutePath() );
+		szLabel += QStringLiteral( "  \u2014  " ) + szFolder;
+		QString szTip = QDir::toNativeSeparators( szPath );
+		if ( const QDateTime saved = edited.value( szPath ).toDateTime(); saved.isValid() )
+		{
+			szLabel = QStringLiteral( "\u270E " ) + szLabel;
+			szTip += u'\n' + tr( "Edited here, saved %1" ).arg( QLocale{}.toString( saved, QLocale::ShortFormat ) );
+		}
+		items.push_back( { szLabel, szTip, [ this, szPath ] { OpenPath( szPath ); } } );
+		icons.push_back( info.isDir() ? FolderIcon() : FileIcon( info.fileName() ) );
 	}
+	FillPicker( pMenu, std::move( items ), tr( "Nothing yet" ), std::move( icons ) );
 	pMenu->addSeparator();
-	pMenu->addAction( tr( "Clear" ), this, [] { QSettings{}.remove( RECENT_KEY ); } );
+	pMenu->addAction( tr( "Clear" ), this, [] {
+		QSettings cleared;
+		cleared.remove( RECENT_KEY );
+		cleared.remove( RECENT_EDITED_KEY );
+	} );
 }
 
 //-----------------------------------------------------------------------------
@@ -1109,7 +1126,7 @@ void CMainWindow::FillSkyMenu( QMenu *pMenu )
 //-----------------------------------------------------------------------------
 // Purpose:
 //-----------------------------------------------------------------------------
-void CMainWindow::AddRecent( const QString &szPath )
+void CMainWindow::AddRecent( const QString &szPath, bool bSaved )
 {
 	QSettings settings;
 	QStringList recent = settings.value( RECENT_KEY ).toStringList();
@@ -1121,6 +1138,13 @@ void CMainWindow::AddRecent( const QString &szPath )
 		recent.removeLast();
 	}
 	settings.setValue( RECENT_KEY, recent );
+	QVariantMap edited = settings.value( RECENT_EDITED_KEY ).toMap();
+	if ( bSaved )
+		edited.insert( szClean, QDateTime::currentDateTime() );
+	// Only those still listed.
+	for ( auto it = edited.begin(); it != edited.end(); )
+		it = recent.contains( it.key() ) ? std::next( it ) : edited.erase( it );
+	settings.setValue( RECENT_EDITED_KEY, edited );
 }
 
 //-----------------------------------------------------------------------------
@@ -2994,6 +3018,7 @@ bool CMainWindow::WriteParticles( CParticleEditor *pEditor, const fs::path &targ
 	pDocument->MarkSaved();
 	statusBar()->showMessage( tr( "Saved %1" ).arg( ToQString( target ) ), 8000 );
 	FilesWritten( { target } );
+	AddRecent( ToQString( target ), true );
 	return true;
 }
 
@@ -3234,6 +3259,7 @@ bool CMainWindow::WriteDocument( CSoundEditor *pEditor, const fs::path &target )
 	pDocument->MarkSaved();
 	statusBar()->showMessage( tr( "Saved %1" ).arg( ToQString( target ) ), 8000 );
 	FilesWritten( { target } );
+	AddRecent( ToQString( target ), true );
 	return true;
 }
 
@@ -4341,6 +4367,7 @@ bool CMainWindow::WriteTexture( CTextureEditor *pEditor, const fs::path &target 
 	pDocument->MarkSaved();
 	statusBar()->showMessage( tr( "Saved %1" ).arg( ToQString( target ) ), 8000 );
 	FilesWritten( { target } );
+	AddRecent( ToQString( target ), true );
 	return true;
 }
 
@@ -4737,6 +4764,7 @@ bool CMainWindow::WriteMaterial( CMaterialEditor *pEditor, const fs::path &targe
 	pEditor->MarkSaved();
 	statusBar()->showMessage( tr( "Saved %1" ).arg( ToQString( target ) ), 8000 );
 	FilesWritten( { target } );
+	AddRecent( ToQString( target ), true );
 	return true;
 }
 
@@ -5017,6 +5045,7 @@ bool CMainWindow::WriteDetail( CDetailEditor *pEditor, const fs::path &target )
 	pEditor->GetDocument()->SetGamePath( GamePathForDisk( target ) );
 	pEditor->GetDocument()->MarkSaved();
 	FilesWritten( { target } );
+	AddRecent( ToQString( target ), true );
 	SetUpDetails( pEditor );
 	return true;
 }
@@ -5556,6 +5585,7 @@ void CMainWindow::AddMapTab( CMapEditor *pEditor )
 	} );
 	connect( pEditor, &CMapEditor::OpenInstanceRequested, this, [ this ]( const QString &szPath ) { OpenMapFile( szPath ); } );
 	connect( &pEditor->GetDocument(), &CMapDocument::Saved, this, [ this ]( const QString &szPath ) {
+		AddRecent( szPath, true );
 		for ( int n = 0; n < m_pTabs->count(); ++n )
 			if ( auto *pMap = qobject_cast<CMapEditor *>( m_pTabs->widget( n ) ) )
 				pMap->GetDocument().RefreshInstancesUsing( std::filesystem::path{ szPath.toStdString() } );

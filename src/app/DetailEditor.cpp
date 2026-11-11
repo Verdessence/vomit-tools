@@ -19,6 +19,7 @@
 #include <QDrag>
 #include <QComboBox>
 #include <QCompleter>
+#include <QDir>
 #include <QDoubleSpinBox>
 #include <QFile>
 #include <QFileInfo>
@@ -34,6 +35,7 @@
 #include <QPainter>
 #include <QPushButton>
 #include <QScrollArea>
+#include <QSettings>
 #include <QScrollBar>
 #include <QSplitter>
 #include <QStandardItemModel>
@@ -59,6 +61,9 @@ using xv::kv1::CNode;
 
 namespace
 {
+// By detail.vbsp file: the sprite material last used with it.
+constexpr auto SPRITE_MATERIALS_KEY = "detailSpriteMaterials";
+
 //-----------------------------------------------------------------------------
 // Purpose: Store paths on widgets without exposing node pointers across edits.
 //-----------------------------------------------------------------------------
@@ -749,7 +754,10 @@ CDetailEditor::CDetailEditor( CDetailDocument *pDocument, QWidget *pParent )
 	m_pMaterial = new QLineEdit( QStringLiteral( "detail/detailsprites" ) );
 	m_pMaterial->setToolTip( tr( "The map's detailmaterial value. This is a preview setting; it is not stored in detail.vbsp." ) );
 	pTools->addWidget( m_pMaterial, 1 );
-	connect( m_pMaterial, &QLineEdit::editingFinished, this, &CDetailEditor::LoadSheet );
+	connect( m_pMaterial, &QLineEdit::editingFinished, this, [ this ] {
+		LoadSheet();
+		RememberSpriteMaterial();
+	} );
 	auto *pOpen = new QPushButton( tr( "Open texture" ) );
 	connect( pOpen, &QPushButton::clicked, this, [ this ] {
 		// A missing material has no texture path to open.
@@ -1308,6 +1316,7 @@ void CDetailEditor::SetContext( xv::material::Reader_t pfnRead, std::vector<std:
 	m_pPreview->SetReader( m_pfnRead );
 	m_szGroundType.clear();
 	FillGrounds();
+	RestoreSpriteMaterial();
 	LoadSheet();
 }
 //-----------------------------------------------------------------------------
@@ -1750,6 +1759,52 @@ void CDetailEditor::SetSpriteMaterial( const QString &szMaterial )
 {
 	m_pMaterial->setText( szMaterial );
 	LoadSheet();
+	RememberSpriteMaterial();
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: The file this editor's sprite material is remembered under: where it is on disk,
+//          else its path in the game; empty for a new file.
+//-----------------------------------------------------------------------------
+QString CDetailEditor::SpriteMaterialKey() const
+{
+	if ( !m_pDocument->GetDiskPath().empty() )
+		return QDir::cleanPath( QString::fromStdString( xv::vfs::ToUtf8( m_pDocument->GetDiskPath() ) ) );
+	return m_pDocument->GetGamePath().isEmpty() ? QString{} : QStringLiteral( "game:" ) + m_pDocument->GetGamePath().toLower();
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: The sprite material last used with this file kept, to come back when it opens again
+//          (it isn't stored in detail.vbsp: the map names it).
+//-----------------------------------------------------------------------------
+void CDetailEditor::RememberSpriteMaterial()
+{
+	const QString szKey = SpriteMaterialKey();
+	if ( szKey.isEmpty() )
+		return;
+	QSettings settings;
+	QVariantMap remembered = settings.value( QLatin1String( SPRITE_MATERIALS_KEY ) ).toMap();
+	remembered.insert( szKey, GetSpriteMaterial() );
+	settings.setValue( QLatin1String( SPRITE_MATERIALS_KEY ), remembered );
+	m_szMaterialFor = szKey;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: The sprite material last used with this file put back, once for each file (a save
+//          under another name carries the one in use over to it).
+//-----------------------------------------------------------------------------
+void CDetailEditor::RestoreSpriteMaterial()
+{
+	const QString szKey = SpriteMaterialKey();
+	if ( szKey.isEmpty() || szKey == m_szMaterialFor )
+		return;
+	const bool bFirst = m_szMaterialFor.isEmpty();
+	m_szMaterialFor = szKey;
+	const QString szRemembered = QSettings{}.value( QLatin1String( SPRITE_MATERIALS_KEY ) ).toMap().value( szKey ).toString();
+	if ( bFirst && !szRemembered.isEmpty() )
+		m_pMaterial->setText( szRemembered );
+	else if ( !bFirst )
+		RememberSpriteMaterial();
 }
 //-----------------------------------------------------------------------------
 // Purpose: Load the chosen material's base texture through the active resource reader.

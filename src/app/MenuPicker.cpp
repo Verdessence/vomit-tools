@@ -22,7 +22,7 @@
 //-----------------------------------------------------------------------------
 // Purpose: Fills a menu with a search box over a list, no taller than a quarter of the screen.
 //-----------------------------------------------------------------------------
-void FillPicker( QMenu *pSub, std::vector<PickerItem_t> items, const QString &szEmpty )
+void FillPicker( QMenu *pSub, std::vector<PickerItem_t> items, const QString &szEmpty, std::vector<QIcon> icons )
 {
 	if ( items.empty() )
 	{
@@ -44,12 +44,17 @@ void FillPicker( QMenu *pSub, std::vector<PickerItem_t> items, const QString &sz
 		auto *pItem = new QListWidgetItem( ( *pShared )[ i ].m_szText, pList );
 		pItem->setToolTip( ( *pShared )[ i ].m_szTip );
 		pItem->setData( Qt::UserRole, static_cast<int>( i ) );
+		if ( i < icons.size() )
+			pItem->setIcon( icons[ i ] );
 	}
 	const QScreen *pScreen = pSub->screen();
 	const int nQuarter = pScreen ? pScreen->availableGeometry().height() / 4 : 240;
 	const int nRows = pList->sizeHintForRow( 0 ) * pList->count() + 2 * pList->frameWidth() + 2;
 	pList->setFixedHeight( std::min( nQuarter, nRows ) );
-	pList->setMinimumWidth( std::max( 240, pList->sizeHintForColumn( 0 ) + 32 ) );
+	// As wide as the longest entry, up to most of the screen (long entries are cut in the middle).
+	const int nWidest = pScreen ? pScreen->availableGeometry().width() * 3 / 5 : 900;
+	pList->setTextElideMode( Qt::ElideMiddle );
+	pList->setMinimumWidth( std::clamp( pList->sizeHintForColumn( 0 ) + 32, 240, std::max( 240, nWidest ) ) );
 	pLayout->addWidget( pFilter );
 	pLayout->addWidget( pList );
 

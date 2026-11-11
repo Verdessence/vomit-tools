@@ -408,6 +408,10 @@
 - The File menu is shorter: **New** holds everything that makes something (maps, particles,
   skyboxes, detail files, soundscapes, soundscripts, textures), **Open** holds File, Folder, Game
   and Recent. VPKs and compiled maps open through Open → File; Open Sky moved to the Game menu.
+- Open → Recent is a searchable list of the last 100 files, folders and games, each with its
+  kind's icon, its name before its folder; files saved here are marked ✎ and tell when.
+- The detail editor remembers the sprite material last used with each detail.vbsp, and puts it
+  back when the file opens again.
 - Garry's Mod's `cfg/mount.cfg`: the games it names are mounted after Garry's Mod's own files,
   their VPKs too; a Windows path in it is found again in the Steam library holding Garry's Mod.
 - The model exporter's GMod playermodel tab: a model on the ValveBiped skeleton (HL2's humans,

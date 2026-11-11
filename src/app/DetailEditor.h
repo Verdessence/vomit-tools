@@ -98,6 +98,9 @@ private:
 	// The selection shown on the cards, sheet and preview, without making the cards again.
 	void ApplySelection();
 	void LoadSheet();
+	[[nodiscard]] QString SpriteMaterialKey() const;
+	void RememberSpriteMaterial();
+	void RestoreSpriteMaterial();
 	void ChoosePictures();
 	void UpdateSheetRects();
 	void QueueRebuild();
@@ -128,6 +131,8 @@ private:
 	QString m_szGroundType;          // the type the ground list was made for
 	bool m_bGroundChosen = false;    // picked by hand, so a new type doesn't change it
 	QString m_szTexturePath;
+	// The file the remembered sprite material is kept under, once restored for it.
+	QString m_szMaterialFor;
 	std::map<QString, QImage> m_PackedImages;
 	bool m_bQueued = false;
 	bool m_bFilling = false;
