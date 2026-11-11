@@ -236,6 +236,9 @@ public:
 	// The Entity Report and Check for Problems (Alt+P) windows, one of each, beside the views.
 	CMapEntityReport *ShowEntityReport();
 	CMapCheckPanel *ShowCheckForProblems();
+	// Gives the world's faces facing the void nodraw (one undo step), or says where the map leaks.
+	// The number of faces changed; -1 when the map leaks or has no entity inside (pszLeak then says so).
+	int NodrawVoidFaces( QString *pszLeak = nullptr );
 	// Find Entities (Ctrl+Shift+F): the entities named exactly so selected and centred on.
 	void ShowFindEntities();
 	bool FindEntitiesByName( const QString &szName );

@@ -168,6 +168,7 @@ const MapActionInfo_t ACTIONS[] = {
 	{ A::MAP_ACTION_BRUSH_MODE_EDGE, "Brush_Mode_Edge", QT_TRANSLATE_NOOP( "MapKeys", "Edges" ), "Brush Edit", BRUSH },
 	{ A::MAP_ACTION_BRUSH_MODE_FACE, "Brush_Mode_Face", QT_TRANSLATE_NOOP( "MapKeys", "Faces" ), "Brush Edit", BRUSH },
 	{ A::MAP_ACTION_BRUSH_LEAVE, "Brush_Leave", QT_TRANSLATE_NOOP( "MapKeys", "Leave Brush Edit" ), "Brush Edit", BRUSH },
+	{ A::MAP_ACTION_NODRAW_VOID_FACES, "Map_Nodraw_Void_Faces", QT_TRANSLATE_NOOP( "MapKeys", "Nodraw faces facing the void" ), "Tools", BOTH },
 };
 static_assert( std::size( ACTIONS ) == static_cast<std::size_t>( MapAction_t::MAP_ACTION_COUNT ), "every action is listed" );
 

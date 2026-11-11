@@ -811,6 +811,12 @@ void CMainWindow::BuildMenus( QAction *pSearchPathsToggle )
 			pMap->RunAction( MapAction_t::MAP_ACTION_CHECK_PROBLEMS, pMap->GetActiveView() );
 		}
 	} );
+	m_pMapMenu->addAction( tr( "&Nodraw Faces Facing the Void" ), this, [ this ] {
+		if ( CMapEditor *pMap = GetCurrentMap() )
+		{
+			pMap->RunAction( MapAction_t::MAP_ACTION_NODRAW_VOID_FACES, pMap->GetActiveView() );
+		}
+	} );
 	m_pMapMenu->addAction( tr( "Edit Cordon &Bounds" ), this, [ this ] {
 		if ( CMapEditor *pMap = GetCurrentMap() )
 		{

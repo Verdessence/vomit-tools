@@ -162,6 +162,7 @@ enum class MapAction_t
 	MAP_ACTION_BRUSH_MODE_EDGE,       // Blender's 2
 	MAP_ACTION_BRUSH_MODE_FACE,       // Blender's 3
 	MAP_ACTION_BRUSH_LEAVE,           // Tab (Escape too, always): back to the selection tool
+	MAP_ACTION_NODRAW_VOID_FACES,     // the Map menu: the world's faces facing the void get nodraw
 	MAP_ACTION_COUNT
 };
 

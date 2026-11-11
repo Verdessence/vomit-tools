@@ -10,6 +10,7 @@
 
 #include "kv1/Kv1.h"
 #include "map/Check.h"
+#include "map/VoidFaces.h"
 #include "map/Cordon.h"
 #include "map/DispEdit.h"
 #include "bsp/Stripper.h"
@@ -2689,6 +2690,13 @@ bool CMapEditor::RunAction( MapAction_t nAction, CMapView *pFrom )
 		case MapAction_t::MAP_ACTION_CHECK_PROBLEMS:
 			ShowCheckForProblems();
 			return true;
+		case MapAction_t::MAP_ACTION_NODRAW_VOID_FACES:
+		{
+			QString szLeak;
+			if ( NodrawVoidFaces( &szLeak ) < 0 )
+				QMessageBox::warning( this, tr( "Nodraw Faces Facing the Void" ), szLeak );
+			return true;
+		}
 		case MapAction_t::MAP_ACTION_TRANSFORM:
 			ShowTransformDialog();
 			return true;
@@ -4332,6 +4340,48 @@ std::size_t CMapEditor::ReplaceTextures( const xv::map::ReplaceTextures_t &how, 
 		m_pDocument->Edit( std::move( edit ), tr( "Replace Textures" ) );
 	}
 	return nChanged;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: The faces found from the map as it is now; a leak is said (and the view sent to the
+//          entity the outside reaches) instead, as nothing could be told apart from the void.
+//-----------------------------------------------------------------------------
+int CMapEditor::NodrawVoidFaces( QString *pszLeak )
+{
+	const xv::map::CScene *pScene = m_pDocument->GetScene();
+	if ( !pScene )
+		return 0;
+	xv::map::VoidFaces_t found;
+	{
+		QApplication::setOverrideCursor( Qt::WaitCursor );
+		found = xv::map::FindVoidFaces( *pScene );
+		QApplication::restoreOverrideCursor();
+	}
+	if ( found.m_bLeaks )
+	{
+		const auto &at = found.m_LeakAt;
+		const QString szWhere = QStringLiteral( "%1 %2 %3" ).arg( std::lround( at[ 0 ] ) ).arg( std::lround( at[ 1 ] ) ).arg( std::lround( at[ 2 ] ) );
+		emit StatusMessage( tr( "The map leaks: nothing given nodraw" ) );
+		if ( pszLeak )
+			*pszLeak = tr( "The map leaks: the outside reaches %1 at %2, so its inside can't be told from the void. Seal it first (a compile's pointfile shows where)." ).arg( QString::fromStdString( found.m_szLeakEntity ), szWhere );
+		return -1;
+	}
+	if ( found.m_bNothingInside )
+	{
+		emit StatusMessage( tr( "No entity inside the map: nothing given nodraw" ) );
+		if ( pszLeak )
+			*pszLeak = tr( "No entity is inside the map, so its inside can't be told from the void. Place one (a player start) inside first." );
+		return -1;
+	}
+	if ( found.m_Faces.empty() )
+	{
+		emit StatusMessage( tr( "No faces face the void" ) );
+		return 0;
+	}
+	m_pDocument->Edit( xv::map::NodrawFaces( *pScene, found.m_Faces ), tr( "Nodraw Faces Facing the Void" ) );
+	const int nFaces = static_cast<int>( found.m_Faces.size() );
+	emit StatusMessage( tr( "%n face(s) facing the void given nodraw", nullptr, nFaces ) );
+	return nFaces;
 }
 
 //-----------------------------------------------------------------------------

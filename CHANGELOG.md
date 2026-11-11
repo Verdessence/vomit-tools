@@ -353,6 +353,11 @@
   stack (initializers when an initializer or their heading is picked...); a box beside its filter
   switches kind (or to child systems). Double-click, Enter or Add adds the function highlighted;
   the filter takes words. The split between the stack and the list is remembered.
+- Map > Nodraw Faces Facing the Void: the world's faces only the outside can see (each wall's back,
+  the floor's underside...) get nodraw, as one undo step. The map's own and its instances' world
+  brushes seal it (clip, trigger and hint brushes don't); when the outside reaches an entity it
+  says where the map leaks and changes nothing, and the same when no entity is inside. Tool
+  textures and displacements are left alone.
 - Check for Problems tells errors (the compile fails or the game breaks) from warnings: each row
   tagged ERROR or WARN with its icon and colour, errors first, a count of each, toggles to show
   either, and a badge on the side tab with the error count (or the warnings', when none).
