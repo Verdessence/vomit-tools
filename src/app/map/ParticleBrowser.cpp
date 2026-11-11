@@ -82,9 +82,14 @@ class CWordsFilter : public QSortFilterProxyModel
 public:
 	void SetWords( const QString &szWords )
 	{
+#if QT_VERSION >= QT_VERSION_CHECK( 6, 10, 0 )
 		beginFilterChange();
 		m_Words = szWords.split( QLatin1Char( ' ' ), Qt::SkipEmptyParts );
 		endFilterChange( QSortFilterProxyModel::Direction::Rows );
+#else
+		m_Words = szWords.split( QLatin1Char( ' ' ), Qt::SkipEmptyParts );
+		invalidateRowsFilter(); // CI builds on Qt 6.8, before begin/endFilterChange
+#endif
 	}
 
 protected:

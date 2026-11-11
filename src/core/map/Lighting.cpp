@@ -268,6 +268,16 @@ Ray_t MakeRay( Point_t origin, Point_t dir, double flMax )
 	return ray;
 }
 
+// One bin of the tracer's split search: the triangles whose centres fall in it and their box. Out
+// here rather than in Build: MSVC can't make a default constructor for a local class whose member
+// initializers use the function's own constants.
+struct TraceBin_t
+{
+	std::array<float, 3> m_Lo{ std::numeric_limits<float>::max(), std::numeric_limits<float>::max(), std::numeric_limits<float>::max() };
+	std::array<float, 3> m_Hi{ -std::numeric_limits<float>::max(), -std::numeric_limits<float>::max(), -std::numeric_limits<float>::max() };
+	std::uint32_t m_nCount = 0;
+};
+
 // The faces that stop light, as a bounding volume hierarchy for rays.
 class CTracer
 {
@@ -424,13 +434,7 @@ void CTracer::Build( std::vector<TraceTriangle_t> triangles )
 		std::uint32_t nMid = pending.m_nBegin;
 		if ( nHere > LEAF && flExtent > 0.0f )
 		{
-			struct Bin_t
-			{
-				std::array<float, 3> m_Lo{ BIG, BIG, BIG };
-				std::array<float, 3> m_Hi{ -BIG, -BIG, -BIG };
-				std::uint32_t m_nCount = 0;
-			};
-			std::array<Bin_t, BINS> bins{};
+			std::array<TraceBin_t, BINS> bins{};
 			const auto binOf = [ & ]( std::uint32_t n ) {
 				const int b = static_cast<int>( ( centres[ n ][ nAxis ] - centreLo[ nAxis ] ) / flExtent * BINS );
 				return std::clamp( b, 0, BINS - 1 );
@@ -438,7 +442,7 @@ void CTracer::Build( std::vector<TraceTriangle_t> triangles )
 			for ( std::uint32_t i = pending.m_nBegin; i < pending.m_nEnd; i++ )
 			{
 				const std::uint32_t n = order[ i ];
-				Bin_t &bin = bins[ static_cast<std::size_t>( binOf( n ) ) ];
+				TraceBin_t &bin = bins[ static_cast<std::size_t>( binOf( n ) ) ];
 				bin.m_nCount++;
 				for ( std::size_t k = 0; k < 3; k++ )
 				{
@@ -448,7 +452,7 @@ void CTracer::Build( std::vector<TraceTriangle_t> triangles )
 			}
 			// The cost of each split: the triangles on each side times their box's area.
 			std::array<float, BINS - 1> costs{};
-			Bin_t left;
+			TraceBin_t left;
 			for ( std::size_t b = 0; b + 1 < BINS; b++ )
 			{
 				left.m_nCount += bins[ b ].m_nCount;
@@ -459,7 +463,7 @@ void CTracer::Build( std::vector<TraceTriangle_t> triangles )
 				}
 				costs[ b ] = left.m_nCount > 0 ? area( left.m_Lo, left.m_Hi ) * static_cast<float>( left.m_nCount ) : 0.0f;
 			}
-			Bin_t right;
+			TraceBin_t right;
 			for ( std::size_t b = BINS - 1; b > 0; b-- )
 			{
 				right.m_nCount += bins[ b ].m_nCount;
