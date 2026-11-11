@@ -895,6 +895,17 @@ MapFrame_t CMapRenderData::Snapshot( const xv::map::CViewCamera &camera, const x
 		frame.m_pFog = m_pFog;
 		frame.m_Options.m_Shade.m_pFog = m_pFog.get();
 	}
+	if ( pScene && ( pScene != m_pTonemapFor || pScene->m_nRevision != m_nTonemapRevision ) )
+	{
+		m_pTonemapFor = pScene;
+		m_nTonemapRevision = pScene->m_nRevision;
+		m_Tonemap = xv::map::ReadTonemap( pScene->m_Map );
+	}
+	if ( pScene )
+	{
+		frame.m_flExposureMin = m_Tonemap.m_flExposureMin;
+		frame.m_flExposureMax = m_Tonemap.m_flExposureMax;
+	}
 	frame.m_Options.m_Shade.m_vecViewForward = xv::map::ToVec3( camera.GetForward() );
 	// Hammer++ draws the 3D skybox by default; Alt+V turns it off.
 	frame.m_Options.m_SkyboxCamera.reset();

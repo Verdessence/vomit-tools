@@ -138,6 +138,18 @@ struct FogController_t
 // starts with fog on.
 [[nodiscard]] std::optional<Fog_t> ReadFog( const CMap &map, int nId = 0 );
 
+// What the map's env_tonemap_controller starts with: the inputs a logic_auto's OnMapSpawn sends
+// it (SetAutoExposureMin/Max, SetBloomScale), else the game's own values (mat_autoexposure_min
+// and _max: 0.5 and 2; bloom 1).
+struct Tonemap_t
+{
+	float m_flExposureMin = 0.5f;
+	float m_flExposureMax = 2.0f;
+	float m_flBloomScale = 1.0f;
+	bool m_bController = false; // the map has an env_tonemap_controller
+};
+[[nodiscard]] Tonemap_t ReadTonemap( const CMap &map );
+
 // What lighting needs of a material.
 struct LightMaterial_t
 {

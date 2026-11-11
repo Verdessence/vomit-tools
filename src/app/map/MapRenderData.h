@@ -67,6 +67,9 @@ struct MapFrame_t
 	std::uint64_t m_nGeneration = 0; // changes whenever anything but the camera does
 	bool m_bModelEdges = true;       // the props' edges in the wireframe view
 	float m_flExposure = 0.0f;       // the HDR lighting preview's auto exposure, in the light's scale; 0: none (nothing to measure)
+	// The bounds the auto exposure keeps to: the map's env_tonemap_controller's at the start.
+	float m_flExposureMin = 0.5f;
+	float m_flExposureMax = 2.0f;
 	// A screen effect drawn over the picture (M16), as at a time for its proxies; null for none.
 	std::shared_ptr<const CMapScreenEffect> m_pScreenEffect;
 	float m_flScreenTime = 0.0f;
@@ -170,6 +173,10 @@ private:
 	std::vector<std::shared_ptr<const xv::map::CMapMesh>> m_MeshLightsKeep;
 	std::shared_ptr<const xv::map::Fog_t> m_pFog;
 	const xv::map::CScene *m_pFogFor = nullptr;
+	// The map's tone map, worked out again when its scene changes.
+	xv::map::Tonemap_t m_Tonemap;
+	const xv::map::CScene *m_pTonemapFor = nullptr;
+	std::uint64_t m_nTonemapRevision = 0;
 	int m_nFogControllerFor = 0;
 	std::uint64_t m_nFogRevision = 0; // the meshes m_pMeshLights names, held so their addresses stay theirs
 	xv::map::Point_t m_SpritesRight{};          // the camera the sprite mesh faces

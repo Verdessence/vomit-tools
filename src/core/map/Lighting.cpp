@@ -22,6 +22,7 @@
 #include <utility>
 
 #include "map/Entities.h"
+#include "map/Properties.h"
 #include "map/Scene.h"
 #include "util/Numbers.h"
 #include "util/Parallel.h"
@@ -3402,6 +3403,52 @@ std::optional<Fog_t> ReadFog( const CMap &map, int nId )
 	if ( const auto found = std::ranges::find_if( controllers, &FogController_t::m_bEnabled ); found != controllers.end() )
 		return found->m_Fog;
 	return std::nullopt;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: The first env_tonemap_controller with a name, and the values logic_auto sends it
+//          at the map's start (an output's parameter that isn't a number is left out, as the
+//          game reads it as 0 and the clamp would hide that).
+//-----------------------------------------------------------------------------
+Tonemap_t ReadTonemap( const CMap &map )
+{
+	const auto sameText = []( std::string_view a, std::string_view b ) {
+		return std::ranges::equal( a, b, []( char x, char y ) { return std::tolower( static_cast<unsigned char>( x ) ) == std::tolower( static_cast<unsigned char>( y ) ); } );
+	};
+	Tonemap_t tonemap;
+	std::vector<std::string_view> names;
+	for ( const Entity_t &entity : map.m_Entities )
+	{
+		if ( !entity.m_bDeleted && sameText( entity.GetClassname(), "env_tonemap_controller" ) )
+		{
+			tonemap.m_bController = true;
+			if ( const std::string_view szName = entity.GetValue( "targetname" ); !szName.empty() )
+				names.push_back( szName );
+		}
+	}
+	if ( names.empty() )
+		return tonemap;
+	for ( const Entity_t &entity : map.m_Entities )
+	{
+		if ( entity.m_bDeleted || !sameText( entity.GetClassname(), "logic_auto" ) )
+			continue;
+		for ( const Connection_t &connection : entity.m_Connections )
+		{
+			if ( !sameText( connection.m_szOutput, "OnMapSpawn" ) || std::ranges::none_of( names, [ & ]( std::string_view szName ) { return TargetMatches( connection.m_szTarget, szName ); } ) )
+				continue;
+			const std::optional<double> flValue = ParseNumber<double>( connection.m_szParameter );
+			if ( !flValue )
+				continue;
+			if ( sameText( connection.m_szInput, "SetAutoExposureMin" ) )
+				tonemap.m_flExposureMin = static_cast<float>( *flValue );
+			else if ( sameText( connection.m_szInput, "SetAutoExposureMax" ) )
+				tonemap.m_flExposureMax = static_cast<float>( *flValue );
+			else if ( sameText( connection.m_szInput, "SetBloomScale" ) )
+				tonemap.m_flBloomScale = static_cast<float>( *flValue );
+		}
+	}
+	tonemap.m_flExposureMax = std::max( tonemap.m_flExposureMax, tonemap.m_flExposureMin );
+	return tonemap;
 }
 
 } // namespace xv::map

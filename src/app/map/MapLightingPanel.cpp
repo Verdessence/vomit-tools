@@ -10,17 +10,17 @@
 #include <array>
 
 #include <QCheckBox>
-#include <QColorDialog>
 #include <QDoubleSpinBox>
 #include <QFormLayout>
 #include <QHBoxLayout>
-#include <QHeaderView>
 #include <QLabel>
 #include <QLocale>
 #include <QMenu>
 #include <QPushButton>
 #include <QSpinBox>
-#include <QTableWidget>
+#include <QListWidget>
+#include <QPixmap>
+#include <QToolButton>
 #include <QVBoxLayout>
 
 #include "Preferences.h"
@@ -28,21 +28,10 @@
 #include "map/Shade.h"
 #include "map/MapEditor.h"
 #include "map/MapLighting.h"
+#include "map/MapEntityFields.h"
 
 namespace
 {
-
-enum Column_t
-{
-	COLUMN_CLASS,
-	COLUMN_NAME,
-	COLUMN_COLOUR,
-	COLUMN_BRIGHTNESS,
-	COLUMN_FIFTY,
-	COLUMN_ZERO,
-	COLUMN_CONES,
-	COLUMN_COUNT,
-};
 
 // A "_light"-style value as written: red, green, blue and brightness (255 when left out, which
 // is how vrad reads three numbers; one number is grey).
@@ -84,14 +73,6 @@ LightValue_t ReadValue( std::string_view szText )
 		}
 	}
 	return value;
-}
-
-//-----------------------------------------------------------------------------
-// Purpose:
-//-----------------------------------------------------------------------------
-std::string WriteValue( const LightValue_t &value )
-{
-	return QStringLiteral( "%1 %2 %3 %4" ).arg( value.m_Color[ 0 ] ).arg( value.m_Color[ 1 ] ).arg( value.m_Color[ 2 ] ).arg( value.m_flBrightness ).toStdString();
 }
 
 //-----------------------------------------------------------------------------
@@ -190,53 +171,64 @@ CMapLightingPanel::CMapLightingPanel( CMapEditor &editor, QWidget *pParent )
 	m_pStatus->setWordWrap( true );
 	pLayout->addWidget( m_pStatus );
 
-	m_pTable = new QTableWidget( 0, COLUMN_COUNT );
-	m_pTable->setObjectName( QStringLiteral( "mapLightingTable" ) );
-	m_pTable->setHorizontalHeaderLabels( { tr( "Class" ), tr( "Name" ), tr( "Colour" ), tr( "Brightness" ), tr( "50%" ), tr( "0%" ), tr( "Cones" ) } );
-	m_pTable->horizontalHeaderItem( COLUMN_FIFTY )->setToolTip( tr( "_fifty_percent_distance: where it is half as bright (0: constant, linear and quadratic)" ) );
-	m_pTable->horizontalHeaderItem( COLUMN_ZERO )->setToolTip( tr( "_zero_percent_distance: where it has gone" ) );
-	m_pTable->horizontalHeaderItem( COLUMN_CONES )->setToolTip( tr( "A spot's inner and outer cones, in degrees" ) );
-	m_pTable->verticalHeader()->hide();
-	m_pTable->setSelectionBehavior( QAbstractItemView::SelectRows );
-	m_pTable->setSelectionMode( QAbstractItemView::SingleSelection );
-	m_pTable->horizontalHeader()->setStretchLastSection( true );
-	connect( m_pTable, &QTableWidget::itemChanged, this, &CMapLightingPanel::Edited );
-	connect( m_pTable, &QTableWidget::cellDoubleClicked, this, [ this ]( int nRow, int nColumn ) {
-		if ( nColumn == COLUMN_COLOUR )
-		{
-			PickColour( nRow );
-		}
-	} );
-	connect( m_pTable, &QTableWidget::currentCellChanged, this, [ this ]( int nRow ) {
-		// The light picked in the table is picked in the views too.
-		if ( m_bFilling || nRow < 0 || static_cast<std::size_t>( nRow ) >= m_Rows.size() || !m_Editor.GetDocument().GetScene() )
-		{
+	// The entities that set the map's look, each folding, their keys as fields.
+	const auto section = [ & ]( const QString &szTitle, const QString &szName, std::vector<std::string> classes, std::vector<EntityField_t> fields, bool bOpen ) {
+		auto *pFields = new CMapEntityFields( m_Editor, std::move( classes ), std::move( fields ) );
+		pLayout->addWidget( MakeFoldSection( szTitle, pFields, szName, bOpen ) );
+		return pFields;
+	};
+	section( tr( "Sun and Sky" ), QStringLiteral( "mapLightingSun" ), { "light_environment" },
+		{ { "angles", {}, {}, {} },
+			{ "pitch", {}, {}, {} },
+			{ "_light", {}, {}, {} },
+			{ "_ambient", {}, {}, {} },
+			{ "_lightHDR", {}, {}, {} },
+			{ "_ambientHDR", {}, {}, {} },
+			{ "_lightscaleHDR", {}, {}, {} },
+			{ "_AmbientScaleHDR", {}, {}, {} },
+			{ "SunSpreadAngle", {}, {}, {} } },
+		true );
+	section( tr( "Shadows" ), QStringLiteral( "mapLightingShadows" ), { "shadow_control" },
+		{ { "angles", {}, {}, {} }, { "color", {}, {}, {} }, { "distance", {}, {}, {} }, { "disableallshadows", {}, {}, {} } }, false );
+	section( tr( "Tone Map" ), QStringLiteral( "mapLightingTonemap" ), { "env_tonemap_controller" },
+		{ { "targetname", {}, {}, {} },
+			{ {}, "SetAutoExposureMin", tr( "Exposure at least" ), tr( "SetAutoExposureMin, sent by a logic_auto as the map starts: the darkest the auto exposure goes (the game's own: 0.5). The HDR lighting preview keeps to it." ) },
+			{ {}, "SetAutoExposureMax", tr( "Exposure at most" ), tr( "SetAutoExposureMax, sent as the map starts: the brightest the auto exposure goes (the game's own: 2). The HDR lighting preview keeps to it." ) },
+			{ {}, "SetBloomScale", tr( "Bloom scale" ), tr( "SetBloomScale, sent as the map starts: how strong HDR's bloom is (1 by default)" ) },
+			{ {}, "SetTonemapRate", tr( "Adapt rate" ), tr( "SetTonemapRate, sent as the map starts: how fast the exposure follows the light" ) } },
+		false );
+	section( tr( "Colour Correction" ), QStringLiteral( "mapLightingColorCorrection" ), { "color_correction" },
+		{ { "filename", {}, {}, {} }, { "maxweight", {}, {}, {} }, { "minfalloff", {}, {}, {} }, { "maxfalloff", {}, {}, {} }, { "fadeInDuration", {}, {}, {} }, { "fadeOutDuration", {}, {}, {} } },
+		false );
+
+	// Every light, short: picking one selects it (its keys are Object Properties').
+	m_pLights = new QListWidget;
+	m_pLights->setObjectName( QStringLiteral( "mapLightingLights" ) );
+	m_pLights->setToolTip( tr( "Pick a light to select it; right-click for more" ) );
+	m_pLights->setMinimumHeight( 80 );
+	connect( m_pLights, &QListWidget::currentRowChanged, this, [ this ]( int nRow ) {
+		if ( m_bFilling || nRow < 0 || static_cast<std::size_t>( nRow ) >= m_LightEntities.size() || !m_Editor.GetDocument().GetScene() )
 			return;
-		}
-		m_Editor.GetDocument().SetSelection( { m_Editor.GetDocument().GetScene()->EntityObject( m_Rows[ static_cast<std::size_t>( nRow ) ].m_nEntity ) } );
+		m_Editor.GetDocument().SetSelection( { m_Editor.GetDocument().GetScene()->EntityObject( m_LightEntities[ static_cast<std::size_t>( nRow ) ] ) } );
 	} );
-	// A light's right-click menu: pick it in the views, look at it, open its properties.
-	m_pTable->setContextMenuPolicy( Qt::CustomContextMenu );
-	connect( m_pTable, &QTableWidget::customContextMenuRequested, this, [ this ]( const QPoint &at ) {
-		const int nRow = m_pTable->rowAt( at.y() );
-		if ( nRow < 0 || static_cast<std::size_t>( nRow ) >= m_Rows.size() )
+	m_pLights->setContextMenuPolicy( Qt::CustomContextMenu );
+	connect( m_pLights, &QListWidget::customContextMenuRequested, this, [ this ]( const QPoint &at ) {
+		const int nRow = m_pLights->indexAt( at ).row();
+		if ( nRow < 0 || static_cast<std::size_t>( nRow ) >= m_LightEntities.size() )
 			return;
-		m_pTable->setCurrentCell( nRow, m_pTable->columnAt( at.x() ) );
+		m_pLights->setCurrentRow( nRow );
 		QMenu menu( this );
 		menu.setObjectName( QStringLiteral( "mapLightMenu" ) );
-		menu.addAction( tr( "Select" ), this, [ this, nRow ] {
-			if ( const xv::map::CScene *pScene = m_Editor.GetDocument().GetScene() )
-				m_Editor.GetDocument().SetSelection( { pScene->EntityObject( m_Rows[ static_cast<std::size_t>( nRow ) ].m_nEntity ) } );
-		} );
 		menu.addAction( tr( "Centre 3D View on It" ), this, [ this ] { m_Editor.RunAction( MapAction_t::MAP_ACTION_CENTER_3D, nullptr ); } );
 		menu.addAction( tr( "Centre 2D Views on It" ), this, [ this ] { m_Editor.RunAction( MapAction_t::MAP_ACTION_CENTER_2D, nullptr ); } );
-		menu.addAction( tr( "Change Colour…" ), this, [ this, nRow ] { PickColour( nRow ); } );
 		menu.addSeparator();
 		menu.addAction( tr( "Properties" ), this, [ this ] { m_Editor.RunAction( MapAction_t::MAP_ACTION_PROPERTIES, nullptr ); } );
-		menu.exec( m_pTable->viewport()->mapToGlobal( at ) );
+		menu.exec( m_pLights->viewport()->mapToGlobal( at ) );
 	} );
-	pLayout->addWidget( new QLabel( tr( "Lights (double-click a colour to change it):" ) ) );
-	pLayout->addWidget( m_pTable, 1 );
+	QWidget *pLights = MakeFoldSection( tr( "Lights in the Map" ), m_pLights, QStringLiteral( "mapLightingLightList" ), false );
+	m_pLightsHeader = pLights->findChild<QToolButton *>();
+	pLayout->addWidget( pLights, 1 );
+	pLayout->addStretch( 0 );
 
 	LoadPreferences();
 	for ( QSpinBox *pSpin : { m_pBounces, m_pLuxels, m_pDelay, m_pSkySamples } )
@@ -334,172 +326,36 @@ void CMapLightingPanel::UpdateStatus()
 }
 
 //-----------------------------------------------------------------------------
-// Purpose: light, light_spot, light_glspot and light_environment (its sun, then its ambient).
+// Purpose: light, light_spot, light_glspot, light_dynamic and light_environment, each with its
+//          colour, class and name.
 //-----------------------------------------------------------------------------
 void CMapLightingPanel::Refresh()
 {
 	const xv::map::CScene *pScene = m_Editor.GetDocument().GetScene();
 	m_bFilling = true;
-	const QSignalBlocker block( m_pTable );
-	m_Rows.clear();
-	m_pTable->setRowCount( 0 );
-	if ( !pScene )
+	const QSignalBlocker block( m_pLights );
+	m_LightEntities.clear();
+	m_pLights->clear();
+	if ( pScene )
 	{
-		m_bFilling = false;
-		return;
-	}
-	const auto &entities = std::as_const( pScene->m_Map.m_Entities );
-	for ( std::size_t e = 0; e < entities.size(); e++ )
-	{
-		const xv::map::Entity_t &entity = entities[ e ];
-		const std::string_view szClass = entity.GetClassname();
-		if ( entity.m_bDeleted || ( szClass != "light" && szClass != "light_spot" && szClass != "light_glspot" && szClass != "light_environment" ) )
+		const auto &entities = std::as_const( pScene->m_Map.m_Entities );
+		for ( std::size_t e = 0; e < entities.size(); e++ )
 		{
-			continue;
-		}
-		const bool bSpot = szClass == "light_spot" || szClass == "light_glspot";
-		const bool bSun = szClass == "light_environment";
-		for ( const std::string_view szKey : { std::string_view{ "_light" }, std::string_view{ "_ambient" } } )
-		{
-			if ( szKey == "_ambient" && !bSun )
-			{
+			const xv::map::Entity_t &entity = entities[ e ];
+			const std::string_view szClass = entity.GetClassname();
+			if ( entity.m_bDeleted || ( szClass != "light" && szClass != "light_spot" && szClass != "light_glspot" && szClass != "light_dynamic" && szClass != "light_environment" ) )
 				continue;
-			}
-			const int nRow = m_pTable->rowCount();
-			m_pTable->insertRow( nRow );
-			m_Rows.push_back( { static_cast<std::uint32_t>( e ), std::string( szKey ) } );
-			auto cell = [ & ]( int nColumn, const QString &szText, bool bEditable ) {
-				auto *pItem = new QTableWidgetItem( szText );
-				pItem->setFlags( bEditable ? pItem->flags() | Qt::ItemIsEditable : pItem->flags() & ~Qt::ItemIsEditable );
-				m_pTable->setItem( nRow, nColumn, pItem );
-				return pItem;
-			};
-			cell( COLUMN_CLASS, szKey == "_ambient" ? tr( "%1 (ambient)" ).arg( Text( szClass ) ) : Text( szClass ), false );
-			cell( COLUMN_NAME, Text( entity.GetValue( "targetname" ) ), false );
-			const LightValue_t value = ReadValue( entity.GetValue( szKey ) );
-			QTableWidgetItem *pColour = cell( COLUMN_COLOUR, QString{}, false );
-			pColour->setBackground( QColor( std::clamp( value.m_Color[ 0 ], 0, 255 ), std::clamp( value.m_Color[ 1 ], 0, 255 ), std::clamp( value.m_Color[ 2 ], 0, 255 ) ) );
-			pColour->setToolTip( QStringLiteral( "%1 %2 %3" ).arg( value.m_Color[ 0 ] ).arg( value.m_Color[ 1 ] ).arg( value.m_Color[ 2 ] ) );
-			cell( COLUMN_BRIGHTNESS, QString::number( value.m_flBrightness ), true );
-			const bool bFalloff = !bSun;
-			cell( COLUMN_FIFTY, bFalloff ? Text( entity.GetValue( "_fifty_percent_distance" ) ) : QString{}, bFalloff );
-			cell( COLUMN_ZERO, bFalloff ? Text( entity.GetValue( "_zero_percent_distance" ) ) : QString{}, bFalloff );
-			cell( COLUMN_CONES, bSpot ? QStringLiteral( "%1 / %2" ).arg( Text( entity.GetValue( "_inner_cone" ) ), Text( entity.GetValue( "_cone" ) ) ) : QString{}, bSpot );
+			const LightValue_t value = ReadValue( entity.GetValue( "_light" ) );
+			QPixmap swatch( 12, 12 );
+			swatch.fill( QColor( std::clamp( value.m_Color[ 0 ], 0, 255 ), std::clamp( value.m_Color[ 1 ], 0, 255 ), std::clamp( value.m_Color[ 2 ], 0, 255 ) ) );
+			const std::string_view szName = entity.GetValue( "targetname" );
+			auto *pItem = new QListWidgetItem( QIcon( swatch ), szName.empty() ? Text( szClass ) : QStringLiteral( "%1  %2" ).arg( Text( szClass ), Text( szName ) ), m_pLights );
+			pItem->setToolTip( tr( "%1, brightness %2" ).arg( Text( entity.GetValue( "_light" ) ) ).arg( value.m_flBrightness ) );
+			m_LightEntities.push_back( static_cast<std::uint32_t>( e ) );
 		}
 	}
-	m_pTable->resizeColumnsToContents();
+	m_pLightsHeader->setText( tr( "Lights in the Map (%1)" ).arg( m_LightEntities.size() ) );
 	m_bFilling = false;
-}
-
-//-----------------------------------------------------------------------------
-// Purpose:
-//-----------------------------------------------------------------------------
-void CMapLightingPanel::SetKey( std::uint32_t nEntity, const std::string &szKey, const std::string &szValue, const QString &szName )
-{
-	const xv::map::CScene *pScene = m_Editor.GetDocument().GetScene();
-	if ( !pScene || nEntity >= pScene->m_Map.m_Entities.size() )
-	{
-		return;
-	}
-	xv::map::Entity_t entity = std::as_const( pScene->m_Map.m_Entities )[ nEntity ];
-	if ( entity.GetValue( szKey ) == szValue )
-	{
-		return;
-	}
-	xv::map::SetKeyValue( pScene->m_Map, entity, szKey, szValue );
-	xv::map::MapEdit_t edit;
-	edit.m_Entities.emplace_back( nEntity, std::move( entity ) );
-	m_Editor.GetDocument().Edit( std::move( edit ), szName );
-}
-
-//-----------------------------------------------------------------------------
-// Purpose: A cell typed in: the brightness, a falloff distance, or a spot's cones.
-//-----------------------------------------------------------------------------
-void CMapLightingPanel::Edited( QTableWidgetItem *pItem )
-{
-	if ( m_bFilling || !pItem || static_cast<std::size_t>( pItem->row() ) >= m_Rows.size() )
-	{
-		return;
-	}
-	const Row_t row = m_Rows[ static_cast<std::size_t>( pItem->row() ) ];
-	const xv::map::CScene *pScene = m_Editor.GetDocument().GetScene();
-	if ( !pScene )
-	{
-		return;
-	}
-	const xv::map::Entity_t &entity = std::as_const( pScene->m_Map.m_Entities )[ row.m_nEntity ];
-	const QString szText = pItem->text().trimmed();
-	switch ( pItem->column() )
-	{
-		case COLUMN_BRIGHTNESS:
-		{
-			bool bOk = false;
-			const double flBrightness = szText.toDouble( &bOk );
-			if ( !bOk || flBrightness < 0.0 )
-			{
-				break;
-			}
-			LightValue_t value = ReadValue( entity.GetValue( row.m_szKey ) );
-			value.m_flBrightness = flBrightness;
-			SetKey( row.m_nEntity, row.m_szKey, WriteValue( value ), tr( "Light Brightness" ) );
-			return;
-		}
-		case COLUMN_FIFTY:
-		case COLUMN_ZERO:
-		{
-			bool bOk = szText.isEmpty();
-			const double flDistance = bOk ? 0.0 : szText.toDouble( &bOk );
-			if ( !bOk || flDistance < 0.0 )
-			{
-				break;
-			}
-			SetKey( row.m_nEntity, pItem->column() == COLUMN_FIFTY ? "_fifty_percent_distance" : "_zero_percent_distance", szText.isEmpty() ? std::string{ "0" } : QString::number( flDistance ).toStdString(), tr( "Light Falloff" ) );
-			return;
-		}
-		case COLUMN_CONES:
-		{
-			const QStringList parts = szText.split( QLatin1Char( '/' ) );
-			bool bInner = false, bOuter = false;
-			const double flInner = parts.value( 0 ).trimmed().toDouble( &bInner );
-			const double flOuter = parts.size() > 1 ? parts[ 1 ].trimmed().toDouble( &bOuter ) : flInner;
-			if ( !bInner || ( parts.size() > 1 && !bOuter ) )
-			{
-				break;
-			}
-			// Both keys in one step to undo.
-			xv::map::Entity_t changed = entity;
-			xv::map::SetKeyValue( pScene->m_Map, changed, "_inner_cone", QString::number( flInner ).toStdString() );
-			xv::map::SetKeyValue( pScene->m_Map, changed, "_cone", QString::number( std::max( flInner, flOuter ) ).toStdString() );
-			xv::map::MapEdit_t edit;
-			edit.m_Entities.emplace_back( row.m_nEntity, std::move( changed ) );
-			m_Editor.GetDocument().Edit( std::move( edit ), tr( "Light Cones" ) );
-			return;
-		}
-		default: break;
-	}
-	// Not a value it takes: back to what the light has.
-	Refresh();
-}
-
-//-----------------------------------------------------------------------------
-// Purpose:
-//-----------------------------------------------------------------------------
-void CMapLightingPanel::PickColour( int nRow )
-{
-	const xv::map::CScene *pScene = m_Editor.GetDocument().GetScene();
-	if ( !pScene || nRow < 0 || static_cast<std::size_t>( nRow ) >= m_Rows.size() )
-	{
-		return;
-	}
-	const Row_t row = m_Rows[ static_cast<std::size_t>( nRow ) ];
-	LightValue_t value = ReadValue( std::as_const( pScene->m_Map.m_Entities )[ row.m_nEntity ].GetValue( row.m_szKey ) );
-	const QColor colour = QColorDialog::getColor( QColor( std::clamp( value.m_Color[ 0 ], 0, 255 ), std::clamp( value.m_Color[ 1 ], 0, 255 ), std::clamp( value.m_Color[ 2 ], 0, 255 ) ), this, tr( "Light Colour" ) );
-	if ( !colour.isValid() )
-	{
-		return;
-	}
-	value.m_Color = { colour.red(), colour.green(), colour.blue() };
-	SetKey( row.m_nEntity, row.m_szKey, WriteValue( value ), tr( "Light Colour" ) );
 }
 
 //-----------------------------------------------------------------------------

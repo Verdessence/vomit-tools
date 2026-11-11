@@ -189,6 +189,8 @@ add_library(vomit_tools_ui STATIC
         map/MapLighting.cpp
         map/MapLighting.h
         map/MapFogPanel.cpp
+        map/MapEntityFields.cpp
+        map/MapEntityFields.h
         map/MapNamePicker.cpp
         map/MapNamePicker.h
         map/MapFogPanel.h

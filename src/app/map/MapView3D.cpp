@@ -469,7 +469,7 @@ void CMapView3D::WorkerLoop()
 		const double flMs = static_cast<double>( timer.nsecsElapsed() ) / 1e6;
 		QImage picture = ToQImage( image );
 		// The HDR lighting preview's next exposure, from this picture (every fourth pixel each way).
-		const float flExposure = frame.m_flExposure > 0.0f ? xv::map::NextExposure( xv::map::ShownLuminance( image.m_Pixels.data(), image.m_nWidth, image.m_nHeight, static_cast<std::size_t>( image.m_nWidth ) * 4, 4, frame.m_Options.m_Shade.m_flMonitorGamma ), frame.m_flExposure ) : 0.0f;
+		const float flExposure = frame.m_flExposure > 0.0f ? xv::map::NextExposure( xv::map::ShownLuminance( image.m_Pixels.data(), image.m_nWidth, image.m_nHeight, static_cast<std::size_t>( image.m_nWidth ) * 4, 4, frame.m_Options.m_Shade.m_flMonitorGamma ), frame.m_flExposure, frame.m_flExposureMin, frame.m_flExposureMax ) : 0.0f;
 		QMetaObject::invokeMethod(
 			this, [ this, picture = std::move( picture ), flMs, flExposure ]() mutable {
 				m_Image = std::move( picture );

@@ -1019,7 +1019,9 @@ void CMapRenderer::MeasureExposure( const MapFrame_t &frame, QRhiRenderTarget *p
 	m_pReadback = std::make_unique<QRhiReadbackResult>();
 	const float flExposure = frame.m_flExposure;
 	const float flGamma = frame.m_Options.m_Shade.m_flMonitorGamma;
-	m_pReadback->completed = [ this, flExposure, flGamma ] {
+	const float flMin = frame.m_flExposureMin;
+	const float flMax = frame.m_flExposureMax;
+	m_pReadback->completed = [ this, flExposure, flGamma, flMin, flMax ] {
 		// Kept until the next reading: QRhi may still hold it while this runs.
 		m_pReadbackDone = std::move( m_pReadback );
 		QRhiReadbackResult *pResult = m_pReadbackDone.get();
@@ -1038,7 +1040,7 @@ void CMapRenderer::MeasureExposure( const MapFrame_t &frame, QRhiRenderTarget *p
 			}
 		}
 		// Every fourth pixel each way is plenty for its brightest 2% and its middle.
-		const float flNext = xv::map::NextExposure( xv::map::ShownLuminance( pPixels, nWidth, nHeight, static_cast<std::size_t>( nWidth ) * 4, 4, flGamma ), flExposure );
+		const float flNext = xv::map::NextExposure( xv::map::ShownLuminance( pPixels, nWidth, nHeight, static_cast<std::size_t>( nWidth ) * 4, 4, flGamma ), flExposure, flMin, flMax );
 		if ( m_pfnExposure )
 		{
 			m_pfnExposure( flNext );

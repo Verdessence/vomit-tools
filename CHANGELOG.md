@@ -28,6 +28,13 @@
   software it runs through the interpreter.
 
 ### Hammer maps (new)
+- The Lighting panel's table of lights is a short list (picking one selects it for Object
+  Properties), folded under sections for the entities that set the map's look, each its keys as
+  fields typed by the FGD (colour buttons, choice lists), one undo step a change, and Add when
+  the map has none: Sun and Sky (light_environment), Shadows (shadow_control), Tone Map
+  (env_tonemap_controller: the exposure range, bloom scale and adapt rate a logic_auto sends it
+  as the map starts, the logic_auto made when there is none) and Colour Correction. The HDR
+  lighting preview's auto exposure keeps to the tone map's exposure range.
 - Right-click menus: in the 2D and 3D views (the object under the cursor, or the selection:
   cut, copy, paste, delete, group, hide, carve, select all of a class, properties; in 3D, a
   face's material), Object Properties' keys (reset to the FGD's default, copy and paste a
