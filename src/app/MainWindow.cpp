@@ -384,8 +384,10 @@ CMainWindow::CMainWindow( QWidget *pParent, xv::audio::CEngine::Output_t nAudio 
 	m_pTree->header()->setSectionResizeMode( QHeaderView::Interactive );
 	m_pTree->header()->setStretchLastSection( false );
 	m_pTree->setColumnWidth( CVfsModel::COLUMN_NAME_COLUMN, 220 );
-	m_pTree->header()->restoreState( QSettings{}.value( QStringLiteral( "gameBrowserColumns" ) ).toByteArray() );
-	connect( m_pTree->header(), &QHeaderView::sectionResized, this, [ this ] { QSettings{}.setValue( QStringLiteral( "gameBrowserColumns" ), m_pTree->header()->saveState() ); } );
+	m_pTree->setColumnWidth( CVfsModel::COLUMN_TYPE_COLUMN, 110 );
+	// Its own key: a layout saved before the Type column came would put the columns out of step.
+	m_pTree->header()->restoreState( QSettings{}.value( QStringLiteral( "gameTreeColumns" ) ).toByteArray() );
+	connect( m_pTree->header(), &QHeaderView::sectionResized, this, [ this ] { QSettings{}.setValue( QStringLiteral( "gameTreeColumns" ), m_pTree->header()->saveState() ); } );
 	m_pTree->setContextMenuPolicy( Qt::CustomContextMenu );
 	connect( m_pTree, &QTreeView::customContextMenuRequested, this, [ this ]( const QPoint &at ) {
 		const QModelIndex proxyIndex = m_pTree->indexAt( at );

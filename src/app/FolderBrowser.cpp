@@ -21,6 +21,7 @@
 #include <QVBoxLayout>
 
 #include "FileActions.h"
+#include "FileIcons.h"
 
 namespace
 {
@@ -37,6 +38,9 @@ CFolderBrowser::CFolderBrowser( QWidget *pParent )
 	  m_pModel( new QFileSystemModel( this ) )
 {
 	m_pModel->setReadOnly( true );
+	// Lives as long as the program: the model's own thread may still ask it while the model goes.
+	static CFileIconProvider s_IconProvider;
+	m_pModel->setIconProvider( &s_IconProvider );
 	m_pModel->setFilter( QDir::AllEntries | QDir::NoDotAndDotDot | QDir::Hidden );
 
 	auto *pOpen = new QToolButton;
@@ -88,9 +92,11 @@ CFolderBrowser::CFolderBrowser( QWidget *pParent )
 	// Every column can be sized; the widths are kept between runs.
 	m_pView->header()->setSectionResizeMode( QHeaderView::Interactive );
 	m_pView->header()->setStretchLastSection( false );
-	m_pView->setColumnHidden( 2, true ); // type
 	m_pView->setColumnWidth( 0, 220 );
+	m_pView->setColumnWidth( 2, 110 );
 	m_pView->header()->restoreState( QSettings{}.value( HEADER_KEY ).toByteArray() );
+	// Shown, as in the other trees (layouts saved before hid it).
+	m_pView->setColumnHidden( 2, false );
 	connect( m_pView->header(), &QHeaderView::sectionResized, this, [ this ] { QSettings{}.setValue( HEADER_KEY, m_pView->header()->saveState() ); } );
 	m_pView->setContextMenuPolicy( Qt::CustomContextMenu );
 	connect( m_pView, &QTreeView::customContextMenuRequested, this, [ this ]( const QPoint &at ) {

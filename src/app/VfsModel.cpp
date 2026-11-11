@@ -9,9 +9,7 @@
 #include <algorithm>
 #include <unordered_map>
 
-#include <QApplication>
-#include <QStyle>
-
+#include "FileIcons.h"
 #include "vfs/Vfs.h"
 
 //-----------------------------------------------------------------------------
@@ -241,13 +239,17 @@ QVariant CVfsModel::data( const QModelIndex &index, int nRole ) const
 			{
 				return pNode->m_szName;
 			}
+			if ( index.column() == COLUMN_TYPE_COLUMN )
+			{
+				return bFolder ? FolderKind() : FileKind( pNode->m_szName );
+			}
 			return pNode->m_pMount ? QString::fromStdString( pNode->m_pMount->GetLocation().filename().string() ) : QVariant{};
 		case Qt::ToolTipRole:
 			return pNode->m_pMount ? QString::fromStdString( pNode->m_pMount->GetLocation().string() ) : QVariant{};
 		case Qt::DecorationRole:
 			if ( index.column() == COLUMN_NAME_COLUMN )
 			{
-				return QApplication::style()->standardIcon( bFolder ? QStyle::SP_DirIcon : QStyle::SP_FileIcon );
+				return bFolder ? FolderIcon() : FileIcon( pNode->m_szName );
 			}
 			return {};
 		case ROLE_PATH_ROLE:
@@ -268,5 +270,13 @@ QVariant CVfsModel::headerData( int nSection, Qt::Orientation nOrientation, int 
 	{
 		return {};
 	}
-	return nSection == COLUMN_NAME_COLUMN ? tr( "Name" ) : tr( "Read from" );
+	switch ( nSection )
+	{
+		case COLUMN_NAME_COLUMN:
+			return tr( "Name" );
+		case COLUMN_TYPE_COLUMN:
+			return tr( "Type" );
+		default:
+			return tr( "Read from" );
+	}
 }

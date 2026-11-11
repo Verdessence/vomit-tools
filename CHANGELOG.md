@@ -5,6 +5,9 @@
 ### Browsing
 - The game browser's, the folder browser's and archives' trees keep the open folders of the rows
   at their top pinned over them while scrolling; a click on one folds it and scrolls to it.
+- The three trees look alike: the same icons (a file's by its kind, the Source formats included:
+  material, texture, model, particles, map, archive...; the folder open while expanded), and a
+  Type column in each.
 
 ### Shaders (new)
 - Compiled shader files (.vcs, versions 4 to 6: every one of HL2's and the game folder's own) are

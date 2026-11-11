@@ -6,6 +6,7 @@
 //===========================================================================//
 #include "VpkEditor.h"
 #include "StickyTreeParents.h"
+#include "FileIcons.h"
 
 #include <algorithm>
 #include <unordered_map>
@@ -54,6 +55,7 @@ enum Column_t
 {
 	COLUMN_NAME,
 	COLUMN_SIZE,
+	COLUMN_TYPE,
 	COLUMN_STORED,
 	COLUMN_COUNT
 };
@@ -202,7 +204,7 @@ public:
 			case Qt::DecorationRole:
 				if ( index.column() == COLUMN_NAME )
 				{
-					return QApplication::style()->standardIcon( pNode->m_pEntry ? QStyle::SP_FileIcon : QStyle::SP_DirIcon );
+					return pNode->m_pEntry ? FileIcon( pNode->m_szName ) : FolderIcon();
 				}
 				return {};
 			case Qt::TextAlignmentRole:
@@ -216,6 +218,8 @@ public:
 						return pNode->m_szName;
 					case COLUMN_SIZE:
 						return QLocale{}.formattedDataSize( static_cast<qint64>( pNode->m_nSize ) );
+					case COLUMN_TYPE:
+						return pNode->m_pEntry ? FileKind( pNode->m_szName ) : FolderKind();
 					case COLUMN_STORED:
 						return pNode->m_pEntry ? StoredIn( m_Package, *pNode->m_pEntry ) : QString{};
 					default:
@@ -238,6 +242,8 @@ public:
 				return QObject::tr( "Name" );
 			case COLUMN_SIZE:
 				return QObject::tr( "Size" );
+			case COLUMN_TYPE:
+				return QObject::tr( "Type" );
 			case COLUMN_STORED:
 				return QObject::tr( "Stored In" );
 			default:
@@ -412,9 +418,11 @@ CVpkEditor::CVpkEditor( std::unique_ptr<xv::vfs::CPackage> pPackage, CSoundPlaye
 	m_pTree->header()->setStretchLastSection( false );
 	m_pTree->setColumnWidth( COLUMN_NAME, 280 );
 	m_pTree->setColumnWidth( COLUMN_SIZE, 90 );
+	m_pTree->setColumnWidth( COLUMN_TYPE, 110 );
 	m_pTree->setColumnWidth( COLUMN_STORED, 140 );
-	m_pTree->header()->restoreState( QSettings{}.value( QStringLiteral( "vpkColumns" ) ).toByteArray() );
-	connect( m_pTree->header(), &QHeaderView::sectionResized, this, [ this ] { QSettings{}.setValue( QStringLiteral( "vpkColumns" ), m_pTree->header()->saveState() ); } );
+	// Its own key: a layout saved before the Type column came would put the columns out of step.
+	m_pTree->header()->restoreState( QSettings{}.value( QStringLiteral( "archiveTreeColumns" ) ).toByteArray() );
+	connect( m_pTree->header(), &QHeaderView::sectionResized, this, [ this ] { QSettings{}.setValue( QStringLiteral( "archiveTreeColumns" ), m_pTree->header()->saveState() ); } );
 	m_pTree->setContextMenuPolicy( Qt::CustomContextMenu );
 	connect( m_pTree, &QTreeView::customContextMenuRequested, this, &CVpkEditor::ShowContextMenu );
 	connect( m_pTree, &QTreeView::activated, this, [ this ]( const QModelIndex &index ) {
