@@ -133,6 +133,8 @@ add_library(vomit_tools_core STATIC
         model/Anim.h
         model/Binary.h
         model/Export.cpp
+        model/Playermodel.cpp
+        model/Playermodel.h
         model/Export.h
         model/Edit.cpp
         model/Edit.h

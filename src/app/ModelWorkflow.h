@@ -22,6 +22,9 @@ public:
 	CModelWorkflow( QString szPath, xv::model::Reader_t pfnRead, xv::model::CModel model, xv::model::CStudioFile source, xv::model::Clip_t clip, std::optional<xv::vfs::CGameInfo> game, QWidget *pParent = nullptr );
 	~CModelWorkflow() override;
 	void SetSelection( const xv::model::Selection_t &selection ) { m_Selection = selection; }
+	// The GMod playermodel tab's project written into szFolder; false (said in the log) when it
+	// couldn't be.
+	bool ExportPlayermodel( const QString &szFolder );
 signals:
 	void OpenModelRequested( const QString &szPath );
 
@@ -46,6 +49,8 @@ private:
 	xv::model::Clip_t m_Clip;
 	std::optional<xv::vfs::CGameInfo> m_Game;
 	QLineEdit *m_pGame = nullptr, *m_pCompiler = nullptr, *m_pPacker = nullptr, *m_pQc = nullptr, *m_pMesh = nullptr, *m_pCollision = nullptr, *m_pModelName = nullptr, *m_pMap = nullptr;
+	QLineEdit *m_pPlayerName = nullptr, *m_pPlayerDisplay = nullptr, *m_pPlayerHands = nullptr;
+	QComboBox *m_pPlayerAnimations = nullptr;
 	QComboBox *m_pOperation = nullptr, *m_pBodygroup = nullptr, *m_pBodyModel = nullptr, *m_pSequences = nullptr;
 	QSpinBox *m_pFirst = nullptr, *m_pLast = nullptr;
 	QDoubleSpinBox *m_pFps = nullptr;

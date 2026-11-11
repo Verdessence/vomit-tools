@@ -6,6 +6,7 @@
 #include "FileDialogs.h"
 #include "ModelImport.h"
 #include "ModelVmfDialog.h"
+#include "model/Playermodel.h"
 #include "Preferences.h"
 #include "QtPaths.h"
 #include "bsp/Bsp.h"
@@ -148,6 +149,50 @@ CModelWorkflow::CModelWorkflow( QString szPath, xv::model::Reader_t pfnRead, xv:
 	pForm->addRow( pExport );
 	connect( pExport, &QPushButton::clicked, this, &CModelWorkflow::ExportSources );
 	pTabs->addTab( pSource, tr( "Source project" ) );
+	// A Garry's Mod playermodel: the source project with GMod's animations, the ragdoll and its Lua.
+	auto *pPlayer = new QWidget;
+	auto *pPlayerForm = new QFormLayout( pPlayer );
+	m_pPlayerName = new QLineEdit( QFileInfo( m_szPath ).completeBaseName() );
+	m_pPlayerName->setObjectName( QStringLiteral( "workflowPlayerName" ) );
+	m_pPlayerName->setToolTip( tr( "The model is models/player/<name>.mdl" ) );
+	pPlayerForm->addRow( tr( "Name" ), m_pPlayerName );
+	m_pPlayerDisplay = new QLineEdit;
+	m_pPlayerDisplay->setPlaceholderText( tr( "The name" ) );
+	pPlayerForm->addRow( tr( "In the menu as" ), m_pPlayerDisplay );
+	m_pPlayerAnimations = new QComboBox;
+	m_pPlayerAnimations->setObjectName( QStringLiteral( "workflowPlayerAnimations" ) );
+	m_pPlayerAnimations->addItems( { tr( "Male (m_anm)" ), tr( "Female (f_anm)" ), tr( "Zombie (z_anm)" ) } );
+	if ( m_szPath.contains( QStringLiteral( "female" ), Qt::CaseInsensitive ) )
+		m_pPlayerAnimations->setCurrentIndex( 1 );
+	else if ( m_szPath.contains( QStringLiteral( "zombie" ), Qt::CaseInsensitive ) )
+		m_pPlayerAnimations->setCurrentIndex( 2 );
+	pPlayerForm->addRow( tr( "Animations" ), m_pPlayerAnimations );
+	m_pPlayerHands = new QLineEdit( QStringLiteral( "models/weapons/c_arms_citizen.mdl" ) );
+	pPlayerForm->addRow( tr( "First-person arms" ), m_pPlayerHands );
+	auto *pPlayerStatus = new QLabel;
+	pPlayerStatus->setObjectName( QStringLiteral( "workflowPlayerStatus" ) );
+	pPlayerStatus->setWordWrap( true );
+	const std::vector<std::string> missing = xv::model::MissingPlayerBones( m_Model );
+	if ( missing.empty() )
+		pPlayerStatus->setText( tr( "On the ValveBiped skeleton: GMod's player animations move it as they are. Its ragdoll comes from its .phy." ) );
+	else
+	{
+		QStringList bones;
+		for ( const std::string &szBone : missing )
+			bones << QString::fromStdString( szBone );
+		pPlayerStatus->setText( tr( "Not on the ValveBiped skeleton GMod's player animations move (it lacks %1). Models on other skeletons can't be made playermodels yet." ).arg( bones.join( QStringLiteral( ", " ) ) ) );
+	}
+	pPlayerForm->addRow( pPlayerStatus );
+	auto *pPlayerExport = new QPushButton( tr( "Export Playermodel Project…" ) );
+	pPlayerExport->setObjectName( QStringLiteral( "workflowPlayerExport" ) );
+	pPlayerExport->setEnabled( missing.empty() );
+	pPlayerForm->addRow( pPlayerExport );
+	connect( pPlayerExport, &QPushButton::clicked, this, [ this ] {
+		const auto folder = AskFolder( this, tr( "Export Playermodel Project" ) );
+		if ( !folder.isEmpty() )
+			ExportPlayermodel( folder );
+	} );
+	pTabs->addTab( pPlayer, tr( "GMod playermodel" ) );
 	auto *pBuildPage = new QWidget;
 	auto *pBuildForm = new QFormLayout( pBuildPage );
 	m_pGame = FileRow( pBuildForm, tr( "Game info" ), tr( "Game info (gameinfo.txt)" ), this );
@@ -339,6 +384,31 @@ void CModelWorkflow::ExportSources()
 		Log( QString::fromUtf8( e.what() ) );
 	}
 }
+//-----------------------------------------------------------------------------
+// Purpose: The playermodel's project written to szFolder, its QC then the one Build compiles.
+//-----------------------------------------------------------------------------
+bool CModelWorkflow::ExportPlayermodel( const QString &szFolder )
+{
+	try
+	{
+		xv::model::PlayermodelOptions_t options;
+		options.m_szName = m_pPlayerName->text().trimmed().toStdString();
+		options.m_szDisplayName = m_pPlayerDisplay->text().trimmed().toStdString();
+		options.m_nAnimations = static_cast<xv::model::PlayerAnimations_t>( m_pPlayerAnimations->currentIndex() );
+		options.m_szHands = m_pPlayerHands->text().trimmed().toStdString();
+		if ( !Write( xv::model::ExportPlayermodel( m_szPath.toStdString(), m_pfnRead, options ), szFolder ) )
+			return false;
+		m_pQc->setText( QDir( szFolder ).filePath( QStringLiteral( "model.qc" ) ) );
+		Log( tr( "Playermodel project exported to %1 (see export-notes.txt)" ).arg( szFolder ) );
+		return true;
+	}
+	catch ( const std::exception &e )
+	{
+		Log( QString::fromUtf8( e.what() ) );
+		return false;
+	}
+}
+
 //-----------------------------------------------------------------------------
 // Purpose: Invokes the chosen compiler against a private VProject, preserving installed models.
 //-----------------------------------------------------------------------------

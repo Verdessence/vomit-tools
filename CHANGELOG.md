@@ -410,6 +410,11 @@
   and Recent. VPKs and compiled maps open through Open → File; Open Sky moved to the Game menu.
 - Garry's Mod's `cfg/mount.cfg`: the games it names are mounted after Garry's Mod's own files,
   their VPKs too; a Windows path in it is found again in the Steam library holding Garry's Mod.
+- The model exporter's GMod playermodel tab: a model on the ValveBiped skeleton (HL2's humans,
+  CS:S's players) becomes a playermodel project: its QC for models/player/<name>.mdl with GMod's
+  male, female or zombie animations included, its ragdoll kept from its .phy (each piece on its
+  bone, the joints' limits and the mass as they were), a ragdoll pose, and the Lua listing it
+  (and its arms) in GMod's player model menu. Models on other skeletons say which bones they lack.
 
 ## 0.7.0 — The Model (2026-10-27)
 
