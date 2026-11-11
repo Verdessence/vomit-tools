@@ -334,6 +334,68 @@ fs::path FindCaseInsensitive( const fs::path &path )
 	return current;
 }
 
+namespace
+{
+
+//-----------------------------------------------------------------------------
+// Purpose: Garry's Mod's cfg/mount.cfg: other games' folders ("cstrike" "C:\\...\\cstrike"),
+//          mounted after the game's own paths. Each is its archives (the *_dir.vpk in it), then
+//          the folder. A path from another machine (a Windows one read on Linux) is looked for
+//          in the Steam library holding this game, by what follows steamapps/common/.
+//-----------------------------------------------------------------------------
+void AddMountCfg( CGameInfo &info )
+{
+	const fs::path file = FindCaseInsensitive( info.m_GameDir / "cfg" / "mount.cfg" );
+	std::ifstream stream{ file, std::ios::binary };
+	if ( !stream )
+		return;
+	const std::string szText{ std::istreambuf_iterator<char>{ stream }, std::istreambuf_iterator<char>{} };
+	const auto parsed = kv1::Parse( szText );
+	const kv1::CNode *pRoot = parsed.m_Document.Find( "mountcfg" );
+	if ( !pRoot || !pRoot->IsBlock() )
+		return;
+	std::error_code ec;
+	for ( const kv1::CNode &entry : pRoot->GetChildren() )
+	{
+		if ( !entry.IsPair() || entry.GetValue().empty() )
+			continue;
+		std::string szPath{ entry.GetValue() };
+		// Written with doubled backslashes as often as single ones.
+		std::ranges::replace( szPath, '\\', '/' );
+		for ( auto nDouble = szPath.find( "//" ); nDouble != std::string::npos; nDouble = szPath.find( "//" ) )
+			szPath.erase( nDouble, 1 );
+		fs::path folder = FindCaseInsensitive( FromUtf8( szPath ) );
+		if ( !fs::is_directory( folder, ec ) )
+		{
+			const std::string szLower = LowerAscii( szPath );
+			if ( const auto nCommon = szLower.find( "steamapps/common/" ); nCommon != std::string::npos )
+			{
+				const fs::path local = FindCaseInsensitive( info.m_BaseDir.parent_path() / FromUtf8( szPath.substr( nCommon + 17 ) ) );
+				if ( fs::is_directory( local, ec ) )
+					folder = local;
+			}
+		}
+		if ( fs::is_directory( folder, ec ) )
+		{
+			std::vector<std::string> vpks;
+			for ( const auto &child : EntriesOf( folder ) )
+			{
+				const std::string szName = ToUtf8( child.path().filename() );
+				const std::string szLowerName = LowerAscii( szName );
+				if ( szLowerName.size() > 8 && szLowerName.ends_with( "_dir.vpk" ) && child.is_regular_file( ec ) )
+					vpks.push_back( ToUtf8( folder / FromUtf8( szName.substr( 0, szName.size() - 8 ) + ".vpk" ) ) );
+			}
+			std::ranges::sort( vpks );
+			for ( std::string &szVpk : vpks )
+				info.m_SearchPaths.push_back( { { "game" }, std::move( szVpk ) } );
+		}
+		// Kept when missing too, so the mount list says so.
+		info.m_SearchPaths.push_back( { { "game" }, ToUtf8( folder ) } );
+	}
+}
+
+} // namespace
+
 //-----------------------------------------------------------------------------
 // Purpose: baseDir defaults to the parent of the gameinfo folder, which holds for Valve's own
 //          games.
@@ -351,7 +413,10 @@ std::optional<CGameInfo> CGameInfo::Load( const fs::path &file, std::string *pEr
 		return std::nullopt;
 	}
 	const std::string szText{ std::istreambuf_iterator<char>{ stream }, std::istreambuf_iterator<char>{} };
-	return Parse( szText, file, pError, std::move( baseDir ) );
+	std::optional<CGameInfo> info = Parse( szText, file, pError, std::move( baseDir ) );
+	if ( info )
+		AddMountCfg( *info );
+	return info;
 }
 
 //-----------------------------------------------------------------------------
