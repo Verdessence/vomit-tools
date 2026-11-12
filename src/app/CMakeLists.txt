@@ -13,6 +13,8 @@ add_library(vomit_tools_ui STATIC
         CrashHandler.h
         StripperEditor.cpp
         StripperEditor.h
+        HudEditor.cpp
+        HudEditor.h
         ChoiceBoxes.cpp
         ChoiceBoxes.h
         ${CMAKE_CURRENT_BINARY_DIR}/BuildInfo.cpp

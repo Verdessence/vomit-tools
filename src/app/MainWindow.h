@@ -30,6 +30,7 @@ class CDiscordPresence;
 class CMapEditor;
 class CModelBrowser;
 class CStripperEditor;
+class CHudEditor;
 class CModelEditor;
 class CDetailDocument;
 class CDetailEditor;
@@ -92,6 +93,8 @@ public:
 	CMapEditor *OpenMapFile( const QString &szPath );
 	// A Stripper:Source config from disk in a tab of its own, previewed on its map when found.
 	CStripperEditor *OpenStripperFile( const QString &szPath );
+	// A VGUI layout (.res) in the HUD editor, from disk (an absolute path) or the mounted game.
+	CHudEditor *OpenHudFile( const QString &szPath );
 	// File > New > Map.
 	CMapEditor *NewMap();
 	[[nodiscard]] CMapEditor *GetCurrentMap() const;

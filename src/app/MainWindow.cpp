@@ -7,6 +7,8 @@
 #include "MainWindow.h"
 #include "StickyTreeParents.h"
 #include "StripperEditor.h"
+#include "HudEditor.h"
+#include "hud/Hud.h"
 #include "CrashHandler.h"
 #include "bsp/Stripper.h"
 #include "HammerSetupDialog.h"
@@ -447,6 +449,10 @@ CMainWindow::CMainWindow( QWidget *pParent, xv::audio::CEngine::Output_t nAudio 
 			const auto bytes = m_pFileSystem->Read( szPath.toStdString() );
 			if ( bytes && CStripperEditor::IsStripperConfig( ToPath( szPath ), std::string_view{ reinterpret_cast<const char *>( bytes->data() ), bytes->size() } ) )
 				OpenStripperFile( szPath );
+		}
+		else if ( const auto text = szPath.endsWith( u".res", Qt::CaseInsensitive ) ? m_pFileSystem->ReadText( szPath.toStdString() ) : std::nullopt; text && CHudEditor::IsHudLayout( ToPath( szPath ), *text ) )
+		{
+			OpenHudFile( szPath );
 		}
 		else if ( xv::sound::FileKindForPath( szPath.toStdString() ) != FileKind_t::FILE_KIND_UNKNOWN )
 		{
@@ -915,10 +921,14 @@ void CMainWindow::BuildMenus( QAction *pSearchPathsToggle )
 	auto *pSprinkle = pTools->addAction( tr( "Sprinkle" ), this, [ this ] { if ( auto *pMap = GetCurrentMap() ) pMap->RunAction( MapAction_t::MAP_ACTION_TOOL_SPRINKLE, pMap->GetActiveView() ); } );
 	pSprinkle->setObjectName( QStringLiteral( "mapSprinkleAction" ) );
 	pTools->addSeparator();
+	auto *pHud = pTools->addAction( tr( "H&UD Editor" ), this, [ this ] { OpenHudFile( QStringLiteral( "scripts/HudLayout.res" ) ); } );
+	pHud->setObjectName( QStringLiteral( "hudEditorAction" ) );
+	pHud->setToolTip( tr( "Open the game's HUD layout (scripts/HudLayout.res) in the HUD editor" ) );
 	auto *pHammerSetup = pTools->addAction( tr( "Set Up &Hammer…" ), this, &CMainWindow::SetUpHammer );
 	pHammerSetup->setObjectName( QStringLiteral( "hammerSetupAction" ) );
 	pHammerSetup->setToolTip( tr( "Write the open game's entry into Hammer++'s or Hammer's game configuration" ) );
-	connect( pTools, &QMenu::aboutToShow, this, [ this, pCreatePrefab, pBuilding, pSprinkle, pHammerSetup ] {
+	connect( pTools, &QMenu::aboutToShow, this, [ this, pCreatePrefab, pBuilding, pSprinkle, pHammerSetup, pHud ] {
+		pHud->setEnabled( m_Game.has_value() );
 		pCreatePrefab->setEnabled( GetCurrentMap() && !GetCurrentMap()->GetDocument().GetSelection().empty() );
 		pSprinkle->setEnabled( GetCurrentMap() != nullptr );
 		pBuilding->setEnabled( GetCurrentMap() != nullptr );
@@ -1931,6 +1941,10 @@ void CMainWindow::PreviewGameFile( const QString &szPath, const QString &szSourc
 	{
 		pView = WithEditButton( pView, tr( "This is a detail file." ), tr( "Open in Details Editor" ), [ this, szPath ] { OpenDetailFile( szPath ); } );
 	}
+	else if ( CHudEditor::IsHudLayout( ToPath( szPath ), std::string_view{ reinterpret_cast<const char *>( bytes->data() ), bytes->size() } ) )
+	{
+		pView = WithEditButton( pView, tr( "This is a HUD layout." ), tr( "Open in HUD Editor" ), [ this, szPath ] { OpenHudFile( szPath ); } );
+	}
 	else if ( szPath.endsWith( u".vmf", Qt::CaseInsensitive ) )
 	{
 		pView = WithEditButton( pView, tr( "This is a Hammer map." ), tr( "Open Map Viewer" ), [ this, szPath ] { OpenMapFile( szPath ); } );
@@ -2031,6 +2045,10 @@ void CMainWindow::PreviewDiskFile( const QString &szPath )
 	else if ( info.suffix().compare( u"vbsp", Qt::CaseInsensitive ) == 0 )
 	{
 		pView = WithEditButton( pView, tr( "This is a detail file." ), tr( "Open in Details Editor" ), [ this, szPath ] { OpenDiskFile( szPath ); } );
+	}
+	else if ( CHudEditor::IsHudLayout( ToPath( szPath ), std::string_view{ data->constData(), static_cast<std::size_t>( data->size() ) } ) )
+	{
+		pView = WithEditButton( pView, tr( "This is a HUD layout." ), tr( "Open in HUD Editor" ), [ this, szPath ] { OpenHudFile( szPath ); } );
 	}
 	else if ( info.suffix().compare( u"vmf", Qt::CaseInsensitive ) == 0 || info.suffix().compare( u"vmm", Qt::CaseInsensitive ) == 0 )
 	{
@@ -2205,6 +2223,11 @@ void CMainWindow::OpenDiskFileAs( const QString &szPath, bool bSkies )
 	if ( CStripperEditor::IsStripperConfig( file, std::string_view{ data->constData(), static_cast<std::size_t>( data->size() ) } ) )
 	{
 		OpenStripperFile( info.absoluteFilePath() );
+		return;
+	}
+	if ( CHudEditor::IsHudLayout( file, std::string_view{ data->constData(), static_cast<std::size_t>( data->size() ) } ) )
+	{
+		OpenHudFile( info.absoluteFilePath() );
 		return;
 	}
 	if ( info.suffix().compare( u"vbsp", Qt::CaseInsensitive ) == 0 )
@@ -3796,6 +3819,10 @@ void CMainWindow::RestoreSessionEntry( const QString &szEntry )
 	else if ( szKind == u"detail" )
 	{
 		OpenDetailFile( szPath );
+	}
+	else if ( szKind == u"hud" )
+	{
+		OpenHudFile( szPath );
 	}
 	else if ( szKind == u"sky" )
 	{
@@ -5460,6 +5487,56 @@ CStripperEditor *CMainWindow::OpenStripperFile( const QString &szPath )
 	} );
 	const int nIndex = m_pTabs->addTab( pEditor, pEditor->GetTabTitle() );
 	m_pTabs->setTabToolTip( nIndex, QDir::toNativeSeparators( ToQString( config ) ) );
+	m_pTabs->setCurrentIndex( nIndex );
+	return pEditor;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: A HUD layout in the HUD editor, the tab it already has if open. The game's scheme
+//          gives the colours its elements name.
+//-----------------------------------------------------------------------------
+CHudEditor *CMainWindow::OpenHudFile( const QString &szPath )
+{
+	const QFileInfo info( szPath );
+	const bool bDisk = info.isAbsolute();
+	const QString szName = bDisk ? QDir::toNativeSeparators( info.absoluteFilePath() ) : QString::fromStdString( xv::vfs::NormalizePath( szPath.toStdString() ) );
+	for ( int i = 0; i < m_pTabs->count(); i++ )
+	{
+		auto *pOpen = qobject_cast<CHudEditor *>( m_pTabs->widget( i ) );
+		if ( pOpen && pOpen->IsFromGame() != bDisk && pOpen->GetSessionEntry().section( u'\t', 2 ).compare( bDisk ? info.absoluteFilePath() : szName, Qt::CaseInsensitive ) == 0 )
+		{
+			m_pTabs->setCurrentWidget( pOpen );
+			return pOpen;
+		}
+	}
+	std::optional<std::string> text;
+	if ( bDisk )
+	{
+		if ( const auto data = ReadDiskFile( info.absoluteFilePath() ) )
+			text = data->toStdString();
+	}
+	else
+	{
+		text = m_pFileSystem->ReadText( szName.toStdString() );
+	}
+	if ( !text )
+	{
+		QMessageBox::warning( this, tr( "Cannot open" ), tr( "Could not read %1." ).arg( szName ) );
+		return nullptr;
+	}
+	auto *pEditor = new CHudEditor( szName, *text, bDisk ? ToPath( info.absoluteFilePath() ) : fs::path{}, !bDisk );
+	if ( m_Game )
+	{
+		if ( const auto scheme = m_pFileSystem->ReadText( "resource/ClientScheme.res" ) )
+			pEditor->SetScheme( xv::hud::CScheme::FromDocument( xv::kv1::Parse( *scheme ).m_Document ) );
+	}
+	m_pUndoGroup->addStack( pEditor->GetUndoStack() );
+	connect( pEditor, &CHudEditor::ModifiedChanged, this, [ this, pEditor ] {
+		m_pTabs->setTabText( m_pTabs->indexOf( pEditor ), pEditor->GetTabTitle() );
+		UpdateTitle();
+	} );
+	const int nIndex = m_pTabs->addTab( pEditor, pEditor->GetTabTitle() );
+	m_pTabs->setTabToolTip( nIndex, szName );
 	m_pTabs->setCurrentIndex( nIndex );
 	return pEditor;
 }
