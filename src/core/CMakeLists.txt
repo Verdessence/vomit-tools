@@ -7,6 +7,8 @@ add_library(vomit_tools_core STATIC
         bsp/Bsp.h
         bsp/Stripper.cpp
         bsp/Stripper.h
+        demo/Demo.cpp
+        demo/Demo.h
         hud/Hud.cpp
         hud/Hud.h
         detail/Detail.cpp

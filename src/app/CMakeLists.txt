@@ -11,6 +11,8 @@ add_library(vomit_tools_ui STATIC
         CodeEdit.h
         CrashHandler.cpp
         CrashHandler.h
+        DemoViewer.cpp
+        DemoViewer.h
         StripperEditor.cpp
         StripperEditor.h
         HudEditor.cpp

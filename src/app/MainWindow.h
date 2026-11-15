@@ -30,6 +30,7 @@ class CDiscordPresence;
 class CMapEditor;
 class CModelBrowser;
 class CStripperEditor;
+class CDemoViewer;
 class CHudEditor;
 class CSchemeEditor;
 class CModelEditor;
@@ -107,6 +108,8 @@ public:
 	// A VGUI scheme (ClientScheme.res, SourceScheme.res) in the scheme editor, from disk or
 	// the mounted game. HUD editor tabs drawing with that file follow its changes.
 	CSchemeEditor *OpenSchemeFile( const QString &szPath );
+	// A demo (.dem) in the demo viewer, from disk (an absolute path) or the mounted game.
+	CDemoViewer *OpenDemoFile( const QString &szPath );
 	// File > New > Map.
 	CMapEditor *NewMap();
 	[[nodiscard]] CMapEditor *GetCurrentMap() const;

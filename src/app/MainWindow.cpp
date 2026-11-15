@@ -7,6 +7,8 @@
 #include "MainWindow.h"
 #include "StickyTreeParents.h"
 #include "StripperEditor.h"
+#include "DemoViewer.h"
+#include "demo/Demo.h"
 #include "HudEditor.h"
 #include "SchemeEditor.h"
 #include "hud/Hud.h"
@@ -517,6 +519,10 @@ CMainWindow::CMainWindow( QWidget *pParent, xv::audio::CEngine::Output_t nAudio 
 		{
 			OpenDetailFile( szPath );
 		}
+		else if ( szPath.endsWith( u".dem", Qt::CaseInsensitive ) )
+		{
+			OpenDemoFile( szPath );
+		}
 		else if ( szPath.endsWith( u".mdl", Qt::CaseInsensitive ) )
 		{
 			OpenModelFile( szPath );
@@ -1022,6 +1028,13 @@ void CMainWindow::BuildMenus( QAction *pSearchPathsToggle )
 	auto *pHammerSetup = pTools->addAction( tr( "Set Up &Hammer…" ), this, &CMainWindow::SetUpHammer );
 	pHammerSetup->setObjectName( QStringLiteral( "hammerSetupAction" ) );
 	pHammerSetup->setToolTip( tr( "Write the open game's entry into Hammer++'s or Hammer's game configuration" ) );
+	QAction *pDemo = pTools->addAction( tr( "&Demo Viewer…" ), this, [ this ] {
+		const QString szFile = AskOpenFile( this, tr( "Open Demo" ), LastFolderOr( m_Game ? ToQString( m_Game->m_GameDir ) : QString{} ), tr( "Source demos (*.dem);;All files (*)" ) );
+		if ( !szFile.isEmpty() )
+			OpenDemoFile( szFile );
+	} );
+	pDemo->setObjectName( QStringLiteral( "demoViewerAction" ) );
+	pDemo->setToolTip( tr( "A recorded demo (.dem): what it says about itself, its timeline, camera path and console commands" ) );
 	connect( pTools, &QMenu::aboutToShow, this, [ this, pCreatePrefab, pBuilding, pSprinkle, pHammerSetup ] {
 		pCreatePrefab->setEnabled( GetCurrentMap() && !GetCurrentMap()->GetDocument().GetSelection().empty() );
 		pSprinkle->setEnabled( GetCurrentMap() != nullptr );
@@ -1272,7 +1285,7 @@ void CMainWindow::ChooseFiles()
 	const QString szStart = LastFolderOr( m_pFolders->GetFolder().isEmpty() && m_Game ? ToQString( m_Game->m_GameDir ) : m_pFolders->GetFolder() );
 	const QStringList files = AskOpenFiles( this, tr( "Open File" ), szStart,
 		tr( "Soundscapes and soundscripts (*.txt);;Detail files (*.vbsp);;Sounds (*.wav *.mp3);;Textures (*.vtf);;Models (*.mdl *.vvd *.vtx *.phy *.ani);;Sky faces and textures (*.vmt *.vtf *.png *.tga *.jpg *.jpeg *.bmp *.psd *.hdr);;Particles (*.pcf *.dmx);;"
-			"KeyValues (*.txt *.vmt *.vdf *.res);;Hammer maps (*.vmf *.vmm);;Archives and maps (*.vpk *.bsp *.gcf *.gma *.pak *.wad *.xzp *.zip);;Stripper configs (*.cfg);;Game info (gameinfo.txt);;All files (*)" ) );
+			"KeyValues (*.txt *.vmt *.vdf *.res);;Hammer maps (*.vmf *.vmm);;Archives and maps (*.vpk *.bsp *.gcf *.gma *.pak *.wad *.xzp *.zip);;Stripper configs (*.cfg);;Source demos (*.dem);;Game info (gameinfo.txt);;All files (*)" ) );
 	OpenPaths( files );
 }
 
@@ -2035,6 +2048,10 @@ void CMainWindow::PreviewGameFile( const QString &szPath, const QString &szSourc
 	{
 		pView = WithEditButton( pView, tr( "This is a detail file." ), tr( "Open in Details Editor" ), [ this, szPath ] { OpenDetailFile( szPath ); } );
 	}
+	else if ( szPath.endsWith( u".dem", Qt::CaseInsensitive ) )
+	{
+		pView = WithEditButton( pView, tr( "This is a demo." ), tr( "Open in Demo Viewer" ), [ this, szPath ] { OpenDemoFile( szPath ); } );
+	}
 	else if ( CSchemeEditor::IsSchemeFile( ToPath( szPath ), std::string_view{ reinterpret_cast<const char *>( bytes->data() ), bytes->size() } ) )
 	{
 		pView = WithEditButton( pView, tr( "This is a VGUI scheme." ), tr( "Open in Scheme Editor" ), [ this, szPath ] { OpenSchemeFile( szPath ); } );
@@ -2278,6 +2295,11 @@ void CMainWindow::OpenDiskFileAs( const QString &szPath, bool bSkies )
 	if ( info.suffix().compare( u"mdl", Qt::CaseInsensitive ) == 0 )
 	{
 		OpenModelFile( info.absoluteFilePath() );
+		return;
+	}
+	if ( info.suffix().compare( u"dem", Qt::CaseInsensitive ) == 0 )
+	{
+		OpenDemoFile( info.absoluteFilePath() );
 		return;
 	}
 	if ( info.suffix().compare( u"vmf", Qt::CaseInsensitive ) == 0 || info.suffix().compare( u"vmm", Qt::CaseInsensitive ) == 0 )
@@ -3935,6 +3957,10 @@ void CMainWindow::RestoreSessionEntry( const QString &szEntry )
 	else if ( szKind == u"scheme" )
 	{
 		OpenSchemeFile( szPath );
+	}
+	else if ( szKind == u"demo" )
+	{
+		OpenDemoFile( szPath );
 	}
 	else if ( szKind == u"sky" )
 	{
@@ -5808,6 +5834,57 @@ CSchemeEditor *CMainWindow::OpenSchemeFile( const QString &szPath )
 	m_pTabs->setTabToolTip( nIndex, szName );
 	m_pTabs->setCurrentIndex( nIndex );
 	return pEditor;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: A demo in the demo viewer, the tab it already has if open. A game's demo is
+//          nearly always a loose file in its folder: that file is mapped, not read whole (an
+//          hour's demo is tens of megabytes, of which the viewer keeps little).
+//-----------------------------------------------------------------------------
+CDemoViewer *CMainWindow::OpenDemoFile( const QString &szPath )
+{
+	if ( const QString szDisk = QFileInfo( szPath ).isAbsolute() ? QString{} : DiskPathForGame( szPath ); !szDisk.isEmpty() && QFileInfo( szDisk ).isFile() )
+		return OpenDemoFile( szDisk );
+	const QFileInfo info( szPath );
+	const bool bDisk = info.isAbsolute();
+	const QString szName = bDisk ? QDir::toNativeSeparators( info.absoluteFilePath() ) : QString::fromStdString( xv::vfs::NormalizePath( szPath.toStdString() ) );
+	for ( int i = 0; i < m_pTabs->count(); i++ )
+	{
+		auto *pOpen = qobject_cast<CDemoViewer *>( m_pTabs->widget( i ) );
+		if ( pOpen && pOpen->GetName().compare( szName, Qt::CaseInsensitive ) == 0 )
+		{
+			m_pTabs->setCurrentWidget( pOpen );
+			return pOpen;
+		}
+	}
+	std::optional<xv::demo::CDemo> demo;
+	std::string szError = "could not read the file";
+	if ( bDisk )
+	{
+		QFile file( info.absoluteFilePath() );
+		if ( file.open( QIODevice::ReadOnly ) )
+		{
+			if ( const uchar *pBytes = file.map( 0, file.size() ) )
+				demo = xv::demo::CDemo::Parse( { reinterpret_cast<const std::byte *>( pBytes ), static_cast<std::size_t>( file.size() ) }, &szError );
+			else if ( const QByteArray data = file.readAll(); !data.isEmpty() )
+				demo = xv::demo::CDemo::Parse( AsBytes( data ), &szError );
+		}
+	}
+	else if ( m_Game )
+	{
+		if ( const auto bytes = m_pFileSystem->Read( szName.toStdString() ) )
+			demo = xv::demo::CDemo::Parse( *bytes, &szError );
+	}
+	if ( !demo )
+	{
+		QMessageBox::warning( this, tr( "Cannot open" ), tr( "Could not open %1: %2." ).arg( szName, QString::fromStdString( szError ) ) );
+		return nullptr;
+	}
+	auto *pViewer = new CDemoViewer( szName, std::move( *demo ), bDisk ? ToPath( info.absoluteFilePath() ) : fs::path{}, !bDisk );
+	const int nIndex = m_pTabs->addTab( pViewer, pViewer->GetTabTitle() );
+	m_pTabs->setTabToolTip( nIndex, szName );
+	m_pTabs->setCurrentIndex( nIndex );
+	return pViewer;
 }
 
 //-----------------------------------------------------------------------------
