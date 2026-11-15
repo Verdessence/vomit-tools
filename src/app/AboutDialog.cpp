@@ -16,6 +16,8 @@
 #include <QFontDatabase>
 #include <QHBoxLayout>
 #include <QLabel>
+#include <QLineEdit>
+#include <QListWidget>
 #include <QPixmap>
 #include <QPlainTextEdit>
 #include <QPushButton>
@@ -202,28 +204,151 @@ QString CAboutDialog::LicenseText( const QString &szName )
 }
 
 //-----------------------------------------------------------------------------
+// Purpose: The file is one long text: each library under a heading between two ruled lines
+//          (its name, "Source:", "License:", then any note), its license's text after.
+//-----------------------------------------------------------------------------
+QList<CAboutDialog::Notice_t> CAboutDialog::ThirdPartyNotices( QString *pIntroduction )
+{
+	QList<Notice_t> notices;
+	const QString szRule( 78, u'-' );
+	const QStringList lines = LicenseText( QStringLiteral( "THIRD-PARTY-NOTICES.txt" ) ).split( u'\n' );
+	QStringList introduction;
+	for ( qsizetype n = 0; n < lines.size(); n++ )
+	{
+		// A heading: a rule, a name, "Source:", and a rule again within a few lines.
+		qsizetype nClose = -1;
+		if ( lines[ n ] == szRule && n + 2 < lines.size() && lines[ n + 2 ].startsWith( QStringLiteral( "Source: " ) ) )
+		{
+			for ( qsizetype k = n + 3; k < lines.size() && k < n + 16 && nClose < 0; k++ )
+			{
+				if ( lines[ k ] == szRule )
+					nClose = k;
+			}
+		}
+		if ( nClose < 0 )
+		{
+			if ( notices.isEmpty() )
+				introduction.append( lines[ n ] );
+			else
+				notices.last().m_szText += lines[ n ] + u'\n';
+			continue;
+		}
+		Notice_t notice;
+		notice.m_szName = lines[ n + 1 ];
+		notice.m_szSource = lines[ n + 2 ].mid( 8 );
+		QStringList note;
+		for ( qsizetype k = n + 3; k < nClose; k++ )
+		{
+			if ( lines[ k ].startsWith( QStringLiteral( "License: " ) ) && notice.m_szLicense.isEmpty() )
+				notice.m_szLicense = lines[ k ].mid( 9 );
+			else
+				note.append( lines[ k ] );
+		}
+		notice.m_szNote = note.join( u'\n' ).trimmed();
+		notices.append( notice );
+		n = nClose;
+	}
+	for ( Notice_t &notice : notices )
+		notice.m_szText = notice.m_szText.trimmed();
+	if ( pIntroduction )
+		*pIntroduction = introduction.join( u'\n' ).trimmed();
+	return notices;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+QDialog *CAboutDialog::NewLicensesDialog( QWidget *pParent )
+{
+	auto *pDialog = new QDialog( pParent );
+	pDialog->setObjectName( QStringLiteral( "licensesDialog" ) );
+	pDialog->setWindowTitle( tr( "Licenses" ) );
+	pDialog->resize( 900, 620 );
+	auto *pTabs = new QTabWidget;
+	const auto textView = []( const QString &szText, const QString &szName ) {
+		auto *pText = new QPlainTextEdit( szText );
+		pText->setObjectName( szName );
+		pText->setReadOnly( true );
+		pText->setFont( QFontDatabase::systemFont( QFontDatabase::FixedFont ) );
+		return pText;
+	};
+	pTabs->addTab( textView( LicenseText( QStringLiteral( "LICENSE.txt" ) ), QStringLiteral( "LICENSE.txt" ) ), tr( "vomit-tools (GNU GPL 3)" ) );
+
+	// The libraries: a list to pick from, the one picked beside it.
+	QString szIntroduction;
+	const QList<Notice_t> notices = ThirdPartyNotices( &szIntroduction );
+	auto *pLibraries = new QWidget;
+	auto *pLibrariesLayout = new QHBoxLayout( pLibraries );
+	auto *pLeft = new QVBoxLayout;
+	auto *pFilter = new QLineEdit;
+	pFilter->setObjectName( QStringLiteral( "licensesFilter" ) );
+	pFilter->setPlaceholderText( tr( "Filter by name or license" ) );
+	pFilter->setClearButtonEnabled( true );
+	pLeft->addWidget( pFilter );
+	auto *pList = new QListWidget;
+	pList->setObjectName( QStringLiteral( "licensesList" ) );
+	pLeft->addWidget( pList, 1 );
+	pLibrariesLayout->addLayout( pLeft, 1 );
+	auto *pRight = new QVBoxLayout;
+	auto *pHeading = new QLabel;
+	pHeading->setObjectName( QStringLiteral( "licensesHeading" ) );
+	pHeading->setWordWrap( true );
+	pHeading->setTextFormat( Qt::RichText );
+	pHeading->setTextInteractionFlags( Qt::TextBrowserInteraction );
+	pHeading->setOpenExternalLinks( true );
+	pRight->addWidget( pHeading );
+	QPlainTextEdit *pText = textView( QString{}, QStringLiteral( "THIRD-PARTY-NOTICES.txt" ) );
+	pRight->addWidget( pText, 1 );
+	pLibrariesLayout->addLayout( pRight, 3 );
+	auto *pAbout = new QListWidgetItem( tr( "About these" ), pList );
+	pAbout->setData( Qt::UserRole, -1 );
+	for ( qsizetype n = 0; n < notices.size(); n++ )
+	{
+		// The name without what it is for (in brackets in the file), and its license.
+		const QString szShort = notices[ n ].m_szName.section( QStringLiteral( " (" ), 0, 0 );
+		auto *pItem = new QListWidgetItem( QStringLiteral( "%1\n%2" ).arg( szShort, notices[ n ].m_szLicense.section( QStringLiteral( " (" ), 0, 0 ) ), pList );
+		pItem->setData( Qt::UserRole, n );
+		pItem->setToolTip( notices[ n ].m_szName );
+	}
+	connect( pList, &QListWidget::currentItemChanged, pDialog, [ = ]( QListWidgetItem *pItem ) {
+		const qsizetype n = pItem ? pItem->data( Qt::UserRole ).toLongLong() : -1;
+		if ( n < 0 || n >= notices.size() )
+		{
+			pHeading->setText( tr( "<b>Third-party software in vomit-tools</b>" ) );
+			pText->setPlainText( szIntroduction );
+			return;
+		}
+		const Notice_t &notice = notices[ n ];
+		// The source as a link when it starts with one.
+		const QString szUrl = notice.m_szSource.section( u' ', 0, 0 );
+		const QString szSource = szUrl.startsWith( QStringLiteral( "http" ) ) ? QStringLiteral( "<a href=\"%1\">%1</a>%2" ).arg( szUrl.toHtmlEscaped(), notice.m_szSource.mid( szUrl.size() ).toHtmlEscaped() ) : notice.m_szSource.toHtmlEscaped();
+		QString szHeading = tr( "<b>%1</b><br>License: %2<br>Source: %3" ).arg( notice.m_szName.toHtmlEscaped(), notice.m_szLicense.toHtmlEscaped(), szSource );
+		if ( !notice.m_szNote.isEmpty() )
+			szHeading += QStringLiteral( "<br><br>" ) + notice.m_szNote.toHtmlEscaped().replace( u'\n', u' ' );
+		pHeading->setText( szHeading );
+		pText->setPlainText( notice.m_szText );
+	} );
+	connect( pFilter, &QLineEdit::textChanged, pDialog, [ pList ]( const QString &szFilter ) {
+		for ( int i = 0; i < pList->count(); i++ )
+			pList->item( i )->setHidden( !szFilter.trimmed().isEmpty() && !pList->item( i )->text().contains( szFilter.trimmed(), Qt::CaseInsensitive ) && !pList->item( i )->toolTip().contains( szFilter.trimmed(), Qt::CaseInsensitive ) );
+	} );
+	pList->setCurrentRow( 0 );
+	pTabs->addTab( pLibraries, tr( "Third-party libraries (%1)" ).arg( notices.size() ) );
+
+	auto *pButtons = new QDialogButtonBox( QDialogButtonBox::Close );
+	connect( pButtons, &QDialogButtonBox::rejected, pDialog, &QDialog::reject );
+	auto *pLayout = new QVBoxLayout( pDialog );
+	pLayout->addWidget( pTabs );
+	pLayout->addWidget( pButtons );
+	return pDialog;
+}
+
+//-----------------------------------------------------------------------------
 // Purpose:
 //-----------------------------------------------------------------------------
 void CAboutDialog::ShowLicenses( QWidget *pParent )
 {
-	QDialog dialog( pParent );
-	dialog.setObjectName( QStringLiteral( "licensesDialog" ) );
-	dialog.setWindowTitle( tr( "Licenses" ) );
-	dialog.resize( 720, 600 );
-	auto *pTabs = new QTabWidget;
-	const auto page = [ pTabs ]( const QString &szTitle, const QString &szName ) {
-		auto *pText = new QPlainTextEdit( LicenseText( szName ) );
-		pText->setObjectName( szName );
-		pText->setReadOnly( true );
-		pText->setFont( QFontDatabase::systemFont( QFontDatabase::FixedFont ) );
-		pTabs->addTab( pText, szTitle );
-	};
-	page( tr( "vomit-tools (GNU GPL 3)" ), QStringLiteral( "LICENSE.txt" ) );
-	page( tr( "Third-party libraries" ), QStringLiteral( "THIRD-PARTY-NOTICES.txt" ) );
-	auto *pButtons = new QDialogButtonBox( QDialogButtonBox::Close );
-	connect( pButtons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject );
-	auto *pLayout = new QVBoxLayout( &dialog );
-	pLayout->addWidget( pTabs );
-	pLayout->addWidget( pButtons );
-	dialog.exec();
+	QDialog *pDialog = NewLicensesDialog( pParent );
+	pDialog->exec();
+	delete pDialog;
 }

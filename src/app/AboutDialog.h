@@ -8,6 +8,7 @@
 #pragma once
 
 #include <QDialog>
+#include <QList>
 
 class CAboutDialog : public QDialog
 {
@@ -23,7 +24,21 @@ public:
 	[[nodiscard]] static QString BuildDetails();
 	// A license shipped with the program: "LICENSE.txt" (ours) or "THIRD-PARTY-NOTICES.txt".
 	[[nodiscard]] static QString LicenseText( const QString &szName );
-	// Our license and every library's notice, one tab each.
+	// One library of THIRD-PARTY-NOTICES.txt: what its heading says and its license's text.
+	struct Notice_t
+	{
+		QString m_szName;
+		QString m_szSource;
+		QString m_szLicense; // the SPDX id, as the heading gives it
+		QString m_szNote;
+		QString m_szText;
+	};
+	// The notices file taken apart, in its order; pIntroduction gets what stands before the
+	// first library.
+	[[nodiscard]] static QList<Notice_t> ThirdPartyNotices( QString *pIntroduction = nullptr );
+	// The licenses window: our license in one tab; in the other the libraries listed by name
+	// and license (a filter over them), each with its own notice beside the list.
+	[[nodiscard]] static QDialog *NewLicensesDialog( QWidget *pParent );
 	static void ShowLicenses( QWidget *pParent );
 
 protected:
