@@ -5,11 +5,12 @@
 //          header that folds it and drags it to another place in the column, and a strip of
 //          tabs down the side shows or hides each one (several at once, unlike Blender's
 //          tabs). A panel can belong to a mode, as Blender's tool settings do: while its mode is
-//          off, neither it nor its tab is there (SetAvailable). The tabs are in three groups, each
+//          off, neither it nor its tab is there (SetAvailable). A panel can be taken out into a
+//          window of its own (SetFloating): its tab then shows and hides the window. The tabs are in three groups, each
 //          on a rounded ground of its own: those pinned at the top (SetPinned), the rest, then the
 //          modes' (whose group runs down the strip). The column scrolls when its panels are taller than it; a panel that stretches
-//          takes the height left over when they aren't. Which panels show, which are folded and
-//          their order are kept as one value (GetState, SetState).
+//          takes the height left over when they aren't. Which panels show, which are folded or in
+//          windows, and their order are kept as one value (GetState, SetState).
 //
 //===========================================================================//
 #pragma once
@@ -42,6 +43,9 @@ public:
 	[[nodiscard]] bool IsStretching() const { return m_bStretch && !m_bFolded; }
 	void SetFolded( bool bFolded );
 	void SetTitle( const QString &szTitle );
+	[[nodiscard]] QString GetTitle() const;
+	// In a window of its own: no header (the window has a title), the content always open.
+	void SetFloating( bool bFloating );
 
 signals:
 	void FoldChanged();
@@ -91,6 +95,14 @@ public:
 	void ScrollTo( const QString &szId );
 	// Shown, unfolded and scrolled to.
 	void Reveal( const QString &szId );
+	// In a window of its own, out of the column; closing the window puts it back.
+	[[nodiscard]] bool IsFloating( const QString &szId ) const;
+	void SetFloating( const QString &szId, bool bFloating );
+	[[nodiscard]] QWidget *GetWindow( const QString &szId ) const;
+	// In a window of its own, this one opens only when asked for (Reveal), as Hammer's Object
+	// Properties does, and its window's close button puts it away rather than back.
+	void SetOnDemand( const QString &szId );
+	[[nodiscard]] bool IsOnDemandWindow( const QString &szId ) const;
 	// Moves a panel to nIndex in the column's order.
 	void MovePanel( const QString &szId, int nIndex );
 	// Folds every panel but this one, or unfolds them all when the others are folded already
@@ -102,8 +114,9 @@ public:
 	void SetOnePanel( bool bOnePanel );
 	[[nodiscard]] bool IsOnePanel() const { return m_bOnePanel; }
 
-	// "order" (ids), "hidden" and "folded" (ids), and "current" (the panel shown alone, with one
-	// panel at a time): what SetState takes back. Ids it doesn't
+	// "order" (ids), "hidden" and "folded" (ids), "current" (the panel shown alone, with one
+	// panel at a time), "windows" (ids) and "windowGeometry" (id to "x y width height"): what
+	// SetState takes back. Ids it doesn't
 	// know are passed over, and panels it doesn't name keep their place at the end.
 	[[nodiscard]] QVariantMap GetState() const;
 	void SetState( const QVariantMap &state );
@@ -122,6 +135,9 @@ signals:
 
 protected:
 	bool eventFilter( QObject *pObject, QEvent *pEvent ) override;
+	// The panels' windows go and come with the column (another editor's tab hides it).
+	void showEvent( QShowEvent *pEvent ) override;
+	void hideEvent( QHideEvent *pEvent ) override;
 
 private:
 	struct Entry_t
@@ -133,7 +149,15 @@ private:
 		bool m_bMode = false; // comes and goes with a mode (SetAvailable has been called)
 		bool m_bHiddenByDefault = false;
 		bool m_bPinned = false;
+		QWidget *m_pWindow = nullptr; // while the panel is in a window of its own
+		QRect m_WindowGeometry;       // where its window was last
+		bool m_bOnDemand = false;
 	};
+
+	void MakeWindow( Entry_t &entry );
+	void DropWindow( Entry_t &entry );
+
+	[[nodiscard]] Entry_t *FindEntry( const QString &szId );
 
 	// The layouts' order and stretch from m_Entries.
 	void Relayout();

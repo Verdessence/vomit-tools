@@ -10,17 +10,57 @@
 
 #include <iterator>
 
+#include <QApplication>
+#include <QCloseEvent>
+#include <QGuiApplication>
 #include <QInputDialog>
 #include <QLineEdit>
 #include <QMenu>
+#include <QMenuBar>
 #include <QSettings>
+#include <QStatusBar>
 #include <QTabBar>
+#include <QWindow>
 
 namespace
 {
 
 // The user's groups: tab key to group.
 constexpr char USER_GROUPS_SETTING[] = "tabGroups/user";
+// Where each kind's editor window was: editorWindows/<kind>.
+constexpr char WINDOW_GEOMETRY_SETTING[] = "editorWindows/";
+
+// A window's tab widget, saying when tabs come and go.
+class CWindowTabs : public QTabWidget
+{
+public:
+	explicit CWindowTabs( std::function<void()> pfnChanged )
+		: m_pfnChanged( std::move( pfnChanged ) )
+	{
+	}
+
+protected:
+	//-----------------------------------------------------------------------------
+	// Purpose:
+	//-----------------------------------------------------------------------------
+	void tabInserted( int nIndex ) override
+	{
+		QTabWidget::tabInserted( nIndex );
+		m_pfnChanged();
+	}
+
+	//-----------------------------------------------------------------------------
+	// Purpose:
+	//-----------------------------------------------------------------------------
+	void tabRemoved( int nIndex ) override
+	{
+		QTabWidget::tabRemoved( nIndex );
+		m_pfnChanged();
+	}
+
+private:
+	std::function<void()> m_pfnChanged;
+};
 
 struct Kind_t
 {
@@ -52,7 +92,8 @@ constexpr char OTHER[] = QT_TRANSLATE_NOOP( "CTabGroups", "Other" );
 void CEditorTabWidget::tabInserted( int nIndex )
 {
 	QTabWidget::tabInserted( nIndex );
-	emit TabsChanged();
+	if ( !m_bMoving )
+		emit TabsChanged();
 }
 
 //-----------------------------------------------------------------------------
@@ -61,7 +102,510 @@ void CEditorTabWidget::tabInserted( int nIndex )
 void CEditorTabWidget::tabRemoved( int nIndex )
 {
 	QTabWidget::tabRemoved( nIndex );
+	if ( !m_bMoving )
+		emit TabsChanged();
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: The windows go with the tabs' owner.
+//-----------------------------------------------------------------------------
+CEditorTabWidget::~CEditorTabWidget()
+{
+	for ( const QPointer<CEditorWindow> &pWindow : m_Windows )
+		delete pWindow.data();
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Which tab widget holds tab nIndex of the whole list, and where in it.
+//-----------------------------------------------------------------------------
+CEditorTabWidget::Place_t CEditorTabWidget::PlaceOf( int nIndex ) const
+{
+	if ( nIndex < 0 )
+		return {};
+	const int nOwn = Own()->count();
+	if ( nIndex < nOwn )
+		return { const_cast<QTabWidget *>( Own() ), nIndex };
+	nIndex -= nOwn;
+	for ( const QPointer<CEditorWindow> &pWindow : m_Windows )
+	{
+		if ( !pWindow )
+			continue;
+		const int nCount = pWindow->GetTabs()->count();
+		if ( nIndex < nCount )
+			return { pWindow->GetTabs(), nIndex };
+		nIndex -= nCount;
+	}
+	return {};
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+int CEditorTabWidget::count() const
+{
+	int nCount = Own()->count();
+	for ( const QPointer<CEditorWindow> &pWindow : m_Windows )
+		if ( pWindow )
+			nCount += pWindow->GetTabs()->count();
+	return nCount;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+QWidget *CEditorTabWidget::widget( int nIndex ) const
+{
+	const Place_t place = PlaceOf( nIndex );
+	return place.m_pTabs ? place.m_pTabs->widget( place.m_nIndex ) : nullptr;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+int CEditorTabWidget::indexOf( const QWidget *pWidget ) const
+{
+	if ( !pWidget )
+		return -1;
+	int nBase = Own()->count();
+	if ( const int n = Own()->indexOf( pWidget ); n >= 0 )
+		return n;
+	for ( const QPointer<CEditorWindow> &pWindow : m_Windows )
+	{
+		if ( !pWindow )
+			continue;
+		if ( const int n = pWindow->GetTabs()->indexOf( pWidget ); n >= 0 )
+			return nBase + n;
+		nBase += pWindow->GetTabs()->count();
+	}
+	return -1;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: The current tab of the window last used.
+//-----------------------------------------------------------------------------
+QWidget *CEditorTabWidget::currentWidget() const
+{
+	const QTabWidget *pTabs = m_pActive ? m_pActive.data() : Own();
+	return pTabs->currentWidget();
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+int CEditorTabWidget::currentIndex() const
+{
+	return indexOf( currentWidget() );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Also brings its window forward.
+//-----------------------------------------------------------------------------
+void CEditorTabWidget::setCurrentWidget( QWidget *pWidget )
+{
+	setCurrentIndex( indexOf( pWidget ) );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+void CEditorTabWidget::setCurrentIndex( int nIndex )
+{
+	const Place_t place = PlaceOf( nIndex );
+	if ( !place.m_pTabs )
+		return;
+	if ( place.m_pTabs == Own() )
+	{
+		const bool bWasActive = !m_pActive;
+		m_pActive = nullptr;
+		// From another window (a file previewed from an editor's): the main window comes forward.
+		if ( !bWasActive && window()->isVisible() )
+		{
+			window()->raise();
+			window()->activateWindow();
+		}
+		const int nWas = Own()->currentIndex();
+		QTabWidget::setCurrentIndex( place.m_nIndex );
+		// Coming back to this window with its tab already current: the current tab still changed.
+		if ( !bWasActive || nWas == place.m_nIndex )
+			emit currentChanged( currentIndex() );
+		return;
+	}
+	auto *pWindow = static_cast<CEditorWindow *>( place.m_pTabs->window() );
+	const bool bChanged = m_pActive != place.m_pTabs || place.m_pTabs->currentIndex() != place.m_nIndex;
+	m_pActive = place.m_pTabs;
+	{
+		const QSignalBlocker blocker( place.m_pTabs );
+		place.m_pTabs->setCurrentIndex( place.m_nIndex );
+	}
+	if ( window()->isVisible() )
+	{
+		pWindow->show();
+		pWindow->raise();
+		pWindow->activateWindow();
+	}
+	if ( bChanged )
+		emit currentChanged( currentIndex() );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Windowed, an editor goes to its kind's window (the first tab stays here).
+//-----------------------------------------------------------------------------
+int CEditorTabWidget::addTab( QWidget *pWidget, const QString &szText )
+{
+	if ( !m_bWindowed || Own()->count() == 0 )
+		return QTabWidget::addTab( pWidget, szText );
+	CEditorWindow *pWindow = WindowFor( CTabGroups::KindOf( pWidget ) );
+	pWindow->GetTabs()->addTab( pWidget, szText );
+	if ( window()->isVisible() && !pWindow->isVisible() )
+		pWindow->show();
+	return indexOf( pWidget );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: A window left without tabs goes away.
+//-----------------------------------------------------------------------------
+void CEditorTabWidget::removeTab( int nIndex )
+{
+	const Place_t place = PlaceOf( nIndex );
+	if ( !place.m_pTabs )
+		return;
+	if ( place.m_pTabs == Own() )
+	{
+		QTabWidget::removeTab( place.m_nIndex );
+		return;
+	}
+	place.m_pTabs->removeTab( place.m_nIndex );
+	if ( place.m_pTabs->count() == 0 )
+	{
+		place.m_pTabs->window()->hide();
+		if ( m_pActive == place.m_pTabs )
+		{
+			m_pActive = nullptr;
+			emit currentChanged( currentIndex() );
+		}
+	}
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+QString CEditorTabWidget::tabText( int nIndex ) const
+{
+	const Place_t place = PlaceOf( nIndex );
+	return place.m_pTabs ? place.m_pTabs->tabText( place.m_nIndex ) : QString{};
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: A window's title follows its current tab's.
+//-----------------------------------------------------------------------------
+void CEditorTabWidget::setTabText( int nIndex, const QString &szText )
+{
+	const Place_t place = PlaceOf( nIndex );
+	if ( !place.m_pTabs )
+		return;
+	place.m_pTabs->setTabText( place.m_nIndex, szText );
+	if ( place.m_pTabs != Own() )
+		WindowCurrentChanged( static_cast<CEditorWindow *>( place.m_pTabs->window() ) );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+QString CEditorTabWidget::tabToolTip( int nIndex ) const
+{
+	const Place_t place = PlaceOf( nIndex );
+	return place.m_pTabs ? place.m_pTabs->tabToolTip( place.m_nIndex ) : QString{};
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+void CEditorTabWidget::setTabToolTip( int nIndex, const QString &szTip )
+{
+	const Place_t place = PlaceOf( nIndex );
+	if ( place.m_pTabs )
+		place.m_pTabs->setTabToolTip( place.m_nIndex, szTip );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+bool CEditorTabWidget::isTabVisible( int nIndex ) const
+{
+	const Place_t place = PlaceOf( nIndex );
+	return place.m_pTabs && place.m_pTabs->isTabVisible( place.m_nIndex );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+void CEditorTabWidget::setTabVisible( int nIndex, bool bVisible )
+{
+	const Place_t place = PlaceOf( nIndex );
+	if ( place.m_pTabs )
+		place.m_pTabs->setTabVisible( place.m_nIndex, bVisible );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+void CEditorTabWidget::setTabEnabled( int nIndex, bool bEnabled )
+{
+	const Place_t place = PlaceOf( nIndex );
+	if ( place.m_pTabs )
+		place.m_pTabs->setTabEnabled( place.m_nIndex, bEnabled );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: The tabs move, each as it was; the one current stays current.
+//-----------------------------------------------------------------------------
+void CEditorTabWidget::SetWindowed( bool bWindowed )
+{
+	if ( bWindowed == m_bWindowed )
+		return;
+	QWidget *pCurrent = currentWidget();
+	m_bMoving = true;
+	m_bWindowed = bWindowed;
+	if ( bWindowed )
+	{
+		// The main window coming up shows the windows with it; using it makes its tab current.
+		window()->installEventFilter( this );
+		connect( qApp, &QGuiApplication::focusWindowChanged, this, [ this ]( QWindow *pFocus ) {
+			if ( !pFocus )
+				return;
+			if ( pFocus == window()->windowHandle() )
+				Activated( nullptr );
+			for ( const QPointer<CEditorWindow> &pWindow : m_Windows )
+				if ( pWindow && pFocus == pWindow->windowHandle() )
+					Activated( pWindow->GetTabs() );
+		} );
+		const QSignalBlocker blocker( this );
+		while ( Own()->count() > 1 )
+		{
+			QWidget *pWidget = Own()->widget( 1 );
+			MoveTab( this, 1, WindowFor( CTabGroups::KindOf( pWidget ) )->GetTabs() );
+		}
+	}
+	else
+	{
+		window()->removeEventFilter( this );
+		disconnect( qApp, &QGuiApplication::focusWindowChanged, this, nullptr );
+		const QSignalBlocker blocker( this );
+		for ( const QPointer<CEditorWindow> &pWindow : m_Windows )
+		{
+			if ( !pWindow )
+				continue;
+			while ( pWindow->GetTabs()->count() > 0 )
+				MoveTab( pWindow->GetTabs(), 0, this );
+			pWindow->SetClosingQuietly( true );
+			pWindow->close();
+			pWindow->deleteLater();
+		}
+		m_Windows.clear();
+		m_pActive = nullptr;
+	}
+	m_bMoving = false;
+	if ( window()->isVisible() )
+		for ( CEditorWindow *pWindow : GetWindows() )
+			pWindow->setVisible( pWindow->GetTabs()->count() > 0 );
+	if ( pCurrent && indexOf( pCurrent ) >= 0 )
+		setCurrentWidget( pCurrent );
 	emit TabsChanged();
+	emit currentChanged( currentIndex() );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+void CEditorTabWidget::MoveTab( QTabWidget *pFrom, int nIndex, QTabWidget *pTo )
+{
+	QWidget *pWidget = pFrom->widget( nIndex );
+	const QString szText = pFrom->tabText( nIndex );
+	const QString szTip = pFrom->tabToolTip( nIndex );
+	const QIcon icon = pFrom->tabIcon( nIndex );
+	const bool bVisible = pFrom->isTabVisible( nIndex );
+	pFrom->removeTab( nIndex );
+	const int nAt = pTo->addTab( pWidget, icon, szText );
+	pTo->setTabToolTip( nAt, szTip );
+	pTo->setTabVisible( nAt, bVisible );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Where it was last, the main window's menus, and its tabs' signals as this one's.
+//-----------------------------------------------------------------------------
+CEditorWindow *CEditorTabWidget::WindowFor( const QString &szKind )
+{
+	for ( const QPointer<CEditorWindow> &pWindow : m_Windows )
+		if ( pWindow && pWindow->GetKind() == szKind )
+			return pWindow;
+	auto *pWindow = new CEditorWindow( szKind, window() );
+	pWindow->TakeMenus( m_pMenuSource );
+	if ( auto *pMain = qobject_cast<QMainWindow *>( window() ) )
+		connect( pMain->statusBar(), &QStatusBar::messageChanged, pWindow->statusBar(), [ pWindow ]( const QString &szMessage ) { pWindow->statusBar()->showMessage( szMessage ); } );
+	if ( const QByteArray geometry = QSettings{}.value( QLatin1String( WINDOW_GEOMETRY_SETTING ) + szKind ).toByteArray(); !geometry.isEmpty() )
+		pWindow->restoreGeometry( geometry );
+	else
+		pWindow->resize( window()->size() );
+	connect( pWindow, &CEditorWindow::Activated, this, [ this, pWindow ] { Activated( pWindow->GetTabs() ); } );
+	connect( pWindow, &CEditorWindow::TabCloseRequested, this, [ this ]( QWidget *pWidget ) {
+		if ( const int nIndex = indexOf( pWidget ); nIndex >= 0 )
+			emit tabCloseRequested( nIndex );
+	} );
+	connect( pWindow, &CEditorWindow::TabsChanged, this, [ this, pWindow ] {
+		if ( m_bMoving )
+			return;
+		WindowCurrentChanged( pWindow );
+		emit TabsChanged();
+	} );
+	connect( pWindow->GetTabs(), &QTabWidget::currentChanged, this, [ this, pWindow ] {
+		WindowCurrentChanged( pWindow );
+		if ( !m_bMoving && m_pActive == pWindow->GetTabs() )
+			emit currentChanged( currentIndex() );
+	} );
+	m_Windows.push_back( pWindow );
+	return pWindow;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+void CEditorTabWidget::Activated( QTabWidget *pTabs )
+{
+	if ( pTabs == m_pActive.data() || ( pTabs && pTabs->count() == 0 ) )
+		return;
+	m_pActive = pTabs;
+	emit currentChanged( currentIndex() );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: The window's title: its current tab's, then its kind.
+//-----------------------------------------------------------------------------
+void CEditorTabWidget::WindowCurrentChanged( CEditorWindow *pWindow )
+{
+	QTabWidget *pTabs = pWindow->GetTabs();
+	const QString szTab = pTabs->currentIndex() >= 0 ? pTabs->tabText( pTabs->currentIndex() ) : QString{};
+	pWindow->setWindowTitle( ( szTab.isEmpty() ? QString{} : szTab + QStringLiteral( " — " ) ) + pWindow->GetKind() + QStringLiteral( " — vomit-tools" ) );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+void CEditorTabWidget::SetMenuSource( QMenuBar *pMenus )
+{
+	m_pMenuSource = pMenus;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+QWidget *CEditorTabWidget::GetWindowOf( const QWidget *pWidget ) const
+{
+	const Place_t place = PlaceOf( indexOf( pWidget ) );
+	return place.m_pTabs ? place.m_pTabs->window() : nullptr;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+std::vector<CEditorWindow *> CEditorTabWidget::GetWindows() const
+{
+	std::vector<CEditorWindow *> windows;
+	for ( const QPointer<CEditorWindow> &pWindow : m_Windows )
+		if ( pWindow )
+			windows.push_back( pWindow );
+	return windows;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+void CEditorTabWidget::CloseWindows()
+{
+	for ( CEditorWindow *pWindow : GetWindows() )
+	{
+		pWindow->SetClosingQuietly( true );
+		pWindow->close();
+		pWindow->SetClosingQuietly( false );
+	}
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: The main window shown (the windows with tabs come up with it) or hidden.
+//-----------------------------------------------------------------------------
+bool CEditorTabWidget::eventFilter( QObject *pObject, QEvent *pEvent )
+{
+	if ( pObject == window() && pEvent->type() == QEvent::Show )
+	{
+		for ( CEditorWindow *pWindow : GetWindows() )
+			if ( pWindow->GetTabs()->count() > 0 )
+				pWindow->show();
+	}
+	return QTabWidget::eventFilter( pObject, pEvent );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: A top-level window of the main window's (it goes when that does), its tabs in the
+//          middle.
+//-----------------------------------------------------------------------------
+CEditorWindow::CEditorWindow( const QString &szKind, QWidget *pParent )
+	: QMainWindow( pParent, Qt::Window ),
+	  m_szKind( szKind )
+{
+	setObjectName( QStringLiteral( "editorWindow_" ) + szKind );
+	setAttribute( Qt::WA_DeleteOnClose, false );
+	m_pTabs = new CWindowTabs( [ this ] { emit TabsChanged(); } );
+	m_pTabs->setObjectName( QStringLiteral( "editorWindowTabs" ) );
+	m_pTabs->setDocumentMode( true );
+	m_pTabs->setTabsClosable( true );
+	m_pTabs->setMovable( true );
+	connect( m_pTabs, &QTabWidget::tabCloseRequested, this, [ this ]( int nIndex ) { emit TabCloseRequested( m_pTabs->widget( nIndex ) ); } );
+	setCentralWidget( m_pTabs );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: The same menus (the actions are shared, so they follow the main window's state:
+//          the Map menu shows while a map is current, and so on).
+//-----------------------------------------------------------------------------
+void CEditorWindow::TakeMenus( QMenuBar *pMenus )
+{
+	if ( !pMenus )
+		return;
+	for ( QAction *pAction : pMenus->actions() )
+		menuBar()->addAction( pAction );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Using the window makes its current tab the current one.
+//-----------------------------------------------------------------------------
+void CEditorWindow::changeEvent( QEvent *pEvent )
+{
+	QMainWindow::changeEvent( pEvent );
+	if ( pEvent->type() == QEvent::ActivationChange && isActiveWindow() )
+		emit Activated();
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Each tab asks about unsaved changes; the window stays while any is kept. Its place
+//          is kept for the next time.
+//-----------------------------------------------------------------------------
+void CEditorWindow::closeEvent( QCloseEvent *pEvent )
+{
+	QSettings{}.setValue( QLatin1String( WINDOW_GEOMETRY_SETTING ) + m_szKind, saveGeometry() );
+	if ( !m_bQuiet )
+	{
+		std::vector<QPointer<QWidget>> tabs;
+		for ( int i = 0; i < m_pTabs->count(); i++ )
+			tabs.emplace_back( m_pTabs->widget( i ) );
+		for ( const QPointer<QWidget> &pTab : tabs )
+			if ( pTab && m_pTabs->indexOf( pTab ) >= 0 )
+				emit TabCloseRequested( pTab );
+		if ( m_pTabs->count() > 0 )
+		{
+			pEvent->ignore();
+			return;
+		}
+	}
+	pEvent->accept();
 }
 
 //-----------------------------------------------------------------------------

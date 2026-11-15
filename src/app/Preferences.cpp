@@ -41,6 +41,8 @@ namespace
 // The file's name, beside Qt's own settings file.
 constexpr auto CONFIG_NAME = "vomit-tools.nut";
 constexpr auto CONFIG_VARIABLE = "VOMIT_TOOLS_CONFIG";
+constexpr double MIN_UI_SCALE = 0.5;
+constexpr double MAX_UI_SCALE = 4.0;
 constexpr auto KEYS_PRESET_KEY = "map:keys_preset";
 // The map preferences the keys' lines stand for, not a setting of their own in the file.
 constexpr std::string_view KEY_PRESET_LEGACY = "maps/keyPreset";
@@ -105,6 +107,7 @@ void ForEachMapPreference( Visit_t &&pfnVisit, Preferences_t &...maps )
 	pfnVisit( "maps/sensitivity", maps.m_flSensitivity... );
 	pfnVisit( "maps/forwardSpeed", maps.m_flForwardSpeed... );
 	pfnVisit( "maps/renderDistance", maps.m_flRenderDistance... );
+	pfnVisit( "maps/detailDistance", maps.m_flDetailDistance... );
 	pfnVisit( "maps/wheelStep", maps.m_flWheelStep... );
 	pfnVisit( "maps/panScale", maps.m_flPanScale... );
 	pfnVisit( "maps/farStep", maps.m_flFarStep... );
@@ -122,6 +125,7 @@ void ForEachMapPreference( Visit_t &&pfnVisit, Preferences_t &...maps )
 	pfnVisit( "maps/lightPropShadows", maps.m_bLightPropShadows... );
 	pfnVisit( "maps/lightSmoothShadows", maps.m_bLightSmoothShadows... );
 	pfnVisit( "maps/lightAutoBake", maps.m_bLightAutoBake... );
+	pfnVisit( "maps/lightKeepBakes", maps.m_bLightKeepBakes... );
 	pfnVisit( "maps/lightInRadius", maps.m_bLightInRadius... );
 	pfnVisit( "maps/lightRadius", maps.m_flLightRadius... );
 	pfnVisit( "maps/lightDelay", maps.m_nLightDelay... );
@@ -129,6 +133,7 @@ void ForEachMapPreference( Visit_t &&pfnVisit, Preferences_t &...maps )
 	pfnVisit( "maps/lightMonitorGamma", maps.m_flLightMonitorGamma... );
 	pfnVisit( "maps/skybox3D", maps.m_bSkybox3D... );
 	pfnVisit( "maps/sky2D", maps.m_bSky2D... );
+	pfnVisit( "maps/skyFaces", maps.m_bSkyFaces... );
 	pfnVisit( "maps/originAxes", maps.m_bOriginAxes... );
 	pfnVisit( "maps/propertiesFollowSelection", maps.m_bPropertiesFollowSelection... );
 	pfnVisit( "maps/physicsDrag", maps.m_flPhysicsDrag... );
@@ -160,7 +165,6 @@ void ForEachMapPreference( Visit_t &&pfnVisit, Preferences_t &...maps )
 	pfnVisit( "maps/pivot", maps.m_bPivot... );
 	pfnVisit( "maps/carve", maps.m_nCarve... );
 	pfnVisit( "maps/groupCarve", maps.m_bGroupCarve... );
-	pfnVisit( "maps/faceEditWindow", maps.m_bFaceEditWindow... );
 	pfnVisit( "maps/onePanel", maps.m_bOnePanel... );
 	pfnVisit( "maps/autosave", maps.m_bAutosave... );
 	pfnVisit( "maps/autosaveMinutes", maps.m_nAutosaveMinutes... );
@@ -286,10 +290,12 @@ void ForEachGeneralPreference( Visit_t &&pfnVisit, General_t &...generals )
 	pfnVisit( "general:single_window", "singleWindow", "files opened from outside join the window already open", generals.m_bSingleWindow... );
 	pfnVisit( "general:reopen_session", "reopenSession", "the files open at closing open again", generals.m_bReopenSession... );
 	pfnVisit( "general:tab_groups", "tabGroups/on", "tabs grouped under a strip by kind", generals.m_bTabGroups... );
+	pfnVisit( "general:editor_windows", nullptr, "each kind of editor (maps, particles...) in a window of its own", generals.m_bEditorWindows... );
 	pfnVisit( "general:manifest_reminder", "manifestReminder", "offer to add saved files to the game's manifest", generals.m_bManifestReminder... );
 	pfnVisit( "general:desktop_file_chooser", "desktopFileChooser", "the desktop's own open and save windows", generals.m_bDesktopFileChooser... );
 	pfnVisit( "general:debug_log", "debugLog", "log what goes on in the background", generals.m_bDebugLog... );
 	pfnVisit( "general:simple_interface", "simpleInterface", "fewer, plainer controls", generals.m_bSimpleInterface... );
+	pfnVisit( "general:ui_scale", nullptr, "the interface's size (1.25: a quarter bigger), from the next start", generals.m_flUiScale... );
 	pfnVisit( "theme:color_scheme", nullptr, "light or dark, else the desktop's", generals.m_nThemeScheme... );
 	pfnVisit( "theme:accent", nullptr, "#rrggbb for selections and highlights; empty: the desktop's", generals.m_ThemeAccent... );
 	pfnVisit( "theme:style", nullptr, "a Qt style (Fusion, Windows...); empty: the desktop's", generals.m_szThemeStyle... );
@@ -716,24 +722,50 @@ CPreferences &CPreferences::Instance()
 	return preferences;
 }
 
+namespace
+{
+
+//-----------------------------------------------------------------------------
+// Purpose: Where vomit-tools.nut is: VOMIT_TOOLS_CONFIG, else beside Qt's own settings file.
+//-----------------------------------------------------------------------------
+QString ConfigPathNow()
+{
+	QString szPath = qEnvironmentVariable( CONFIG_VARIABLE );
+	if ( !szPath.isEmpty() )
+		return szPath;
+	// Beside Qt's own file (where tests point it, too). Windows keeps Qt's in the registry.
+	const QSettings settings;
+	const QString szFolder = settings.format() == QSettings::NativeFormat && QSysInfo::productType() == u"windows" ? QStandardPaths::writableLocation( QStandardPaths::AppConfigLocation )
+																												   : QFileInfo( settings.fileName() ).absolutePath();
+	// Other programs built on the app's code (the tests) keep a file of their own, as Qt keeps
+	// their settings apart by program name.
+	const QString szApp = QCoreApplication::applicationName();
+	const QString szName = szApp.isEmpty() || szApp == u"vomit-tools" ? QLatin1String( CONFIG_NAME ) : szApp + u'.' + QLatin1String( CONFIG_NAME );
+	return QDir( szFolder ).filePath( szName );
+}
+
+} // namespace
+
+//-----------------------------------------------------------------------------
+// Purpose: Only the one key, straight from the file: nothing else of the preferences can be
+//          made before the application.
+//-----------------------------------------------------------------------------
+double CPreferences::ReadStartupUiScale()
+{
+	xv::conf::CConfig config;
+	config.Load( ConfigPathNow().toStdString() );
+	double flScale = 1.0;
+	if ( const xv::conf::Entry_t *pEntry = config.Find( "general:ui_scale" ) )
+		static_cast<void>( FromText( pEntry->m_szValue, flScale ) );
+	return std::clamp( flScale, MIN_UI_SCALE, MAX_UI_SCALE );
+}
+
 //-----------------------------------------------------------------------------
 // Purpose: Reads the file, making it from the old settings the first time, and watches it.
 //-----------------------------------------------------------------------------
 CPreferences::CPreferences()
 {
-	m_szConfigPath = qEnvironmentVariable( CONFIG_VARIABLE );
-	if ( m_szConfigPath.isEmpty() )
-	{
-		// Beside Qt's own file (where tests point it, too). Windows keeps Qt's in the registry.
-		const QSettings settings;
-		const QString szFolder = settings.format() == QSettings::NativeFormat && QSysInfo::productType() == u"windows" ? QStandardPaths::writableLocation( QStandardPaths::AppConfigLocation )
-																													   : QFileInfo( settings.fileName() ).absolutePath();
-		// Other programs built on the app's code (the tests) keep a file of their own, as Qt keeps
-		// their settings apart by program name.
-		const QString szApp = QCoreApplication::applicationName();
-		const QString szName = szApp.isEmpty() || szApp == u"vomit-tools" ? QLatin1String( CONFIG_NAME ) : szApp + u'.' + QLatin1String( CONFIG_NAME );
-		m_szConfigPath = QDir( szFolder ).filePath( szName );
-	}
+	m_szConfigPath = ConfigPathNow();
 	m_pWatcher = new QFileSystemWatcher( this );
 	m_pReloadTimer = new QTimer( this );
 	m_pReloadTimer->setSingleShot( true );
@@ -1100,6 +1132,10 @@ void CPreferences::ApplyConfig()
 	if ( old.m_bTabGroups != general.m_bTabGroups )
 	{
 		emit TabGroupsChanged( general.m_bTabGroups );
+	}
+	if ( old.m_bEditorWindows != general.m_bEditorWindows )
+	{
+		emit EditorWindowsChanged( general.m_bEditorWindows );
 	}
 	if ( old.m_bSimpleInterface != general.m_bSimpleInterface )
 	{
@@ -1474,6 +1510,25 @@ void CPreferences::SetReopenSession( bool bReopen )
 {
 	m_General.m_bReopenSession = bReopen;
 	Store( "general:reopen_session", bReopen );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+void CPreferences::SetUiScale( double flScale )
+{
+	m_General.m_flUiScale = std::clamp( flScale, MIN_UI_SCALE, MAX_UI_SCALE );
+	Store( "general:ui_scale", m_General.m_flUiScale );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+void CPreferences::SetEditorWindows( bool bWindows )
+{
+	m_General.m_bEditorWindows = bWindows;
+	Store( "general:editor_windows", bWindows );
+	emit EditorWindowsChanged( bWindows );
 }
 
 //-----------------------------------------------------------------------------

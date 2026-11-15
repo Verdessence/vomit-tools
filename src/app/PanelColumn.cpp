@@ -19,6 +19,7 @@
 #include <QPainter>
 #include <QMimeData>
 #include <QMouseEvent>
+#include <QCloseEvent>
 #include <QContextMenuEvent>
 #include <QMenu>
 #include <QScrollArea>
@@ -62,6 +63,83 @@ protected:
 		painter.drawRoundedRect( QRectF( rect() ).adjusted( 0.5, 0.5, -0.5, -0.5 ), 5, 5 );
 	}
 };
+
+// A panel's own window: a tool window over the editor's, telling the column when it is
+// closed (the panel goes back) and where it was put.
+class CPanelWindow : public QWidget
+{
+public:
+	CPanelWindow( QWidget *pParent, std::function<void()> pfnClosed, std::function<void( QRect )> pfnPlaced )
+		: QWidget( pParent, Qt::Tool ),
+		  m_pfnClosed( std::move( pfnClosed ) ),
+		  m_pfnPlaced( std::move( pfnPlaced ) )
+	{
+		auto *pLayout = new QVBoxLayout( this );
+		pLayout->setContentsMargins( 0, 0, 0, 0 );
+	}
+
+protected:
+	//-----------------------------------------------------------------------------
+	// Purpose:
+	//-----------------------------------------------------------------------------
+	void closeEvent( QCloseEvent *pEvent ) override
+	{
+		pEvent->ignore(); // the column takes the panel back and deletes the window
+		m_pfnPlaced( geometry() );
+		m_pfnClosed();
+	}
+
+	//-----------------------------------------------------------------------------
+	// Purpose:
+	//-----------------------------------------------------------------------------
+	void moveEvent( QMoveEvent *pEvent ) override
+	{
+		QWidget::moveEvent( pEvent );
+		if ( isVisible() )
+			m_pfnPlaced( geometry() );
+	}
+
+	//-----------------------------------------------------------------------------
+	// Purpose:
+	//-----------------------------------------------------------------------------
+	void resizeEvent( QResizeEvent *pEvent ) override
+	{
+		QWidget::resizeEvent( pEvent );
+		if ( isVisible() )
+			m_pfnPlaced( geometry() );
+	}
+
+private:
+	std::function<void()> m_pfnClosed;
+	std::function<void( QRect )> m_pfnPlaced;
+};
+
+//-----------------------------------------------------------------------------
+// Purpose: A window's place as the state keeps it.
+//-----------------------------------------------------------------------------
+QString GeometryText( const QRect &rect )
+{
+	return QStringLiteral( "%1 %2 %3 %4" ).arg( rect.x() ).arg( rect.y() ).arg( rect.width() ).arg( rect.height() );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: The other way; an empty rectangle for text that isn't four numbers.
+//-----------------------------------------------------------------------------
+QRect GeometryFromText( const QString &szText )
+{
+	const QStringList parts = szText.split( QLatin1Char( ' ' ), Qt::SkipEmptyParts );
+	if ( parts.size() != 4 )
+		return {};
+	std::array<int, 4> values{};
+	for ( int i = 0; i < 4; i++ )
+	{
+		bool bOk = false;
+		values[ static_cast<std::size_t>( i ) ] = parts[ i ].toInt( &bOk );
+		if ( !bOk )
+			return {};
+	}
+	return { values[ 0 ], values[ 1 ], values[ 2 ], values[ 3 ] };
+}
 
 } // namespace
 
@@ -125,7 +203,7 @@ void CPanel::SetFolded( bool bFolded )
 		return;
 	}
 	m_bFolded = bFolded;
-	m_pContent->setVisible( !bFolded );
+	m_pContent->setVisible( !bFolded || !m_pHeader->isVisibleTo( this ) );
 	UpdateArrow();
 	emit FoldChanged();
 }
@@ -136,6 +214,23 @@ void CPanel::SetFolded( bool bFolded )
 void CPanel::SetTitle( const QString &szTitle )
 {
 	m_pTitle->setText( szTitle );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+QString CPanel::GetTitle() const
+{
+	return m_pTitle->text();
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: The fold is kept for when it comes back to the column.
+//-----------------------------------------------------------------------------
+void CPanel::SetFloating( bool bFloating )
+{
+	m_pHeader->setVisible( !bFloating );
+	m_pContent->setVisible( bFloating || !m_bFolded );
 }
 
 //-----------------------------------------------------------------------------
@@ -274,7 +369,8 @@ CPanel *CPanelColumn::AddPanel( const QString &szId, const QString &szTitle, con
 	pTab->setIconSize( QSize{ 20, 20 } );
 	pTab->setToolTip( szTitle );
 	connect( pTab, &QToolButton::toggled, this, [ this, szId, pTab ]( bool bChecked ) {
-		if ( m_bOnePanel )
+		// A panel in a window has a tab of its own, whatever the column does.
+		if ( m_bOnePanel && !IsFloating( szId ) )
 		{
 			// One tab down at a time: picking another lets this one up; this one can't be let up.
 			if ( !bChecked )
@@ -285,7 +381,7 @@ CPanel *CPanelColumn::AddPanel( const QString &szId, const QString &szTitle, con
 			}
 			for ( const Entry_t &entry : m_Entries )
 			{
-				if ( entry.m_pTab != pTab )
+				if ( entry.m_pTab != pTab && !entry.m_pWindow )
 				{
 					const QSignalBlocker blocker( entry.m_pTab );
 					entry.m_pTab->setChecked( false );
@@ -303,7 +399,12 @@ CPanel *CPanelColumn::AddPanel( const QString &szId, const QString &szTitle, con
 		Relayout();
 		emit StateChanged();
 	} );
-	m_Entries.push_back( { pPanel, pTab, {} } );
+	pTab->setContextMenuPolicy( Qt::CustomContextMenu );
+	connect( pTab, &QWidget::customContextMenuRequested, this, [ this, szId, pTab ]( const QPoint &at ) { ShowMenu( szId, pTab->mapToGlobal( at ) ); } );
+	Entry_t entry;
+	entry.m_pPanel = pPanel;
+	entry.m_pTab = pTab;
+	m_Entries.push_back( entry );
 	Relayout();
 	return pPanel;
 }
@@ -404,7 +505,7 @@ void CPanelColumn::SetAvailable( const QString &szId, bool bAvailable )
 	}
 	it->m_bAvailable = bAvailable;
 	it->m_bMode = true;
-	if ( m_bOnePanel )
+	if ( m_bOnePanel && !it->m_pWindow )
 	{
 		const QString szId = it->m_pPanel->GetId();
 		if ( bAvailable )
@@ -429,6 +530,11 @@ void CPanelColumn::ScrollTo( const QString &szId )
 	{
 		return;
 	}
+	if ( QWidget *pWindow = GetWindow( szId ) )
+	{
+		pWindow->raise();
+		return;
+	}
 	// Once the layout has placed it.
 	QTimer::singleShot( 0, this, [ this, pPanel ] { m_pScroll->ensureWidgetVisible( pPanel, 0, 0 ); } );
 }
@@ -446,6 +552,161 @@ void CPanelColumn::Reveal( const QString &szId )
 	SetShown( szId, true );
 	pPanel->SetFolded( false );
 	ScrollTo( szId );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+CPanelColumn::Entry_t *CPanelColumn::FindEntry( const QString &szId )
+{
+	const auto it = std::ranges::find_if( m_Entries, [ & ]( const Entry_t &entry ) { return entry.m_pPanel->GetId() == szId; } );
+	return it == m_Entries.end() ? nullptr : &*it;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+bool CPanelColumn::IsFloating( const QString &szId ) const
+{
+	return GetWindow( szId ) != nullptr;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+QWidget *CPanelColumn::GetWindow( const QString &szId ) const
+{
+	const auto it = std::ranges::find_if( m_Entries, [ & ]( const Entry_t &entry ) { return entry.m_pPanel->GetId() == szId; } );
+	return it == m_Entries.end() ? nullptr : it->m_pWindow;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Out in a window of its own (shown), or back where it was in the column's order.
+//-----------------------------------------------------------------------------
+void CPanelColumn::SetFloating( const QString &szId, bool bFloating )
+{
+	Entry_t *pEntry = FindEntry( szId );
+	if ( !pEntry || ( pEntry->m_pWindow != nullptr ) == bFloating )
+		return;
+	if ( bFloating )
+	{
+		MakeWindow( *pEntry );
+		const QSignalBlocker blocker( pEntry->m_pTab );
+		pEntry->m_pTab->setChecked( true );
+	}
+	else
+	{
+		DropWindow( *pEntry );
+		const QSignalBlocker blocker( pEntry->m_pTab );
+		// Back in the side, an on-demand panel shows again (in its window it was put away).
+		if ( pEntry->m_bOnDemand )
+			pEntry->m_pTab->setChecked( true );
+		// With one panel at a time, the one coming back is the one shown.
+		if ( m_bOnePanel )
+		{
+			for ( const Entry_t &entry : m_Entries )
+			{
+				const QSignalBlocker blockOther( entry.m_pTab );
+				if ( !entry.m_pWindow )
+					entry.m_pTab->setChecked( entry.m_pPanel->GetId() == szId );
+			}
+			m_szCurrent = szId;
+		}
+	}
+	Relayout();
+	emit StateChanged();
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+void CPanelColumn::SetOnDemand( const QString &szId )
+{
+	if ( Entry_t *pEntry = FindEntry( szId ) )
+		pEntry->m_bOnDemand = true;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+bool CPanelColumn::IsOnDemandWindow( const QString &szId ) const
+{
+	const auto it = std::ranges::find_if( m_Entries, [ & ]( const Entry_t &entry ) { return entry.m_pPanel->GetId() == szId; } );
+	return it != m_Entries.end() && it->m_bOnDemand && it->m_pWindow;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: The panel's window, beside the column the first time. Closing it puts the panel
+//          back, or only puts it away when it is opened on demand.
+//-----------------------------------------------------------------------------
+void CPanelColumn::MakeWindow( Entry_t &entry )
+{
+	CPanel *pPanel = entry.m_pPanel;
+	const QString szId = pPanel->GetId();
+	auto *pWindow = new CPanelWindow(
+		this, [ this, szId ] { QTimer::singleShot( 0, this, [ this, szId ] {
+								   if ( IsOnDemandWindow( szId ) )
+									   SetShown( szId, false );
+								   else
+									   SetFloating( szId, false );
+							   } ); },
+		[ this, szId ]( QRect rect ) {
+			if ( Entry_t *p = FindEntry( szId ) )
+			{
+				p->m_WindowGeometry = rect;
+				emit StateChanged();
+			}
+		} );
+	pWindow->setObjectName( QStringLiteral( "panelWindow_" ) + szId );
+	pWindow->setWindowTitle( pPanel->GetTitle() );
+	m_pPanels->removeWidget( pPanel );
+	pWindow->layout()->addWidget( pPanel );
+	pPanel->SetFloating( true );
+	pPanel->show();
+	if ( entry.m_WindowGeometry.isValid() )
+		pWindow->setGeometry( entry.m_WindowGeometry );
+	else
+	{
+		// Beside the column, half as tall as it, each a little lower than the one before.
+		const int nIndex = static_cast<int>( &entry - m_Entries.data() );
+		pWindow->resize( std::max( std::max( width(), 280 ), pPanel->sizeHint().width() ), std::max( 240, height() / 2 ) );
+		pWindow->move( mapToGlobal( QPoint{ -pWindow->width() - 8, 24 * nIndex } ) );
+	}
+	entry.m_pWindow = pWindow;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: The panel back in the column, its window gone.
+//-----------------------------------------------------------------------------
+void CPanelColumn::DropWindow( Entry_t &entry )
+{
+	QWidget *pWindow = std::exchange( entry.m_pWindow, nullptr );
+	if ( !pWindow )
+		return;
+	pWindow->layout()->removeWidget( entry.m_pPanel );
+	entry.m_pPanel->setParent( m_pContent );
+	entry.m_pPanel->SetFloating( false );
+	pWindow->deleteLater();
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+void CPanelColumn::showEvent( QShowEvent *pEvent )
+{
+	QWidget::showEvent( pEvent );
+	Relayout();
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+void CPanelColumn::hideEvent( QHideEvent *pEvent )
+{
+	QWidget::hideEvent( pEvent );
+	for ( const Entry_t &entry : m_Entries )
+		if ( entry.m_pWindow )
+			entry.m_pWindow->hide();
 }
 
 //-----------------------------------------------------------------------------
@@ -496,11 +757,20 @@ void CPanelColumn::FoldOthers( CPanel *pKeep )
 //-----------------------------------------------------------------------------
 QVariantMap CPanelColumn::GetState() const
 {
-	QStringList order, hidden, folded;
+	QStringList order, hidden, folded, windows;
+	QVariantMap geometry;
 	for ( const Entry_t &entry : m_Entries )
 	{
 		order.append( entry.m_pPanel->GetId() );
-		if ( m_bOnePanel ? !m_StackedShown.contains( entry.m_pPanel->GetId() ) : !entry.m_pTab->isChecked() )
+		if ( entry.m_pWindow )
+			windows.append( entry.m_pPanel->GetId() );
+		if ( entry.m_WindowGeometry.isValid() )
+			geometry.insert( entry.m_pPanel->GetId(), GeometryText( entry.m_WindowGeometry ) );
+		// An on-demand panel coming and going in its window leaves the column's choice alone.
+		const bool bShown = entry.m_bOnDemand && entry.m_pWindow ? true
+			: m_bOnePanel && !entry.m_pWindow                    ? m_StackedShown.contains( entry.m_pPanel->GetId() )
+																 : entry.m_pTab->isChecked();
+		if ( !bShown )
 		{
 			hidden.append( entry.m_pPanel->GetId() );
 		}
@@ -509,7 +779,7 @@ QVariantMap CPanelColumn::GetState() const
 			folded.append( entry.m_pPanel->GetId() );
 		}
 	}
-	return { { QStringLiteral( "order" ), order }, { QStringLiteral( "hidden" ), hidden }, { QStringLiteral( "folded" ), folded }, { QStringLiteral( "current" ), m_szCurrent } };
+	return { { QStringLiteral( "order" ), order }, { QStringLiteral( "hidden" ), hidden }, { QStringLiteral( "folded" ), folded }, { QStringLiteral( "current" ), m_szCurrent }, { QStringLiteral( "windows" ), windows }, { QStringLiteral( "windowGeometry" ), geometry } };
 }
 
 //-----------------------------------------------------------------------------
@@ -535,6 +805,19 @@ void CPanelColumn::SetState( const QVariantMap &state )
 		entry.m_pTab->setChecked( order.contains( szId ) || !entry.m_bHiddenByDefault ? !hidden.contains( szId ) : false );
 		entry.m_pPanel->SetFolded( folded.contains( entry.m_pPanel->GetId() ) );
 	}
+	const QStringList windows = state.value( QStringLiteral( "windows" ) ).toStringList();
+	const QVariantMap geometry = state.value( QStringLiteral( "windowGeometry" ) ).toMap();
+	const QSignalBlocker blockColumn( this );
+	for ( Entry_t &entry : m_Entries )
+	{
+		const QString szId = entry.m_pPanel->GetId();
+		entry.m_WindowGeometry = GeometryFromText( geometry.value( szId ).toString() );
+		const bool bShown = entry.m_pTab->isChecked();
+		SetFloating( szId, windows.contains( szId ) );
+		const QSignalBlocker blockTab( entry.m_pTab );
+		// In its window, an on-demand panel waits to be asked for, as Hammer's dialogs do.
+		entry.m_pTab->setChecked( entry.m_bOnDemand && entry.m_pWindow ? false : bShown );
+	}
 	Relayout();
 }
 
@@ -551,7 +834,7 @@ void CPanelColumn::SetOnePanel( bool bOnePanel )
 		QString szKeep;
 		for ( const Entry_t &entry : m_Entries )
 		{
-			if ( entry.m_pTab->isChecked() )
+			if ( entry.m_pTab->isChecked() && !entry.m_pWindow )
 			{
 				m_StackedShown.append( entry.m_pPanel->GetId() );
 				if ( szKeep.isEmpty() && entry.m_bAvailable && !entry.m_bMode )
@@ -561,7 +844,7 @@ void CPanelColumn::SetOnePanel( bool bOnePanel )
 		// The panel shown alone last time, when it is still about.
 		for ( const Entry_t &entry : m_Entries )
 		{
-			if ( entry.m_pPanel->GetId() == m_szCurrent && entry.m_bAvailable && !entry.m_bMode )
+			if ( entry.m_pPanel->GetId() == m_szCurrent && entry.m_bAvailable && !entry.m_bMode && !entry.m_pWindow )
 				szKeep = m_szCurrent;
 		}
 		if ( szKeep.isEmpty() && !m_Entries.empty() )
@@ -569,7 +852,7 @@ void CPanelColumn::SetOnePanel( bool bOnePanel )
 		m_szCurrent = szKeep;
 		// A mode's panel that is there now stays the one shown.
 		for ( const Entry_t &entry : m_Entries )
-			if ( entry.m_bMode && entry.m_bAvailable && entry.m_pTab->isChecked() )
+			if ( entry.m_bMode && entry.m_bAvailable && entry.m_pTab->isChecked() && !entry.m_pWindow )
 			{
 				m_szBeforeMode = szKeep;
 				szKeep = entry.m_pPanel->GetId();
@@ -578,7 +861,8 @@ void CPanelColumn::SetOnePanel( bool bOnePanel )
 		for ( const Entry_t &entry : m_Entries )
 		{
 			const QSignalBlocker blocker( entry.m_pTab );
-			entry.m_pTab->setChecked( entry.m_pPanel->GetId() == szKeep );
+			if ( !entry.m_pWindow )
+				entry.m_pTab->setChecked( entry.m_pPanel->GetId() == szKeep );
 		}
 	}
 	else
@@ -587,7 +871,8 @@ void CPanelColumn::SetOnePanel( bool bOnePanel )
 		for ( const Entry_t &entry : m_Entries )
 		{
 			const QSignalBlocker blocker( entry.m_pTab );
-			entry.m_pTab->setChecked( m_StackedShown.contains( entry.m_pPanel->GetId() ) );
+			if ( !entry.m_pWindow )
+				entry.m_pTab->setChecked( m_StackedShown.contains( entry.m_pPanel->GetId() ) );
 		}
 	}
 	Relayout();
@@ -647,7 +932,7 @@ bool CPanelColumn::eventFilter( QObject *pObject, QEvent *pEvent )
 			int nLineY = m_pPanels->contentsMargins().top();
 			for ( int i = nIndex - 1; i >= 0; i-- )
 			{
-				if ( m_Entries[ static_cast<std::size_t>( i ) ].m_pPanel->isVisible() )
+				if ( !m_Entries[ static_cast<std::size_t>( i ) ].m_pWindow && m_Entries[ static_cast<std::size_t>( i ) ].m_pPanel->isVisible() )
 				{
 					nLineY = m_Entries[ static_cast<std::size_t>( i ) ].m_pPanel->geometry().bottom() + 1;
 					break;
@@ -700,7 +985,7 @@ QSize CPanelColumn::minimumSizeHint() const
 	int nContent = 0;
 	for ( const Entry_t &entry : m_Entries )
 	{
-		if ( !entry.m_bMode && entry.m_bAvailable && entry.m_pTab->isChecked() )
+		if ( !entry.m_bMode && entry.m_bAvailable && entry.m_pTab->isChecked() && !entry.m_pWindow )
 			nContent = std::max( nContent, entry.m_pPanel->minimumSizeHint().width() );
 	}
 	const QMargins margins = m_pPanels->contentsMargins();
@@ -716,7 +1001,7 @@ int CPanelColumn::DropIndexAt( int y ) const
 	for ( std::size_t i = 0; i < m_Entries.size(); i++ )
 	{
 		const CPanel *pPanel = m_Entries[ i ].m_pPanel;
-		if ( pPanel->isVisible() && y < pPanel->geometry().center().y() )
+		if ( !m_Entries[ i ].m_pWindow && pPanel->isVisible() && y < pPanel->geometry().center().y() )
 		{
 			return static_cast<int>( i );
 		}
@@ -745,6 +1030,19 @@ void CPanelColumn::Relayout()
 	for ( const Entry_t &entry : m_Entries )
 	{
 		const bool bShown = entry.m_bAvailable && entry.m_pTab->isChecked();
+		entry.m_pTab->setVisible( entry.m_bAvailable );
+		if ( entry.m_pWindow )
+		{
+			// Its window shows while the column does (it is the editor's).
+			if ( bShown && isVisible() )
+			{
+				if ( !entry.m_pWindow->isVisible() )
+					entry.m_pWindow->show();
+			}
+			else
+				entry.m_pWindow->hide();
+			continue;
+		}
 		// A panel shown alone fills the column, its lists growing into the height.
 		const bool bStretch = bShown && ( entry.m_pPanel->IsStretching() || ( m_bOnePanel && !entry.m_pPanel->IsFolded() ) );
 		bStretching = bStretching || bStretch;
@@ -775,28 +1073,34 @@ void CPanelColumn::Relayout()
 //-----------------------------------------------------------------------------
 void CPanelColumn::SetMenu( const QString &szId, std::function<void( QMenu & )> pfnMenu )
 {
-	for ( Entry_t &entry : m_Entries )
-		if ( entry.m_pPanel->GetId() == szId )
-		{
-			entry.m_pfnMenu = std::move( pfnMenu );
-			entry.m_pTab->setContextMenuPolicy( Qt::CustomContextMenu );
-			connect( entry.m_pTab, &QWidget::customContextMenuRequested, this, [ this, szId, pTab = entry.m_pTab ]( const QPoint &at ) { ShowMenu( szId, pTab->mapToGlobal( at ) ); } );
-			break;
-		}
+	if ( Entry_t *pEntry = FindEntry( szId ) )
+		pEntry->m_pfnMenu = std::move( pfnMenu );
 }
 
 //-----------------------------------------------------------------------------
-// Purpose: The panel's own commands at the pointer.
+// Purpose: The panel's own commands at the pointer, and taking it out into a window or back.
 //-----------------------------------------------------------------------------
 void CPanelColumn::ShowMenu( const QString &szId, const QPoint &globalAt )
 {
-	for ( const Entry_t &entry : m_Entries )
-		if ( entry.m_pPanel->GetId() == szId && entry.m_pfnMenu )
-		{
-			auto *pMenu = new QMenu( this );
-			pMenu->setAttribute( Qt::WA_DeleteOnClose );
-			entry.m_pfnMenu( *pMenu );
-			pMenu->popup( globalAt );
-			break;
-		}
+	const Entry_t *pEntry = FindEntry( szId );
+	if ( !pEntry )
+		return;
+	auto *pMenu = new QMenu( this );
+	pMenu->setAttribute( Qt::WA_DeleteOnClose );
+	QAction *pOwn = pMenu->addAction( tr( "Own Window" ), this, [ this, szId ]( bool bOn ) { SetFloating( szId, bOn ); } );
+	pOwn->setObjectName( QStringLiteral( "panelOwnWindow" ) );
+	pOwn->setCheckable( true );
+	pOwn->setChecked( pEntry->m_pWindow != nullptr );
+	if ( pEntry->m_pfnMenu )
+	{
+		if ( !pMenu->isEmpty() )
+			pMenu->addSeparator();
+		pEntry->m_pfnMenu( *pMenu );
+	}
+	if ( pMenu->isEmpty() )
+	{
+		delete pMenu;
+		return;
+	}
+	pMenu->popup( globalAt );
 }

@@ -55,10 +55,12 @@ struct GeneralPreferences_t
 	bool m_bSingleWindow = true;
 	bool m_bReopenSession = true;
 	bool m_bTabGroups = true;
+	bool m_bEditorWindows = false; // each kind of editor in a window of its own
 	bool m_bManifestReminder = true;
 	bool m_bDesktopFileChooser = true;
 	bool m_bDebugLog = false;
 	bool m_bSimpleInterface = false;
+	double m_flUiScale = 1.0; // the whole interface's size, from the next start
 	ThemeScheme_t m_nThemeScheme = ThemeScheme_t::THEME_SCHEME_SYSTEM;
 	QColor m_ThemeAccent;  // invalid: the desktop's
 	QString m_szThemeStyle; // a Qt style ("Fusion"); empty: the desktop's
@@ -189,6 +191,7 @@ struct MapPreferences_t
 	double m_flSensitivity = mapstyle::MOUSE_SENSITIVITY; // mouse look
 	double m_flForwardSpeed = mapstyle::MAX_FORWARD_SPEED;
 	double m_flRenderDistance = mapstyle::FAR_PLANE;
+	double m_flDetailDistance = mapstyle::DETAIL_DISTANCE; // detail.vbsp's sprites: how far they are drawn
 	double m_flWheelStep = mapstyle::WHEEL_STEP; // units a wheel notch moves the camera
 	double m_flPanScale = mapstyle::PAN_SCALE;   // units a pixel of right-drag moves it
 	double m_flFarStep = mapstyle::FAR_PLANE_STEP; // keys 1 and 2
@@ -206,12 +209,14 @@ struct MapPreferences_t
 	bool m_bLightPropShadows = true;   // prop_static's models cast shadows, as vrad's do
 	bool m_bLightSmoothShadows = true; // shadow edges smoothed across their luxels, as vrad's -final
 	bool m_bLightAutoBake = true;      // the preview bakes again by itself after edits (else on Bake Lighting, as Hammer++)
+	bool m_bLightKeepBakes = true;     // earlier bakes are kept and found again: an undo, a setting put back, the map opened again (a file under the cache folder)
 	bool m_bLightInRadius = false;     // bake only around the 3D camera (Hammer++'s Bake in Radius)
 	double m_flLightRadius = 1024.0;   // and how far
 	int m_nLightDelay = 250;           // milliseconds after an edit before baking (Hammer++'s update delay)
 	int m_nLightSkySamples = 48;       // rays to the sky a sample, for its ambient (Hammer++'s visibility samples)
 	double m_flLightMonitorGamma = 2.2; // the lighting preview's mat_monitorgamma (the game's brightness: 1.6 brightest, 2.6 darkest)
 	bool m_bSkybox3D = true;
+	bool m_bSkyFaces = true;         // sky faces show the map's sky; off, their tool texture
 	bool m_bSky2D = true;            // the map's 2D sky behind everything in the textured 3D views
 	bool m_bOriginAxes = true;       // the world's axes at 0 0 0 in the 3D views
 	bool m_bPropertiesFollowSelection = true; // an entity newly selected brings Object Properties forward
@@ -248,7 +253,6 @@ struct MapPreferences_t
 	MapCarve_t m_nCarve = MapCarve_t::MAP_CARVE_AUTO;
 	bool m_bGroupCarve = true;       // a carved brush's pieces grouped (Hammer++'s GroupCarve)
 	bool m_bShowDisplacementBrush = false; // show its ring in Select while the Displacement tab is open
-	bool m_bFaceEditWindow = true;   // Face Edit in a window of its own, as Hammer's (else in the side panel)
 	bool m_bOnePanel = false;        // the side shows the panel whose tab was picked alone, as Blender's tabs do
 	bool m_bAutosave = true;         // a modified map is written to <map>.vmf.autosave now and then
 	int m_nAutosaveMinutes = 5;      // how often
@@ -294,6 +298,9 @@ class CPreferences : public QObject
 
 public:
 	[[nodiscard]] static CPreferences &Instance();
+	// The interface's scale as the file has it, read before the application is made (Qt takes
+	// its scale then, and only then). Needs the application's name set.
+	[[nodiscard]] static double ReadStartupUiScale();
 
 	// vomit-tools.nut: beside Qt's own settings file (VOMIT_TOOLS_CONFIG names another).
 	[[nodiscard]] QString GetConfigPath() const;
@@ -345,6 +352,10 @@ public:
 
 	// Whether the main window's tabs are grouped (by kind, or the user's groups) under a strip.
 	[[nodiscard]] bool IsTabGroups() const { return m_General.m_bTabGroups; }
+	[[nodiscard]] bool IsEditorWindows() const { return m_General.m_bEditorWindows; }
+	void SetEditorWindows( bool bWindows );
+	[[nodiscard]] double GetUiScale() const { return m_General.m_flUiScale; }
+	void SetUiScale( double flScale );
 	void SetTabGroups( bool bGroups );
 
 	// Whether open and save windows are the desktop's own file chooser (the XDG portal's, on
@@ -389,6 +400,7 @@ signals:
 	void MaterialEditingChanged();
 	void MapPreferencesChanged();
 	void TabGroupsChanged( bool bGroups );
+	void EditorWindowsChanged( bool bWindows );
 	// The Discord settings changed (they live in QSettings under discord/).
 	void DiscordChanged();
 	void CodeEditorChanged();

@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
 //===========================================================================//
+#include <cmath>
+
 #include <QApplication>
 #include <QCommandLineParser>
 #include <QDir>
@@ -31,13 +33,20 @@
 int main( int nArgc, char *argv[] )
 {
 	xv::TuneAllocator();
-	CApplication app{ nArgc, argv };
 	QApplication::setApplicationName( QStringLiteral( "vomit-tools" ) );
 	QApplication::setOrganizationName( QStringLiteral( "vomit-tools" ) );
 	// Qt's own settings as Squirrel tables (vomit-tools.state.nut), beside the settings in
-	// vomit-tools.nut: before
-	// anything reads a setting.
+	// vomit-tools.nut: before anything reads a setting.
 	QSettings::setDefaultFormat( NutSettingsFormat() );
+	// Preferences > General's interface scale: Qt takes it only before the application is made.
+	// QT_SCALE_FACTOR set by hand wins.
+	if ( qEnvironmentVariableIsEmpty( "QT_SCALE_FACTOR" ) )
+	{
+		const double flScale = CPreferences::ReadStartupUiScale();
+		if ( std::abs( flScale - 1.0 ) > 1e-3 )
+			qputenv( "QT_SCALE_FACTOR", QByteArray::number( flScale ) );
+	}
+	CApplication app{ nArgc, argv };
 	MigrateSettingsToNut();
 	QApplication::setApplicationVersion( CAboutDialog::VersionText() );
 	QApplication::setWindowIcon( QIcon( QStringLiteral( ":/assets/vomit-tools.png" ) ) );

@@ -534,8 +534,14 @@ CMainWindow::CMainWindow( QWidget *pParent, xv::audio::CEngine::Output_t nAudio 
 	// The groups' strip over the tabs.
 	m_pTabGroups = new CTabGroups( m_pTabs );
 	m_pTabGroups->SetKeyFunction( [ this ]( QWidget *pTab ) { return SessionEntryFor( m_pTabs->indexOf( pTab ) ); } );
-	m_pTabGroups->SetEnabled( CPreferences::Instance().IsTabGroups() );
-	connect( &CPreferences::Instance(), &CPreferences::TabGroupsChanged, m_pTabGroups, &CTabGroups::SetEnabled );
+	// With each kind of editor in a window of its own, the windows are the groups.
+	const auto groupTabs = [ this ] { m_pTabGroups->SetEnabled( CPreferences::Instance().IsTabGroups() && !CPreferences::Instance().IsEditorWindows() ); };
+	groupTabs();
+	connect( &CPreferences::Instance(), &CPreferences::TabGroupsChanged, m_pTabGroups, groupTabs );
+	connect( &CPreferences::Instance(), &CPreferences::EditorWindowsChanged, this, [ this, groupTabs ]( bool bWindows ) {
+		groupTabs();
+		m_pTabs->SetWindowed( bWindows );
+	} );
 
 	// Discord's Rich Presence: the current tab's kind and file, the time since the start. Tabs
 	// are renamed as files are saved, so it is looked at again now and then too.
@@ -592,6 +598,8 @@ CMainWindow::CMainWindow( QWidget *pParent, xv::audio::CEngine::Output_t nAudio 
 	statusBar()->addPermanentWidget( BuildFooter() );
 
 	BuildMenus( pMountsDock->toggleViewAction() );
+	m_pTabs->SetMenuSource( menuBar() );
+	m_pTabs->SetWindowed( CPreferences::Instance().IsEditorWindows() );
 }
 
 //-----------------------------------------------------------------------------
@@ -3608,6 +3616,7 @@ void CMainWindow::closeEvent( QCloseEvent *pEvent )
 		}
 	}
 	m_pPlayer->Stop();
+	m_pTabs->CloseWindows();
 	pEvent->accept();
 }
 

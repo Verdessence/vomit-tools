@@ -6,6 +6,7 @@
 //===========================================================================//
 #include "PreferencesDialog.h"
 
+#include <cmath>
 #include <utility>
 #include <vector>
 
@@ -167,6 +168,20 @@ QWidget *CPreferencesDialog::BuildInterfacePage()
 	pLayout->addWidget( Hint( tr( "Plain names with a line on what each setting does, easier ways to type values, and advanced "
 								  "settings tucked away while they have their usual value. Off: the files' own names and every "
 								  "setting. Either way the files are edited the same. View → Simple Interface switches it too." ) ) );
+	auto *pScale = new QSpinBox;
+	pScale->setObjectName( QStringLiteral( "preferencesUiScale" ) );
+	pScale->setRange( 50, 400 );
+	pScale->setSingleStep( 25 );
+	pScale->setSuffix( QStringLiteral( "%" ) );
+	pScale->setValue( static_cast<int>( std::lround( CPreferences::Instance().GetUiScale() * 100.0 ) ) );
+	connect( pScale, &QSpinBox::valueChanged, this, []( int nPercent ) { CPreferences::Instance().SetUiScale( nPercent / 100.0 ); } );
+	auto *pScaleRow = new QFormLayout;
+	pScaleRow->setContentsMargins( 0, 0, 0, 0 );
+	pScaleRow->addRow( tr( "Interface scale" ), pScale );
+	pLayout->addSpacing( 12 );
+	pLayout->addLayout( pScaleRow );
+	pLayout->addWidget( Hint( tr( "The size of everything: text, buttons, panels and the views' labels, over the desktop's own "
+								  "scale. Takes effect the next time vomit-tools starts." ) ) );
 	auto *pSingle = new QCheckBox( tr( "Open files in the window already open" ) );
 	pSingle->setObjectName( QStringLiteral( "preferencesSingleWindow" ) );
 	pSingle->setChecked( CPreferences::Instance().IsSingleWindow() );
@@ -191,6 +206,15 @@ QWidget *CPreferencesDialog::BuildInterfacePage()
 	pLayout->addWidget( pReopen );
 	pLayout->addWidget( Hint( tr( "At the next start, the tabs come back as they were left, with the folder browser's folder. "
 								  "Files opened from the command line or a file manager open instead." ) ) );
+	auto *pWindows = new QCheckBox( tr( "Each kind of editor in a window of its own" ) );
+	pWindows->setObjectName( QStringLiteral( "preferencesEditorWindows" ) );
+	pWindows->setChecked( CPreferences::Instance().IsEditorWindows() );
+	connect( pWindows, &QCheckBox::toggled, this, []( bool bOn ) { CPreferences::Instance().SetEditorWindows( bOn ); } );
+	pLayout->addSpacing( 12 );
+	pLayout->addWidget( pWindows );
+	pLayout->addWidget( Hint( tr( "Maps open in a Maps window, particle files in a Particles window and so on, each with its "
+								  "tabs and the whole menu bar; the main window keeps the game's files and the preview. Closing "
+								  "a window closes its tabs. Tab groups are off meanwhile: the windows are the groups." ) ) );
 	auto *pGroups = new QCheckBox( tr( "Group the tabs" ) );
 	pGroups->setObjectName( QStringLiteral( "preferencesTabGroups" ) );
 	pGroups->setChecked( CPreferences::Instance().IsTabGroups() );
@@ -546,6 +570,7 @@ QWidget *CPreferencesDialog::BuildMapsPage()
 		pForm->addRow( tr( "Wheel step (units a notch)" ), spin( QStringLiteral( "preferencesMapWheelStep" ), current.m_flWheelStep, 1, 1024, 8, 0, []( MapPreferences_t &p, double fl ) { p.m_flWheelStep = fl; } ) );
 		pForm->addRow( tr( "Right-drag (units a pixel)" ), spin( QStringLiteral( "preferencesMapPanScale" ), current.m_flPanScale, 0.1, 16, 0.25, 2, []( MapPreferences_t &p, double fl ) { p.m_flPanScale = fl; } ) );
 		pForm->addRow( tr( "Render distance" ), spin( QStringLiteral( "preferencesMapDistance" ), current.m_flRenderDistance, 1024, 131072, 1024, 0, []( MapPreferences_t &p, double fl ) { p.m_flRenderDistance = fl; } ) );
+		pForm->addRow( tr( "Detail props drawn to" ), spin( QStringLiteral( "preferencesMapDetailDistance" ), current.m_flDetailDistance, 256, 65536, 256, 0, []( MapPreferences_t &p, double fl ) { p.m_flDetailDistance = fl; } ) );
 		pForm->addRow( tr( "Keys 1 and 2 change it by" ), spin( QStringLiteral( "preferencesMapFarStep" ), current.m_flFarStep, 1.05, 4, 0.05, 2, []( MapPreferences_t &p, double fl ) { p.m_flFarStep = fl; } ) );
 		pForm->addRow( tr( "Texture filtering" ), choice( QStringLiteral( "preferencesMapTextureFilter" ), { { tr( "Bilinear" ), static_cast<int>( MapTextureFilter_t::MAP_TEXTURE_FILTER_BILINEAR ) }, { tr( "Trilinear" ), static_cast<int>( MapTextureFilter_t::MAP_TEXTURE_FILTER_TRILINEAR ) }, { tr( "Anisotropic 2×" ), static_cast<int>( MapTextureFilter_t::MAP_TEXTURE_FILTER_ANISOTROPIC_2X ) }, { tr( "Anisotropic 4×" ), static_cast<int>( MapTextureFilter_t::MAP_TEXTURE_FILTER_ANISOTROPIC_4X ) }, { tr( "Anisotropic 8×" ), static_cast<int>( MapTextureFilter_t::MAP_TEXTURE_FILTER_ANISOTROPIC_8X ) }, { tr( "Anisotropic 16×" ), static_cast<int>( MapTextureFilter_t::MAP_TEXTURE_FILTER_ANISOTROPIC_16X ) } }, static_cast<int>( current.m_nTextureFilter ), []( MapPreferences_t &p, int n ) { p.m_nTextureFilter = static_cast<MapTextureFilter_t>( n ); } ) );
 		pForm->addRow( tr( "Selection tint" ), spin( QStringLiteral( "preferencesMapSelectionTint" ), current.m_flSelectionTint, 0, 1, 0.05, 2, []( MapPreferences_t &p, double fl ) { p.m_flSelectionTint = fl; } ) );
@@ -564,6 +589,7 @@ QWidget *CPreferencesDialog::BuildMapsPage()
 		pForm->addRow( tr( "Default 3D gizmo" ), choice( QStringLiteral( "preferencesMapGizmoDefault" ), { { tr( "Move" ), 0 }, { tr( "All" ), 1 } }, current.m_bGizmoAll ? 1 : 0, []( MapPreferences_t &p, int n ) { p.m_bGizmoAll = n != 0; } ) );
 		pLayout->addWidget( check( QStringLiteral( "preferencesMapLightHdr" ), tr( "Lighting preview as the game with HDR (auto exposure, the lights' HDR values)" ), current.m_bLightHdr, []( MapPreferences_t &p, bool b ) { p.m_bLightHdr = b; } ) );
 		pLayout->addWidget( check( QStringLiteral( "preferencesMapSkybox3D" ), tr( "Draw the 3D skybox" ), current.m_bSkybox3D, []( MapPreferences_t &p, bool b ) { p.m_bSkybox3D = b; } ) );
+		pLayout->addWidget( check( QStringLiteral( "preferencesMapSkyFaces" ), tr( "Draw the sky on sky faces (off: tools/toolsskybox itself)" ), current.m_bSkyFaces, []( MapPreferences_t &p, bool b ) { p.m_bSkyFaces = b; } ) );
 		pLayout->addWidget( check( QStringLiteral( "preferencesMapSky2D" ), tr( "Draw the 2D sky behind everything in the 3D view" ), current.m_bSky2D, []( MapPreferences_t &p, bool b ) { p.m_bSky2D = b; } ) );
 		pLayout->addWidget( check( QStringLiteral( "preferencesMapOriginAxes" ), tr( "Draw the world's axes at 0 0 0 in the 3D view" ), current.m_bOriginAxes, []( MapPreferences_t &p, bool b ) { p.m_bOriginAxes = b; } ) );
 		pLayout->addWidget( check( QStringLiteral( "preferencesMapPropertiesFollow" ), tr( "Show Object Properties when an entity is selected" ), current.m_bPropertiesFollowSelection, []( MapPreferences_t &p, bool b ) { p.m_bPropertiesFollowSelection = b; } ) );
@@ -581,7 +607,6 @@ QWidget *CPreferencesDialog::BuildMapsPage()
 		pEditing->addRow( tr( "When a shape comes out concave" ), choice( QStringLiteral( "preferencesMapBrushConcave" ), { { tr( "Split into convex brushes" ), 0 }, { tr( "Keep it as it is" ), 1 } }, current.m_bBrushKeepConcave ? 1 : 0, []( MapPreferences_t &p, int n ) { p.m_bBrushKeepConcave = n == 1; } ) );
 		pLayout->addLayout( pEditing );
 		pLayout->addWidget( check( QStringLiteral( "preferencesMapAutosave" ), tr( "Autosave changed maps to <map>.vmf.autosave (offered back when the map opens after a crash)" ), current.m_bAutosave, []( MapPreferences_t &p, bool b ) { p.m_bAutosave = b; } ) );
-		pLayout->addWidget( check( QStringLiteral( "preferencesMapFaceEditWindow" ), tr( "Face Edit in a window of its own (Hammer), else in the side panel" ), current.m_bFaceEditWindow, []( MapPreferences_t &p, bool b ) { p.m_bFaceEditWindow = b; } ) );
 		pLayout->addWidget( check( QStringLiteral( "preferencesMapOnePanel" ), tr( "One side panel at a time: a tab shows its panel alone (Blender), else the panels stack" ), current.m_bOnePanel, []( MapPreferences_t &p, bool b ) { p.m_bOnePanel = b; } ) );
 		pLayout->addWidget( check( QStringLiteral( "preferencesMapDisplacementBrush" ), tr( "Show the paint brush while the Displacement tab is open" ), current.m_bShowDisplacementBrush, []( MapPreferences_t &p, bool b ) { p.m_bShowDisplacementBrush = b; } ) );
 		pLayout->addWidget( check( QStringLiteral( "preferencesMapGroupCarve" ), tr( "Group the pieces Carve leaves of each brush" ), current.m_bGroupCarve, []( MapPreferences_t &p, bool b ) { p.m_bGroupCarve = b; } ) );
