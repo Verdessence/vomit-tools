@@ -8,6 +8,7 @@
 #include "StickyTreeParents.h"
 #include "StripperEditor.h"
 #include "HudEditor.h"
+#include "SchemeEditor.h"
 #include "hud/Hud.h"
 #include "CrashHandler.h"
 #include "bsp/Stripper.h"
@@ -124,6 +125,52 @@ using xv::sound::FileKind_t;
 
 namespace
 {
+
+//-----------------------------------------------------------------------------
+// Purpose: A file in a folder by its path from it, whatever the case of each part on disk (a
+//          HUD's folders are named as its author liked: Resource/UI, resource/ui); empty
+//          when there is none.
+//-----------------------------------------------------------------------------
+QString FindInFolder( const QString &szFolder, const QString &szRelative )
+{
+	QString szAt = szFolder;
+	const QStringList parts = QString( szRelative ).replace( u'\\', u'/' ).split( u'/', Qt::SkipEmptyParts );
+	for ( qsizetype n = 0; n < parts.size(); n++ )
+	{
+		if ( parts[ n ] == u".." || parts[ n ] == u"." )
+			return {};
+		QString szFound;
+		for ( const QString &szEntry : QDir( szAt ).entryList( n + 1 < parts.size() ? QDir::Dirs | QDir::NoDotAndDotDot : QDir::Files ) )
+		{
+			if ( szEntry.compare( parts[ n ], Qt::CaseInsensitive ) == 0 )
+				szFound = szEntry;
+		}
+		if ( szFound.isEmpty() )
+			return {};
+		szAt += u'/' + szFound;
+	}
+	return parts.isEmpty() ? QString{} : szAt;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Whether a folder is a HUD's: it has a layout, a scheme, or panels of its own.
+//-----------------------------------------------------------------------------
+bool IsHudFolder( const QString &szFolder )
+{
+	if ( !FindInFolder( szFolder, QStringLiteral( "scripts/hudlayout.res" ) ).isEmpty() || !FindInFolder( szFolder, QStringLiteral( "resource/clientscheme.res" ) ).isEmpty() )
+		return true;
+	for ( const QString &szEntry : QDir( szFolder ).entryList( QDir::Dirs | QDir::NoDotAndDotDot ) )
+	{
+		if ( szEntry.compare( u"resource", Qt::CaseInsensitive ) != 0 )
+			continue;
+		for ( const QString &szInside : QDir( szFolder + u'/' + szEntry ).entryList( QDir::Dirs | QDir::NoDotAndDotDot ) )
+		{
+			if ( szInside.compare( u"ui", Qt::CaseInsensitive ) == 0 )
+				return true;
+		}
+	}
+	return false;
+}
 
 constexpr auto LAST_GAME_KEY = "lastGameInfo";
 constexpr auto LAST_FOLDER_KEY = "lastFolder";
@@ -450,7 +497,11 @@ CMainWindow::CMainWindow( QWidget *pParent, xv::audio::CEngine::Output_t nAudio 
 			if ( bytes && CStripperEditor::IsStripperConfig( ToPath( szPath ), std::string_view{ reinterpret_cast<const char *>( bytes->data() ), bytes->size() } ) )
 				OpenStripperFile( szPath );
 		}
-		else if ( const auto text = szPath.endsWith( u".res", Qt::CaseInsensitive ) ? m_pFileSystem->ReadText( szPath.toStdString() ) : std::nullopt; text && CHudEditor::IsHudLayout( ToPath( szPath ), *text ) )
+		else if ( const auto text = szPath.endsWith( u".res", Qt::CaseInsensitive ) ? m_pFileSystem->ReadText( szPath.toStdString() ) : std::nullopt; text && CSchemeEditor::IsSchemeFile( ToPath( szPath ), *text ) )
+		{
+			OpenSchemeFile( szPath );
+		}
+		else if ( text && CHudEditor::IsHudLayout( ToPath( szPath ), *text ) )
 		{
 			OpenHudFile( szPath );
 		}
@@ -921,14 +972,49 @@ void CMainWindow::BuildMenus( QAction *pSearchPathsToggle )
 	auto *pSprinkle = pTools->addAction( tr( "Sprinkle" ), this, [ this ] { if ( auto *pMap = GetCurrentMap() ) pMap->RunAction( MapAction_t::MAP_ACTION_TOOL_SPRINKLE, pMap->GetActiveView() ); } );
 	pSprinkle->setObjectName( QStringLiteral( "mapSprinkleAction" ) );
 	pTools->addSeparator();
-	auto *pHud = pTools->addAction( tr( "H&UD Editor" ), this, [ this ] { OpenHudFile( QStringLiteral( "scripts/HudLayout.res" ) ); } );
-	pHud->setObjectName( QStringLiteral( "hudEditorAction" ) );
-	pHud->setToolTip( tr( "Open the game's HUD layout (scripts/HudLayout.res) in the HUD editor" ) );
+	// The HUD: the game's own (whichever HUD its custom/ folders put first), each HUD found
+	// in the game's custom/ by itself, and any HUD folder kept elsewhere.
+	auto *pHud = pTools->addMenu( tr( "H&UD Editor" ) );
+	pHud->setObjectName( QStringLiteral( "hudEditorMenu" ) );
+	pHud->setToolTipsVisible( true );
+	connect( pHud, &QMenu::aboutToShow, this, [ this, pHud ] {
+		pHud->clear();
+		QAction *pGame = pHud->addAction( tr( "The Game's HUD" ), this, [ this ] { OpenHudFile( QStringLiteral( "scripts/HudLayout.res" ) ); } );
+		pGame->setObjectName( QStringLiteral( "hudEditorAction" ) );
+		pGame->setToolTip( tr( "scripts/HudLayout.res as the game finds it, a custom HUD's when one is installed" ) );
+		pGame->setEnabled( m_Game.has_value() );
+		if ( m_Game )
+		{
+			const QDir custom( QFileInfo( ToQString( m_Game->m_File ) ).absolutePath() + QStringLiteral( "/custom" ) );
+			for ( const QFileInfo &folder : custom.entryInfoList( QDir::Dirs | QDir::NoDotAndDotDot, QDir::Name ) )
+			{
+				if ( IsHudFolder( folder.absoluteFilePath() ) )
+					pHud->addAction( tr( "custom/%1" ).arg( folder.fileName() ), this, [ this, szFolder = folder.absoluteFilePath() ] { OpenHudFolder( szFolder ); } )->setToolTip( QDir::toNativeSeparators( folder.absoluteFilePath() ) );
+			}
+		}
+		pHud->addSeparator();
+		QAction *pFolder = pHud->addAction( tr( "Open HUD Folder…" ), this, [ this ] {
+			const QString szFolder = AskFolder( this, tr( "HUD Folder (the one holding its resource and scripts folders)" ), LastFolderOr( m_Game ? QFileInfo( ToQString( m_Game->m_File ) ).absolutePath() + QStringLiteral( "/custom" ) : QString{} ) );
+			if ( !szFolder.isEmpty() )
+				OpenHudFolder( szFolder );
+		} );
+		pFolder->setObjectName( QStringLiteral( "hudFolderAction" ) );
+		pFolder->setToolTip( tr( "A custom HUD kept anywhere: its layout opens with its own scheme, fonts, icons and images, the game's for what it hasn't" ) );
+		QAction *pMenu = pHud->addAction( tr( "The Game's Main Menu" ), this, [ this ] { OpenHudFile( QStringLiteral( "resource/GameMenu.res" ) ); } );
+		pMenu->setToolTip( tr( "resource/GameMenu.res: the main menu's items, over the menu's background" ) );
+		pMenu->setEnabled( m_Game.has_value() );
+		pHud->addSeparator();
+		for ( const char *pszScheme : { "resource/ClientScheme.res", "resource/SourceScheme.res" } )
+		{
+			QAction *pScheme = pHud->addAction( tr( "Edit %1" ).arg( QString::fromLatin1( pszScheme ).section( u'/', -1 ) ), this, [ this, szScheme = QString::fromLatin1( pszScheme ) ] { OpenSchemeFile( szScheme ); } );
+			pScheme->setToolTip( tr( "The game's %1 in the scheme editor" ).arg( QString::fromLatin1( pszScheme ) ) );
+			pScheme->setEnabled( m_Game.has_value() );
+		}
+	} );
 	auto *pHammerSetup = pTools->addAction( tr( "Set Up &Hammer…" ), this, &CMainWindow::SetUpHammer );
 	pHammerSetup->setObjectName( QStringLiteral( "hammerSetupAction" ) );
 	pHammerSetup->setToolTip( tr( "Write the open game's entry into Hammer++'s or Hammer's game configuration" ) );
-	connect( pTools, &QMenu::aboutToShow, this, [ this, pCreatePrefab, pBuilding, pSprinkle, pHammerSetup, pHud ] {
-		pHud->setEnabled( m_Game.has_value() );
+	connect( pTools, &QMenu::aboutToShow, this, [ this, pCreatePrefab, pBuilding, pSprinkle, pHammerSetup ] {
 		pCreatePrefab->setEnabled( GetCurrentMap() && !GetCurrentMap()->GetDocument().GetSelection().empty() );
 		pSprinkle->setEnabled( GetCurrentMap() != nullptr );
 		pBuilding->setEnabled( GetCurrentMap() != nullptr );
@@ -1941,6 +2027,10 @@ void CMainWindow::PreviewGameFile( const QString &szPath, const QString &szSourc
 	{
 		pView = WithEditButton( pView, tr( "This is a detail file." ), tr( "Open in Details Editor" ), [ this, szPath ] { OpenDetailFile( szPath ); } );
 	}
+	else if ( CSchemeEditor::IsSchemeFile( ToPath( szPath ), std::string_view{ reinterpret_cast<const char *>( bytes->data() ), bytes->size() } ) )
+	{
+		pView = WithEditButton( pView, tr( "This is a VGUI scheme." ), tr( "Open in Scheme Editor" ), [ this, szPath ] { OpenSchemeFile( szPath ); } );
+	}
 	else if ( CHudEditor::IsHudLayout( ToPath( szPath ), std::string_view{ reinterpret_cast<const char *>( bytes->data() ), bytes->size() } ) )
 	{
 		pView = WithEditButton( pView, tr( "This is a HUD layout." ), tr( "Open in HUD Editor" ), [ this, szPath ] { OpenHudFile( szPath ); } );
@@ -2045,6 +2135,10 @@ void CMainWindow::PreviewDiskFile( const QString &szPath )
 	else if ( info.suffix().compare( u"vbsp", Qt::CaseInsensitive ) == 0 )
 	{
 		pView = WithEditButton( pView, tr( "This is a detail file." ), tr( "Open in Details Editor" ), [ this, szPath ] { OpenDiskFile( szPath ); } );
+	}
+	else if ( CSchemeEditor::IsSchemeFile( ToPath( szPath ), std::string_view{ data->constData(), static_cast<std::size_t>( data->size() ) } ) )
+	{
+		pView = WithEditButton( pView, tr( "This is a VGUI scheme." ), tr( "Open in Scheme Editor" ), [ this, szPath ] { OpenSchemeFile( szPath ); } );
 	}
 	else if ( CHudEditor::IsHudLayout( ToPath( szPath ), std::string_view{ data->constData(), static_cast<std::size_t>( data->size() ) } ) )
 	{
@@ -2223,6 +2317,11 @@ void CMainWindow::OpenDiskFileAs( const QString &szPath, bool bSkies )
 	if ( CStripperEditor::IsStripperConfig( file, std::string_view{ data->constData(), static_cast<std::size_t>( data->size() ) } ) )
 	{
 		OpenStripperFile( info.absoluteFilePath() );
+		return;
+	}
+	if ( CSchemeEditor::IsSchemeFile( file, std::string_view{ data->constData(), static_cast<std::size_t>( data->size() ) } ) )
+	{
+		OpenSchemeFile( info.absoluteFilePath() );
 		return;
 	}
 	if ( CHudEditor::IsHudLayout( file, std::string_view{ data->constData(), static_cast<std::size_t>( data->size() ) } ) )
@@ -3823,6 +3922,10 @@ void CMainWindow::RestoreSessionEntry( const QString &szEntry )
 	else if ( szKind == u"hud" )
 	{
 		OpenHudFile( szPath );
+	}
+	else if ( szKind == u"scheme" )
+	{
+		OpenSchemeFile( szPath );
 	}
 	else if ( szKind == u"sky" )
 	{
@@ -5492,11 +5595,16 @@ CStripperEditor *CMainWindow::OpenStripperFile( const QString &szPath )
 }
 
 //-----------------------------------------------------------------------------
-// Purpose: A HUD layout in the HUD editor, the tab it already has if open. The game's scheme
-//          gives the colours its elements name.
+// Purpose: A HUD layout in the HUD editor, the tab it already has if open. Its HUD's folder
+//          (found above a layout on disk, or given) comes before the game for the scheme and
+//          for everything the elements are drawn with.
 //-----------------------------------------------------------------------------
-CHudEditor *CMainWindow::OpenHudFile( const QString &szPath )
+CHudEditor *CMainWindow::OpenHudFile( const QString &szPath, const QString &szHudFolder )
 {
+	// A game file that is a loose file on disk (a HUD in custom/) is opened as that file: it
+	// is saved in place, and its HUD's folder is found from where it is.
+	if ( const QString szDisk = QFileInfo( szPath ).isAbsolute() ? QString{} : DiskPathForGame( szPath ); !szDisk.isEmpty() && QFileInfo( szDisk ).isFile() )
+		return OpenHudFile( szDisk, szHudFolder );
 	const QFileInfo info( szPath );
 	const bool bDisk = info.isAbsolute();
 	const QString szName = bDisk ? QDir::toNativeSeparators( info.absoluteFilePath() ) : QString::fromStdString( xv::vfs::NormalizePath( szPath.toStdString() ) );
@@ -5525,15 +5633,167 @@ CHudEditor *CMainWindow::OpenHudFile( const QString &szPath )
 		return nullptr;
 	}
 	auto *pEditor = new CHudEditor( szName, *text, bDisk ? ToPath( info.absoluteFilePath() ) : fs::path{}, !bDisk );
-	if ( m_Game )
+	// The HUD's folder: given, or the nearest one above the file that looks like a HUD's.
+	QString szHud = szHudFolder;
+	if ( szHud.isEmpty() && bDisk )
 	{
-		if ( const auto scheme = m_pFileSystem->ReadText( "resource/ClientScheme.res" ) )
-			pEditor->SetScheme( xv::hud::CScheme::FromDocument( xv::kv1::Parse( *scheme ).m_Document ) );
+		QDir above = info.absoluteDir();
+		for ( int nUp = 0; nUp < 4 && szHud.isEmpty(); nUp++ )
+		{
+			if ( IsHudFolder( above.absolutePath() ) )
+				szHud = above.absolutePath();
+			else if ( !above.cdUp() )
+				break;
+		}
 	}
+	// The scheme: the HUD's own over the game's.
+	std::optional<std::string> scheme;
+	QString szSchemeSource;
+	// The main menu is the game's own window, which reads SourceScheme.res; the HUD and the
+	// panels over the game read ClientScheme.res.
+	const QString szSchemeFile = pEditor->IsGameMenu() ? QStringLiteral( "resource/sourcescheme.res" ) : QStringLiteral( "resource/clientscheme.res" );
+	if ( const QString szOwn = szHud.isEmpty() ? QString{} : FindInFolder( szHud, szSchemeFile ); !szOwn.isEmpty() )
+	{
+		if ( const auto data = ReadDiskFile( szOwn ) )
+		{
+			scheme = data->toStdString();
+			szSchemeSource = QDir::toNativeSeparators( szOwn );
+		}
+	}
+	if ( !scheme && m_Game )
+	{
+		// The game's: the file it is on disk when it is one (another HUD in custom/), so Edit
+		// Scheme opens that very file.
+		scheme = m_pFileSystem->ReadText( szSchemeFile.toStdString() );
+		const QString szDisk = DiskPathForGame( szSchemeFile );
+		szSchemeSource = !szDisk.isEmpty() && QFileInfo( szDisk ).isFile() ? QDir::toNativeSeparators( QFileInfo( szDisk ).absoluteFilePath() ) : szSchemeFile;
+	}
+	if ( scheme )
+		pEditor->SetScheme( xv::hud::CScheme::FromDocument( xv::kv1::Parse( *scheme ).m_Document ), szSchemeSource );
+	if ( m_Game || !szHud.isEmpty() )
+	{
+		pEditor->SetFiles( [ this, szHud ]( const std::string &szFile ) -> std::optional<std::vector<std::byte>> {
+			if ( const QString szOwn = szHud.isEmpty() ? QString{} : FindInFolder( szHud, QString::fromStdString( szFile ) ); !szOwn.isEmpty() )
+			{
+				if ( const auto data = ReadDiskFile( szOwn ) )
+				{
+					const auto *pBytes = reinterpret_cast<const std::byte *>( data->constData() );
+					return std::vector<std::byte>( pBytes, pBytes + data->size() );
+				}
+			}
+			return m_Game ? m_pFileSystem->Read( szFile ) : std::nullopt;
+		} );
+	}
+	connect( pEditor, &CHudEditor::EditSchemeRequested, this, [ this ]( const QString &szSource ) { OpenSchemeFile( szSource ); } );
 	m_pUndoGroup->addStack( pEditor->GetUndoStack() );
 	connect( pEditor, &CHudEditor::ModifiedChanged, this, [ this, pEditor ] {
 		m_pTabs->setTabText( m_pTabs->indexOf( pEditor ), pEditor->GetTabTitle() );
 		UpdateTitle();
+	} );
+	const int nIndex = m_pTabs->addTab( pEditor, pEditor->GetTabTitle() );
+	m_pTabs->setTabToolTip( nIndex, szHud.isEmpty() || bDisk ? szName : tr( "%1, with the HUD in %2" ).arg( szName, QDir::toNativeSeparators( szHud ) ) );
+	m_pTabs->setCurrentIndex( nIndex );
+	return pEditor;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: A HUD's folder, or a folder of them (custom/, or wherever a collection is kept):
+//          with several inside, the one to open is asked for.
+//-----------------------------------------------------------------------------
+CHudEditor *CMainWindow::OpenHudFolder( const QString &szFolder )
+{
+	QString szHud = QDir( szFolder ).absolutePath();
+	if ( !IsHudFolder( szHud ) )
+	{
+		// Picked a level off: the resource or scripts folder itself, or the folder above.
+		QStringList inside;
+		for ( const QFileInfo &folder : QDir( szHud ).entryInfoList( QDir::Dirs | QDir::NoDotAndDotDot, QDir::Name ) )
+		{
+			if ( IsHudFolder( folder.absoluteFilePath() ) )
+				inside.append( folder.fileName() );
+		}
+		if ( const QString szAbove = QFileInfo( szHud ).absolutePath(); inside.isEmpty() && IsHudFolder( szAbove ) )
+		{
+			szHud = szAbove;
+		}
+		else if ( inside.size() == 1 )
+		{
+			szHud += u'/' + inside.front();
+		}
+		else if ( inside.size() > 1 )
+		{
+			bool bOk = false;
+			const QString szPicked = QInputDialog::getItem( this, tr( "Open HUD Folder" ), tr( "This folder holds several HUDs. Open:" ), inside, 0, false, &bOk );
+			if ( !bOk )
+				return nullptr;
+			szHud += u'/' + szPicked;
+		}
+		else
+		{
+			QMessageBox::warning( this, tr( "Not a HUD folder" ), tr( "%1 has no scripts/HudLayout.res, resource/ClientScheme.res or resource/ui folder, and no folder in it has." ).arg( QDir::toNativeSeparators( szHud ) ) );
+			return nullptr;
+		}
+	}
+	if ( const QString szLayout = FindInFolder( szHud, QStringLiteral( "scripts/hudlayout.res" ) ); !szLayout.isEmpty() )
+		return OpenHudFile( szLayout );
+	// A HUD that only restyles: the game's layout, drawn with the HUD's scheme and files.
+	if ( !m_Game )
+	{
+		QMessageBox::warning( this, tr( "No layout" ), tr( "This HUD has no scripts/HudLayout.res of its own; open a game to see the game's with it." ) );
+		return nullptr;
+	}
+	return OpenHudFile( QStringLiteral( "scripts/HudLayout.res" ), szHud );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: A scheme in the scheme editor, the tab it already has if open. Each change goes to
+//          the HUD editor tabs that draw with this file.
+//-----------------------------------------------------------------------------
+CSchemeEditor *CMainWindow::OpenSchemeFile( const QString &szPath )
+{
+	// The game's scheme is most often a custom HUD's own file: that file is what is edited.
+	if ( const QString szDisk = QFileInfo( szPath ).isAbsolute() ? QString{} : DiskPathForGame( szPath ); !szDisk.isEmpty() && QFileInfo( szDisk ).isFile() )
+		return OpenSchemeFile( szDisk );
+	const QFileInfo info( szPath );
+	const bool bDisk = info.isAbsolute();
+	const QString szName = bDisk ? QDir::toNativeSeparators( info.absoluteFilePath() ) : QString::fromStdString( xv::vfs::NormalizePath( szPath.toStdString() ) );
+	for ( int i = 0; i < m_pTabs->count(); i++ )
+	{
+		auto *pOpen = qobject_cast<CSchemeEditor *>( m_pTabs->widget( i ) );
+		if ( pOpen && pOpen->GetName().compare( szName, Qt::CaseInsensitive ) == 0 )
+		{
+			m_pTabs->setCurrentWidget( pOpen );
+			return pOpen;
+		}
+	}
+	std::optional<std::string> text;
+	if ( bDisk )
+	{
+		if ( const auto data = ReadDiskFile( info.absoluteFilePath() ) )
+			text = data->toStdString();
+	}
+	else if ( m_Game )
+	{
+		text = m_pFileSystem->ReadText( szName.toStdString() );
+	}
+	if ( !text )
+	{
+		QMessageBox::warning( this, tr( "Cannot open" ), tr( "Could not read %1." ).arg( szName ) );
+		return nullptr;
+	}
+	auto *pEditor = new CSchemeEditor( szName, *text, bDisk ? ToPath( info.absoluteFilePath() ) : fs::path{}, !bDisk );
+	m_pUndoGroup->addStack( pEditor->GetUndoStack() );
+	connect( pEditor, &CSchemeEditor::ModifiedChanged, this, [ this, pEditor ] {
+		m_pTabs->setTabText( m_pTabs->indexOf( pEditor ), pEditor->GetTabTitle() );
+		UpdateTitle();
+	} );
+	connect( pEditor, &CSchemeEditor::Changed, this, [ this, pEditor, szName ] {
+		for ( int i = 0; i < m_pTabs->count(); i++ )
+		{
+			auto *pHud = qobject_cast<CHudEditor *>( m_pTabs->widget( i ) );
+			if ( pHud && pHud->GetSchemeSource().compare( szName, Qt::CaseInsensitive ) == 0 )
+				pHud->SetScheme( pEditor->GetScheme(), pHud->GetSchemeSource() );
+		}
 	} );
 	const int nIndex = m_pTabs->addTab( pEditor, pEditor->GetTabTitle() );
 	m_pTabs->setTabToolTip( nIndex, szName );

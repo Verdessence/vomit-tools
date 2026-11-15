@@ -31,6 +31,7 @@ class CMapEditor;
 class CModelBrowser;
 class CStripperEditor;
 class CHudEditor;
+class CSchemeEditor;
 class CModelEditor;
 class CDetailDocument;
 class CDetailEditor;
@@ -94,7 +95,18 @@ public:
 	// A Stripper:Source config from disk in a tab of its own, previewed on its map when found.
 	CStripperEditor *OpenStripperFile( const QString &szPath );
 	// A VGUI layout (.res) in the HUD editor, from disk (an absolute path) or the mounted game.
-	CHudEditor *OpenHudFile( const QString &szPath );
+	// A layout on disk belongs to the HUD whose folder it is in (the one holding its scripts/
+	// and resource/): that HUD's scheme, fonts, icons and images come before the game's.
+	// szHudFolder gives that folder for a layout that isn't in it (the game's own layout with
+	// a HUD's scheme).
+	CHudEditor *OpenHudFile( const QString &szPath, const QString &szHudFolder = {} );
+	// A custom HUD's folder (custom/<hud>, wherever it is kept): its scripts/HudLayout.res in
+	// the HUD editor, or the game's layout with the HUD's files when it has none of its own.
+	// A folder of several HUDs asks which.
+	CHudEditor *OpenHudFolder( const QString &szFolder );
+	// A VGUI scheme (ClientScheme.res, SourceScheme.res) in the scheme editor, from disk or
+	// the mounted game. HUD editor tabs drawing with that file follow its changes.
+	CSchemeEditor *OpenSchemeFile( const QString &szPath );
 	// File > New > Map.
 	CMapEditor *NewMap();
 	[[nodiscard]] CMapEditor *GetCurrentMap() const;

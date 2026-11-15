@@ -150,6 +150,8 @@ QString DiscordVerb( const QString &szKind )
 {
 	if ( szKind == QLatin1String( "Maps" ) )
 		return QStringLiteral( "Mapping" );
+	if ( szKind == QLatin1String( "HUD" ) )
+		return QStringLiteral( "Hudding" );
 	if ( szKind == QLatin1String( "Models" ) )
 		return QStringLiteral( "Modelling" );
 	if ( szKind == QLatin1String( "Textures" ) )
