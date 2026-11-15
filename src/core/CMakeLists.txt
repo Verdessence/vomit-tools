@@ -9,8 +9,13 @@ add_library(vomit_tools_core STATIC
         bsp/Decompile.h
         bsp/Stripper.cpp
         bsp/Stripper.h
+        demo/Bits.h
         demo/Demo.cpp
         demo/Demo.h
+        demo/Network.cpp
+        demo/Network.h
+        demo/Players.cpp
+        demo/Players.h
         hud/Hud.cpp
         hud/Hud.h
         detail/Detail.cpp

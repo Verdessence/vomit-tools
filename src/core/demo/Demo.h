@@ -4,7 +4,7 @@
 // Purpose: Source demos (.dem, "HL2DEMO") as data: the header (server, recorder, map, length)
 //          and the list of frames after it, each with its tick, kind and size. Packets also
 //          give the recorder's camera, and console frames the commands typed. What is inside
-//          a packet (the network messages) isn't read.
+//          a packet (the network messages) is Network.h's to read, and Players.h's to follow.
 //
 //===========================================================================//
 #pragma once
@@ -118,6 +118,9 @@ public:
 	// Bytes of packets in each of nBuckets equal spans of the ticks from 0 to the last: how
 	// much the server sent over the demo's length.
 	[[nodiscard]] std::vector<std::uint64_t> PacketBytesOverTime( int nBuckets ) const;
+	// A frame's block (a packet's messages, the network tables, the string tables) in the file
+	// the demo was read from; empty for a frame that has none, or bytes that aren't that file.
+	[[nodiscard]] static std::span<const std::byte> FrameBlock( const Frame_t &frame, std::span<const std::byte> file );
 
 private:
 	Header_t m_Header;

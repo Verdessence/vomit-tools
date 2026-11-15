@@ -110,6 +110,9 @@ public:
 	CSchemeEditor *OpenSchemeFile( const QString &szPath );
 	// A demo (.dem) in the demo viewer, from disk (an absolute path) or the mounted game.
 	CDemoViewer *OpenDemoFile( const QString &szPath );
+	// Finds the map a demo names and starts reading it into the demo's 3D view. szDemoFolder: where
+	// the demo is on disk (empty for a game file), which is looked in after the game.
+	void LoadDemoMap( CDemoViewer &viewer, const QString &szMap, const QString &szDemoFolder );
 	// File > New > Map.
 	CMapEditor *NewMap();
 	[[nodiscard]] CMapEditor *GetCurrentMap() const;

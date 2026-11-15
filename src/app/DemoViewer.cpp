@@ -10,6 +10,7 @@
 #include <cmath>
 #include <numbers>
 
+#include <QCheckBox>
 #include <QComboBox>
 #include <QFormLayout>
 #include <QHBoxLayout>
@@ -26,6 +27,8 @@
 #include <QTimer>
 #include <QVBoxLayout>
 
+#include "DemoWorld.h"
+
 namespace
 {
 
@@ -40,6 +43,15 @@ constexpr double FALLBACK_TICK_INTERVAL = 0.015;
 constexpr int COMMAND_COLUMN_TIME = 0;
 constexpr int COMMAND_COLUMN_TICK = 1;
 constexpr int COMMAND_COLUMN_TEXT = 2;
+constexpr int PLAYER_COLUMN_NAME = 0;
+constexpr int PLAYER_COLUMN_TEAM = 1;
+constexpr int PLAYER_COLUMN_HEALTH = 2;
+// The pages, in the order they are added.
+constexpr int PAGE_WORLD = 0;
+constexpr int PAGE_COMMANDS = 2;
+constexpr int PAGE_FRAMES = 3;
+// A playing demo's player list is brought up to date this often (milliseconds).
+constexpr qint64 LIST_INTERVAL = 250;
 
 //-----------------------------------------------------------------------------
 // Purpose: A value label whose text can be selected and copied. bWrap for text of any
@@ -324,9 +336,10 @@ void CDemoPathView::paintEvent( QPaintEvent * )
 //-----------------------------------------------------------------------------
 // Purpose: The summary beside the pages, the timeline and its controls under both.
 //-----------------------------------------------------------------------------
-CDemoViewer::CDemoViewer( const QString &szName, xv::demo::CDemo demo, const std::filesystem::path &disk, bool bFromGame, QWidget *pParent )
+CDemoViewer::CDemoViewer( const QString &szName, xv::demo::CDemo demo, const std::filesystem::path &disk, bool bFromGame, xv::demo::CPlayers players, QWidget *pParent )
 	: QWidget( pParent ),
 	  m_Demo( std::move( demo ) ),
+	  m_Players( std::move( players ) ),
 	  m_szName( szName ),
 	  m_Disk( disk ),
 	  m_bFromGame( bFromGame )
@@ -336,14 +349,30 @@ CDemoViewer::CDemoViewer( const QString &szName, xv::demo::CDemo demo, const std
 	m_pPath = new CDemoPathView( *this );
 	m_pPages = new QTabWidget;
 	m_pPages->setObjectName( QStringLiteral( "demoPages" ) );
+	m_pPages->addTab( BuildWorld(), tr( "World" ) );
 	m_pPages->addTab( m_pPath, tr( "Camera Path" ) );
 	m_pPages->addTab( BuildCommands(), tr( "Console Commands (%1)" ).arg( m_Demo.GetCommands().size() ) );
 	m_pPages->addTab( BuildFrameKinds(), tr( "Frames" ) );
-	// A demo with no camera opens on what it does have.
-	if ( !m_Demo.HasCamera() )
+	// A demo with no camera and no players opens on what it does have.
+	if ( !m_Demo.HasCamera() && m_Players.IsEmpty() )
 	{
-		m_pPages->setCurrentIndex( m_Demo.GetCommands().empty() ? 2 : 1 );
+		m_pPages->setCurrentIndex( m_Demo.GetCommands().empty() ? PAGE_FRAMES : PAGE_COMMANDS );
 	}
+	// A map that starts loading has something to show there after all.
+	connect( m_pWorld, &CDemoWorld::StatusChanged, this, [ this ] {
+		if ( m_pWorld->HasMap() && !m_Demo.HasCamera() && m_Players.IsEmpty() && m_pPages->currentIndex() != PAGE_WORLD && !m_pPages->property( "worldShown" ).toBool() )
+		{
+			m_pPages->setProperty( "worldShown", true );
+			m_pPages->setCurrentIndex( PAGE_WORLD );
+		}
+	} );
+	connect( this, &CDemoViewer::TickChanged, this, [ this ] {
+		m_pWorld->Redraw();
+		if ( !IsPlaying() || !m_ListClock.isValid() || m_ListClock.elapsed() >= LIST_INTERVAL )
+		{
+			UpdatePlayerList();
+		}
+	} );
 
 	auto *pSplitter = new QSplitter( Qt::Horizontal );
 	pSplitter->addWidget( BuildSummary() );
@@ -412,13 +441,181 @@ QWidget *CDemoViewer::BuildSummary()
 	pForm->addRow( tr( "Frames" ), ValueLabel( tr( "%L1" ).arg( header.m_nFrames > 0 ? header.m_nFrames : static_cast<int>( m_Demo.GetFrames().size() ) ) ) );
 	pForm->addRow( tr( "File size" ), ValueLabel( QLocale{}.formattedDataSize( static_cast<qint64>( m_Demo.GetFileSize() ) ) ) );
 	pForm->addRow( tr( "Protocol" ), ValueLabel( tr( "demo %1, network %2" ).arg( header.m_nDemoProtocol ).arg( header.m_nNetworkProtocol ) ) );
+	if ( !m_Players.IsEmpty() )
+	{
+		pForm->addRow( tr( "Players" ), ValueLabel( tr( "%L1, in %L2 snapshots" ).arg( m_Players.GetTracks().size() ).arg( m_Players.GetSnapshotCount() ) ) );
+	}
 	if ( !m_Demo.GetWarning().empty() )
 	{
 		QLabel *pWarning = ValueLabel( QString::fromStdString( m_Demo.GetWarning() ), true );
 		pWarning->setObjectName( QStringLiteral( "demoWarning" ) );
 		pForm->addRow( pWarning );
 	}
+	if ( !m_Players.GetWarning().empty() )
+	{
+		QLabel *pWarning = ValueLabel( QString::fromStdString( m_Players.GetWarning() ), true );
+		pWarning->setObjectName( QStringLiteral( "demoPlayersWarning" ) );
+		pForm->addRow( pWarning );
+	}
 	return pPanel;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: The 3D view with its camera's controls over it, and the players listed beside
+//          it: a click on a row follows that player from behind, a double click looks
+//          through its eyes.
+//-----------------------------------------------------------------------------
+QWidget *CDemoViewer::BuildWorld()
+{
+	m_pWorld = new CDemoWorld( *this );
+	m_pCamera = new QComboBox;
+	m_pCamera->setObjectName( QStringLiteral( "demoCamera" ) );
+	m_pCamera->addItem( tr( "Free camera" ), static_cast<int>( DemoCamera_t::DEMO_CAMERA_FREE ) );
+	if ( m_Demo.HasCamera() )
+	{
+		m_pCamera->addItem( tr( "The recorder's view" ), static_cast<int>( DemoCamera_t::DEMO_CAMERA_RECORDER ) );
+	}
+	m_pCamera->addItem( tr( "Through the player's eyes" ), static_cast<int>( DemoCamera_t::DEMO_CAMERA_FIRST_PERSON ) );
+	m_pCamera->addItem( tr( "Behind the player" ), static_cast<int>( DemoCamera_t::DEMO_CAMERA_CHASE ) );
+	m_pCamera->setToolTip( tr( "Where the view is seen from. Drag in the view to look around, W A S D to fly (E and Q up and down, Shift faster); click a player to follow it" ) );
+	connect( m_pCamera, &QComboBox::activated, this, [ this ] {
+		const auto nMode = static_cast<DemoCamera_t>( m_pCamera->currentData().toInt() );
+		// Following needs someone to follow: the first player there now.
+		if ( ( nMode == DemoCamera_t::DEMO_CAMERA_FIRST_PERSON || nMode == DemoCamera_t::DEMO_CAMERA_CHASE ) && m_pWorld->GetFollowed() == 0 )
+		{
+			if ( const auto shown = m_pWorld->GetPlayersShown(); !shown.empty() )
+			{
+				m_pWorld->SetFollowed( shown.front().m_nEntity );
+			}
+		}
+		m_pWorld->SetCameraMode( nMode );
+	} );
+	auto *pNames = new QCheckBox( tr( "Names" ) );
+	pNames->setObjectName( QStringLiteral( "demoNames" ) );
+	pNames->setChecked( m_pWorld->IsShowingNames() );
+	connect( pNames, &QCheckBox::toggled, m_pWorld, &CDemoWorld::SetShowingNames );
+	auto *pThrough = new QCheckBox( tr( "Players through walls" ) );
+	pThrough->setObjectName( QStringLiteral( "demoThroughWalls" ) );
+	pThrough->setToolTip( tr( "Outline every player, whatever stands between it and the camera" ) );
+	connect( pThrough, &QCheckBox::toggled, m_pWorld, &CDemoWorld::SetSeeingThroughWalls );
+	auto *pFind = new QPushButton( tr( "Find Players" ) );
+	pFind->setObjectName( QStringLiteral( "demoFindPlayers" ) );
+	pFind->setToolTip( tr( "Put the free camera where it sees the players there now (F in the view)" ) );
+	connect( pFind, &QPushButton::clicked, m_pWorld, &CDemoWorld::LookAtPlayers );
+	auto *pBar = new QHBoxLayout;
+	pBar->addWidget( m_pCamera );
+	pBar->addWidget( pFind );
+	pBar->addWidget( pNames );
+	pBar->addWidget( pThrough );
+	pBar->addStretch( 1 );
+	auto *pView = new QWidget;
+	auto *pViewLayout = new QVBoxLayout( pView );
+	pViewLayout->setContentsMargins( 0, 0, 0, 0 );
+	pViewLayout->addLayout( pBar );
+	pViewLayout->addWidget( m_pWorld, 1 );
+
+	m_pPlayerList = ListTable( { tr( "Player" ), tr( "Team" ), tr( "Health" ) } );
+	m_pPlayerList->setObjectName( QStringLiteral( "demoPlayers" ) );
+	m_pPlayerList->horizontalHeader()->setStretchLastSection( false );
+	m_pPlayerList->horizontalHeader()->setSectionResizeMode( PLAYER_COLUMN_NAME, QHeaderView::Stretch );
+	m_pPlayerList->horizontalHeader()->setSectionResizeMode( PLAYER_COLUMN_TEAM, QHeaderView::ResizeToContents );
+	m_pPlayerList->horizontalHeader()->setSectionResizeMode( PLAYER_COLUMN_HEALTH, QHeaderView::ResizeToContents );
+	m_pPlayerList->setHorizontalScrollBarPolicy( Qt::ScrollBarAlwaysOff );
+	m_pPlayerList->setMinimumWidth( 320 );
+	const std::vector<xv::demo::PlayerTrack_t> &tracks = m_Players.GetTracks();
+	m_pPlayerList->setRowCount( static_cast<int>( tracks.size() ) );
+	for ( int i = 0; i < static_cast<int>( tracks.size() ); i++ )
+	{
+		for ( const int nColumn : { PLAYER_COLUMN_NAME, PLAYER_COLUMN_TEAM, PLAYER_COLUMN_HEALTH } )
+		{
+			m_pPlayerList->setItem( i, nColumn, new QTableWidgetItem );
+		}
+		m_pPlayerList->item( i, PLAYER_COLUMN_HEALTH )->setTextAlignment( Qt::AlignRight | Qt::AlignVCenter );
+	}
+	connect( m_pPlayerList, &QTableWidget::cellClicked, this, [ this ]( int nRow ) {
+		m_pWorld->SetFollowed( m_Players.GetTracks()[ static_cast<std::size_t>( nRow ) ].m_nEntity );
+		if ( m_pWorld->GetCameraMode() != DemoCamera_t::DEMO_CAMERA_FIRST_PERSON )
+		{
+			m_pWorld->SetCameraMode( DemoCamera_t::DEMO_CAMERA_CHASE );
+		}
+	} );
+	connect( m_pPlayerList, &QTableWidget::cellDoubleClicked, this, [ this ]( int nRow ) {
+		m_pWorld->SetFollowed( m_Players.GetTracks()[ static_cast<std::size_t>( nRow ) ].m_nEntity );
+		m_pWorld->SetCameraMode( DemoCamera_t::DEMO_CAMERA_FIRST_PERSON );
+	} );
+	connect( m_pWorld, &CDemoWorld::CameraModeChanged, this, &CDemoViewer::UpdateCameraControls );
+	connect( m_pWorld, &CDemoWorld::FollowedChanged, this, &CDemoViewer::UpdateCameraControls );
+	UpdateCameraControls();
+	UpdatePlayerList();
+
+	auto *pSplitter = new QSplitter( Qt::Horizontal );
+	pSplitter->setObjectName( QStringLiteral( "demoWorldSplitter" ) );
+	pSplitter->addWidget( pView );
+	pSplitter->addWidget( m_pPlayerList );
+	pSplitter->setStretchFactor( 0, 1 );
+	pSplitter->setStretchFactor( 1, 0 );
+	pSplitter->setSizes( { 800, 260 } );
+	m_pPlayerList->setVisible( !tracks.empty() );
+	return pSplitter;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: The box and the list say what the view's camera is doing, however it came to.
+//-----------------------------------------------------------------------------
+void CDemoViewer::UpdateCameraControls()
+{
+	m_pCamera->setCurrentIndex( m_pCamera->findData( static_cast<int>( m_pWorld->GetCameraMode() ) ) );
+	const std::vector<xv::demo::PlayerTrack_t> &tracks = m_Players.GetTracks();
+	const auto followed = std::ranges::find( tracks, m_pWorld->GetFollowed(), &xv::demo::PlayerTrack_t::m_nEntity );
+	const QSignalBlocker blocker( m_pPlayerList );
+	if ( followed == tracks.end() )
+	{
+		m_pPlayerList->clearSelection();
+	}
+	else
+	{
+		m_pPlayerList->selectRow( static_cast<int>( followed - tracks.begin() ) );
+	}
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Each slot's player at the playhead: its name in its team's colour, greyed when
+//          the demo doesn't have it there (dead players keep their team and say so).
+//-----------------------------------------------------------------------------
+void CDemoViewer::UpdatePlayerList()
+{
+	m_ListClock.restart();
+	const std::vector<xv::demo::PlayerTrack_t> &tracks = m_Players.GetTracks();
+	const std::string &szGameDir = m_Demo.GetHeader().m_szGameDir;
+	for ( int i = 0; i < static_cast<int>( tracks.size() ); i++ )
+	{
+		const xv::demo::PlayerTrack_t &track = tracks[ static_cast<std::size_t>( i ) ];
+		const auto state = m_Players.At( track.m_nEntity, m_nTick );
+		const xv::demo::PlayerIdentity_t *pIdentity = track.IdentityAt( m_nTick );
+		QString szName = pIdentity ? QString::fromUtf8( pIdentity->m_szName ) : tr( "(slot %1)" ).arg( track.m_nEntity );
+		if ( pIdentity && pIdentity->m_bBot )
+		{
+			szName = tr( "%1 (bot)" ).arg( szName );
+		}
+		const QString szTeam = state ? QString::fromStdString( xv::demo::TeamName( szGameDir, state->m_nTeam ) ) : QString{};
+		const QString szHealth = !state ? QString{} : !state->m_bAlive ? ( state->m_nTeam >= 2 ? tr( "dead" ) : QString{} )
+																	   : QString::number( state->m_nHealth );
+		const QBrush brush = state && state->m_bAlive && state->m_nTeam >= 2 ? QBrush( DemoTeamColor( state->m_nTeam ) ) : QBrush( palette().color( QPalette::Disabled, QPalette::Text ) );
+		const auto set = [ & ]( int nColumn, const QString &szText ) {
+			QTableWidgetItem *pItem = m_pPlayerList->item( i, nColumn );
+			if ( pItem->text() != szText )
+			{
+				pItem->setText( szText );
+			}
+			if ( pItem->foreground() != brush )
+			{
+				pItem->setForeground( brush );
+			}
+		};
+		set( PLAYER_COLUMN_NAME, szName );
+		set( PLAYER_COLUMN_TEAM, szTeam );
+		set( PLAYER_COLUMN_HEALTH, szHealth );
+	}
 }
 
 //-----------------------------------------------------------------------------
@@ -498,6 +695,14 @@ void CDemoViewer::SetTick( int nTick )
 //-----------------------------------------------------------------------------
 // Purpose:
 //-----------------------------------------------------------------------------
+double CDemoViewer::GetPlayTick() const
+{
+	return IsPlaying() ? std::clamp( m_flPlayTick, static_cast<double>( m_nTick ), m_nTick + 1.0 ) : m_nTick;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
 bool CDemoViewer::IsPlaying() const
 {
 	return m_pPlayTimer->isActive();
@@ -525,6 +730,8 @@ void CDemoViewer::SetPlaying( bool bPlaying )
 	else
 	{
 		m_pPlayTimer->stop();
+		UpdatePlayerList();
+		m_pWorld->Redraw();
 	}
 	m_pPlay->setChecked( bPlaying );
 	m_pPlay->setText( bPlaying ? tr( "Pause" ) : tr( "Play" ) );
@@ -566,6 +773,8 @@ void CDemoViewer::Advance()
 		return;
 	}
 	SetTick( static_cast<int>( m_flPlayTick ) );
+	// Between ticks too: the players move by fractions of one.
+	m_pWorld->Redraw();
 }
 
 //-----------------------------------------------------------------------------
@@ -650,4 +859,5 @@ QString CDemoViewer::GetSessionEntry() const
 void CDemoViewer::StopWork()
 {
 	SetPlaying( false );
+	m_pWorld->Stop();
 }

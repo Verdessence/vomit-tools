@@ -13,6 +13,8 @@ add_library(vomit_tools_ui STATIC
         CrashHandler.h
         DemoViewer.cpp
         DemoViewer.h
+        DemoWorld.cpp
+        DemoWorld.h
         StripperEditor.cpp
         StripperEditor.h
         HudEditor.cpp

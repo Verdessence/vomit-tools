@@ -8,7 +8,10 @@
 #include "StickyTreeParents.h"
 #include "StripperEditor.h"
 #include "DemoViewer.h"
+#include "DemoWorld.h"
 #include "demo/Demo.h"
+#include "demo/Players.h"
+#include "bsp/Decompile.h"
 #include "HudEditor.h"
 #include "SchemeEditor.h"
 #include "hud/Hud.h"
@@ -1342,10 +1345,10 @@ CVpkEditor *CMainWindow::OpenPackage( const QString &szPath )
 		m_pTabs->setTabText( m_pTabs->indexOf( pEditor ), ( bModified ? QStringLiteral( "*" ) : QString{} ) + pEditor->GetFileName() );
 		UpdateTitle();
 	} );
+	connect( pEditor, &CVpkEditor::MapViewRequested, this, [ this, pEditor ] { OpenMapFile( ToQString( pEditor->GetPackage().GetFile() ) ); } );
 	connect( pEditor, &CVpkEditor::MapParticlesRequested, this, [ this, pEditor ] {
 		GenerateManifest( CManifestDialog::Format_t::FORMAT_PARTICLES, ToQString( pEditor->GetPackage().GetFile().stem() ), pEditor->GetPackage().GetBsp(), &pEditor->GetPackage() );
 	} );
-	connect( pEditor, &CVpkEditor::MapViewRequested, this, [ this, pEditor ] { OpenMapFile( ToQString( pEditor->GetPackage().GetFile() ) ); } );
 	const int nIndex = m_pTabs->addTab( pEditor, pEditor->GetFileName() );
 	m_pTabs->setTabToolTip( nIndex, ToQString( pEditor->GetPackage().GetFile() ) );
 	m_pTabs->setCurrentIndex( nIndex );
@@ -2065,13 +2068,13 @@ void CMainWindow::PreviewGameFile( const QString &szPath, const QString &szSourc
 	{
 		pView = WithEditButton( pView, tr( "This is a Hammer map." ), tr( "Open Map Viewer" ), [ this, szPath ] { OpenMapFile( szPath ); } );
 	}
-	else if ( const FileKind_t nKind = xv::sound::FileKindForPath( szPath.toStdString() ); nKind != FileKind_t::FILE_KIND_UNKNOWN )
-	{
-		pView = WithEditButton( pView, tr( "This is a %1 file." ).arg( KindName( nKind ) ), tr( "Open in Editor" ), [ this, szPath ] { OpenSoundFile( szPath ); } );
 	else if ( szPath.endsWith( u".bsp", Qt::CaseInsensitive ) )
 	{
 		pView = WithEditButton( pView, tr( "This is a compiled map." ), tr( "Open in Map Viewer" ), [ this, szPath ] { OpenMapFile( szPath ); } );
 	}
+	else if ( const FileKind_t nKind = xv::sound::FileKindForPath( szPath.toStdString() ); nKind != FileKind_t::FILE_KIND_UNKNOWN )
+	{
+		pView = WithEditButton( pView, tr( "This is a %1 file." ).arg( KindName( nKind ) ), tr( "Open in Editor" ), [ this, szPath ] { OpenSoundFile( szPath ); } );
 	}
 	else if ( const QString szSky = SkyNameFor( szPath ); !szSky.isEmpty() )
 	{
@@ -2174,13 +2177,13 @@ void CMainWindow::PreviewDiskFile( const QString &szPath )
 	{
 		pView = WithEditButton( pView, tr( "This is a HUD layout." ), tr( "Open in HUD Editor" ), [ this, szPath ] { OpenHudFile( szPath ); } );
 	}
-	else if ( info.suffix().compare( u"vmf", Qt::CaseInsensitive ) == 0 || info.suffix().compare( u"vmm", Qt::CaseInsensitive ) == 0 )
-	{
-		pView = WithEditButton( pView, info.suffix().compare( u"vmm", Qt::CaseInsensitive ) == 0 ? tr( "This is a Hammer map manifest." ) : tr( "This is a Hammer map." ), tr( "Open Map Viewer" ), [ this, szPath ] { OpenDiskFile( szPath ); } );
 	else if ( info.suffix().compare( u"bsp", Qt::CaseInsensitive ) == 0 )
 	{
 		pView = WithEditButton( pView, tr( "This is a compiled map." ), tr( "Open in Map Viewer" ), [ this, szPath ] { OpenMapFile( QFileInfo( szPath ).absoluteFilePath() ); } );
 	}
+	else if ( info.suffix().compare( u"vmf", Qt::CaseInsensitive ) == 0 || info.suffix().compare( u"vmm", Qt::CaseInsensitive ) == 0 )
+	{
+		pView = WithEditButton( pView, info.suffix().compare( u"vmm", Qt::CaseInsensitive ) == 0 ? tr( "This is a Hammer map manifest." ) : tr( "This is a Hammer map." ), tr( "Open Map Viewer" ), [ this, szPath ] { OpenDiskFile( szPath ); } );
 	}
 	else if ( info.suffix().compare( u"mdl", Qt::CaseInsensitive ) == 0 )
 	{
@@ -5592,9 +5595,6 @@ CMapEditor *CMainWindow::OpenMapFile( const QString &szPath )
 		source.m_Text.assign( reinterpret_cast<const char *>( bytes->data() ), reinterpret_cast<const char *>( bytes->data() + bytes->size() ) );
 	}
 	source.m_Game = m_Game;
-	// Preferences > Maps can name the game data in place of the game's Hammer configuration.
-	for ( const QString &szFgd : CPreferences::Instance().GetMapPreferences().m_Fgds )
-	{
 	// A compiled map is read back into a Hammer map's text (bsp/Decompile.h), and the files
 	// packed into it come before the game's, as they do when the game runs it.
 	if ( szOrigin.endsWith( u".bsp", Qt::CaseInsensitive ) )
@@ -5617,6 +5617,9 @@ CMapEditor *CMainWindow::OpenMapFile( const QString &szPath )
 		DebugLog() << szSummary;
 		statusBar()->showMessage( szSummary, 15000 );
 	}
+	// Preferences > Maps can name the game data in place of the game's Hammer configuration.
+	for ( const QString &szFgd : CPreferences::Instance().GetMapPreferences().m_Fgds )
+	{
 		source.m_Fgds.push_back( ToPath( szFgd ) );
 	}
 	auto *pEditor = new CMapEditor( szOrigin, !bDisk );
@@ -5893,33 +5896,87 @@ CDemoViewer *CMainWindow::OpenDemoFile( const QString &szPath )
 		}
 	}
 	std::optional<xv::demo::CDemo> demo;
+	xv::demo::CPlayers players;
 	std::string szError = "could not read the file";
+	// The players are followed through the packets while the bytes are at hand (a third of a
+	// second for an hour's demo).
+	const auto read = [ & ]( std::span<const std::byte> bytes ) {
+		demo = xv::demo::CDemo::Parse( bytes, &szError );
+		if ( demo )
+			players = xv::demo::CPlayers::Read( *demo, bytes );
+	};
 	if ( bDisk )
 	{
 		QFile file( info.absoluteFilePath() );
 		if ( file.open( QIODevice::ReadOnly ) )
 		{
 			if ( const uchar *pBytes = file.map( 0, file.size() ) )
-				demo = xv::demo::CDemo::Parse( { reinterpret_cast<const std::byte *>( pBytes ), static_cast<std::size_t>( file.size() ) }, &szError );
+				read( { reinterpret_cast<const std::byte *>( pBytes ), static_cast<std::size_t>( file.size() ) } );
 			else if ( const QByteArray data = file.readAll(); !data.isEmpty() )
-				demo = xv::demo::CDemo::Parse( AsBytes( data ), &szError );
+				read( AsBytes( data ) );
 		}
 	}
 	else if ( m_Game )
 	{
 		if ( const auto bytes = m_pFileSystem->Read( szName.toStdString() ) )
-			demo = xv::demo::CDemo::Parse( *bytes, &szError );
+			read( *bytes );
 	}
 	if ( !demo )
 	{
 		QMessageBox::warning( this, tr( "Cannot open" ), tr( "Could not open %1: %2." ).arg( szName, QString::fromStdString( szError ) ) );
 		return nullptr;
 	}
-	auto *pViewer = new CDemoViewer( szName, std::move( *demo ), bDisk ? ToPath( info.absoluteFilePath() ) : fs::path{}, !bDisk );
+	const QString szMap = QString::fromUtf8( demo->GetHeader().m_szMap );
+	auto *pViewer = new CDemoViewer( szName, std::move( *demo ), bDisk ? ToPath( info.absoluteFilePath() ) : fs::path{}, !bDisk, std::move( players ) );
+	LoadDemoMap( *pViewer, szMap, bDisk ? info.absolutePath() : QString{} );
 	const int nIndex = m_pTabs->addTab( pViewer, pViewer->GetTabTitle() );
 	m_pTabs->setTabToolTip( nIndex, szName );
 	m_pTabs->setCurrentIndex( nIndex );
 	return pViewer;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: The map a demo was recorded on, for its 3D view: maps/<name>.bsp from the mounted
+//          game (which has the maps a server sent, too), else beside the demo or in a maps
+//          folder there.
+//-----------------------------------------------------------------------------
+void CMainWindow::LoadDemoMap( CDemoViewer &viewer, const QString &szMap, const QString &szDemoFolder )
+{
+	if ( szMap.isEmpty() )
+	{
+		viewer.GetWorld().SetNoMap( tr( "The demo doesn't name its map." ) );
+		return;
+	}
+	const QString szGamePath = QStringLiteral( "maps/%1.bsp" ).arg( szMap );
+	QString szDisk = m_Game ? DiskPathForGame( szGamePath ) : QString{};
+	if ( szDisk.isEmpty() && !szDemoFolder.isEmpty() )
+	{
+		for ( const QString &szTry : { szDemoFolder + QStringLiteral( "/maps/%1.bsp" ).arg( szMap ), szDemoFolder + QStringLiteral( "/%1.bsp" ).arg( szMap ) } )
+		{
+			if ( szDisk.isEmpty() && QFileInfo( szTry ).isFile() )
+				szDisk = szTry;
+		}
+	}
+	std::optional<std::vector<std::byte>> bytes;
+	if ( !szDisk.isEmpty() )
+	{
+		if ( const auto data = ReadDiskFile( szDisk ) )
+		{
+			const auto *pBytes = reinterpret_cast<const std::byte *>( data->data() );
+			bytes.emplace( pBytes, pBytes + data->size() );
+		}
+	}
+	else if ( m_Game )
+	{
+		bytes = m_pFileSystem->Read( szGamePath.toStdString() );
+	}
+	if ( !bytes )
+	{
+		viewer.GetWorld().SetNoMap( m_Game ? tr( "%1 isn't among the game's files: the players are shown without their map." ).arg( szGamePath )
+										   : tr( "No game is mounted to read %1 from: the players are shown without their map." ).arg( szGamePath ) );
+		return;
+	}
+	viewer.GetWorld().LoadCompiledMap( std::move( *bytes ), m_Game, szMap + QStringLiteral( ".bsp" ), szDisk.isEmpty() ? fs::path{} : ToPath( szDisk ) );
 }
 
 //-----------------------------------------------------------------------------

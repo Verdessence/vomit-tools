@@ -282,7 +282,9 @@ std::optional<CDemo> CDemo::Parse( std::span<const std::byte> bytes, std::string
 		}
 		frame.m_nSize = static_cast<std::uint32_t>( reader.GetOffset() - frame.m_nOffset );
 		demo.m_Frames.push_back( frame );
-		if ( frame.m_nKind != FrameKind_t::FRAME_KIND_SIGNON )
+		// Only what comes once the game has begun is on the demo's clock: the sign-on packets
+		// and the tables sent with them carry whatever tick the server was at.
+		if ( frame.m_nKind == FrameKind_t::FRAME_KIND_PACKET || frame.m_nKind == FrameKind_t::FRAME_KIND_CONSOLE || frame.m_nKind == FrameKind_t::FRAME_KIND_USER_COMMAND )
 		{
 			demo.m_nLastTick = std::max( demo.m_nLastTick, frame.m_nTick );
 		}
@@ -372,6 +374,39 @@ std::vector<std::uint64_t> CDemo::PacketBytesOverTime( int nBuckets ) const
 		buckets[ static_cast<std::size_t>( nTick * static_cast<std::int64_t>( buckets.size() ) / nSpan ) ] += frame.m_nSize;
 	}
 	return buckets;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: A packet's block comes after its camera and sequence numbers; the tables' right
+//          after the tick. Each has its length before it.
+//-----------------------------------------------------------------------------
+std::span<const std::byte> CDemo::FrameBlock( const Frame_t &frame, std::span<const std::byte> file )
+{
+	std::size_t nAt = static_cast<std::size_t>( frame.m_nOffset ) + 1 + 4;
+	switch ( frame.m_nKind )
+	{
+		case FrameKind_t::FRAME_KIND_SIGNON:
+		case FrameKind_t::FRAME_KIND_PACKET:
+			nAt += CAMERA_SIZE + 8;
+			break;
+		case FrameKind_t::FRAME_KIND_DATA_TABLES:
+		case FrameKind_t::FRAME_KIND_STRING_TABLES:
+			break;
+		default:
+			return {};
+	}
+	std::int32_t nLength = 0;
+	if ( nAt + sizeof( nLength ) > file.size() )
+	{
+		return {};
+	}
+	std::memcpy( &nLength, file.data() + nAt, sizeof( nLength ) );
+	nAt += sizeof( nLength );
+	if ( nLength < 0 || file.size() - nAt < static_cast<std::size_t>( nLength ) )
+	{
+		return {};
+	}
+	return file.subspan( nAt, static_cast<std::size_t>( nLength ) );
 }
 
 } // namespace xv::demo
