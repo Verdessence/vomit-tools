@@ -1771,7 +1771,8 @@ void CMapEditor::UpdateAutosaveTimer()
 //-----------------------------------------------------------------------------
 QString CMapEditor::GetAutosavePath() const
 {
-	return MapAutosavePath( m_szPath, m_bFromGame, m_szNewAutosaveKey );
+	// A compiled map's autosave goes with the game files' (not beside the map, in a game's folder).
+	return MapAutosavePath( m_szPath, m_bFromGame || IsCompiled(), m_szNewAutosaveKey );
 }
 
 //-----------------------------------------------------------------------------
@@ -4596,7 +4597,7 @@ bool CMapEditor::ConfirmClose()
 bool CMapEditor::Save()
 {
 	// A manifest is shown as one map; it is saved as one (a VMF), never over the manifest.
-	if ( m_bFromGame || m_szPath.isEmpty() || !m_pDocument->IsLoaded() || IsManifest() )
+	if ( m_bFromGame || m_szPath.isEmpty() || !m_pDocument->IsLoaded() || IsManifest() || IsCompiled() )
 	{
 		return m_pDocument->IsLoaded() && SaveAs();
 	}
@@ -4627,9 +4628,18 @@ bool CMapEditor::SaveAs()
 																						  : m_szPath;
 	if ( IsManifest() )
 		szStart = szStart.chopped( 4 ) + QStringLiteral( ".vmf" );
+	// A compiled map's VMF isn't the one it was compiled from: "_d", as decompilers name theirs,
+	// in the folder the last file window finished in (not among the game's maps).
+	if ( IsCompiled() )
+		szStart = QFileInfo{ m_szPath }.completeBaseName() + QStringLiteral( "_d.vmf" );
 	const QString szFile = AskSaveFile( this, tr( "Save Map As" ), szStart, tr( "Hammer maps (*.vmf)" ) );
 	if ( szFile.isEmpty() )
 	{
+		return false;
+	}
+	if ( szFile.endsWith( u".bsp", Qt::CaseInsensitive ) )
+	{
+		QMessageBox::warning( this, tr( "Save failed" ), tr( "A map is saved as a Hammer map: choose a .vmf name." ) );
 		return false;
 	}
 	if ( IsManifest() && szFile.endsWith( u".vmm", Qt::CaseInsensitive ) )

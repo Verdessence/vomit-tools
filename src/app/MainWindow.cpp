@@ -1345,6 +1345,7 @@ CVpkEditor *CMainWindow::OpenPackage( const QString &szPath )
 	connect( pEditor, &CVpkEditor::MapParticlesRequested, this, [ this, pEditor ] {
 		GenerateManifest( CManifestDialog::Format_t::FORMAT_PARTICLES, ToQString( pEditor->GetPackage().GetFile().stem() ), pEditor->GetPackage().GetBsp(), &pEditor->GetPackage() );
 	} );
+	connect( pEditor, &CVpkEditor::MapViewRequested, this, [ this, pEditor ] { OpenMapFile( ToQString( pEditor->GetPackage().GetFile() ) ); } );
 	const int nIndex = m_pTabs->addTab( pEditor, pEditor->GetFileName() );
 	m_pTabs->setTabToolTip( nIndex, ToQString( pEditor->GetPackage().GetFile() ) );
 	m_pTabs->setCurrentIndex( nIndex );
@@ -2067,6 +2068,10 @@ void CMainWindow::PreviewGameFile( const QString &szPath, const QString &szSourc
 	else if ( const FileKind_t nKind = xv::sound::FileKindForPath( szPath.toStdString() ); nKind != FileKind_t::FILE_KIND_UNKNOWN )
 	{
 		pView = WithEditButton( pView, tr( "This is a %1 file." ).arg( KindName( nKind ) ), tr( "Open in Editor" ), [ this, szPath ] { OpenSoundFile( szPath ); } );
+	else if ( szPath.endsWith( u".bsp", Qt::CaseInsensitive ) )
+	{
+		pView = WithEditButton( pView, tr( "This is a compiled map." ), tr( "Open in Map Viewer" ), [ this, szPath ] { OpenMapFile( szPath ); } );
+	}
 	}
 	else if ( const QString szSky = SkyNameFor( szPath ); !szSky.isEmpty() )
 	{
@@ -2172,6 +2177,10 @@ void CMainWindow::PreviewDiskFile( const QString &szPath )
 	else if ( info.suffix().compare( u"vmf", Qt::CaseInsensitive ) == 0 || info.suffix().compare( u"vmm", Qt::CaseInsensitive ) == 0 )
 	{
 		pView = WithEditButton( pView, info.suffix().compare( u"vmm", Qt::CaseInsensitive ) == 0 ? tr( "This is a Hammer map manifest." ) : tr( "This is a Hammer map." ), tr( "Open Map Viewer" ), [ this, szPath ] { OpenDiskFile( szPath ); } );
+	else if ( info.suffix().compare( u"bsp", Qt::CaseInsensitive ) == 0 )
+	{
+		pView = WithEditButton( pView, tr( "This is a compiled map." ), tr( "Open in Map Viewer" ), [ this, szPath ] { OpenMapFile( QFileInfo( szPath ).absoluteFilePath() ); } );
+	}
 	}
 	else if ( info.suffix().compare( u"mdl", Qt::CaseInsensitive ) == 0 )
 	{
@@ -3912,7 +3921,11 @@ void CMainWindow::RestoreSessionEntry( const QString &szEntry )
 		{
 			return;
 		}
-		OpenDiskFile( szPath );
+		// A compiled map that was open in the map viewer goes back there, not to its files' tab.
+		if ( szKind == u"map" && szPath.endsWith( u".bsp", Qt::CaseInsensitive ) )
+			OpenMapFile( szPath );
+		else
+			OpenDiskFile( szPath );
 	}
 	else if ( !m_Game || ( szKind != u"sky" && !m_pFileSystem->Resolve( xv::vfs::NormalizePath( szPath.toStdString() ) ) ) )
 	{
@@ -5582,6 +5595,28 @@ CMapEditor *CMainWindow::OpenMapFile( const QString &szPath )
 	// Preferences > Maps can name the game data in place of the game's Hammer configuration.
 	for ( const QString &szFgd : CPreferences::Instance().GetMapPreferences().m_Fgds )
 	{
+	// A compiled map is read back into a Hammer map's text (bsp/Decompile.h), and the files
+	// packed into it come before the game's, as they do when the game runs it.
+	if ( szOrigin.endsWith( u".bsp", Qt::CaseInsensitive ) )
+	{
+		xv::bsp::DecompileReport_t report;
+		std::string szError;
+		const auto text = xv::bsp::DecompileToVmf( std::as_bytes( std::span( source.m_Text ) ), &report, &szError );
+		if ( !text )
+		{
+			QMessageBox::warning( this, tr( "Cannot open" ), tr( "Could not read %1: %2." ).arg( QDir::toNativeSeparators( szOrigin ), QString::fromStdString( szError ) ) );
+			return nullptr;
+		}
+		source.m_Text.assign( text->begin(), text->end() );
+		const QString szDisk = bDisk ? szOrigin : DiskPathForGame( szOrigin );
+		if ( source.m_Game && !szDisk.isEmpty() )
+			source.m_Game->m_SearchPaths.insert( source.m_Game->m_SearchPaths.begin(), { { "game" }, ToPath( szDisk ).generic_string() } );
+		QString szSummary = tr( "%1 read back: %L2 brushes, %L3 entities, %L4 displacements, %L5 static props, %L6 overlays" ).arg( source.m_szName ).arg( report.m_nSolids ).arg( report.m_nEntities ).arg( report.m_nDisplacements ).arg( report.m_nStaticProps ).arg( report.m_nOverlays );
+		for ( const std::string &szWarning : report.m_Warnings )
+			szSummary += QStringLiteral( "; " ) + QString::fromStdString( szWarning );
+		DebugLog() << szSummary;
+		statusBar()->showMessage( szSummary, 15000 );
+	}
 		source.m_Fgds.push_back( ToPath( szFgd ) );
 	}
 	auto *pEditor = new CMapEditor( szOrigin, !bDisk );

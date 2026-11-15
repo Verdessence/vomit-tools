@@ -74,6 +74,8 @@ signals:
 	void OpenRequested( const QString &szPath );
 	// A map's "Particles Manifest…" button: generate its <map>_particles.txt.
 	void MapParticlesRequested();
+	// A map's "Open in Map Viewer" button.
+	void MapViewRequested();
 	void ModifiedChanged( bool bModified );
 
 private:

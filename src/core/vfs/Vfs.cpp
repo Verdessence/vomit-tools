@@ -5,6 +5,7 @@
 //
 //===========================================================================//
 #include "Vfs.h"
+#include "Package.h"
 
 #include <algorithm>
 #include <fstream>
@@ -192,6 +193,53 @@ public:
 
 private:
 	std::unordered_map<std::string, fs::path> m_Files; // normalized path -> real file
+};
+
+// An archive read through CPackage (a map's packed files).
+class CPackageMount final : public CMount
+{
+public:
+	CPackageMount( const fs::path &location, std::vector<std::string> ids, std::unique_ptr<CPackage> pPackage )
+		: CMount( Kind_t::KIND_VPK, location, std::move( ids ) ),
+		  m_pPackage( std::move( pPackage ) )
+	{
+		for ( const PackageEntry_t &entry : m_pPackage->GetEntries() )
+		{
+			m_Entries.emplace( NormalizePath( entry.m_szPath ), entry.m_szPath );
+		}
+	}
+
+	[[nodiscard]] bool Contains( const std::string &szPath ) const override
+	{
+		return m_Entries.contains( szPath );
+	}
+
+	[[nodiscard]] std::optional<std::vector<std::byte>> Read( const std::string &szPath ) const override
+	{
+		const auto it = m_Entries.find( szPath );
+		if ( it == m_Entries.end() )
+		{
+			return std::nullopt;
+		}
+		return m_pPackage->Read( it->second );
+	}
+
+	void ForEachFile( const std::function<void( const std::string & )> &pfnCallback ) const override
+	{
+		for ( const auto &[ path, _ ] : m_Entries )
+		{
+			pfnCallback( path );
+		}
+	}
+
+	[[nodiscard]] std::size_t GetFileCount() const override
+	{
+		return m_Entries.size();
+	}
+
+private:
+	std::unique_ptr<CPackage> m_pPackage;
+	std::map<std::string, std::string> m_Entries; // normalized -> as stored
 };
 
 class CVpkMount final : public CMount
@@ -548,6 +596,21 @@ const CMount *CFileSystem::AddVpk( const fs::path &file, std::vector<std::string
 //-----------------------------------------------------------------------------
 // Purpose:
 //-----------------------------------------------------------------------------
+const CMount *CFileSystem::AddPackage( const fs::path &file, std::vector<std::string> ids, std::string *pError )
+{
+	auto pPackage = CPackage::Open( file, pError );
+	if ( !pPackage )
+	{
+		return nullptr;
+	}
+	auto &pMount = m_Mounts.emplace_back( std::make_unique<CPackageMount>( file, ids, std::move( pPackage ) ) );
+	m_Records.push_back( { ToUtf8( file ), file, std::move( ids ), MountRecord_t::Status_t::STATUS_MOUNTED, {}, pMount.get() } );
+	return pMount.get();
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
 void CFileSystem::Record( const SearchPath_t &searchPath, const fs::path &location, MountRecord_t::Status_t nStatus, std::string szMessage, const CMount *pMount )
 {
 	if ( pMount )
@@ -611,6 +674,15 @@ void CFileSystem::MountSearchPath( const CGameInfo &info, const SearchPath_t &se
 			}
 			Record( searchPath, entry.path(), MountRecord_t::Status_t::STATUS_FAILED, std::move( szError ), pMount );
 		}
+		return;
+	}
+
+	// A compiled map: the files packed into it.
+	if ( LowerAscii( ToUtf8( path.extension() ) ) == ".bsp" )
+	{
+		std::string szError;
+		const CMount *pMount = AddPackage( path, searchPath.m_Ids, &szError );
+		Record( searchPath, path, MountRecord_t::Status_t::STATUS_FAILED, std::move( szError ), pMount );
 		return;
 	}
 

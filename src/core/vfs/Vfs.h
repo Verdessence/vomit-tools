@@ -111,6 +111,9 @@ public:
 
 	const CMount *AddDirectory( const std::filesystem::path &directory, std::vector<std::string> ids, std::string *pError = nullptr );
 	const CMount *AddVpk( const std::filesystem::path &file, std::vector<std::string> ids, std::string *pError = nullptr );
+	// Any archive CPackage opens, a compiled map's packed files above all: a search path that
+	// names a .bsp mounts them, as the game does for the map it has loaded.
+	const CMount *AddPackage( const std::filesystem::path &file, std::vector<std::string> ids, std::string *pError = nullptr );
 
 	[[nodiscard]] const std::vector<MountRecord_t> &GetRecords() const { return m_Records; }
 

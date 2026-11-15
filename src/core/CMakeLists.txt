@@ -5,6 +5,8 @@ add_library(vomit_tools_core STATIC
         audio/Audio.h
         bsp/Bsp.cpp
         bsp/Bsp.h
+        bsp/Decompile.cpp
+        bsp/Decompile.h
         bsp/Stripper.cpp
         bsp/Stripper.h
         demo/Demo.cpp

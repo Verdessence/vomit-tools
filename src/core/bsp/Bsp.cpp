@@ -88,6 +88,36 @@ std::optional<std::vector<std::byte>> Decompress( std::span<const std::byte> lum
 } // namespace
 
 //-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+std::optional<std::vector<std::byte>> ReadLump( std::span<const std::byte> file, const Lump_t &lump )
+{
+	if ( static_cast<std::uint64_t>( lump.m_nOffset ) + lump.m_nLength > file.size() )
+	{
+		return std::nullopt;
+	}
+	const auto stored = file.subspan( lump.m_nOffset, lump.m_nLength );
+	if ( lump.m_nUncompressed != 0 )
+	{
+		return Decompress( stored );
+	}
+	return std::vector<std::byte>( stored.begin(), stored.end() );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+std::optional<std::vector<std::byte>> UnpackIfCompressed( std::span<const std::byte> stored )
+{
+	constexpr std::uint32_t LZMA_IDENT = 'L' | ( 'Z' << 8 ) | ( 'M' << 16 ) | ( 'A' << 24 );
+	if ( stored.size() >= 17 && Read32( stored, 0 ) == LZMA_IDENT )
+	{
+		return Decompress( stored );
+	}
+	return std::vector<std::byte>( stored.begin(), stored.end() );
+}
+
+//-----------------------------------------------------------------------------
 // Purpose: Valve's streams often have no end marker, so the unpacked size is what stops the
 //          decoder; it goes in the .lzma file header (properties, then that size as 64 bits)
 //          that liblzma's decoder reads.

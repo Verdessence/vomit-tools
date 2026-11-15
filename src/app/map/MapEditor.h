@@ -322,6 +322,9 @@ public:
 	void CreateBuilding();
 	// Opened from a .vmm: its submaps are instances, and saving asks for a VMF.
 	[[nodiscard]] bool IsManifest() const { return m_szPath.endsWith( u".vmm", Qt::CaseInsensitive ); }
+	// Opened from a compiled map (.bsp), read back into brushes and entities: saving asks for
+	// a VMF, never writes over the map.
+	[[nodiscard]] bool IsCompiled() const { return m_szPath.endsWith( u".bsp", Qt::CaseInsensitive ); }
 	[[nodiscard]] CMapSprinklePanel &GetSprinkle() { return *m_pSprinkle; }
 	// The Displacement tab's edits, each one undo step, on the selected faces (else every face
 	// of the selected objects): displacements made at a power on four-sided faces, taken off,

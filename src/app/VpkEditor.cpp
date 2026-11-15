@@ -405,6 +405,11 @@ CVpkEditor::CVpkEditor( std::unique_ptr<xv::vfs::CPackage> pPackage, CSoundPlaye
 		pParticles->setToolTip( tr( "Make maps/%1_particles.txt with the particle files this map uses" ).arg( ToQString( m_pPackage->GetFile().stem() ) ) );
 		connect( pParticles, &QPushButton::clicked, this, &CVpkEditor::MapParticlesRequested );
 		pBar->addWidget( pParticles );
+		auto *pView = new QPushButton( tr( "Open in Map Viewer" ) );
+		pView->setObjectName( QStringLiteral( "mapOpenInViewer" ) );
+		pView->setToolTip( tr( "The map's brushes, displacements, entities and props read back out of it, in the map viewer" ) );
+		connect( pView, &QPushButton::clicked, this, &CVpkEditor::MapViewRequested );
+		pBar->addWidget( pView );
 	}
 
 	m_pTree = new QTreeView;

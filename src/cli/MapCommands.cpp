@@ -16,12 +16,14 @@
 #include <map>
 #include <optional>
 #include <set>
+#include <span>
 #include <stdexcept>
 #include <string>
 #include <string_view>
 #include <vector>
 
 #include "Process.h"
+#include "bsp/Decompile.h"
 #include "map/Compile.h"
 #include "map/GameConfig.h"
 #include "vfs/Vfs.h"
@@ -51,6 +53,9 @@ const char *const MAP_USAGE = R"(vomit-tools-cli map: Hammer maps
       --go-on                keep going after a leak (Hammer's way; Hammer++ stops)
   vomit-tools-cli map sequences [--sequences <file>] [--game <folder>]
       Lists the sequences and their commands.
+  vomit-tools-cli map decompile <map.bsp> [<out.vmf>]
+      Writes a compiled map back as a Hammer map (beside the .bsp, as <map>_d.vmf, unless
+      named): its brushes, displacements, entities, static props, overlays and cubemaps.
 
 Exit code 0 when everything ran, 2 when the map leaked, 1 otherwise.
 )";
@@ -369,6 +374,52 @@ int ListSequences( const std::map<std::string, std::string> &options )
 	return 0;
 }
 
+//-----------------------------------------------------------------------------
+// Purpose: map decompile: the .bsp read whole, the VMF written, what was found counted.
+//-----------------------------------------------------------------------------
+int Decompile( const std::vector<std::string> &inputs )
+{
+	if ( inputs.empty() || inputs.size() > 2 )
+	{
+		std::fprintf( stderr, "map decompile: give a .bsp, and optionally the .vmf to write\n" );
+		return 1;
+	}
+	const fs::path bsp( inputs[ 0 ] );
+	fs::path vmf = inputs.size() > 1 ? fs::path( inputs[ 1 ] ) : bsp;
+	if ( inputs.size() == 1 )
+	{
+		vmf.replace_filename( bsp.stem().string() + "_d.vmf" );
+	}
+	std::ifstream in( bsp, std::ios::binary );
+	if ( !in )
+	{
+		std::fprintf( stderr, "map decompile: could not open %s\n", inputs[ 0 ].c_str() );
+		return 1;
+	}
+	const std::vector<char> data( ( std::istreambuf_iterator<char>( in ) ), std::istreambuf_iterator<char>() );
+	xv::bsp::DecompileReport_t report;
+	std::string szError;
+	const auto text = xv::bsp::DecompileToVmf( std::as_bytes( std::span( data ) ), &report, &szError );
+	if ( !text )
+	{
+		std::fprintf( stderr, "map decompile: %s\n", szError.c_str() );
+		return 1;
+	}
+	std::ofstream out( vmf, std::ios::binary );
+	out.write( text->data(), static_cast<std::streamsize>( text->size() ) );
+	if ( !out )
+	{
+		std::fprintf( stderr, "map decompile: could not write %s\n", xv::vfs::ToUtf8( vmf ).c_str() );
+		return 1;
+	}
+	std::printf( "%s: %d solids, %d entities, %d displacements, %d static props, %d overlays, %d cubemaps\n", xv::vfs::ToUtf8( vmf ).c_str(), report.m_nSolids, report.m_nEntities, report.m_nDisplacements, report.m_nStaticProps, report.m_nOverlays, report.m_nCubemaps );
+	for ( const std::string &szWarning : report.m_Warnings )
+	{
+		std::printf( "warning: %s\n", szWarning.c_str() );
+	}
+	return 0;
+}
+
 } // namespace
 
 //-----------------------------------------------------------------------------
@@ -414,6 +465,10 @@ int MapCommand( int argc, char **argv )
 	if ( szCommand == "sequences" )
 	{
 		return ListSequences( options );
+	}
+	if ( szCommand == "decompile" )
+	{
+		return Decompile( inputs );
 	}
 	std::fprintf( stderr, "map: unknown command %s\n\n%s", szCommand.c_str(), MAP_USAGE );
 	return 1;

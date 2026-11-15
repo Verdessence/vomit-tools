@@ -68,6 +68,12 @@ private:
 	std::vector<std::byte> m_Pakfile;
 };
 
+// A lump's bytes out of the map's file, unpacked when compressed; nullopt when it lies outside
+// the file or won't unpack.
+[[nodiscard]] std::optional<std::vector<std::byte>> ReadLump( std::span<const std::byte> file, const Lump_t &lump );
+// Bytes that may be a compressed lump (a game lump's): unpacked when they begin "LZMA", as
+// they are otherwise; nullopt when they won't unpack.
+[[nodiscard]] std::optional<std::vector<std::byte>> UnpackIfCompressed( std::span<const std::byte> stored );
 // The lump's name ("Entities", "Pakfile"...), by index; numbered for unknown ones.
 [[nodiscard]] std::string LumpName( int nIndex );
 // Raw LZMA data with its 5 property bytes, unpacked to its known size (compressed lumps, and
