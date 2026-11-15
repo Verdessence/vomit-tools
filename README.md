@@ -46,8 +46,9 @@ Skybox Editor with skybox preview, guides, w/ smart selection
 - Test Patterns so you can easily make your own in another program <!-- let me export this also cuh -->
 
 ### VTFEdit
-> [!NOTE]
-> hi i need an image/video/jxl for preview (We do not say gif in this household.)
+<div align="center">
+	<img src=src/assets/previews/vtf.png alt="Showcase of the VTF Editor in Vomit Editor" />
+</div>
 
 normally i'd call this VomiTFEdit but we're dragging with this one<br>
 Brought VTFEdit to this household to fit the IDE concept
@@ -57,14 +58,16 @@ Brought VTFEdit to this household to fit the IDE concept
 - Ability to preview materials from the associated VMT
 
 ### Detail.vbsp Editor
-> [!NOTE]
-> hi i need an image/video/jxl for preview (We do not say gif in this household.)
+<div align="center">
+	<img src=src/assets/previews/detail.png alt="Showcase of the Detail Editor in Vomit Editor" />
+</div>
 
 Easily edit a `detail.vbsp` file for your mods or for your maps, with 3D preview and easier sprite bound creation
 
 ### Particle Editor
-> [!NOTE]
-> hi i need an image/video/jxl for preview (We do not say gif in this household.)
+<div align="center">
+	<img src=src/assets/previews/particle.png alt="Showcase of the Particle Editor in Vomit Editor" />
+</div>
 
 Create your own particles.... What else is there to say? Goodbye running `-tools`? probably
 - Everything the particle editor got except for anything outside of SDK and Counter-Strike Source
@@ -74,30 +77,34 @@ Create your own particles.... What else is there to say? Goodbye running `-tools
 - Generate manifests
 
 ### Model Editor
-> [!NOTE]
-> hi i need an image/video/jxl for preview (We do not say gif in this household.)
+<div align="center">
+	<img src=src/assets/previews/model.png alt="Showcase of the Model Editor in Vomit Editor" />
+</div>
 
 There's so much shit going on in there I don't even know what's in there
 - Export a Model to VMF, decomposing the mesh into brushes via convex decomposition @ CoACD
 - CLI
 
 ### BSP/VPK Viewer
-> [!NOTE]
-> hi i need an image/video/jxl for preview (We do not say gif in this household.)
+<div align="center">
+	<img src=src/assets/previews/bsp.png alt="Showcase of the Archive Viewer in Vomit Editor" />
+</div>
 
 what else is there to note of lol
 - If available, preview stripper additions and modifications
 
 ### Stripper Viewer
-> [!NOTE]
-> hi i need an image/video/jxl for preview (We do not say gif in this household.)
+<div align="center">
+	<img src=src/assets/previews/stripper.png alt="Showcase of the Stripper Editor in Vomit Editor" />
+</div>
 
 Preview and edit strippers easily
 - Glorified text editor with syntax highlighting and completion
 - Check for Problems
 ### Map Editor
-> [!NOTE]
-> hi i need an image/video/jxl for preview (We do not say gif in this household.)
+<div align="center">
+	<img src=src/assets/previews/showcase.png alt="Showcase of the Map Editor in Vomit Editor" />
+</div>
 
 you know who it is
 - yeah buddy there's most of hammer++ features in here
@@ -117,7 +124,9 @@ you know who it is
 > [!NOTE]
 > hi i need an image/video/jxl for preview (We do not say gif in this household.)
 
-Planned
+Configure `client/sourcescheme.res` and other resource files for your custom huds
+- Preview window
+- Easily trace which element is using which property in the scheme
 
 ### Demo Viewer
 > [!NOTE]
