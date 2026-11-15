@@ -24,23 +24,25 @@ This program was tailored to the creator's environment (Hyprland on Arch Linux w
 This does not mean the program only works in said environment, but I cannot guarantee 100% compatibility with your system, especially with Windows users.
 ## Features
 ### Soundscape Editor
-> [!NOTE]
-> hi i need an image/video/jxl for preview (We do not say gif in this household.)
+<div align="center">
+	<img src=src/assets/previews/sound.png alt="Showcase of the Sound Editor in Vomit Editor" />
+</div>
 
-Soundscape/Soundscript editor with sound preview,  easily configurable like keyvalues
+Soundscape/Soundscript editor with sound preview, easily configurable like keyvalues
 - Easier interface with descriptions and simplified text
 - Soundscape checks via lint for easier troubleshooting
 - Preview sound states dependent on which play button is played
 - Generate or list manifests
 ### Skybox Editor
-> [!NOTE]
-> hi i need an image/video/jxl for preview (We do not say gif in this household.)
+<div align="center">
+	<img src=src/assets/previews/skybox.png alt="Showcase of the Skybox Editor in Vomit Editor" />
+</div>
 
 Skybox Editor with skybox preview, guides, w/ smart selection
-<!-- import hdri or smsht -->
+- Import HDRI/`.exr`
 - View the skybox as is in a 3d space
 - Linter for troubleshooting
-- (WIP) VMT previews for more complex 2d skyboxes
+- VMT previews for more complex 2d skyboxes
 - Test Patterns so you can easily make your own in another program <!-- let me export this also cuh -->
 
 ### VTFEdit
