@@ -159,6 +159,7 @@ private:
 	std::unique_ptr<QRhiGraphicsPipeline> m_pPremultipliedAdditive; // and added
 	std::unique_ptr<QRhiGraphicsPipeline> m_pLines;
 	std::unique_ptr<QRhiGraphicsPipeline> m_pSkyFaces; // the world's sky faces over a 3D skybox
+	std::unique_ptr<QRhiGraphicsPipeline> m_pWorldGrid; // the world grid's plane
 	std::unique_ptr<QRhiGraphicsPipeline> m_pAlpha;    // makes the picture opaque afterwards
 	std::unique_ptr<QRhiGraphicsPipeline> m_pAlphaSky; // the same, marking what is left as sky (the HDR lighting preview)
 	std::unique_ptr<QRhiShaderResourceBindings> m_pNoBindings;

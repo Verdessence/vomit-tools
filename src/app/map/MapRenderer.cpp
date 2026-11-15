@@ -44,6 +44,12 @@ struct FrameUniforms_t
 	float m_FogDirection[ 4 ];
 	float m_FogRange[ 4 ];
 	float m_ViewForward[ 4 ];
+	float m_Grid[ 4 ];
+	float m_GridColor[ 3 ][ 4 ];
+	float m_WorldGrid[ 4 ];
+	float m_WorldGridAt[ 4 ];
+	float m_WorldGridU[ 4 ];
+	float m_WorldGridV[ 4 ];
 };
 
 struct MaterialUniforms_t
@@ -55,7 +61,7 @@ struct MaterialUniforms_t
 	float m_Extra[ 4 ];
 	float m_SelfIllum[ 4 ];
 	float m_UvTransform[ 4 ]; // a b c d
-	float m_UvOffset[ 4 ];    // tx ty
+	float m_UvOffset[ 4 ];    // tx ty; 1: a brush face's (the 3D grid)
 	float m_Refract[ 4 ];     // 1: Refract or Water; 1: this is the reflection's pass; 1: reflects; 1: reflects the sky
 	float m_RefractTint[ 4 ];
 	float m_EnvTint[ 4 ];
@@ -122,6 +128,7 @@ MaterialUniforms_t MaterialUniforms( const xv::map::RasterMaterial_t *pMaterial,
 		u.m_UvTransform[ i ] = shade.m_UvTransform[ i ];
 	u.m_UvOffset[ 0 ] = shade.m_UvTransform[ 4 ];
 	u.m_UvOffset[ 1 ] = shade.m_UvTransform[ 5 ];
+	u.m_UvOffset[ 2 ] = shade.m_bGrid ? 1.0f : 0.0f;
 	u.m_Refract[ 0 ] = shade.m_bRefract ? 1.0f : 0.0f;
 	u.m_Refract[ 1 ] = bReflection ? 1.0f : 0.0f;
 	u.m_Refract[ 2 ] = shade.m_bEnvMap ? 1.0f : 0.0f;
@@ -258,6 +265,7 @@ void CMapRenderer::Release()
 	}
 	m_pNearest.reset();
 	m_pSkyFaces.reset();
+	m_pWorldGrid.reset();
 	m_pAlpha.reset();
 	m_pAlphaSky.reset();
 	m_pSkyBehind.reset();
@@ -924,6 +932,27 @@ void CMapRenderer::MakePipelines( QRhiRenderTarget *pTarget )
 	m_pLines = make( 0, true );
 	m_pSkyFaces = make( 3, false );
 
+	// The world grid's plane: no vertices of its own (mapgrid.vert makes them), seen from both
+	// sides, behind what is in front of it and behind a face that lies in it (pushed back a
+	// little, so such a face always wins). The picture's alpha is other passes' to write.
+	m_pWorldGrid.reset( m_pRhi->newGraphicsPipeline() );
+	m_pWorldGrid->setShaderStages( { { QRhiShaderStage::Vertex, LoadShader( QStringLiteral( ":/shaders/mapgrid.vert.qsb" ) ) }, { QRhiShaderStage::Fragment, LoadShader( QStringLiteral( ":/shaders/mapgrid.frag.qsb" ) ) } } );
+	m_pWorldGrid->setDepthTest( true );
+	m_pWorldGrid->setDepthWrite( false );
+	m_pWorldGrid->setDepthOp( QRhiGraphicsPipeline::Less );
+	m_pWorldGrid->setDepthBias( 16 );
+	m_pWorldGrid->setSlopeScaledDepthBias( 1.0f );
+	QRhiGraphicsPipeline::TargetBlend gridBlend;
+	gridBlend.enable = true;
+	gridBlend.colorWrite = QRhiGraphicsPipeline::R | QRhiGraphicsPipeline::G | QRhiGraphicsPipeline::B;
+	gridBlend.srcColor = QRhiGraphicsPipeline::One;
+	gridBlend.dstColor = QRhiGraphicsPipeline::OneMinusSrcAlpha;
+	m_pWorldGrid->setTargetBlends( { gridBlend } );
+	m_pWorldGrid->setSampleCount( pTarget->sampleCount() );
+	m_pWorldGrid->setShaderResourceBindings( m_LinesAll.m_pBindings.get() );
+	m_pWorldGrid->setRenderPassDescriptor( pTarget->renderPassDescriptor() );
+	m_pWorldGrid->create();
+
 	m_pNoBindings.reset( m_pRhi->newShaderResourceBindings() );
 	m_pNoBindings->create();
 	m_pAlpha.reset( m_pRhi->newGraphicsPipeline() );
@@ -1135,6 +1164,7 @@ void CMapRenderer::Render( QRhiCommandBuffer *pCommands, QRhiRenderTarget *pTarg
 		uniforms.m_Instance[ 2 ] = shade.m_vecInstance.m_flZ;
 		uniforms.m_Instance[ 3 ] = shade.m_flInstanceTint;
 		uniforms.m_Pass[ 0 ] = bSkyPass ? 1.0f : 0.0f;
+		uniforms.m_Pass[ 2 ] = shade.m_bSkyFaces ? 0.0f : 1.0f;
 		uniforms.m_Invalid[ 0 ] = shade.m_vecInvalid.m_flX;
 		uniforms.m_Invalid[ 1 ] = shade.m_vecInvalid.m_flY;
 		uniforms.m_Invalid[ 2 ] = shade.m_vecInvalid.m_flZ;
@@ -1174,6 +1204,29 @@ void CMapRenderer::Render( QRhiCommandBuffer *pCommands, QRhiRenderTarget *pTarg
 		uniforms.m_ViewForward[ 1 ] = shade.m_vecViewForward.m_flY;
 		uniforms.m_ViewForward[ 2 ] = shade.m_vecViewForward.m_flZ;
 		uniforms.m_ViewForward[ 3 ] = shade.m_flMonitorGamma / 2.2f;
+		uniforms.m_Grid[ 0 ] = shade.m_flGrid;
+		uniforms.m_Grid[ 1 ] = shade.m_flGridPerDistance;
+		uniforms.m_Grid[ 2 ] = shade.m_flGridPixel;
+		for ( std::size_t i = 0; i < 3; i++ )
+			std::memcpy( uniforms.m_GridColor[ i ], shade.m_GridColors[ i ].data(), sizeof uniforms.m_GridColor[ i ] );
+		// The world grid's square is laid out from the point of its plane nearest the eye, so
+		// what the card adds up stays small however far the plane's origin is.
+		{
+			const xv::map::RasterOptions_t &options = frame.m_Options;
+			const xv::map::Point_t normal = xv::map::Cross( options.m_WorldGridU, options.m_WorldGridV );
+			const xv::map::Point_t fromOrigin = xv::map::Subtract( camera.m_Eye, options.m_WorldGridOrigin );
+			const xv::map::Point_t toPlane = xv::map::Scale( normal, -xv::map::Dot( fromOrigin, normal ) );
+			uniforms.m_WorldGrid[ 0 ] = options.m_flWorldGrid;
+			uniforms.m_WorldGrid[ 1 ] = static_cast<float>( camera.m_flFar * 2.0 );
+			uniforms.m_WorldGrid[ 2 ] = static_cast<float>( xv::map::Dot( fromOrigin, options.m_WorldGridU ) );
+			uniforms.m_WorldGrid[ 3 ] = static_cast<float>( xv::map::Dot( fromOrigin, options.m_WorldGridV ) );
+			for ( std::size_t i = 0; i < 3; i++ )
+			{
+				uniforms.m_WorldGridAt[ i ] = static_cast<float>( toPlane[ i ] );
+				uniforms.m_WorldGridU[ i ] = static_cast<float>( options.m_WorldGridU[ i ] );
+				uniforms.m_WorldGridV[ i ] = static_cast<float>( options.m_WorldGridV[ i ] );
+			}
+		}
 		return uniforms;
 	};
 	// Slot 1 and 3 are 0 and 2 for meshes as read.
@@ -1306,7 +1359,7 @@ void CMapRenderer::Render( QRhiCommandBuffer *pCommands, QRhiRenderTarget *pTarg
 					later.push_back( { nMesh, &batch, xv::map::Length( xv::map::Subtract( centre, camera.m_Eye ) ) } );
 					continue;
 				}
-				const bool bSkyFace = bSky && !bSkyPass && pMaterial && pMaterial->m_Shade.m_bSky;
+				const bool bSkyFace = bSky && !bSkyPass && shade.m_bSkyFaces && pMaterial && pMaterial->m_Shade.m_bSky;
 				draw( nMesh, batch, bSkyFace ? m_pSkyFaces.get() : m_pOpaque.get() );
 			}
 		}
@@ -1343,6 +1396,14 @@ void CMapRenderer::Render( QRhiCommandBuffer *pCommands, QRhiRenderTarget *pTarg
 	if ( shade.m_nMode != xv::map::RasterMode_t::RASTER_MODE_WIREFRAME )
 	{
 		faces( frame.m_Camera, false );
+	}
+	if ( frame.m_Options.m_flWorldGrid > 0.0f )
+	{
+		pCommands->setGraphicsPipeline( m_pWorldGrid.get() );
+		pBound = nullptr;
+		bind( m_LinesAll.m_pBindings.get(), 0 );
+		pCommands->draw( 6 );
+		m_nDrawCalls++;
 	}
 	// Edges: the wireframe's, then broken solids' and the selection's over everything.
 	auto edges = [ & ]( Material_t &material, Material_t &models, bool bWireframe ) {

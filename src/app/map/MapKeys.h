@@ -34,6 +34,10 @@ enum class MapAction_t
 	MAP_ACTION_GRID_SMALLER,         // [
 	MAP_ACTION_GRID_LARGER,          // ]
 	MAP_ACTION_TOGGLE_GRID,          // Shift+R
+	MAP_ACTION_TOGGLE_3D_GRID,       // P: the grid on the faces in 3D views
+	MAP_ACTION_TOGGLE_WORLD_GRID,    // Shift+P: the grid on a plane of its own in 3D views
+	MAP_ACTION_WORLD_GRID_HEIGHT,    // asks for that plane's height
+	MAP_ACTION_WORLD_GRID_EDIT,      // a gizmo on the world grid, to move and turn its plane
 	MAP_ACTION_MAXIMIZE,             // Shift+Z
 	MAP_ACTION_AUTOSIZE,             // Ctrl+A
 	MAP_ACTION_CENTER_2D,            // Ctrl+E
@@ -48,6 +52,7 @@ enum class MapAction_t
 	MAP_ACTION_TOGGLE_TOOL_TEXTURES, // Ctrl+Shift+F2
 	MAP_ACTION_TOGGLE_NODRAW,        // the tool bar: tools/toolsnodraw's faces, apart from the other tool textures
 	MAP_ACTION_TOGGLE_SKYBOX_3D,     // Alt+V
+	MAP_ACTION_TOGGLE_SKY_FACES,     // the tool bar: the sky on sky faces, or tools/toolsskybox itself
 	MAP_ACTION_TOGGLE_SKY_2D,        // the tool bar: the 2D sky behind everything in the 3D views
 	MAP_ACTION_TOGGLE_ORIGIN_AXES,   // the tool bar: the world's axes at 0 0 0 in the 3D views
 	MAP_ACTION_TOGGLE_FOG,           // the tool bar: the map's fog in the textured 3D views

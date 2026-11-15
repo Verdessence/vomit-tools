@@ -2,7 +2,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
 // Purpose: See MapView3D.h. The camera controls are Hammer's: the camera tool's drags, Z to
-//          toggle mouselook (Space to hold it), WASD and the arrows to fly, the wheel to step.
+//          toggle mouselook (Space to hold it, Space and a drag for the camera tool's drags),
+//          WASD and the arrows to fly, the wheel to step.
 //
 //===========================================================================//
 #include "MapView3D.h"
@@ -146,6 +147,9 @@ constexpr double ORTHO_WHEEL_ZOOM = 1.2;
 constexpr double ORTHO_SMALLEST = 1.0 / 64.0;
 constexpr double ORTHO_LARGEST = 64.0;
 constexpr double ORTHO_DEFAULT_DISTANCE = 512.0;
+constexpr double BOX_ARROW_PIXELS = 26.0; // how far a block box's arrows stand out of its faces
+constexpr double BOX_ARROW_HEAD = 7.0;
+constexpr double BOX_ARROW_SLACK = 6.0;   // how near the pointer has to be
 
 //-----------------------------------------------------------------------------
 // Purpose:
@@ -384,6 +388,30 @@ MapFrame_t CMapView3D::MakeFrame( QSize size )
 	options.m_Shade.m_bMipBlend = preferences.m_nTextureFilter != MapTextureFilter_t::MAP_TEXTURE_FILTER_BILINEAR;
 	options.m_Shade.m_nAnisotropy = MapAnisotropy( preferences.m_nTextureFilter );
 	options.m_InvalidEdge = bytes( colors.m_Invalid );
+	// The 3D grid (P), on the 2D views' grid: the world units a pixel covers grow with distance,
+	// or are the same everywhere looking orthographic.
+	if ( const MapViewSettings_t &settings = m_Editor.GetSettings(); settings.m_bShow3DGrid && options.m_Shade.m_nMode != xv::map::RasterMode_t::RASTER_MODE_WIREFRAME )
+	{
+		options.m_Shade.m_flGrid = static_cast<float>( settings.m_nGridSize );
+		if ( camera.IsOrthographic() )
+			options.m_Shade.m_flGridPixel = static_cast<float>( 1.0 / camera.m_flOrthoScale );
+		else
+			options.m_Shade.m_flGridPerDistance = static_cast<float>( 2.0 * std::tan( std::clamp( camera.m_flFov, 1.0, 179.0 ) * std::numbers::pi / 360.0 ) / camera.m_nWidth );
+	}
+	// The world grid (Shift+P): the same lines on a plane of its own, in any look.
+	if ( const MapViewSettings_t &settings = m_Editor.GetSettings(); settings.m_bWorldGrid )
+	{
+		options.m_flWorldGrid = static_cast<float>( settings.m_nGridSize );
+		options.m_WorldGridOrigin = settings.m_WorldGrid.m_Origin;
+		options.m_WorldGridU = settings.m_WorldGrid.m_Axes[ 0 ];
+		options.m_WorldGridV = settings.m_WorldGrid.m_Axes[ 1 ];
+	}
+	if ( options.m_Shade.m_flGrid > 0.0f || options.m_flWorldGrid > 0.0f )
+	{
+		for ( std::size_t i = 0; i < 3; i++ )
+			for ( std::size_t j = 0; j < 4; j++ )
+				options.m_Shade.m_GridColors[ i ][ j ] = mapstyle::GRID_3D[ i ][ j ];
+	}
 	if ( options.m_Shade.m_nMode == xv::map::RasterMode_t::RASTER_MODE_LIGHTING )
 	{
 		m_Editor.WantLighting();
@@ -709,33 +737,54 @@ void CMapView3D::SetMouselook( bool bOn )
 	m_bMouselook = bOn;
 	if ( bOn )
 	{
-		setCursor( Qt::BlankCursor );
+		CapturePointer( mapFromGlobal( QCursor::pos() ), [ this ]( QPointF delta ) { Look( delta ); } );
 	}
 	else
 	{
-		UpdateCursor();
+		ReleasePointer();
 	}
-	if ( bOn )
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Hides the cursor and keeps it from leaving the view while the camera turns or
+//          moves with the mouse: the pointer is pinned (Wayland), or warped back to the middle
+//          at each move (WarpToMiddle), so it never reaches an edge.
+//-----------------------------------------------------------------------------
+void CMapView3D::CapturePointer( QPoint at, std::function<void( QPointF )> pfnMoved )
+{
+	setCursor( Qt::BlankCursor );
+	// The cursor goes back here afterwards.
+	m_LookFrom = at;
+	m_LastMouse = m_LookFrom;
+	grabMouse();
+	m_PointerLock.Lock( this, std::move( pfnMoved ) );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Lets the pointer go, with the cursor back where the capture began.
+//-----------------------------------------------------------------------------
+void CMapView3D::ReleasePointer()
+{
+	releaseMouse();
+	if ( m_PointerLock.IsActive() )
 	{
-		// The cursor goes back here afterwards. Meanwhile the pointer is pinned (Wayland), or
-		// warped back to the middle at each move (mouseMoveEvent), so it never reaches an edge.
-		m_LookFrom = mapFromGlobal( QCursor::pos() );
-		m_LastMouse = m_LookFrom;
-		grabMouse();
-		m_PointerLock.Lock( this, [ this ]( QPointF delta ) { Look( delta ); } );
+		m_PointerLock.Unlock( m_LookFrom );
 	}
 	else
 	{
-		releaseMouse();
-		if ( m_PointerLock.IsActive() )
-		{
-			m_PointerLock.Unlock( m_LookFrom );
-		}
-		else
-		{
-			QCursor::setPos( mapToGlobal( m_LookFrom ) );
-		}
+		QCursor::setPos( mapToGlobal( m_LookFrom ) );
 	}
+	UpdateCursor();
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Puts a captured pointer back in the view's middle, when it isn't pinned.
+//-----------------------------------------------------------------------------
+void CMapView3D::WarpToMiddle()
+{
+	const QPoint middle{ width() / 2, height() / 2 };
+	QCursor::setPos( mapToGlobal( middle ) );
+	m_LastMouse = middle;
 }
 
 //-----------------------------------------------------------------------------
@@ -758,6 +807,24 @@ void CMapView3D::Look( QPointF delta )
 //-----------------------------------------------------------------------------
 void CMapView3D::mousePressEvent( QMouseEvent *pEvent )
 {
+	// With Space held the buttons move the camera, as the camera tool's do: left looks, right
+	// pans, both go forward and back. No tool sees the click.
+	if ( ( m_bSpaceHeld || m_bSpaceDrag ) && !m_ModalTransform && ( pEvent->button() == Qt::LeftButton || pEvent->button() == Qt::RightButton ) )
+	{
+		setFocus( Qt::MouseFocusReason );
+		m_Dragging = pEvent->buttons();
+		if ( !m_bSpaceDrag )
+		{
+			m_bSpaceDrag = true;
+			m_PressAt = pEvent->position().toPoint();
+			m_bMoved = false;
+			// Mouselook (Z) already holds the pointer.
+			if ( !m_bMouselook )
+				CapturePointer( m_PressAt, [ this ]( QPointF delta ) { DragCamera( m_Dragging, delta ); } );
+		}
+		pEvent->accept();
+		return;
+	}
 	if ( m_Editor.GetBrushEdit().HandleEvent( *this, pEvent ) )
 	{
 		pEvent->accept();
@@ -778,8 +845,33 @@ void CMapView3D::mousePressEvent( QMouseEvent *pEvent )
 	m_bMoved = false;
 	if ( pEvent->button() == Qt::LeftButton && !m_bSpaceHeld && !m_bMouselook && m_Editor.GetTool() == MapTool_t::MAP_TOOL_OVERLAY && m_Editor.GetFacePickKey().isEmpty() && !pEvent->modifiers().testFlag( Qt::ShiftModifier ) && BeginOverlayDrag( pEvent->position() ) )
 		return;
-	// On one of the gizmo's axes, the selection tool drags the selection along it.
-	if ( pEvent->button() == Qt::LeftButton && !m_bSpaceHeld && !m_bMouselook && m_Editor.GetTool() == MapTool_t::MAP_TOOL_SELECT )
+	// The block tool's box: a face's arrow sizes it, and a drag on the box itself slides it
+	// across the face pressed.
+	if ( pEvent->button() == Qt::LeftButton && !m_bSpaceHeld && !m_bMouselook && m_Editor.GetTool() == MapTool_t::MAP_TOOL_BLOCK && m_Editor.GetBlockBox() && !m_Editor.GetBlockBox()->IsEmpty() )
+	{
+		if ( const int nFace = BoxHandleAt( pEvent->position() ); nFace >= 0 )
+		{
+			m_nBoxFace = nFace;
+			m_BoxFrom = m_Editor.GetBlockBox();
+			RedrawLabels();
+			return;
+		}
+		if ( const auto surface = BoxSurfaceAt( pEvent->position() ) )
+		{
+			m_nBoxPlane = surface->first / 2;
+			m_BoxGrab = surface->second;
+			m_BoxFrom = m_Editor.GetBlockBox();
+			UpdateCursor();
+			return;
+		}
+	}
+	if ( pEvent->button() == Qt::LeftButton && !m_bSpaceHeld && !m_bMouselook && m_Editor.GetTool() == MapTool_t::MAP_TOOL_BLOCK && !m_Editor.IsWorldGridEdited() && BeginBlockDrag( pEvent->position() ) )
+	{
+		return;
+	}
+	// On one of the gizmo's axes, the selection tool drags the selection along it; the world
+	// grid's gizmo drags its plane, whatever the tool.
+	if ( pEvent->button() == Qt::LeftButton && !m_bSpaceHeld && !m_bMouselook && ( m_Editor.GetTool() == MapTool_t::MAP_TOOL_SELECT || m_Editor.IsWorldGridEdited() ) )
 	{
 		if ( const std::optional<CMapGizmo> gizmo = GetGizmo() )
 		{
@@ -790,6 +882,12 @@ void CMapView3D::mousePressEvent( QMouseEvent *pEvent )
 				m_nGizmoDrag = nAxis;
 				m_GizmoFrom = pEvent->position();
 				m_DragGizmo = gizmo;
+				if ( m_Editor.IsWorldGridEdited() )
+				{
+					m_GridFrom = m_Editor.GetSettings().m_WorldGrid;
+					UpdateCursor();
+					return;
+				}
 				m_pGizmoScene = GetDocument().GetSharedScene();
 				m_GizmoSelection = GetDocument().GetSelection();
 				UpdateCursor();
@@ -1007,6 +1105,16 @@ std::optional<CMapGizmo> CMapView3D::GetGizmo() const
 {
 	const CMapDocument &document = GetDocument();
 	const xv::map::CScene *pScene = document.GetScene();
+	if ( m_Editor.IsWorldGridEdited() )
+	{
+		// The world grid's: at its origin on its own axes, arrows to move it or rings to turn it.
+		const MapGridPlane_t &plane = m_Editor.GetSettings().m_WorldGrid;
+		CMapGizmo gizmo;
+		gizmo.Place( plane.m_Origin, plane.m_Axes );
+		gizmo.SetBounds( xv::map::Box_t{ plane.m_Origin, plane.m_Origin } );
+		gizmo.SetMode( m_Editor.GetGizmoMode() == MapGizmoMode_t::MAP_GIZMO_MODE_ROTATE ? MapGizmoMode_t::MAP_GIZMO_MODE_ROTATE : MapGizmoMode_t::MAP_GIZMO_MODE_TRANSLATE );
+		return gizmo;
+	}
 	if ( !m_Editor.IsGizmoShown() || m_Editor.GetTool() != MapTool_t::MAP_TOOL_SELECT || !pScene || document.GetSelection().empty() )
 	{
 		return std::nullopt;
@@ -1031,6 +1139,385 @@ std::optional<CMapGizmo> CMapView3D::GetGizmo() const
 	gizmo.SetBounds( bounds );
 	gizmo.SetMode( m_Editor.GetGizmoMode() );
 	return gizmo;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: The plane the block tool's box is measured on: the turned one it stands on, else
+//          the world's own axes from the world's origin.
+//-----------------------------------------------------------------------------
+MapGridPlane_t CMapView3D::BoxFrame() const
+{
+	return m_Editor.GetNewBoxPlane().value_or( MapGridPlane_t{} );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: The middle of each of the box's faces, in the box's own measures.
+//-----------------------------------------------------------------------------
+std::array<xv::map::Point_t, 6> CMapView3D::BoxHandles( const xv::map::Box_t &box ) const
+{
+	std::array<xv::map::Point_t, 6> handles{};
+	const xv::map::Point_t centre = box.GetCenter();
+	for ( int f = 0; f < 6; f++ )
+	{
+		handles[ f ] = centre;
+		handles[ f ][ f / 2 ] = f % 2 ? box.m_Maxs[ f / 2 ] : box.m_Mins[ f / 2 ];
+	}
+	return handles;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: A face's arrow on screen: from the middle of the face, a fixed length the way the
+//          face looks. An axis that points at the camera has no direction on screen: its arrow
+//          is a point (drawn as a dot), and its depth says which of two such is nearer.
+//-----------------------------------------------------------------------------
+std::optional<CMapView3D::BoxArrow_t> CMapView3D::BoxArrow( const xv::map::Box_t &box, int nFace ) const
+{
+	const xv::map::CViewCamera camera = GetSizedCamera();
+	const MapGridPlane_t frame = BoxFrame();
+	const xv::map::Point_t from = BoxHandles( box )[ static_cast<std::size_t>( nFace ) ];
+	const auto foot = camera.Project( frame.ToWorld( from ) );
+	if ( !foot )
+		return std::nullopt;
+	BoxArrow_t arrow;
+	arrow.m_From = QPointF{ ( *foot )[ 0 ], ( *foot )[ 1 ] };
+	arrow.m_To = arrow.m_From;
+	arrow.m_flDepth = ( *foot )[ 2 ];
+	// A step out of the face, as long as the box is wide there at least, so the direction on
+	// screen is the axis's however near the camera is.
+	xv::map::Point_t out = from;
+	out[ static_cast<std::size_t>( nFace / 2 ) ] += ( nFace % 2 ? 1.0 : -1.0 ) * std::max( 1.0, box.GetSize()[ static_cast<std::size_t>( nFace / 2 ) ] * 0.25 );
+	if ( const auto ahead = camera.Project( frame.ToWorld( out ) ) )
+	{
+		const QPointF along{ ( *ahead )[ 0 ] - ( *foot )[ 0 ], ( *ahead )[ 1 ] - ( *foot )[ 1 ] };
+		if ( const double flLength = std::hypot( along.x(), along.y() ); flLength > 0.5 )
+			arrow.m_To = arrow.m_From + along * ( BOX_ARROW_PIXELS / flLength );
+	}
+	return arrow;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: The arrow the pointer is on (within a few pixels of its line); of several, the one
+//          it is nearest, then the one nearer the camera.
+//-----------------------------------------------------------------------------
+int CMapView3D::BoxHandleAt( QPointF at ) const
+{
+	const std::optional<xv::map::Box_t> &box = m_Editor.GetBlockBox();
+	if ( m_Editor.GetTool() != MapTool_t::MAP_TOOL_BLOCK || !box || box->IsEmpty() )
+		return -1;
+	int nBest = -1;
+	double flBest = std::numeric_limits<double>::infinity();
+	for ( int f = 0; f < 6; f++ )
+	{
+		const std::optional<BoxArrow_t> arrow = BoxArrow( *box, f );
+		if ( !arrow )
+			continue;
+		const QPointF along = arrow->m_To - arrow->m_From;
+		const double flSquared = along.x() * along.x() + along.y() * along.y();
+		const double t = flSquared > 0.0 ? std::clamp( QPointF::dotProduct( at - arrow->m_From, along ) / flSquared, 0.0, 1.0 ) : 0.0;
+		const QPointF nearest = arrow->m_From + along * t;
+		const double flPixels = std::hypot( nearest.x() - at.x(), nearest.y() - at.y() );
+		if ( flPixels > BOX_ARROW_SLACK )
+			continue;
+		const double flScore = flPixels + arrow->m_flDepth * 1e-3;
+		if ( flScore < flBest )
+		{
+			flBest = flScore;
+			nBest = f;
+		}
+	}
+	return nBest;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: The pointer's ray in the box's own measures, where a turned box is one along the
+//          axes like any other.
+//-----------------------------------------------------------------------------
+std::pair<xv::map::Point_t, xv::map::Point_t> CMapView3D::BoxRay( QPointF at ) const
+{
+	const MapGridPlane_t frame = BoxFrame();
+	const auto [ origin, direction ] = GetSizedCamera().Ray( at.x(), at.y() );
+	return { frame.ToLocal( origin ), MapGridPlane_t{ {}, frame.m_Axes }.ToLocal( direction ) };
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Where the pointer's ray enters the block tool's box: the face (as BoxHandles numbers
+//          them) and the point, in the box's own measures. None when it misses, or from inside
+//          the box.
+//-----------------------------------------------------------------------------
+std::optional<std::pair<int, xv::map::Point_t>> CMapView3D::BoxSurfaceAt( QPointF at ) const
+{
+	const std::optional<xv::map::Box_t> &box = m_Editor.GetBlockBox();
+	if ( m_Editor.GetTool() != MapTool_t::MAP_TOOL_BLOCK || !box || box->IsEmpty() )
+		return std::nullopt;
+	const auto [ origin, direction ] = BoxRay( at );
+	double flEnter = 0.0;
+	double flLeave = std::numeric_limits<double>::infinity();
+	int nFace = -1;
+	for ( std::size_t a = 0; a < 3; a++ )
+	{
+		if ( std::abs( direction[ a ] ) < 1e-12 )
+		{
+			if ( origin[ a ] < box->m_Mins[ a ] || origin[ a ] > box->m_Maxs[ a ] )
+				return std::nullopt;
+			continue;
+		}
+		const bool bFromLow = direction[ a ] > 0.0;
+		const double flNear = ( ( bFromLow ? box->m_Mins[ a ] : box->m_Maxs[ a ] ) - origin[ a ] ) / direction[ a ];
+		const double flFar = ( ( bFromLow ? box->m_Maxs[ a ] : box->m_Mins[ a ] ) - origin[ a ] ) / direction[ a ];
+		if ( flNear > flEnter )
+		{
+			flEnter = flNear;
+			nFace = static_cast<int>( a ) * 2 + ( bFromLow ? 0 : 1 );
+		}
+		flLeave = std::min( flLeave, flFar );
+	}
+	if ( nFace < 0 || flEnter > flLeave )
+		return std::nullopt;
+	return std::pair{ nFace, xv::map::Add( origin, xv::map::Scale( direction, flEnter ) ) };
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: A drag on the box. By an arrow: its face goes where the pointer's ray passes nearest
+//          the line through the arrow's foot along its axis, never across the face opposite (a
+//          grid step apart at least). By the box itself: it slides across the face pressed,
+//          following the pointer on that face's plane. On the grid unless free (Alt).
+//-----------------------------------------------------------------------------
+void CMapView3D::DragBox( QPointF at, Qt::KeyboardModifiers modifiers )
+{
+	if ( !m_BoxFrom || ( m_nBoxFace < 0 && m_nBoxPlane < 0 ) )
+		return;
+	const MapViewSettings_t &settings = m_Editor.GetSettings();
+	const double flGrid = modifiers.testFlag( Qt::AltModifier ) || !settings.m_bSnapToGrid ? 0.0 : static_cast<double>( settings.m_nGridSize );
+	const auto [ origin, direction ] = BoxRay( at );
+	xv::map::Box_t box = *m_BoxFrom;
+	if ( m_nBoxFace < 0 )
+	{
+		const auto nNormal = static_cast<std::size_t>( m_nBoxPlane );
+		if ( std::abs( direction[ nNormal ] ) < 1e-6 )
+			return; // looking along the plane: the pointer is nowhere on it
+		const double t = ( m_BoxGrab[ nNormal ] - origin[ nNormal ] ) / direction[ nNormal ];
+		if ( t <= 0.0 )
+			return;
+		xv::map::Point_t offset = xv::map::Subtract( xv::map::Add( origin, xv::map::Scale( direction, t ) ), m_BoxGrab );
+		offset[ nNormal ] = 0.0;
+		if ( flGrid > 0.0 )
+			for ( double &flAlong : offset )
+				flAlong = std::round( flAlong / flGrid ) * flGrid;
+		box.m_Mins = xv::map::Add( box.m_Mins, offset );
+		box.m_Maxs = xv::map::Add( box.m_Maxs, offset );
+	}
+	else
+	{
+		const auto nAxis = static_cast<std::size_t>( m_nBoxFace / 2 );
+		const xv::map::Point_t handle = BoxHandles( *m_BoxFrom )[ static_cast<std::size_t>( m_nBoxFace ) ];
+		xv::map::Point_t along{};
+		along[ nAxis ] = 1.0;
+		// The closest points of two lines: the ray's and the axis's through the handle.
+		const xv::map::Point_t w0 = xv::map::Subtract( origin, handle );
+		const double b = xv::map::Dot( direction, along );
+		const double d = xv::map::Dot( direction, w0 );
+		const double e = xv::map::Dot( along, w0 );
+		const double flDenominator = 1.0 - b * b;
+		if ( std::abs( flDenominator ) < 1e-6 )
+			return; // looking straight along the axis: no way to tell how far
+		double flTo = handle[ nAxis ] + ( e - b * d ) / flDenominator;
+		if ( flGrid > 0.0 )
+			flTo = std::round( flTo / flGrid ) * flGrid;
+		const double flLeast = flGrid > 0.0 ? flGrid : 1.0;
+		if ( m_nBoxFace % 2 )
+			box.m_Maxs[ nAxis ] = std::max( flTo, box.m_Mins[ nAxis ] + flLeast );
+		else
+			box.m_Mins[ nAxis ] = std::min( flTo, box.m_Maxs[ nAxis ] - flLeast );
+	}
+	if ( box != m_Editor.GetBlockBox() )
+		m_Editor.SetBlockBox( box );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Ends a drag on the block tool's box: where it is, or back as it was.
+//-----------------------------------------------------------------------------
+void CMapView3D::EndBoxDrag( bool bCommit )
+{
+	if ( !bCommit && m_BoxFrom )
+		m_Editor.SetBlockBox( m_BoxFrom );
+	m_nBoxFace = -1;
+	m_nBoxPlane = -1;
+	m_BoxFrom.reset();
+	UpdateCursor();
+	RedrawLabels();
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: A new box begun where the pointer is: on the world grid's plane while it shows, else
+//          on the surface there, taken as the plane across the world axis it faces most. It
+//          stands on the side of the plane the camera is on, as tall as the last box was that
+//          way (a grid step when that is nothing). False when there is no plane under the
+//          pointer.
+//-----------------------------------------------------------------------------
+bool CMapView3D::BeginBlockDrag( QPointF at )
+{
+	const MapViewSettings_t &settings = m_Editor.GetSettings();
+	const xv::map::CViewCamera camera = GetSizedCamera();
+	const auto [ origin, direction ] = camera.Ray( at.x(), at.y() );
+	MapGridPlane_t plane;
+	if ( settings.m_bWorldGrid )
+	{
+		plane = settings.m_WorldGrid;
+	}
+	else
+	{
+		const auto surface = SurfaceAt( at );
+		if ( !surface )
+			return false;
+		std::size_t nAxis = 0;
+		for ( std::size_t a = 1; a < 3; a++ )
+			if ( std::abs( surface->second[ a ] ) > std::abs( surface->second[ nAxis ] ) )
+				nAxis = a;
+		plane.m_Axes = {};
+		plane.m_Axes[ 0 ][ ( nAxis + 1 ) % 3 ] = 1.0;
+		plane.m_Axes[ 1 ][ ( nAxis + 2 ) % 3 ] = 1.0;
+		plane.m_Axes[ 2 ][ nAxis ] = 1.0;
+		// The mesh's corners are floats: a face at 128 is a hair off it.
+		plane.m_Origin[ nAxis ] = std::round( surface->first[ nAxis ] * 64.0 ) / 64.0;
+	}
+	const double flAlong = xv::map::Dot( direction, plane.m_Axes[ 2 ] );
+	const double flGap = xv::map::Dot( xv::map::Subtract( plane.m_Origin, origin ), plane.m_Axes[ 2 ] );
+	if ( std::abs( flAlong ) < 1e-6 || flGap / flAlong <= 0.0 )
+		return false; // the plane is edge on, or behind the pointer
+	const xv::map::Point_t local = plane.ToLocal( xv::map::Add( origin, xv::map::Scale( direction, flGap / flAlong ) ) );
+	const double flGrid = settings.m_bSnapToGrid ? static_cast<double>( settings.m_nGridSize ) : 0.0;
+	const auto snapped = [ & ]( double flValue ) { return flGrid > 0.0 ? std::round( flValue / flGrid ) * flGrid : flValue; };
+	m_BlockFrom = { snapped( local[ 0 ] ), snapped( local[ 1 ] ) };
+	// How tall: the last box's size along the world axis nearest the plane's normal.
+	std::size_t nUp = 0;
+	for ( std::size_t a = 1; a < 3; a++ )
+		if ( std::abs( plane.m_Axes[ 2 ][ a ] ) > std::abs( plane.m_Axes[ 2 ][ nUp ] ) )
+			nUp = a;
+	std::pair<double, double> depth = m_Editor.GetNewBoxDepth( static_cast<int>( nUp ) );
+	if ( m_Editor.GetNewBoxPlane() && m_Editor.GetBlockBox() )
+		depth = { m_Editor.GetBlockBox()->m_Mins[ 2 ], m_Editor.GetBlockBox()->m_Maxs[ 2 ] }; // a turned box's height is across its plane
+	const double flTall = depth.second - depth.first > 0.0 ? depth.second - depth.first : static_cast<double>( std::max( 1, settings.m_nGridSize ) );
+	m_flBlockDepth = flGap < 0.0 ? flTall : -flTall; // the camera's side of the plane
+	m_BlockBefore = m_Editor.GetBlockBox();
+	m_BlockPlaneBefore = m_Editor.GetNewBoxPlane();
+	m_BlockPlane = plane;
+	m_BlockLocal.reset();
+	return true;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: The box from where the drag began to where the pointer is on the plane, on the grid
+//          unless free (Alt). Along the world's axes it is a box in the world's measures, which
+//          the 2D views show and size too; turned, one in the plane's.
+//-----------------------------------------------------------------------------
+void CMapView3D::DragBlock( QPointF at, Qt::KeyboardModifiers modifiers )
+{
+	if ( !m_BlockPlane )
+		return;
+	const MapGridPlane_t &plane = *m_BlockPlane;
+	const MapViewSettings_t &settings = m_Editor.GetSettings();
+	const double flGrid = modifiers.testFlag( Qt::AltModifier ) || !settings.m_bSnapToGrid ? 0.0 : static_cast<double>( settings.m_nGridSize );
+	const auto [ origin, direction ] = GetSizedCamera().Ray( at.x(), at.y() );
+	const double flAlong = xv::map::Dot( direction, plane.m_Axes[ 2 ] );
+	const double flGap = xv::map::Dot( xv::map::Subtract( plane.m_Origin, origin ), plane.m_Axes[ 2 ] );
+	if ( std::abs( flAlong ) < 1e-6 || flGap / flAlong <= 0.0 )
+		return;
+	xv::map::Point_t to = plane.ToLocal( xv::map::Add( origin, xv::map::Scale( direction, flGap / flAlong ) ) );
+	if ( flGrid > 0.0 )
+		to = { std::round( to[ 0 ] / flGrid ) * flGrid, std::round( to[ 1 ] / flGrid ) * flGrid, 0.0 };
+	xv::map::Box_t local;
+	local.Add( xv::map::Point_t{ m_BlockFrom[ 0 ], m_BlockFrom[ 1 ], 0.0 } );
+	local.Add( xv::map::Point_t{ to[ 0 ], to[ 1 ], m_flBlockDepth } );
+	m_BlockLocal = local;
+	if ( plane.IsAlongWorld() )
+	{
+		xv::map::Box_t box;
+		for ( const xv::map::Point_t &corner : { local.m_Mins, local.m_Maxs } )
+		{
+			xv::map::Point_t world = plane.ToWorld( corner );
+			for ( double &flPart : world )
+				flPart = std::round( flPart * 1024.0 ) / 1024.0;
+			box.Add( world );
+		}
+		m_Editor.SetNewBox( box );
+	}
+	else
+	{
+		m_Editor.SetNewBox( local, plane );
+	}
+	RedrawLabels();
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: The drag over. A box with no size across the plane (a click) or a drag given up
+//          leaves the editor's box as it was; any other stays to be sized, and Enter makes it.
+//-----------------------------------------------------------------------------
+void CMapView3D::EndBlockDrag( bool bCommit )
+{
+	if ( !m_BlockPlane )
+		return;
+	const std::optional<xv::map::Box_t> local = m_BlockLocal;
+	m_BlockPlane.reset();
+	m_BlockLocal.reset();
+	const bool bSized = local && local->m_Maxs[ 0 ] > local->m_Mins[ 0 ] && local->m_Maxs[ 1 ] > local->m_Mins[ 1 ];
+	if ( !bCommit || !bSized )
+		m_Editor.SetNewBox( m_BlockBefore, m_BlockPlaneBefore );
+	m_BlockBefore.reset();
+	m_BlockPlaneBefore.reset();
+	RedrawLabels();
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: The plane's origin carried by the transform and its axes turned by it, then made
+//          square again (many small turns add up their rounding).
+//-----------------------------------------------------------------------------
+MapGridPlane_t CMapView3D::MovedPlane( const MapGridPlane_t &plane, const xv::map::Transform_t &transform )
+{
+	MapGridPlane_t moved;
+	moved.m_Origin = transform.Apply( plane.m_Origin );
+	const xv::map::Point_t u = xv::map::Normalized( transform.Rotate( plane.m_Axes[ 0 ] ) );
+	const xv::map::Point_t normal = xv::map::Normalized( xv::map::Cross( u, transform.Rotate( plane.m_Axes[ 1 ] ) ) );
+	moved.m_Axes = { u, xv::map::Cross( normal, u ), normal };
+	// A turn back onto the world's axes lands on them, not a rounding off.
+	for ( xv::map::Point_t &axis : moved.m_Axes )
+		for ( double &flPart : axis )
+			if ( std::abs( flPart ) < 1e-12 || std::abs( std::abs( flPart ) - 1.0 ) < 1e-12 )
+				flPart = std::round( flPart );
+	return moved;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: While the world grid is edited, a double-click lays it on the surface there: through
+//          the point, level lines along the surface (across its slope), counted from the grid
+//          crossing nearest the point.
+//-----------------------------------------------------------------------------
+void CMapView3D::mouseDoubleClickEvent( QMouseEvent *pEvent )
+{
+	if ( pEvent->button() != Qt::LeftButton || !m_Editor.IsWorldGridEdited() )
+	{
+		CMapView::mouseDoubleClickEvent( pEvent );
+		return;
+	}
+	const auto surface = SurfaceAt( pEvent->position() );
+	if ( !surface )
+		return;
+	MapGridPlane_t plane;
+	const xv::map::Point_t normal = xv::map::Normalized( surface->second );
+	if ( std::abs( normal[ 2 ] ) < 1.0 - 1e-9 )
+	{
+		const xv::map::Point_t level = xv::map::Normalized( xv::map::Cross( xv::map::Point_t{ 0, 0, 1 }, normal ) );
+		plane.m_Axes = { level, xv::map::Cross( normal, level ), normal };
+	}
+	else if ( normal[ 2 ] < 0.0 )
+		plane.m_Axes = { { { 1, 0, 0 }, { 0, -1, 0 }, { 0, 0, -1 } } };
+	// On the world's grid where the plane lets it: a level floor's lines are the 2D views'.
+	plane.m_Origin = surface->first;
+	const double flGrid = std::max( 1, m_Editor.GetSettings().m_nGridSize );
+	const MapGridPlane_t fromWorld{ {}, plane.m_Axes };
+	xv::map::Point_t local = fromWorld.ToLocal( surface->first );
+	local = { std::round( local[ 0 ] / flGrid ) * flGrid, std::round( local[ 1 ] / flGrid ) * flGrid, std::round( local[ 2 ] * 64.0 ) / 64.0 };
+	plane.m_Origin = fromWorld.ToWorld( local );
+	m_Editor.SetWorldGridPlane( MovedPlane( plane, {} ) );
 }
 
 //-----------------------------------------------------------------------------
@@ -1078,7 +1565,38 @@ void CMapView3D::BeginModalTransform( MapGizmoMode_t nMode )
 	if ( m_ModalTransform )
 		EndModalTransform( false );
 	m_Editor.SetGizmoMode( nMode );
-	if ( m_nGizmoDrag >= 0 || m_pOverlayScene || m_pPaintScene || m_Editor.GetTool() != MapTool_t::MAP_TOOL_SELECT )
+	if ( m_nGizmoDrag >= 0 || m_pOverlayScene || m_pPaintScene || m_nBoxFace >= 0 || m_nBoxPlane >= 0 )
+		return;
+	// The world grid's plane: moved or turned about its origin, on its own axes.
+	if ( m_Editor.IsWorldGridEdited() )
+	{
+		if ( nMode != MapGizmoMode_t::MAP_GIZMO_MODE_TRANSLATE && nMode != MapGizmoMode_t::MAP_GIZMO_MODE_ROTATE )
+			return;
+		if ( m_bMouselook )
+			SetMouselook( false );
+		m_GridFrom = m_Editor.GetSettings().m_WorldGrid;
+		m_ModalTransform.emplace( nMode, m_GridFrom->m_Origin, m_GridFrom->m_Axes, GetSizedCamera(), m_LastMouse );
+		m_ModalResult = {};
+		PreviewModalTransform( QApplication::keyboardModifiers() );
+		return;
+	}
+	// The block tool's box: moved, turned by quarter turns (it stays a box along the axes) or
+	// sized about its middle.
+	if ( m_Editor.GetTool() == MapTool_t::MAP_TOOL_BLOCK )
+	{
+		const std::optional<xv::map::Box_t> &box = m_Editor.GetBlockBox();
+		if ( !box || box->IsEmpty() )
+			return;
+		if ( m_bMouselook )
+			SetMouselook( false );
+		m_BoxFrom = box;
+		const MapGridPlane_t frame = BoxFrame();
+		m_ModalTransform.emplace( nMode, frame.ToWorld( box->GetCenter() ), frame.m_Axes, GetSizedCamera(), m_LastMouse );
+		m_ModalResult = {};
+		PreviewModalTransform( QApplication::keyboardModifiers() );
+		return;
+	}
+	if ( m_Editor.GetTool() != MapTool_t::MAP_TOOL_SELECT )
 		return;
 	const auto &document = GetDocument();
 	if ( !document.GetScene() || document.GetSelection().empty() || document.GetSelectionBounds().IsEmpty() )
@@ -1105,10 +1623,40 @@ void CMapView3D::BeginModalTransform( MapGizmoMode_t nMode )
 //-----------------------------------------------------------------------------
 void CMapView3D::PreviewModalTransform( Qt::KeyboardModifiers modifiers )
 {
-	if ( !m_ModalTransform || !m_pGizmoScene )
+	if ( !m_ModalTransform || ( !m_pGizmoScene && !m_BoxFrom && !m_GridFrom ) )
 		return;
 	const auto &settings = m_Editor.GetSettings();
 	const bool bFree = modifiers.testFlag( Qt::ControlModifier ) || modifiers.testFlag( Qt::AltModifier );
+	if ( m_GridFrom )
+	{
+		m_ModalResult = m_ModalTransform->Evaluate( GetSizedCamera(), bFree || !settings.m_bSnapToGrid ? 0.0 : settings.m_nGridSize, bFree ? 0.0 : CPreferences::Instance().GetMapPreferences().m_flRotationSnap );
+		m_Editor.SetWorldGridPlane( MovedPlane( *m_GridFrom, m_ModalResult ), false );
+		emit m_Editor.StatusMessage( m_ModalTransform->GetDescription() );
+		RedrawLabels();
+		return;
+	}
+	if ( m_BoxFrom )
+	{
+		m_ModalResult = m_ModalTransform->Evaluate( GetSizedCamera(), bFree || !settings.m_bSnapToGrid ? 0.0 : settings.m_nGridSize, 90.0 );
+		// The box around its corners moved; a size squeezed to nothing (or through itself) is
+		// left as it was. Rounded, as a quarter turn's sines aren't quite 0 and 1.
+		// A turned box is moved in the world and measured on its plane again.
+		const MapGridPlane_t frame = BoxFrame();
+		xv::map::Box_t box;
+		for ( int n = 0; n < 8; n++ )
+			box.Add( frame.ToLocal( m_ModalResult.Apply( frame.ToWorld( xv::map::Point_t{ ( n & 1 ) ? m_BoxFrom->m_Maxs[ 0 ] : m_BoxFrom->m_Mins[ 0 ], ( n & 2 ) ? m_BoxFrom->m_Maxs[ 1 ] : m_BoxFrom->m_Mins[ 1 ], ( n & 4 ) ? m_BoxFrom->m_Maxs[ 2 ] : m_BoxFrom->m_Mins[ 2 ] } ) ) ) );
+		bool bSized = true;
+		for ( std::size_t a = 0; a < 3; a++ )
+		{
+			box.m_Mins[ a ] = std::round( box.m_Mins[ a ] * 1024.0 ) / 1024.0;
+			box.m_Maxs[ a ] = std::round( box.m_Maxs[ a ] * 1024.0 ) / 1024.0;
+			bSized = bSized && box.m_Maxs[ a ] - box.m_Mins[ a ] >= 1.0;
+		}
+		m_Editor.SetBlockBox( bSized ? box : *m_BoxFrom );
+		emit m_Editor.StatusMessage( m_ModalTransform->GetDescription() );
+		RedrawLabels();
+		return;
+	}
 	m_ModalResult = m_ModalTransform->Evaluate( GetSizedCamera(), bFree || !settings.m_bSnapToGrid ? 0.0 : settings.m_nGridSize, bFree ? 0.0 : CPreferences::Instance().GetMapPreferences().m_flRotationSnap );
 	if ( m_ModalResult.IsIdentity() )
 		GetDocument().EndPreview();
@@ -1128,6 +1676,25 @@ void CMapView3D::EndModalTransform( bool bCommit )
 	const auto nMode = m_ModalTransform->GetMode();
 	const auto transform = m_ModalResult;
 	m_ModalTransform.reset();
+	if ( m_GridFrom )
+	{
+		// Kept where the preview put it, or back as it was.
+		m_Editor.SetWorldGridPlane( bCommit ? m_Editor.GetSettings().m_WorldGrid : *m_GridFrom );
+		m_GridFrom.reset();
+		emit m_Editor.StatusMessage( QString{} );
+		RedrawLabels();
+		return;
+	}
+	if ( m_BoxFrom )
+	{
+		// The block tool's box stays where the preview put it, or goes back.
+		if ( !bCommit )
+			m_Editor.SetBlockBox( m_BoxFrom );
+		m_BoxFrom.reset();
+		emit m_Editor.StatusMessage( QString{} );
+		RedrawLabels();
+		return;
+	}
 	GetDocument().EndPreview();
 	m_pGizmoScene.reset();
 	m_GizmoSelection.clear();
@@ -1144,7 +1711,7 @@ void CMapView3D::EndModalTransform( bool bCommit )
 //-----------------------------------------------------------------------------
 void CMapView3D::PreviewGizmo( QPointF at, Qt::KeyboardModifiers modifiers )
 {
-	if ( !m_DragGizmo || !m_pGizmoScene )
+	if ( !m_DragGizmo || ( !m_pGizmoScene && !m_GridFrom ) )
 	{
 		return;
 	}
@@ -1153,6 +1720,11 @@ void CMapView3D::PreviewGizmo( QPointF at, Qt::KeyboardModifiers modifiers )
 	const double flGrid = bFree || !settings.m_bSnapToGrid ? 0.0 : static_cast<double>( settings.m_nGridSize );
 	const double flStep = bFree ? 0.0 : CPreferences::Instance().GetMapPreferences().m_flRotationSnap;
 	const xv::map::Transform_t transform = m_DragGizmo->Drag( GetSizedCamera(), m_nGizmoDrag, m_GizmoFrom, at, flGrid, flStep );
+	if ( m_GridFrom )
+	{
+		m_Editor.SetWorldGridPlane( MovedPlane( *m_GridFrom, transform ), false );
+		return;
+	}
 	GetDocument().Preview( xv::map::TransformObjects( *m_pGizmoScene, m_GizmoSelection, transform, settings.m_bTextureLock, settings.m_bScaleLock ) );
 }
 
@@ -1172,6 +1744,17 @@ void CMapView3D::EndGizmo( bool bCommit, QPointF at, Qt::KeyboardModifiers modif
 	const double flStep = bFree ? 0.0 : CPreferences::Instance().GetMapPreferences().m_flRotationSnap;
 	const xv::map::Transform_t transform = m_DragGizmo ? m_DragGizmo->Drag( GetSizedCamera(), m_nGizmoDrag, m_GizmoFrom, at, flGrid, flStep ) : xv::map::Transform_t{};
 	const MapGizmoMode_t nMode = m_DragGizmo ? m_DragGizmo->GetPartMode( m_nGizmoDrag ) : MapGizmoMode_t::MAP_GIZMO_MODE_TRANSLATE;
+	if ( m_GridFrom )
+	{
+		// The world grid's plane: where the drag took it (kept for the next run), or back.
+		m_Editor.SetWorldGridPlane( bCommit ? MovedPlane( *m_GridFrom, transform ) : *m_GridFrom );
+		m_GridFrom.reset();
+		m_nGizmoDrag = -1;
+		m_DragGizmo.reset();
+		UpdateCursor();
+		RedrawLabels();
+		return;
+	}
 	if ( m_pGizmoScene )
 	{
 		GetDocument().EndPreview();
@@ -1196,6 +1779,20 @@ void CMapView3D::EndGizmo( bool bCommit, QPointF at, Qt::KeyboardModifiers modif
 //-----------------------------------------------------------------------------
 void CMapView3D::mouseMoveEvent( QMouseEvent *pEvent )
 {
+	if ( m_bSpaceDrag )
+	{
+		// A pinned pointer's movement comes through the lock's callback.
+		if ( m_PointerLock.IsActive() )
+			return;
+		const QPoint at = pEvent->position().toPoint();
+		const QPoint delta = at - m_LastMouse;
+		m_LastMouse = at;
+		if ( !delta.isNull() )
+			m_bMoved = true;
+		DragCamera( pEvent->buttons(), delta );
+		WarpToMiddle();
+		return;
+	}
 	if ( m_Editor.GetBrushEdit().HandleEvent( *this, pEvent ) )
 	{
 		pEvent->accept();
@@ -1228,6 +1825,16 @@ void CMapView3D::mouseMoveEvent( QMouseEvent *pEvent )
 	if ( m_nGizmoDrag >= 0 && ( pEvent->buttons() & Qt::LeftButton ) )
 	{
 		PreviewGizmo( pEvent->position(), pEvent->modifiers() );
+		return;
+	}
+	if ( ( m_nBoxFace >= 0 || m_nBoxPlane >= 0 ) && ( pEvent->buttons() & Qt::LeftButton ) )
+	{
+		DragBox( pEvent->position(), pEvent->modifiers() );
+		return;
+	}
+	if ( m_BlockPlane && ( pEvent->buttons() & Qt::LeftButton ) )
+	{
+		DragBlock( pEvent->position(), pEvent->modifiers() );
 		return;
 	}
 	if ( m_RadiusFrom && ( pEvent->buttons() & ( Qt::LeftButton | Qt::RightButton ) ) )
@@ -1272,7 +1879,20 @@ void CMapView3D::mouseMoveEvent( QMouseEvent *pEvent )
 	{
 		UpdateCursor();
 	}
-	if ( pEvent->buttons() == Qt::NoButton && !m_bMouselook && m_Editor.GetTool() == MapTool_t::MAP_TOOL_SELECT )
+	if ( pEvent->buttons() == Qt::NoButton && !m_bMouselook && !m_ModalTransform && m_Editor.GetTool() == MapTool_t::MAP_TOOL_BLOCK )
+	{
+		// The box's arrow under the mouse lights up; over the box itself the cursor says it moves.
+		const int nFace = BoxHandleAt( pEvent->position() );
+		const bool bOver = nFace < 0 && BoxSurfaceAt( pEvent->position() ).has_value();
+		if ( nFace != m_nBoxFaceHover || bOver != m_bBoxHover )
+		{
+			m_nBoxFaceHover = nFace;
+			m_bBoxHover = bOver;
+			RedrawLabels();
+			UpdateCursor();
+		}
+	}
+	if ( pEvent->buttons() == Qt::NoButton && !m_bMouselook && ( m_Editor.GetTool() == MapTool_t::MAP_TOOL_SELECT || m_Editor.IsWorldGridEdited() ) )
 	{
 		// The axis under the mouse lights up.
 		const std::optional<CMapGizmo> gizmo = GetGizmo();
@@ -1285,17 +1905,14 @@ void CMapView3D::mouseMoveEvent( QMouseEvent *pEvent )
 			UpdateCursor();
 		}
 	}
-	auto look = [ & ] { Look( delta ); };
 	if ( m_bMouselook || ( m_bSpaceHeld && ( pEvent->buttons() & Qt::LeftButton ) ) )
 	{
-		look();
+		Look( delta );
 		// Back to the middle, so the mouse never runs into the screen's edge (a compositor
 		// that won't move the pointer leaves it where it is, and the movement is all there is).
 		if ( m_bMouselook )
 		{
-			const QPoint middle{ width() / 2, height() / 2 };
-			QCursor::setPos( mapToGlobal( middle ) );
-			m_LastMouse = middle;
+			WarpToMiddle();
 		}
 		return;
 	}
@@ -1303,8 +1920,17 @@ void CMapView3D::mouseMoveEvent( QMouseEvent *pEvent )
 	{
 		return;
 	}
-	const bool bLeft = ( pEvent->buttons() & Qt::LeftButton ) != 0;
-	const bool bRight = ( pEvent->buttons() & Qt::RightButton ) != 0;
+	DragCamera( pEvent->buttons(), delta );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: The camera tool's drags, also Space's: left looks, right pans across the view,
+//          both move forward and back.
+//-----------------------------------------------------------------------------
+void CMapView3D::DragCamera( Qt::MouseButtons buttons, QPointF delta )
+{
+	const bool bLeft = ( buttons & Qt::LeftButton ) != 0;
+	const bool bRight = ( buttons & Qt::RightButton ) != 0;
 	const double flPan = CPreferences::Instance().GetMapPreferences().m_flPanScale;
 	if ( bLeft && bRight )
 	{
@@ -1313,7 +1939,7 @@ void CMapView3D::mouseMoveEvent( QMouseEvent *pEvent )
 	}
 	else if ( bLeft )
 	{
-		look();
+		Look( delta );
 	}
 	else if ( bRight )
 	{
@@ -1323,10 +1949,30 @@ void CMapView3D::mouseMoveEvent( QMouseEvent *pEvent )
 }
 
 //-----------------------------------------------------------------------------
+// Purpose: Ends a drag begun with Space held, letting the pointer go.
+//-----------------------------------------------------------------------------
+void CMapView3D::EndSpaceDrag()
+{
+	if ( !m_bSpaceDrag )
+		return;
+	m_bSpaceDrag = false;
+	m_Dragging = Qt::NoButton;
+	if ( !m_bMouselook )
+		ReleasePointer();
+}
+
+//-----------------------------------------------------------------------------
 // Purpose: A click (not a drag) with the selection tool picks what is under it.
 //-----------------------------------------------------------------------------
 void CMapView3D::mouseReleaseEvent( QMouseEvent *pEvent )
 {
+	if ( m_bSpaceDrag )
+	{
+		m_Dragging = pEvent->buttons();
+		if ( m_Dragging == Qt::NoButton )
+			EndSpaceDrag();
+		return;
+	}
 	if ( m_Editor.GetBrushEdit().HandleEvent( *this, pEvent ) )
 	{
 		pEvent->accept();
@@ -1349,6 +1995,18 @@ void CMapView3D::mouseReleaseEvent( QMouseEvent *pEvent )
 	if ( m_nGizmoDrag >= 0 && pEvent->button() == Qt::LeftButton )
 	{
 		EndGizmo( true, pEvent->position(), pEvent->modifiers() );
+		return;
+	}
+	if ( ( m_nBoxFace >= 0 || m_nBoxPlane >= 0 ) && pEvent->button() == Qt::LeftButton )
+	{
+		DragBox( pEvent->position(), pEvent->modifiers() );
+		EndBoxDrag( true );
+		return;
+	}
+	if ( m_BlockPlane && pEvent->button() == Qt::LeftButton )
+	{
+		DragBlock( pEvent->position(), pEvent->modifiers() );
+		EndBlockDrag( true );
 		return;
 	}
 	if ( m_RadiusFrom && ( pEvent->button() == Qt::LeftButton || pEvent->button() == Qt::RightButton ) )
@@ -1594,9 +2252,12 @@ void CMapView3D::UpdateCursor()
 	}
 	// A handle being dragged, one that can be, or a brush (or a face pick) to aim.
 	Qt::CursorShape nShape = ( IsPaintingDisplacements() || IsSprinkling() || !m_Editor.GetFacePickKey().isEmpty() ) ? Qt::CrossCursor : Qt::ArrowCursor;
-	if ( m_nGizmoDrag >= 0 || m_pOverlayScene )
+	const bool bBlock = m_Editor.GetTool() == MapTool_t::MAP_TOOL_BLOCK;
+	if ( m_nGizmoDrag >= 0 || m_pOverlayScene || m_nBoxFace >= 0 )
 		nShape = Qt::ClosedHandCursor;
-	else if ( m_nGizmoHover >= 0 || OverlayHandleAt( mapFromGlobal( QCursor::pos() ) ) )
+	else if ( m_nBoxPlane >= 0 || ( bBlock && m_bBoxHover && m_nBoxFaceHover < 0 ) )
+		nShape = Qt::SizeAllCursor;
+	else if ( m_nGizmoHover >= 0 || ( bBlock && m_nBoxFaceHover >= 0 ) || OverlayHandleAt( mapFromGlobal( QCursor::pos() ) ) )
 		nShape = Qt::OpenHandCursor;
 	if ( cursor().shape() != nShape )
 	{
@@ -1965,7 +2626,7 @@ void CMapView3D::UpdateCollapsibleVertices()
 void CMapView3D::PaintTools( QPainter &painter )
 {
 	UpdateCollapsibleVertices();
-	const std::optional<xv::map::Box_t> &box = m_Editor.GetNewBox();
+	const std::optional<xv::map::Box_t> &box = m_Editor.GetBlockBox();
 	const std::optional<xv::map::Point_t> &marker = m_Editor.GetEntityMarker();
 	const std::optional<CMapGizmo> gizmo = m_DragGizmo ? m_DragGizmo : GetGizmo();
 	std::vector<xv::map::FaceRef_t> faces = m_Editor.GetSelectedFaces();
@@ -2187,7 +2848,8 @@ void CMapView3D::PaintTools( QPainter &painter )
 	}
 	if ( box )
 	{
-		auto corner = [ & ]( int n ) { return xv::map::Point_t{ ( n & 1 ) ? box->m_Maxs[ 0 ] : box->m_Mins[ 0 ], ( n & 2 ) ? box->m_Maxs[ 1 ] : box->m_Mins[ 1 ], ( n & 4 ) ? box->m_Maxs[ 2 ] : box->m_Mins[ 2 ] }; };
+		const MapGridPlane_t frame = BoxFrame();
+		auto corner = [ & ]( int n ) { return frame.ToWorld( xv::map::Point_t{ ( n & 1 ) ? box->m_Maxs[ 0 ] : box->m_Mins[ 0 ], ( n & 2 ) ? box->m_Maxs[ 1 ] : box->m_Mins[ 1 ], ( n & 4 ) ? box->m_Maxs[ 2 ] : box->m_Mins[ 2 ] } ); };
 		for ( int n = 0; n < 8; n++ )
 		{
 			for ( const int nBit : { 1, 2, 4 } )
@@ -2207,6 +2869,45 @@ void CMapView3D::PaintTools( QPainter &painter )
 		painter.drawLines( lines.data(), static_cast<int>( lines.size() ) );
 	};
 	drawEdged( CPreferences::Instance().GetMapPreferences().m_Colors.m_ToolBlock );
+	// The block tool's arrows: one out of the middle of each face, in its axis's colour, to drag
+	// the face out or in. Not while the keys move the box (G, R, E).
+	if ( box && !box->IsEmpty() && m_Editor.GetTool() == MapTool_t::MAP_TOOL_BLOCK && !m_ModalTransform )
+	{
+		const MapPreferences_t &look = CPreferences::Instance().GetMapPreferences();
+		for ( int f = 0; f < 6; f++ )
+		{
+			const std::optional<BoxArrow_t> arrow = BoxArrow( *box, f );
+			if ( !arrow )
+				continue;
+			const bool bHot = f == m_nBoxFaceHover || f == m_nBoxFace;
+			const QColor color = bHot ? look.m_Colors.m_SelectionEdge3D : f / 2 == 0 ? mapstyle::AXIS_X
+				: f / 2 == 1                                                         ? mapstyle::AXIS_Y
+																					 : mapstyle::AXIS_Z;
+			const QPointF along = arrow->m_To - arrow->m_From;
+			const double flLength = std::hypot( along.x(), along.y() );
+			if ( flLength < 1.0 )
+			{
+				// Pointing at the camera (or away): a dot.
+				painter.setPen( QPen{ QColor{ 0, 0, 0, 160 }, 1.5 } );
+				painter.setBrush( color );
+				painter.drawEllipse( arrow->m_From, 4.0, 4.0 );
+				continue;
+			}
+			const QPointF unit = along / flLength;
+			const QPointF side{ -unit.y(), unit.x() };
+			const QPointF neck = arrow->m_To - unit * BOX_ARROW_HEAD;
+			const QPolygonF head{ { arrow->m_To, neck + side * ( BOX_ARROW_HEAD * 0.55 ), neck - side * ( BOX_ARROW_HEAD * 0.55 ) } };
+			painter.setBrush( Qt::NoBrush );
+			painter.setPen( QPen{ QColor{ 0, 0, 0, 160 }, bHot ? 5.5 : 4.5, Qt::SolidLine, Qt::RoundCap } );
+			painter.drawLine( arrow->m_From, neck );
+			painter.setPen( QPen{ color, bHot ? 3.0 : 2.0, Qt::SolidLine, Qt::RoundCap } );
+			painter.drawLine( arrow->m_From, neck );
+			painter.setPen( QPen{ QColor{ 0, 0, 0, 160 }, 1.0 } );
+			painter.setBrush( color );
+			painter.drawPolygon( head );
+		}
+		painter.setBrush( Qt::NoBrush );
+	}
 	if ( bBrush )
 	{
 		// The brush's ring on the surface, the radius the sheet has.
@@ -2598,6 +3299,7 @@ void CMapView3D::focusOutEvent( QFocusEvent *pEvent )
 	m_pTick->stop();
 	m_flSpeed = 0.0;
 	m_bSpaceHeld = false;
+	EndSpaceDrag();
 	if ( m_bMouselook )
 	{
 		SetMouselook( false );
@@ -2726,6 +3428,21 @@ bool CMapView3D::Run( MapAction_t nAction )
 			if ( m_nGizmoDrag >= 0 )
 			{
 				EndGizmo( false, m_GizmoFrom, Qt::NoModifier );
+				return true;
+			}
+			if ( m_nBoxFace >= 0 || m_nBoxPlane >= 0 )
+			{
+				EndBoxDrag( false );
+				return true;
+			}
+			if ( m_BlockPlane )
+			{
+				EndBlockDrag( false );
+				return true;
+			}
+			if ( m_Editor.IsWorldGridEdited() )
+			{
+				m_Editor.SetWorldGridEdited( false );
 				return true;
 			}
 			return false;

@@ -14,8 +14,11 @@
 #include <cmath>
 #include <limits>
 #include <map>
+#include <mutex>
 #include <numbers>
 #include <cctype>
+#include <cstring>
+#include <type_traits>
 #include <optional>
 #include <string>
 #include <unordered_map>
@@ -37,6 +40,16 @@ namespace
 // its _distance), and many faint lights add up: dozens across a hall, each under one unit, light
 // it as VRAD++ does only from about this low.
 constexpr double LIGHT_THRESHOLD = 0.02;
+// A light that changed lights a luxel again where it gives this much (in the lightmap's units,
+// 255 fully lit) and this share of what the luxel had: less doesn't show.
+constexpr double LIGHT_CHANGE = 0.03;
+constexpr double LIGHT_CHANGE_SHARE = 0.02;
+// Where a changed light's light lands is counted by rays (Landing_t), which is rough: a place
+// counts as lit by it from this share of what is worth telling.
+constexpr double LANDING_SHARE = 0.5;
+// More lights changed at once than this (a wide face that gives light off, moved): everything
+// is baked.
+constexpr std::size_t MAX_CHANGED_LIGHTS = 256;
 // Rays leave a face this far along its normal, past the face and its coplanar neighbours.
 constexpr double RAY_OFFSET = 0.5;
 // As far as any ray goes: across the largest map there can be.
@@ -743,6 +756,11 @@ struct BakeFace_t
 	bool m_bInstance = false;
 	std::uint32_t m_nMaterial = 0;
 	bool m_bLit = false;
+	bool m_bKept = false;           // lit, with the light of the bake before: no samples of its own
+	const LightmapRect_t *m_pBefore = nullptr; // lit again, but the same face as in the bake before, here: its luxels the edit can't have changed keep their light
+	bool m_bStale = false;          // with m_pBefore: that light is older than the bake before's map, so every luxel is lit again
+	bool m_bIdle = false;           // lit again, but not in the chunk being lit now: the passes leave it alone
+	bool m_bPending = false;        // lit again, in a chunk not reached yet
 	bool m_bBlocks = false;
 	bool m_bSky = false;
 	CVec3 m_vecReflectivity;
@@ -971,6 +989,13 @@ struct Bake_t
 	Box_t m_SkyBounds;
 	CTracer m_SkyTracer;       // the sky faces alone, for SeesSky
 	std::vector<bool> m_Unlit; // by the scene's materials: no lightmap by design
+	std::vector<CLighting::BakedFace_t> m_Baked; // what was read of the map's faces, for the next bake
+	std::shared_ptr<const std::vector<std::array<float, 9>>> m_pBakedTriangles;
+	std::uint64_t m_nLightsHash = 0;
+	std::uint64_t m_nSettingsHash = 0; // of the options a result depends on, and the props' shadows
+	std::uint64_t m_nInstanceHash = 0; // of the instances' faces
+	CTracer m_Changed;         // starting from a bake before: the faces that changed, as they were and as they are
+	bool m_bChanged = false;   // it has any
 	int m_nStep = 1;
 	int m_nWidth = 0;
 	int m_nHeight = 0;
@@ -1262,7 +1287,7 @@ void FillBuried( const Bake_t &bake, std::vector<Rgb_t> &buffer )
 		for ( std::size_t f = nBegin; f < nEnd; f++ )
 		{
 			const BakeFace_t &face = bake.m_Faces[ f ];
-			if ( !face.m_bLit || face.m_nWidth == 0 )
+			if ( !face.m_bLit || face.m_bKept || face.m_bIdle || face.m_nWidth == 0 )
 			{
 				continue;
 			}
@@ -1356,7 +1381,7 @@ void FillBuried( const Bake_t &bake, std::vector<Rgb_t> &buffer )
 //          shades (vrad's -final supersamples the same luxels) instead of the luxel's middle
 //          deciding all of it.
 //-----------------------------------------------------------------------------
-void SmoothShadowEdges( const Bake_t &bake, const BakeFace_t &face, std::span<const std::uint64_t> visibility, std::size_t nWords, std::vector<Rgb_t> &direct, std::vector<Rgb_t> &source )
+void SmoothShadowEdges( const Bake_t &bake, const BakeFace_t &face, std::span<const std::uint64_t> visibility, std::size_t nWords, std::vector<Rgb_t> &direct, std::vector<Rgb_t> &source, std::span<const std::uint8_t> kept = {} )
 {
 	if ( !face.m_bLit || Length( face.m_AxisU ) <= 0.0 || Length( face.m_AxisV ) <= 0.0 )
 		return;
@@ -1375,7 +1400,9 @@ void SmoothShadowEdges( const Bake_t &bake, const BakeFace_t &face, std::span<co
 		for ( int i = 0; i < face.m_nWidth; i++ )
 		{
 			const LuxelSample_t &sample = face.m_Samples[ static_cast<std::size_t>( j * face.m_nWidth + i ) ];
-			if ( sample.m_bBuried )
+			// A luxel that keeps the light of the bake before has all of it already (its edges
+			// smoothed then); nothing was traced for it here.
+			if ( sample.m_bBuried || ( !kept.empty() && kept[ bake.TexelIndex( face, i, j ) ] ) )
 			{
 				continue;
 			}
@@ -1388,6 +1415,12 @@ void SmoothShadowEdges( const Bake_t &bake, const BakeFace_t &face, std::span<co
 				const int x = i + di;
 				const int y = j + dj;
 				if ( x < 0 || y < 0 || x >= face.m_nWidth || y >= face.m_nHeight || face.m_Samples[ static_cast<std::size_t>( y * face.m_nWidth + x ) ].m_bBuried )
+				{
+					continue;
+				}
+				// A kept neighbour tells nothing: what it holds is all its light, bounces too, and
+				// which lights reach it wasn't looked at.
+				if ( !kept.empty() && kept[ bake.TexelIndex( face, x, y ) ] )
 				{
 					continue;
 				}
@@ -1470,17 +1503,19 @@ bool Reaches( const BakeFace_t &face, int i, int j, std::array<int, 2> to )
 //          around it, and added to out.
 //-----------------------------------------------------------------------------
 template <typename Gather>
-void GatherSparse( const Bake_t &bake, int nSpacing, int nBlur, std::vector<Rgb_t> &out, Gather &&gather )
+void GatherSparse( const Bake_t &bake, int nSpacing, int nBlur, std::vector<Rgb_t> &out, Gather &&gather, const std::vector<std::uint8_t> *pSkip = nullptr )
 {
 	ParallelFor( bake.m_Faces.size(), 16, [ & ]( std::size_t nBegin, std::size_t nEnd ) {
 		std::vector<Rgb_t> coarse;
 		std::vector<Rgb_t> blurred;
 		std::vector<bool> valid;
 		std::vector<std::array<int, 2>> where; // the luxel each gather was made at
+		std::vector<std::uint8_t> wanted;      // with pSkip: the gathers some luxel that isn't skipped takes from
+		std::vector<std::uint8_t> spread;
 		for ( std::size_t f = nBegin; f < nEnd && !bake.IsCancelled(); f++ )
 		{
 			const BakeFace_t &face = bake.m_Faces[ f ];
-			if ( !face.m_bLit )
+			if ( !face.m_bLit || face.m_bKept || face.m_bIdle )
 			{
 				continue;
 			}
@@ -1492,10 +1527,60 @@ void GatherSparse( const Bake_t &bake, int nSpacing, int nBlur, std::vector<Rgb_
 			coarse.assign( static_cast<std::size_t>( nCoarseW * nCoarseH ), Rgb_t{} );
 			valid.assign( coarse.size(), false );
 			where.assign( coarse.size(), {} );
+			if ( pSkip )
+			{
+				// The gathers around each luxel that isn't skipped, and those averaged into them.
+				wanted.assign( coarse.size(), 0 );
+				for ( int j = 0; j < face.m_nHeight; j++ )
+				{
+					for ( int i = 0; i < face.m_nWidth; i++ )
+					{
+						if ( ( *pSkip )[ bake.TexelIndex( face, i, j ) ] )
+						{
+							continue;
+						}
+						const int ci0 = std::min( i / nSpacing, nCoarseW - 1 );
+						const int cj0 = std::min( j / nSpacing, nCoarseH - 1 );
+						for ( const int cj : { cj0, std::min( cj0 + 1, nCoarseH - 1 ) } )
+						{
+							for ( const int ci : { ci0, std::min( ci0 + 1, nCoarseW - 1 ) } )
+							{
+								wanted[ static_cast<std::size_t>( cj * nCoarseW + ci ) ] = 1;
+							}
+						}
+					}
+				}
+				if ( nBlur > 0 )
+				{
+					spread = wanted;
+					for ( int cj = 0; cj < nCoarseH; cj++ )
+					{
+						for ( int ci = 0; ci < nCoarseW; ci++ )
+						{
+							if ( !wanted[ static_cast<std::size_t>( cj * nCoarseW + ci ) ] )
+							{
+								continue;
+							}
+							for ( int nj = std::max( cj - nBlur, 0 ); nj <= std::min( cj + nBlur, nCoarseH - 1 ); nj++ )
+							{
+								for ( int ni = std::max( ci - nBlur, 0 ); ni <= std::min( ci + nBlur, nCoarseW - 1 ); ni++ )
+								{
+									spread[ static_cast<std::size_t>( nj * nCoarseW + ni ) ] = 1;
+								}
+							}
+						}
+					}
+					std::swap( wanted, spread );
+				}
+			}
 			for ( int cj = 0; cj < nCoarseH; cj++ )
 			{
 				for ( int ci = 0; ci < nCoarseW; ci++ )
 				{
+					if ( pSkip && !wanted[ static_cast<std::size_t>( cj * nCoarseW + ci ) ] )
+					{
+						continue;
+					}
 					// A buried point gathers from where it can't be seen: the nearest luxel of its
 					// cell that isn't buried stands in, or none.
 					const int i0 = at( ci, face.m_nWidth );
@@ -1583,6 +1668,10 @@ void GatherSparse( const Bake_t &bake, int nSpacing, int nBlur, std::vector<Rgb_
 					const int i0 = at( ci0, face.m_nWidth );
 					const int i1 = at( ci1, face.m_nWidth );
 					const float tx = i1 > i0 ? static_cast<float>( i - i0 ) / static_cast<float>( i1 - i0 ) : 0.0f;
+					if ( pSkip && ( *pSkip )[ bake.TexelIndex( face, i, j ) ] )
+					{
+						continue;
+					}
 					// Between the gathers around it that weren't buried (buried luxels are filled
 					// from their neighbours afterwards, FillBuried).
 					const std::array<std::size_t, 4> corners{ static_cast<std::size_t>( cj0 * nCoarseW + ci0 ), static_cast<std::size_t>( cj0 * nCoarseW + ci1 ), static_cast<std::size_t>( cj1 * nCoarseW + ci0 ), static_cast<std::size_t>( cj1 * nCoarseW + ci1 ) };
@@ -2166,7 +2255,692 @@ void AddTextureLights( const CScene &scene, std::span<const LightMaterial_t> mat
 }
 
 //-----------------------------------------------------------------------------
+// Purpose: FNV-1a over a value's bytes, carried on from nHash.
+//-----------------------------------------------------------------------------
+template <typename T>
+void HashValue( std::uint64_t &nHash, const T &value )
+{
+	static_assert( std::is_trivially_copyable_v<T> );
+	std::array<unsigned char, sizeof( T )> bytes;
+	std::memcpy( bytes.data(), &value, sizeof( T ) );
+	for ( const unsigned char ch : bytes )
+	{
+		nHash = ( nHash ^ ch ) * 0x100000001b3ull;
+	}
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: A face as a bake reads it: where its corners are (and their luxels), and what its
+//          material and entity make of it. The same for a face no edit touched.
+//-----------------------------------------------------------------------------
+std::uint64_t HashFace( const BakeFace_t &face )
+{
+	std::uint64_t nHash = 0xcbf29ce484222325ull;
+	const MeshFace_t &meshFace = face.m_pMesh->m_Faces[ face.m_nFace ];
+	for ( std::uint32_t v = 0; v < meshFace.m_nVertexCount; v++ )
+	{
+		const MeshVertex_t &vertex = face.m_pMesh->m_Vertices[ meshFace.m_nFirstVertex + v ];
+		HashValue( nHash, vertex.m_vecPosition.m_flX );
+		HashValue( nHash, vertex.m_vecPosition.m_flY );
+		HashValue( nHash, vertex.m_vecPosition.m_flZ );
+		HashValue( nHash, vertex.m_Luxel );
+	}
+	HashValue( nHash, static_cast<std::uint32_t>( face.m_Triangles.size() ) );
+	// Which material it is can change by number alone (another material added before it): what
+	// lighting takes from it is what counts.
+	HashValue( nHash, static_cast<std::uint8_t>( ( face.m_bLit ? 1 : 0 ) | ( face.m_bBlocks ? 2 : 0 ) | ( face.m_bSky ? 4 : 0 ) ) );
+	HashValue( nHash, face.m_vecReflectivity.m_flX );
+	HashValue( nHash, face.m_vecReflectivity.m_flY );
+	HashValue( nHash, face.m_vecReflectivity.m_flZ );
+	HashValue( nHash, face.m_flMinLight );
+	return nHash;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: A light as read, but for which face or entity it is: the same when no edit changed
+//          it (or the face that gives it off).
+//-----------------------------------------------------------------------------
+std::uint64_t HashLight( const Light_t &light )
+{
+	std::uint64_t nHash = 0xcbf29ce484222325ull;
+	HashValue( nHash, static_cast<int>( light.m_nType ) );
+	HashValue( nHash, light.m_Origin );
+	HashValue( nHash, light.m_Direction );
+	HashValue( nHash, light.m_vecIntensity.m_flX );
+	HashValue( nHash, light.m_vecIntensity.m_flY );
+	HashValue( nHash, light.m_vecIntensity.m_flZ );
+	for ( const double fl : { light.m_flConstant, light.m_flLinear, light.m_flQuadratic, light.m_flCapDistance, light.m_flFadeStart, light.m_flFadeEnd, light.m_flInnerCos, light.m_flOuterCos, light.m_flExponent, light.m_flSunSpread, light.m_flReach } )
+	{
+		HashValue( nHash, fl );
+	}
+	HashValue( nHash, static_cast<std::uint8_t>( light.m_bNamed ? 1 : 0 ) );
+	return nHash;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: All the lights, in their order.
+//-----------------------------------------------------------------------------
+std::uint64_t HashLights( std::span<const Light_t> lights )
+{
+	std::uint64_t nHash = 0xcbf29ce484222325ull;
+	for ( const Light_t &light : lights )
+	{
+		HashValue( nHash, HashLight( light ) );
+	}
+	return nHash;
+}
+
+// Where the light of the lights that changed lands, as they were and as they are: how much of
+// it each cell of a grid over the map gets, straight from them and after one bounce. Rays are
+// sent out of each light and on from what they meet, enough of them that light worth telling
+// is seldom missed (AddLightLanding).
+struct Landing_t
+{
+	static constexpr double CELL = 128.0;
+	std::unordered_map<std::uint64_t, std::array<float, 2>> m_Cells; // by cell: light landing straight, bounced once
+
+	[[nodiscard]] static std::int64_t CellOf( double fl ) { return static_cast<std::int64_t>( std::floor( fl / CELL ) ); }
+	[[nodiscard]] static std::uint64_t Key( std::int64_t x, std::int64_t y, std::int64_t z )
+	{
+		constexpr std::int64_t HALF = 1 << 20;
+		return ( static_cast<std::uint64_t>( x + HALF ) << 42 ) | ( static_cast<std::uint64_t>( y + HALF ) << 21 ) | static_cast<std::uint64_t>( z + HALF );
+	}
+	void Add( Point_t at, std::size_t nWhich, double flLight )
+	{
+		m_Cells[ Key( CellOf( at[ 0 ] ), CellOf( at[ 1 ] ), CellOf( at[ 2 ] ) ) ][ nWhich ] += static_cast<float>( flLight );
+	}
+
+	// The most light an area that any cell at a box, or next to it, holds (in the lightmap's
+	// units): bBounced, what came by a bounce alone.
+	[[nodiscard]] double Most( const Box_t &bounds, bool bBounced ) const
+	{
+		if ( m_Cells.empty() || bounds.IsEmpty() )
+		{
+			return 0.0;
+		}
+		std::array<std::int64_t, 3> from{};
+		std::array<std::int64_t, 3> to{};
+		double flCells = 1.0;
+		for ( std::size_t k = 0; k < 3; k++ )
+		{
+			from[ k ] = CellOf( bounds.m_Mins[ k ] ) - 1;
+			to[ k ] = CellOf( bounds.m_Maxs[ k ] ) + 1;
+			flCells *= static_cast<double>( to[ k ] - from[ k ] + 1 );
+		}
+		float flMost = 0.0f;
+		const auto take = [ & ]( const std::array<float, 2> &cell ) { flMost = std::max( flMost, bBounced ? cell[ 1 ] : cell[ 0 ] + cell[ 1 ] ); };
+		if ( flCells > static_cast<double>( m_Cells.size() ) )
+		{
+			// A wide box: the cells that hold anything are fewer than those it covers.
+			constexpr std::int64_t HALF = 1 << 20;
+			for ( const auto &[ nKey, cell ] : m_Cells )
+			{
+				const std::array<std::int64_t, 3> at{ static_cast<std::int64_t>( nKey >> 42 ) - HALF, static_cast<std::int64_t>( ( nKey >> 21 ) & 0x1fffff ) - HALF, static_cast<std::int64_t>( nKey & 0x1fffff ) - HALF };
+				if ( at[ 0 ] >= from[ 0 ] && at[ 0 ] <= to[ 0 ] && at[ 1 ] >= from[ 1 ] && at[ 1 ] <= to[ 1 ] && at[ 2 ] >= from[ 2 ] && at[ 2 ] <= to[ 2 ] )
+				{
+					take( cell );
+				}
+			}
+		}
+		else
+		{
+			for ( std::int64_t z = from[ 2 ]; z <= to[ 2 ]; z++ )
+			{
+				for ( std::int64_t y = from[ 1 ]; y <= to[ 1 ]; y++ )
+				{
+					for ( std::int64_t x = from[ 0 ]; x <= to[ 0 ]; x++ )
+					{
+						if ( const auto found = m_Cells.find( Key( x, y, z ) ); found != m_Cells.end() )
+						{
+							take( found->second );
+						}
+					}
+				}
+			}
+		}
+		return static_cast<double>( flMost ) / ( CELL * CELL );
+	}
+};
+
+// What an edit changed, for a bake that starts from the one before: boxes around the faces that
+// moved, came or went, and the lights that did (as they were and as they are) with where their
+// light lands.
+struct Dirty_t
+{
+	std::vector<Box_t> m_Boxes;
+	std::vector<Light_t> m_Lights;
+	Landing_t m_Landing;
+
+	// Boxes that touch are one; past a few dozen, the rest go into the last (a wider box only
+	// lights more again).
+	void Add( const Box_t &box )
+	{
+		if ( box.IsEmpty() )
+		{
+			return;
+		}
+		for ( Box_t &mine : m_Boxes )
+		{
+			if ( mine.Intersects( box ) )
+			{
+				mine.Add( box );
+				return;
+			}
+		}
+		if ( m_Boxes.size() >= 48 )
+		{
+			m_Boxes.back().Add( box );
+			return;
+		}
+		m_Boxes.push_back( box );
+	}
+};
+
+//-----------------------------------------------------------------------------
+// Purpose: Where a changed light's light lands: rays every way from it, each standing for its
+//          share of the sphere, leave what the light gives there at the first face they meet,
+//          and (unless the light is named: those don't bounce) what that face reflects at the
+//          next face a ray on from it meets. As many rays as it takes for one ray's light,
+//          over a cell, to be a fraction of what is worth telling: a brighter light gets more.
+//-----------------------------------------------------------------------------
+void AddLightLanding( const Bake_t &bake, const Light_t &light, Landing_t &landing )
+{
+	constexpr std::size_t FIRST_RAYS = 4096;
+	constexpr std::size_t MOST_RAYS = std::size_t{ 1 } << 19;
+	if ( light.m_nType != LightType_t::LIGHT_TYPE_POINT && light.m_nType != LightType_t::LIGHT_TYPE_SPOT && light.m_nType != LightType_t::LIGHT_TYPE_SURFACE )
+	{
+		return;
+	}
+	// A surface light sits on its face: from just off it.
+	const Point_t from = light.m_nType == LightType_t::LIGHT_TYPE_SURFACE ? Add( light.m_Origin, Scale( light.m_Direction, RAY_OFFSET ) ) : light.m_Origin;
+	struct Hit_t
+	{
+		Point_t m_At{};
+		float m_flLight = 0.0f;
+		std::uint8_t m_nWhich = 0;
+	};
+	// One ray of nRays, and the one on from where it lands.
+	const auto send = [ & ]( std::size_t n, std::size_t nRays, std::vector<Hit_t> &hits ) {
+		// Evenly over the sphere, along a spiral.
+		const double z = 1.0 - ( 2.0 * static_cast<double>( n ) + 1.0 ) / static_cast<double>( nRays );
+		const double flRing = std::sqrt( std::max( 0.0, 1.0 - z * z ) );
+		const double flTurn = static_cast<double>( n ) * std::numbers::pi * ( 3.0 - std::sqrt( 5.0 ) );
+		const Point_t dir{ flRing * std::cos( flTurn ), flRing * std::sin( flTurn ), z };
+		const std::optional<TraceHit_t> hit = bake.m_Tracer.Nearest( MakeRay( from, dir, RAY_LENGTH ) );
+		if ( !hit )
+		{
+			return;
+		}
+		const TraceTriangle_t &triangle = bake.m_Tracer.GetTriangle( hit->m_nTriangle );
+		if ( triangle.m_nFace >= bake.m_Faces.size() || bake.m_Faces[ triangle.m_nFace ].m_bSky )
+		{
+			return;
+		}
+		Point_t normal = Cross( Point_t{ triangle.m_E1[ 0 ], triangle.m_E1[ 1 ], triangle.m_E1[ 2 ] }, Point_t{ triangle.m_E2[ 0 ], triangle.m_E2[ 1 ], triangle.m_E2[ 2 ] } );
+		const double flLength = Length( normal );
+		if ( flLength < 1.0e-12 )
+		{
+			return;
+		}
+		normal = Scale( normal, ( Dot( normal, dir ) > 0.0 ? -1.0 : 1.0 ) / flLength );
+		const Point_t at = Add( Add( from, Scale( dir, hit->m_flDistance ) ), Scale( normal, RAY_OFFSET ) );
+		const double flLands = Brightest( PointLightAt( light, at, normal ) );
+		if ( flLands <= 0.0 )
+		{
+			return;
+		}
+		// The patch the ray stands for: its share of the sphere, at this distance and slant.
+		const double flSlant = std::max( -Dot( normal, dir ), 0.2 );
+		const double flLight = flLands * 4.0 * std::numbers::pi / static_cast<double>( nRays ) * hit->m_flDistance * hit->m_flDistance / flSlant;
+		hits.push_back( { at, static_cast<float>( flLight ), 0 } );
+		if ( light.m_bNamed )
+		{
+			return;
+		}
+		// On from there, any way out of the face (more often straight out, as it reflects).
+		const std::uint32_t nSeed = Hash( static_cast<std::uint32_t>( n ) );
+		const double flOut = std::sqrt( ( nSeed & 0xffff ) / 65536.0 );
+		const double flAround = ( nSeed >> 16 ) / 65536.0 * 2.0 * std::numbers::pi;
+		Point_t tangent{}, bitangent{};
+		Basis( normal, tangent, bitangent );
+		const Point_t on = Add( Add( Scale( tangent, flOut * std::cos( flAround ) ), Scale( bitangent, flOut * std::sin( flAround ) ) ), Scale( normal, std::sqrt( std::max( 0.0, 1.0 - flOut * flOut ) ) ) );
+		if ( const std::optional<TraceHit_t> next = bake.m_Tracer.Nearest( MakeRay( at, on, RAY_LENGTH ) ) )
+		{
+			hits.push_back( { Add( at, Scale( on, next->m_flDistance ) ), static_cast<float>( flLight * Brightest( bake.m_Faces[ triangle.m_nFace ].m_vecReflectivity ) ), 1 } );
+		}
+	};
+	// A first few, to learn how much light there is to follow.
+	std::vector<Hit_t> first;
+	for ( std::size_t n = 0; n < FIRST_RAYS; n++ )
+	{
+		send( n, FIRST_RAYS, first );
+	}
+	double flAll = 0.0;
+	for ( const Hit_t &hit : first )
+	{
+		flAll += hit.m_nWhich == 0 ? hit.m_flLight : 0.0;
+	}
+	const double flWorthARay = LIGHT_CHANGE * LANDING_SHARE * Landing_t::CELL * Landing_t::CELL / 4.0;
+	const std::size_t nRays = std::clamp( static_cast<std::size_t>( flAll / flWorthARay ), FIRST_RAYS, MOST_RAYS );
+	std::vector<Hit_t> all;
+	if ( nRays == FIRST_RAYS )
+	{
+		all = std::move( first );
+	}
+	else
+	{
+		std::mutex lock;
+		ParallelFor( nRays, 4096, [ & ]( std::size_t nBegin, std::size_t nEnd ) {
+			std::vector<Hit_t> mine;
+			for ( std::size_t n = nBegin; n < nEnd && !bake.IsCancelled(); n++ )
+			{
+				send( n, nRays, mine );
+			}
+			const std::lock_guard guard( lock );
+			all.insert( all.end(), mine.begin(), mine.end() );
+		} );
+	}
+	for ( const Hit_t &hit : all )
+	{
+		landing.Add( hit.m_At, hit.m_nWhich, hit.m_flLight );
+	}
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: The gap between two boxes, squared.
+//-----------------------------------------------------------------------------
+double GapSquared( const Box_t &a, const Box_t &b )
+{
+	double flSquared = 0.0;
+	for ( std::size_t k = 0; k < 3; k++ )
+	{
+		const double flGap = std::max( { a.m_Mins[ k ] - b.m_Maxs[ k ], 0.0, b.m_Mins[ k ] - a.m_Maxs[ k ] } );
+		flSquared += flGap * flGap;
+	}
+	return flSquared;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Whether what changed can have changed the light on something in bounds. Each box
+//          is taken as the ball around it, which only errs toward lighting again.
+//          Near a changed box: the sky's ambient and bounced light differ there. Else a
+//          shadow: a changed box between a light that reaches bounds and bounds (in the box
+//          around the two, inside the cone from the light around bounds, and no further than
+//          them), or up the sun's way from bounds, within its spread.
+//          A changed light: where enough of its light lands, straight or by its first
+//          bounce (Landing_t).
+//-----------------------------------------------------------------------------
+bool IsAffected( const Bake_t &bake, const Dirty_t &dirty, const Box_t &bounds )
+{
+	// How far from a change the soft light is taken to differ: a few times the change's size,
+	// and this at least.
+	constexpr double NEAR = 256.0;
+	const Point_t centre = bounds.GetCenter();
+	const double flRadius = Length( Subtract( bounds.m_Maxs, centre ) );
+	if ( dirty.m_Landing.Most( bounds, false ) >= LIGHT_CHANGE * LANDING_SHARE )
+	{
+		return true;
+	}
+	for ( const Box_t &box : dirty.m_Boxes )
+	{
+		const Point_t boxCentre = box.GetCenter();
+		const double flBoxRadius = Length( Subtract( box.m_Maxs, boxCentre ) );
+		const double flNear = std::max( NEAR, flBoxRadius * 2.0 );
+		if ( GapSquared( bounds, box ) <= flNear * flNear )
+		{
+			return true;
+		}
+		for ( const Light_t &light : bake.m_Lights )
+		{
+			if ( light.m_nType == LightType_t::LIGHT_TYPE_SKY_AMBIENT )
+			{
+				continue;
+			}
+			if ( light.m_nType == LightType_t::LIGHT_TYPE_SUN )
+			{
+				// From the changed box along the way the sun's light travels.
+				const Point_t to = Subtract( centre, boxCentre );
+				const double flAlong = Dot( to, light.m_Direction );
+				const double flAcross = Length( Subtract( to, Scale( light.m_Direction, flAlong ) ) );
+				if ( flAlong >= -( flRadius + flBoxRadius ) && flAcross <= flRadius + flBoxRadius + light.m_flSunSpread * std::max( flAlong, 0.0 ) )
+				{
+					return true;
+				}
+				continue;
+			}
+			double flOutside = 0.0;
+			for ( std::size_t k = 0; k < 3; k++ )
+			{
+				const double flGap = std::max( { bounds.m_Mins[ k ] - light.m_Origin[ k ], 0.0, light.m_Origin[ k ] - bounds.m_Maxs[ k ] } );
+				flOutside += flGap * flGap;
+			}
+			if ( flOutside > light.m_flReach * light.m_flReach )
+			{
+				continue;
+			}
+			// Every ray from the light to bounds stays in the box around the two.
+			Box_t lit = bounds;
+			lit.Add( light.m_Origin );
+			if ( !lit.Intersects( box ) )
+			{
+				continue;
+			}
+			const Point_t toBox = Subtract( boxCentre, light.m_Origin );
+			const Point_t toBounds = Subtract( centre, light.m_Origin );
+			const double flBoxDistance = Length( toBox );
+			const double flDistance = Length( toBounds );
+			if ( flBoxDistance <= flBoxRadius || flDistance <= flRadius )
+			{
+				return true; // the light is inside one of the balls: no cone to speak of
+			}
+			if ( flDistance + flRadius < flBoxDistance - flBoxRadius )
+			{
+				continue; // wholly nearer the light than the change
+			}
+			const double flAngle = std::acos( std::clamp( Dot( toBox, toBounds ) / ( flBoxDistance * flDistance ), -1.0, 1.0 ) );
+			if ( flAngle <= std::asin( flBoxRadius / flBoxDistance ) + std::asin( flRadius / flDistance ) )
+			{
+				return true;
+			}
+		}
+	}
+	return false;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Whether the line from one point to another passes through a box grown by flMargin.
+//-----------------------------------------------------------------------------
+bool SegmentMeetsBox( Point_t from, Point_t to, const Box_t &box, double flMargin )
+{
+	double flEnter = 0.0;
+	double flLeave = 1.0;
+	for ( std::size_t k = 0; k < 3; k++ )
+	{
+		const double flAlong = to[ k ] - from[ k ];
+		const double flLow = box.m_Mins[ k ] - flMargin - from[ k ];
+		const double flHigh = box.m_Maxs[ k ] + flMargin - from[ k ];
+		if ( std::abs( flAlong ) < 1.0e-12 )
+		{
+			if ( flLow > 0.0 || flHigh < 0.0 )
+			{
+				return false;
+			}
+			continue;
+		}
+		const double t0 = flLow / flAlong;
+		const double t1 = flHigh / flAlong;
+		flEnter = std::max( flEnter, std::min( t0, t1 ) );
+		flLeave = std::min( flLeave, std::max( t0, t1 ) );
+		if ( flEnter > flLeave )
+		{
+			return false;
+		}
+	}
+	return true;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: The lights reaching a face that have a changed box in the box around the face and
+//          the light, where every line between the two runs: the only ones whose shadows on
+//          it can have moved.
+//-----------------------------------------------------------------------------
+std::vector<std::uint32_t> LightsPastChanges( const Bake_t &bake, const Dirty_t &dirty, const BakeFace_t &face )
+{
+	const double flMargin = 2.0 * std::max( { Length( face.m_AxisU ), Length( face.m_AxisV ), 16.0 * bake.m_nStep } );
+	std::vector<std::uint32_t> lights;
+	for ( const std::uint32_t l : face.m_Lights )
+	{
+		Box_t between = face.m_Bounds;
+		between.Add( bake.m_Lights[ l ].m_Origin );
+		for ( std::size_t k = 0; k < 3; k++ )
+		{
+			between.m_Mins[ k ] -= flMargin;
+			between.m_Maxs[ k ] += flMargin;
+		}
+		if ( std::ranges::any_of( dirty.m_Boxes, [ & ]( const Box_t &box ) { return between.Intersects( box ); } ) )
+		{
+			lights.push_back( l );
+		}
+	}
+	return lights;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: IsAffected for one luxel of a face that is. Near a changed box, the soft light
+//          differs. Further off only a shadow can: a line from the luxel to a light that
+//          reaches its face, or to the sun, that one of the changed faces is on (as it was or
+//          as it is; every other face is where it was, so the rest of the line is as before).
+//          The lines are tried from the luxels around it too: a luxel's light is gathered
+//          across it, and a shadow's edge smoothed over its neighbours. The boxes, grown by
+//          that much, only save trying lines that pass nowhere near a change. A sun with a
+//          size is taken by the boxes alone, grown by its spread. lights: those of the face's
+//          with a changed box anywhere between them and the face (LightsPastChanges).
+//          flBefore: its light in the bake before (a change is told against it). bBounces:
+//          whether any of the changed lights' bounced light lands at its face at all.
+//-----------------------------------------------------------------------------
+bool IsLuxelAffected( const Bake_t &bake, const Dirty_t &dirty, const BakeFace_t &face, const LuxelSample_t &sample, std::span<const std::uint32_t> lights, float flBefore, bool bBounces )
+{
+	constexpr double NEAR = 256.0;
+	const Point_t point = sample.m_Position;
+	const double flMargin = 2.0 * std::max( { Length( face.m_AxisU ), Length( face.m_AxisV ), 16.0 * bake.m_nStep } );
+	Box_t at;
+	at.Add( point );
+	// A changed light: where it gives (or gave) enough to tell, straight and in sight, or by
+	// its first bounce.
+	const double flEnough = LIGHT_CHANGE + LIGHT_CHANGE_SHARE * flBefore;
+	for ( const Light_t &light : dirty.m_Lights )
+	{
+		if ( Brightest( PointLightAt( light, point, sample.m_Normal ) ) < flEnough )
+		{
+			continue;
+		}
+		for ( int n = 0; n < 9; n++ )
+		{
+			const Point_t from = Add( Add( point, Scale( sample.m_Normal, RAY_OFFSET ) ), Add( Scale( face.m_AxisU, n % 3 - 1 ), Scale( face.m_AxisV, n / 3 - 1 ) ) );
+			const Point_t toLight = Subtract( light.m_Origin, from );
+			const double flDistance = Length( toLight );
+			if ( flDistance <= 1.0e-6 || !bake.m_Tracer.IsBlocked( MakeRay( from, Scale( toLight, 1.0 / flDistance ), flDistance ) ) )
+			{
+				return true;
+			}
+		}
+	}
+	if ( bBounces && dirty.m_Landing.Most( at, true ) >= flEnough * LANDING_SHARE )
+	{
+		return true;
+	}
+	for ( const Box_t &box : dirty.m_Boxes )
+	{
+		const Point_t boxCentre = box.GetCenter();
+		const double flBoxRadius = Length( Subtract( box.m_Maxs, boxCentre ) );
+		const double flNear = std::max( NEAR, flBoxRadius * 2.0 );
+		if ( GapSquared( at, box ) <= flNear * flNear )
+		{
+			return true;
+		}
+	}
+	if ( !bake.m_bChanged )
+	{
+		return false; // nothing that changed is in the way of light
+	}
+	// Whether a changed face is on the way from the luxel, or one of those around it, to a
+	// light at to (or toward the sun, to its direction).
+	const auto crossed = [ & ]( Point_t to, bool bSun ) {
+		for ( int v = -1; v <= 1; v++ )
+		{
+			for ( int u = -1; u <= 1; u++ )
+			{
+				const Point_t from = Add( Add( point, Scale( sample.m_Normal, RAY_OFFSET ) ), Add( Scale( face.m_AxisU, u ), Scale( face.m_AxisV, v ) ) );
+				if ( bSun )
+				{
+					if ( bake.m_Changed.IsBlocked( MakeRay( from, to, RAY_LENGTH ) ) )
+					{
+						return true;
+					}
+					continue;
+				}
+				const Point_t toLight = Subtract( to, from );
+				const double flDistance = Length( toLight );
+				if ( flDistance > 1.0e-6 && bake.m_Changed.IsBlocked( MakeRay( from, Scale( toLight, 1.0 / flDistance ), flDistance ) ) )
+				{
+					return true;
+				}
+			}
+		}
+		return false;
+	};
+	for ( const std::uint32_t l : lights )
+	{
+		const Point_t origin = bake.m_Lights[ l ].m_Origin;
+		if ( std::ranges::any_of( dirty.m_Boxes, [ & ]( const Box_t &box ) { return SegmentMeetsBox( point, origin, box, flMargin ); } ) && crossed( origin, false ) )
+		{
+			return true;
+		}
+	}
+	for ( const Light_t &light : bake.m_Lights )
+	{
+		if ( light.m_nType != LightType_t::LIGHT_TYPE_SUN )
+		{
+			continue;
+		}
+		for ( const Box_t &box : dirty.m_Boxes )
+		{
+			const Point_t boxCentre = box.GetCenter();
+			const double flAway = Length( Subtract( boxCentre, point ) ) + Length( Subtract( box.m_Maxs, boxCentre ) );
+			if ( !SegmentMeetsBox( point, Subtract( point, Scale( light.m_Direction, flAway ) ), box, flMargin + light.m_flSunSpread * flAway ) )
+			{
+				continue;
+			}
+			if ( light.m_flSunSpread > 0.0 || crossed( Scale( light.m_Direction, -1.0 ), true ) )
+			{
+				return true;
+			}
+			break; // the line toward the sun is the same whichever box it passes
+		}
+	}
+	return false;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: The triangles of the props that cast shadows: prop_static's models, as vrad's do
+//          (unless disableshadows).
+//-----------------------------------------------------------------------------
+std::vector<TraceTriangle_t> PropTriangles( const CScene &scene, const LightingExtras_t &extras )
+{
+	std::vector<TraceTriangle_t> triangles;
+	if ( !extras.m_bPropShadows )
+	{
+		return triangles;
+	}
+	std::map<std::uint32_t, bool> casts;
+	auto castsShadow = [ & ]( std::uint32_t nObject ) {
+		const auto [ it, bNew ] = casts.try_emplace( nObject, false );
+		if ( bNew && nObject < scene.GetObjectCount() && !scene.IsSolidObject( nObject ) && !scene.IsDeleted( nObject ) )
+		{
+			const Entity_t &entity = std::as_const( scene.m_Map.m_Entities )[ scene.GetIndex( nObject ) ];
+			it->second = entity.GetClassname() == "prop_static" && KeyNumber( entity, "disableshadows" ) == 0.0;
+		}
+		return it->second;
+	};
+	for ( const std::shared_ptr<const CMapMesh> &pMesh : extras.m_Props )
+	{
+		for ( std::size_t t = 0; pMesh && t + 2 < pMesh->m_Indices.size(); t += 3 )
+		{
+			const MeshVertex_t &a = pMesh->m_Vertices[ pMesh->m_Indices[ t ] ];
+			if ( !castsShadow( a.m_nObject ) )
+			{
+				continue;
+			}
+			const CVec3 b = pMesh->m_Vertices[ pMesh->m_Indices[ t + 1 ] ].m_vecPosition;
+			const CVec3 c = pMesh->m_Vertices[ pMesh->m_Indices[ t + 2 ] ].m_vecPosition;
+			TraceTriangle_t triangle;
+			triangle.m_V0 = { a.m_vecPosition.m_flX, a.m_vecPosition.m_flY, a.m_vecPosition.m_flZ };
+			triangle.m_E1 = { b.m_flX - a.m_vecPosition.m_flX, b.m_flY - a.m_vecPosition.m_flY, b.m_flZ - a.m_vecPosition.m_flZ };
+			triangle.m_E2 = { c.m_flX - a.m_vecPosition.m_flX, c.m_flY - a.m_vecPosition.m_flY, c.m_flZ - a.m_vecPosition.m_flZ };
+			triangles.push_back( triangle );
+		}
+	}
+	return triangles;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: What a bake's result depends on beside the faces and the lights: the options that
+//          change it, and the shadows the props cast. Two bakes with the same faces, lights
+//          and this come out the same.
+//-----------------------------------------------------------------------------
+std::uint64_t HashSettings( const LightingOptions_t &options, std::span<const TraceTriangle_t> propTriangles )
+{
+	std::uint64_t nHash = 0xcbf29ce484222325ull;
+	for ( const int n : { options.m_bHdr ? 1 : 0, options.m_nBounces, options.m_bConverge ? 1 : 0, options.m_bSmoothShadows ? 1 : 0, options.m_nSkySamples, options.m_nSkySpacing, options.m_nBounceSamples, options.m_nBounceSpacing } )
+	{
+		HashValue( nHash, n );
+	}
+	HashValue( nHash, static_cast<std::uint64_t>( options.m_nMaxLuxels ) );
+	HashValue( nHash, options.m_flRadius );
+	if ( options.m_flRadius > 0.0 )
+	{
+		HashValue( nHash, options.m_Centre );
+	}
+	HashValue( nHash, static_cast<std::uint64_t>( propTriangles.size() ) );
+	for ( const TraceTriangle_t &triangle : propTriangles )
+	{
+		HashValue( nHash, triangle.m_V0 );
+		HashValue( nHash, triangle.m_E1 );
+		HashValue( nHash, triangle.m_E2 );
+	}
+	return nHash;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: A bake read from a file, its faces named as this bake names them: by what was read
+//          of each (solids are numbered again when a map is saved and opened). Those this
+//          bake has no like of keep a name no face has, so they count as gone.
+//-----------------------------------------------------------------------------
+std::shared_ptr<const CLighting> RenameLoaded( const CLighting &loaded, std::span<const CLighting::BakedFace_t> baked )
+{
+	auto pRenamed = std::make_shared<CLighting>( loaded );
+	pRenamed->m_bLoaded = false;
+	std::unordered_multimap<std::uint64_t, FaceRef_t> now;
+	for ( const CLighting::BakedFace_t &face : baked )
+	{
+		now.emplace( face.m_nHash, face.m_Face );
+	}
+	std::map<FaceRef_t, LightmapRect_t> rects;
+	std::uint32_t nGone = 0;
+	for ( CLighting::BakedFace_t &face : pRenamed->m_Baked )
+	{
+		const FaceRef_t was = face.m_Face;
+		if ( const auto it = now.find( face.m_nHash ); it != now.end() )
+		{
+			face.m_Face = it->second;
+			now.erase( it );
+		}
+		else
+		{
+			face.m_Face = FaceRef_t{ std::numeric_limits<std::uint32_t>::max(), nGone++ };
+		}
+		if ( const auto rect = loaded.m_Faces.find( was ); rect != loaded.m_Faces.end() )
+		{
+			rects[ face.m_Face ] = rect->second;
+		}
+	}
+	pRenamed->m_Faces = std::move( rects );
+	std::ranges::sort( pRenamed->m_Baked, {}, &CLighting::BakedFace_t::m_Face );
+	return pRenamed;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: The bake's record of a face, in a list sorted by face; null when it has none.
+//-----------------------------------------------------------------------------
+const CLighting::BakedFace_t *FindBaked( std::span<const CLighting::BakedFace_t> baked, FaceRef_t face )
+{
+	const auto it = std::ranges::lower_bound( baked, face, {}, &CLighting::BakedFace_t::m_Face );
+	return it != baked.end() && it->m_Face == face ? &*it : nullptr;
+}
+
+//-----------------------------------------------------------------------------
 // Purpose: The atlas from the light gathered (bounced may be empty), with where each face is.
+//          Faces a bake by chunks hasn't reached (m_bPending) are marked for the next bake.
 //-----------------------------------------------------------------------------
 std::shared_ptr<CLighting> MakeResult( const CScene &scene, const Bake_t &bake, const std::vector<Rgb_t> &direct, const std::vector<Rgb_t> &bounced )
 {
@@ -2179,6 +2953,19 @@ std::shared_ptr<CLighting> MakeResult( const CScene &scene, const Bake_t &bake, 
 	pLighting->m_pInstanceMesh = scene.m_pInstanceMesh;
 	pLighting->m_InstanceFaces.assign( scene.GetInstanceMesh().m_Faces.size(), LightmapRect_t{} );
 	pLighting->m_Unlit = bake.m_Unlit;
+	pLighting->m_Baked = bake.m_Baked;
+	pLighting->m_pBakedTriangles = bake.m_pBakedTriangles;
+	pLighting->m_nLightsHash = bake.m_nLightsHash;
+	pLighting->m_BakedLights = bake.m_Lights;
+	pLighting->m_nSettingsHash = bake.m_nSettingsHash;
+	pLighting->m_nInstanceHash = bake.m_nInstanceHash;
+	for ( const BakeFace_t &face : bake.m_Faces )
+	{
+		if ( face.m_bLit && face.m_nWidth > 0 )
+		{
+			( face.m_bKept ? pLighting->m_nKeptFaces : pLighting->m_nRelitFaces )++;
+		}
+	}
 	std::vector<Rgb_t> final( direct.size() );
 	for ( std::size_t n = 0; n < direct.size(); n++ )
 	{
@@ -2222,6 +3009,24 @@ std::shared_ptr<CLighting> MakeResult( const CScene &scene, const Bake_t &bake, 
 			continue;
 		}
 		const MeshFace_t &meshFace = face.m_pMesh->m_Faces[ face.m_nFace ];
+		if ( face.m_bPending )
+		{
+			// Not reached yet: its light, if it has any, is the bake before's. A bake starting
+			// from this one lights it; an instance's face has no record to say so in, so it
+			// goes without a place.
+			if ( !face.m_bInstance )
+			{
+				const auto baked = std::ranges::lower_bound( pLighting->m_Baked, FaceRef_t{ meshFace.m_nSolid, meshFace.m_nSide }, {}, &CLighting::BakedFace_t::m_Face );
+				if ( baked != pLighting->m_Baked.end() && baked->m_Face == FaceRef_t{ meshFace.m_nSolid, meshFace.m_nSide } )
+				{
+					baked->m_bStale = true;
+				}
+			}
+			if ( !face.m_pBefore || face.m_bInstance )
+			{
+				continue;
+			}
+		}
 		const CVec3 vecFirst = meshFace.m_nVertexCount > 0 ? face.m_pMesh->m_Vertices[ meshFace.m_nFirstVertex ].m_vecPosition : CVec3{};
 		LightmapRect_t rect{ face.m_nX, face.m_nY, face.m_nWidth, face.m_nHeight, face.m_flMinU, face.m_flMinV, face.m_flMaxU, face.m_flMaxV, vecFirst };
 		if ( face.m_bInstance )
@@ -2773,10 +3578,242 @@ std::shared_ptr<const CLighting> BakeLighting( const CScene &scene, std::span<co
 	}
 	CollectFaces( scene, live, known, bake );
 	AddTextureLights( scene, known, names, options, bake );
+	// What this bake reads of each face, for the next one; and against the bake before, what
+	// changed since: the faces that differ, where they are and where they were.
+	bake.m_nLightsHash = HashLights( bake.m_Lights );
+	std::vector<TraceTriangle_t> propTriangles = PropTriangles( scene, extras );
+	bake.m_nSettingsHash = HashSettings( options, propTriangles );
+	Dirty_t dirty;
+	const auto pBakedTriangles = std::make_shared<std::vector<std::array<float, 9>>>();
+	std::vector<std::uint64_t> hashes( bake.m_Faces.size(), 0 );
+	for ( std::size_t f = 0; f < bake.m_Faces.size(); f++ )
+	{
+		const BakeFace_t &face = bake.m_Faces[ f ];
+		if ( face.m_bInstance )
+		{
+			HashValue( bake.m_nInstanceHash, HashFace( face ) );
+			continue;
+		}
+		const MeshFace_t &meshFace = face.m_pMesh->m_Faces[ face.m_nFace ];
+		hashes[ f ] = HashFace( face );
+		CLighting::BakedFace_t baked{ FaceRef_t{ meshFace.m_nSolid, meshFace.m_nSide }, face.m_Bounds, hashes[ f ] };
+		if ( face.m_bBlocks )
+		{
+			baked.m_nFirstTriangle = static_cast<std::uint32_t>( pBakedTriangles->size() );
+			baked.m_nTriangles = static_cast<std::uint32_t>( face.m_Triangles.size() );
+			for ( const std::uint32_t t : face.m_Triangles )
+			{
+				std::array<float, 9> corners{};
+				for ( std::size_t k = 0; k < 3; k++ )
+				{
+					const CVec3 vecCorner = face.m_pMesh->m_Vertices[ face.m_pMesh->m_Indices[ t * 3 + k ] ].m_vecPosition;
+					corners[ k * 3 ] = vecCorner.m_flX;
+					corners[ k * 3 + 1 ] = vecCorner.m_flY;
+					corners[ k * 3 + 2 ] = vecCorner.m_flZ;
+				}
+				pBakedTriangles->push_back( corners );
+			}
+		}
+		bake.m_Baked.push_back( baked );
+	}
+	bake.m_pBakedTriangles = pBakedTriangles;
+	std::ranges::sort( bake.m_Baked, {}, &CLighting::BakedFace_t::m_Face );
+	// Where this bake starts from: the bake before, or one of the earlier bakes handed along
+	// that read more nearly what this one reads (an undo, a setting put back, the map opened
+	// again). One that read just the same is the answer as it stands.
+	const auto usable = [ & ]( const CLighting *pCandidate ) {
+		return pCandidate && pCandidate->m_nWidth > 0 && pCandidate->m_pBakedTriangles && pCandidate->m_nInstanceHash == bake.m_nInstanceHash;
+	};
+	const auto differences = [ & ]( const CLighting &candidate ) {
+		std::size_t nDifferent = candidate.m_nLightsHash != bake.m_nLightsHash ? 1 : 0;
+		std::size_t i = 0;
+		std::size_t j = 0;
+		while ( i < bake.m_Baked.size() && j < candidate.m_Baked.size() )
+		{
+			const CLighting::BakedFace_t &now = bake.m_Baked[ i ];
+			const CLighting::BakedFace_t &before = candidate.m_Baked[ j ];
+			if ( now.m_Face == before.m_Face )
+			{
+				nDifferent += now.m_nHash != before.m_nHash || before.m_bStale ? 1 : 0;
+				i++;
+				j++;
+			}
+			else
+			{
+				nDifferent++;
+				( now.m_Face < before.m_Face ? i : j )++;
+			}
+		}
+		return nDifferent + ( bake.m_Baked.size() - i ) + ( candidate.m_Baked.size() - j );
+	};
+	std::vector<std::shared_ptr<const CLighting>> renamed;
+	const CLighting *pPrevious = usable( options.m_pPrevious.get() ) ? options.m_pPrevious.get() : nullptr;
+	std::size_t nDifferences = pPrevious ? differences( *pPrevious ) : std::numeric_limits<std::size_t>::max();
+	for ( const std::shared_ptr<const CLighting> &pEarlier : options.m_Cache )
+	{
+		if ( !usable( pEarlier.get() ) || pEarlier->m_bUnfinished || pEarlier->m_nSettingsHash != bake.m_nSettingsHash )
+		{
+			continue;
+		}
+		const CLighting *pCandidate = pEarlier.get();
+		if ( pCandidate->m_bLoaded )
+		{
+			renamed.push_back( RenameLoaded( *pCandidate, bake.m_Baked ) );
+			pCandidate = renamed.back().get();
+		}
+		// Too unlike this map (a tenth of its faces differ, on a map of any size) is no start:
+		// lighting again what each difference can have changed would come to more than a
+		// whole bake.
+		const std::size_t nDifferent = differences( *pCandidate );
+		if ( nDifferent < nDifferences && nDifferent <= std::max<std::size_t>( bake.m_Baked.size() / 10, 64 ) )
+		{
+			pPrevious = pCandidate;
+			nDifferences = nDifferent;
+		}
+	}
+	if ( pPrevious && nDifferences == 0 && !pPrevious->m_bUnfinished && pPrevious->m_nSettingsHash == bake.m_nSettingsHash )
+	{
+		const auto lit = [ & ]( const std::shared_ptr<const CMapMesh> &pMesh ) {
+			const auto found = pMesh ? pPrevious->m_Extras.find( pMesh.get() ) : pPrevious->m_Extras.end();
+			return !pMesh || ( found != pPrevious->m_Extras.end() && found->second && found->second->size() == pMesh->m_Vertices.size() );
+		};
+		if ( std::ranges::all_of( extras.m_Props, lit ) && std::ranges::all_of( extras.m_Overlays, lit ) && std::ranges::all_of( extras.m_Points, [ & ]( const auto &point ) { return pPrevious->m_Points.contains( point.first ); } ) )
+		{
+			auto pSame = std::make_shared<CLighting>( *pPrevious );
+			pSame->m_nRevision = scene.m_nRevision;
+			pSame->m_pInstanceMesh = scene.m_pInstanceMesh;
+			pSame->m_Unlit.resize( known.size() );
+			for ( std::size_t i = 0; i < known.size(); i++ )
+			{
+				pSame->m_Unlit[ i ] = !known[ i ].m_bLit;
+			}
+			pSame->m_nKeptFaces = pPrevious->m_nKeptFaces + pPrevious->m_nRelitFaces;
+			pSame->m_nRelitFaces = 0;
+			pSame->m_nLuxels = 0;
+			pSame->m_bFromEarlier = true;
+			pSame->m_Extras.clear();
+			pSame->m_ExtraMeshes.clear();
+			for ( const auto *pMeshes : { &extras.m_Props, &extras.m_Overlays } )
+			{
+				for ( const std::shared_ptr<const CMapMesh> &pMesh : *pMeshes )
+				{
+					if ( pMesh && !pSame->m_Extras.contains( pMesh.get() ) )
+					{
+						pSame->m_Extras[ pMesh.get() ] = pPrevious->m_Extras.at( pMesh.get() );
+						pSame->m_ExtraMeshes.push_back( pMesh );
+					}
+				}
+			}
+			endStage( "The same as an earlier bake" );
+			pSame->m_Stages = std::move( stages );
+			bake.Progress( 100, "Done" );
+			return pSame;
+		}
+	}
+	if ( pPrevious && pPrevious->m_nLightsHash != bake.m_nLightsHash )
+	{
+		// Lights changed: those the bake before doesn't have as they are now, and those of
+		// its own that are no more. Each lights again what its light lands on. The sun and the
+		// sky's ambient reach everything.
+		std::unordered_map<std::uint64_t, int> before;
+		for ( const Light_t &light : pPrevious->m_BakedLights )
+		{
+			before[ HashLight( light ) ]++;
+		}
+		bool bEverywhere = false;
+		const auto changed = [ & ]( const Light_t &light ) {
+			bEverywhere = bEverywhere || light.m_nType == LightType_t::LIGHT_TYPE_SUN || light.m_nType == LightType_t::LIGHT_TYPE_SKY_AMBIENT;
+			dirty.m_Lights.push_back( light );
+		};
+		for ( const Light_t &light : bake.m_Lights )
+		{
+			if ( const auto it = before.find( HashLight( light ) ); it != before.end() && it->second > 0 )
+			{
+				it->second--;
+			}
+			else
+			{
+				changed( light );
+			}
+		}
+		for ( const Light_t &light : pPrevious->m_BakedLights )
+		{
+			if ( int &nLeft = before[ HashLight( light ) ]; nLeft > 0 )
+			{
+				nLeft--;
+				changed( light );
+			}
+		}
+		if ( bEverywhere || dirty.m_Lights.size() > MAX_CHANGED_LIGHTS )
+		{
+			pPrevious = nullptr;
+			dirty.m_Lights.clear();
+		}
+	}
+	if ( pPrevious )
+	{
+		// The changed faces themselves, as they were and as they are, for the lines of light
+		// they are on.
+		std::vector<TraceTriangle_t> changed;
+		const auto addChanged = [ &changed ]( const CLighting::BakedFace_t &baked, const std::vector<std::array<float, 9>> &from ) {
+			for ( std::uint32_t t = 0; t < baked.m_nTriangles && baked.m_nFirstTriangle + t < from.size(); t++ )
+			{
+				const std::array<float, 9> &corners = from[ baked.m_nFirstTriangle + t ];
+				TraceTriangle_t triangle;
+				triangle.m_nFace = 0;
+				triangle.m_V0 = { corners[ 0 ], corners[ 1 ], corners[ 2 ] };
+				triangle.m_E1 = { corners[ 3 ] - corners[ 0 ], corners[ 4 ] - corners[ 1 ], corners[ 5 ] - corners[ 2 ] };
+				triangle.m_E2 = { corners[ 6 ] - corners[ 0 ], corners[ 7 ] - corners[ 1 ], corners[ 8 ] - corners[ 2 ] };
+				changed.push_back( triangle );
+			}
+		};
+		for ( const CLighting::BakedFace_t &now : bake.m_Baked )
+		{
+			const CLighting::BakedFace_t *pBefore = FindBaked( pPrevious->m_Baked, now.m_Face );
+			if ( !pBefore || pBefore->m_nHash != now.m_nHash )
+			{
+				dirty.Add( now.m_Bounds );
+				addChanged( now, *pBakedTriangles );
+				if ( pBefore )
+				{
+					dirty.Add( pBefore->m_Bounds );
+					addChanged( *pBefore, *pPrevious->m_pBakedTriangles );
+				}
+			}
+		}
+		for ( const CLighting::BakedFace_t &before : pPrevious->m_Baked )
+		{
+			if ( !FindBaked( bake.m_Baked, before.m_Face ) )
+			{
+				dirty.Add( before.m_Bounds );
+				addChanged( before, *pPrevious->m_pBakedTriangles );
+			}
+		}
+		if ( !changed.empty() )
+		{
+			bake.m_Changed.Build( std::move( changed ) );
+			bake.m_bChanged = true;
+		}
+	}
+	// The bake before's place for a face, when it has one for it as it is now.
+	const auto previousRect = [ & ]( const BakeFace_t &face ) -> const LightmapRect_t * {
+		if ( !pPrevious )
+		{
+			return nullptr;
+		}
+		if ( face.m_bInstance )
+		{
+			return face.m_nFace < pPrevious->m_InstanceFaces.size() && pPrevious->m_InstanceFaces[ face.m_nFace ].m_nWidth > 0 ? &pPrevious->m_InstanceFaces[ face.m_nFace ] : nullptr;
+		}
+		const MeshFace_t &meshFace = face.m_pMesh->m_Faces[ face.m_nFace ];
+		const auto it = pPrevious->m_Faces.find( FaceRef_t{ meshFace.m_nSolid, meshFace.m_nSide } );
+		return it != pPrevious->m_Faces.end() ? &it->second : nullptr;
+	};
 	for ( BakeFace_t &face : bake.m_Faces )
 	{
-		// Outside the radius: no luxels, but still in the way of light.
-		face.m_bLit = face.m_bLit && InRadius( options, face.m_Bounds );
+		// Outside the radius: no luxels, but still in the way of light. One the bake before lit
+		// stays lit.
+		face.m_bLit = face.m_bLit && ( InRadius( options, face.m_Bounds ) || previousRect( face ) );
 	}
 	bake.m_Unlit.resize( known.size() );
 	for ( std::size_t i = 0; i < known.size(); i++ )
@@ -2827,7 +3864,90 @@ std::shared_ptr<const CLighting> BakeLighting( const CScene &scene, std::span<co
 	bake.m_nStep = nStep;
 	bake.m_nWidth = nWidth;
 	bake.m_nHeight = nHeight;
+	// Luxels of another size can't be kept.
+	if ( pPrevious && pPrevious->m_nStep != nStep )
+	{
+		pPrevious = nullptr;
+	}
 	endStage( "Faces and the atlas" );
+
+	bake.Progress( 5, "Building the tracer" );
+	std::vector<TraceTriangle_t> triangles;
+	for ( std::size_t f = 0; f < bake.m_Faces.size(); f++ )
+	{
+		const BakeFace_t &face = bake.m_Faces[ f ];
+		if ( !face.m_bBlocks )
+		{
+			continue;
+		}
+		const CMapMesh &mesh = *face.m_pMesh;
+		for ( const std::uint32_t t : face.m_Triangles )
+		{
+			TraceTriangle_t triangle;
+			triangle.m_nFace = static_cast<std::uint32_t>( f );
+			std::array<CVec3, 3> corners;
+			for ( std::size_t k = 0; k < 3; k++ )
+			{
+				const MeshVertex_t &vertex = mesh.m_Vertices[ mesh.m_Indices[ t * 3 + k ] ];
+				corners[ k ] = vertex.m_vecPosition;
+				triangle.m_Luxels[ k ] = vertex.m_Luxel;
+			}
+			triangle.m_V0 = { corners[ 0 ].m_flX, corners[ 0 ].m_flY, corners[ 0 ].m_flZ };
+			triangle.m_E1 = { corners[ 1 ].m_flX - corners[ 0 ].m_flX, corners[ 1 ].m_flY - corners[ 0 ].m_flY, corners[ 1 ].m_flZ - corners[ 0 ].m_flZ };
+			triangle.m_E2 = { corners[ 2 ].m_flX - corners[ 0 ].m_flX, corners[ 2 ].m_flY - corners[ 0 ].m_flY, corners[ 2 ].m_flZ - corners[ 0 ].m_flZ };
+			triangles.push_back( triangle );
+		}
+	}
+	// prop_static's models cast shadows: one face stands for them all, lit by nothing and
+	// bouncing nothing.
+	if ( !propTriangles.empty() )
+	{
+		const auto nPropFace = static_cast<std::uint32_t>( bake.m_Faces.size() );
+		bake.m_Faces.emplace_back();
+		for ( TraceTriangle_t &triangle : propTriangles )
+		{
+			triangle.m_nFace = nPropFace;
+		}
+		triangles.insert( triangles.end(), propTriangles.begin(), propTriangles.end() );
+		std::vector<TraceTriangle_t>().swap( propTriangles );
+	}
+	const std::size_t nTriangles = triangles.size();
+	std::vector<TraceTriangle_t> skyTriangles;
+	for ( const TraceTriangle_t &triangle : triangles )
+	{
+		if ( triangle.m_nFace < bake.m_Faces.size() && bake.m_Faces[ triangle.m_nFace ].m_bSky )
+		{
+			skyTriangles.push_back( triangle );
+		}
+	}
+	for ( const TraceTriangle_t &triangle : skyTriangles )
+	{
+		Point_t origin{}, edge1{}, edge2{};
+		for ( std::size_t k = 0; k < 3; k++ )
+		{
+			origin[ k ] = triangle.m_V0[ k ];
+			edge1[ k ] = triangle.m_E1[ k ];
+			edge2[ k ] = triangle.m_E2[ k ];
+		}
+		bake.m_SkyBounds.Add( origin );
+		bake.m_SkyBounds.Add( Add( origin, edge1 ) );
+		bake.m_SkyBounds.Add( Add( origin, edge2 ) );
+	}
+	bake.m_SkyTracer.Build( skyTriangles );
+	bake.m_Tracer.Build( std::move( triangles ) );
+	endStage( "The tracer" );
+	if ( bake.IsCancelled() )
+	{
+		return nullptr;
+	}
+	if ( pPrevious && !dirty.m_Lights.empty() )
+	{
+		for ( const Light_t &light : dirty.m_Lights )
+		{
+			AddLightLanding( bake, light, dirty.m_Landing );
+		}
+		endStage( "Where the changed lights land" );
+	}
 
 	ParallelFor( bake.m_Faces.size(), 64, [ & ]( std::size_t nBegin, std::size_t nEnd ) {
 		for ( std::size_t f = nBegin; f < nEnd && !bake.IsCancelled(); f++ )
@@ -2836,6 +3956,25 @@ std::shared_ptr<const CLighting> BakeLighting( const CScene &scene, std::span<co
 			if ( !face.m_bLit )
 			{
 				continue;
+			}
+			// Kept: the bake before has it as it is now, luxel for luxel, and nothing that changed
+			// can have changed its light.
+			if ( const LightmapRect_t *pRect = previousRect( face ); pRect && pRect->m_nWidth == face.m_nWidth && pRect->m_nHeight == face.m_nHeight && pRect->m_flMinU == face.m_flMinU && pRect->m_flMinV == face.m_flMinV )
+			{
+				const MeshFace_t &meshFace = face.m_pMesh->m_Faces[ face.m_nFace ];
+				const CLighting::BakedFace_t *pBefore = face.m_bInstance ? nullptr : FindBaked( pPrevious->m_Baked, FaceRef_t{ meshFace.m_nSolid, meshFace.m_nSide } );
+				if ( face.m_bInstance || ( pBefore && pBefore->m_nHash == hashes[ f ] ) )
+				{
+					// One an unfinished bake hadn't reached is lit whatever this edit changed.
+					const bool bStale = pBefore && pBefore->m_bStale;
+					if ( !bStale && !IsAffected( bake, dirty, face.m_Bounds ) )
+					{
+						face.m_bKept = true;
+						continue;
+					}
+					face.m_pBefore = pRect;
+					face.m_bStale = bStale;
+				}
 			}
 			PlaceSamples( face, nStep );
 			for ( std::uint32_t l = 0; l < bake.m_Lights.size(); l++ )
@@ -2870,91 +4009,6 @@ std::shared_ptr<const CLighting> BakeLighting( const CScene &scene, std::span<co
 	}
 
 	endStage( "Samples and the lights reaching them" );
-	bake.Progress( 5, "Building the tracer" );
-	std::vector<TraceTriangle_t> triangles;
-	for ( std::size_t f = 0; f < bake.m_Faces.size(); f++ )
-	{
-		const BakeFace_t &face = bake.m_Faces[ f ];
-		if ( !face.m_bBlocks )
-		{
-			continue;
-		}
-		const CMapMesh &mesh = *face.m_pMesh;
-		for ( const std::uint32_t t : face.m_Triangles )
-		{
-			TraceTriangle_t triangle;
-			triangle.m_nFace = static_cast<std::uint32_t>( f );
-			std::array<CVec3, 3> corners;
-			for ( std::size_t k = 0; k < 3; k++ )
-			{
-				const MeshVertex_t &vertex = mesh.m_Vertices[ mesh.m_Indices[ t * 3 + k ] ];
-				corners[ k ] = vertex.m_vecPosition;
-				triangle.m_Luxels[ k ] = vertex.m_Luxel;
-			}
-			triangle.m_V0 = { corners[ 0 ].m_flX, corners[ 0 ].m_flY, corners[ 0 ].m_flZ };
-			triangle.m_E1 = { corners[ 1 ].m_flX - corners[ 0 ].m_flX, corners[ 1 ].m_flY - corners[ 0 ].m_flY, corners[ 1 ].m_flZ - corners[ 0 ].m_flZ };
-			triangle.m_E2 = { corners[ 2 ].m_flX - corners[ 0 ].m_flX, corners[ 2 ].m_flY - corners[ 0 ].m_flY, corners[ 2 ].m_flZ - corners[ 0 ].m_flZ };
-			triangles.push_back( triangle );
-		}
-	}
-	// prop_static's models cast shadows, as vrad's do (unless disableshadows): one face stands for
-	// them all, lit by nothing and bouncing nothing.
-	if ( extras.m_bPropShadows && !extras.m_Props.empty() )
-	{
-		const auto nPropFace = static_cast<std::uint32_t>( bake.m_Faces.size() );
-		bake.m_Faces.emplace_back();
-		std::map<std::uint32_t, bool> casts;
-		auto castsShadow = [ & ]( std::uint32_t nObject ) {
-			const auto [ it, bNew ] = casts.try_emplace( nObject, false );
-			if ( bNew && nObject < scene.GetObjectCount() && !scene.IsSolidObject( nObject ) && !scene.IsDeleted( nObject ) )
-			{
-				const Entity_t &entity = std::as_const( scene.m_Map.m_Entities )[ scene.GetIndex( nObject ) ];
-				it->second = entity.GetClassname() == "prop_static" && KeyNumber( entity, "disableshadows" ) == 0.0;
-			}
-			return it->second;
-		};
-		for ( const std::shared_ptr<const CMapMesh> &pMesh : extras.m_Props )
-		{
-			for ( std::size_t t = 0; pMesh && t + 2 < pMesh->m_Indices.size(); t += 3 )
-			{
-				const MeshVertex_t &a = pMesh->m_Vertices[ pMesh->m_Indices[ t ] ];
-				if ( !castsShadow( a.m_nObject ) )
-				{
-					continue;
-				}
-				const CVec3 b = pMesh->m_Vertices[ pMesh->m_Indices[ t + 1 ] ].m_vecPosition;
-				const CVec3 c = pMesh->m_Vertices[ pMesh->m_Indices[ t + 2 ] ].m_vecPosition;
-				TraceTriangle_t triangle;
-				triangle.m_nFace = nPropFace;
-				triangle.m_V0 = { a.m_vecPosition.m_flX, a.m_vecPosition.m_flY, a.m_vecPosition.m_flZ };
-				triangle.m_E1 = { b.m_flX - a.m_vecPosition.m_flX, b.m_flY - a.m_vecPosition.m_flY, b.m_flZ - a.m_vecPosition.m_flZ };
-				triangle.m_E2 = { c.m_flX - a.m_vecPosition.m_flX, c.m_flY - a.m_vecPosition.m_flY, c.m_flZ - a.m_vecPosition.m_flZ };
-				triangles.push_back( triangle );
-			}
-		}
-	}
-	const std::size_t nTriangles = triangles.size();
-	std::vector<TraceTriangle_t> skyTriangles;
-	for ( const TraceTriangle_t &triangle : triangles )
-	{
-		if ( triangle.m_nFace < bake.m_Faces.size() && bake.m_Faces[ triangle.m_nFace ].m_bSky )
-		{
-			skyTriangles.push_back( triangle );
-		}
-	}
-	for ( const TraceTriangle_t &triangle : skyTriangles )
-	{
-		Point_t origin{}, edge1{}, edge2{};
-		for ( std::size_t k = 0; k < 3; k++ )
-		{
-			origin[ k ] = triangle.m_V0[ k ];
-			edge1[ k ] = triangle.m_E1[ k ];
-			edge2[ k ] = triangle.m_E2[ k ];
-		}
-		bake.m_SkyBounds.Add( origin );
-		bake.m_SkyBounds.Add( Add( origin, edge1 ) );
-		bake.m_SkyBounds.Add( Add( origin, edge2 ) );
-	}
 	// A flat face's hemisphere is the same at each luxel. Testing actual sky vertices can
 	// reject ceilings even when the sky's bounding box reaches in front of their plane.
 	for ( BakeFace_t &face : bake.m_Faces )
@@ -2985,13 +4039,8 @@ std::shared_ptr<const CLighting> BakeLighting( const CScene &scene, std::span<co
 			for ( LuxelSample_t &at : face.m_Samples )
 				at.m_bSkyPossible = false;
 	}
-	bake.m_SkyTracer.Build( std::move( skyTriangles ) );
-	bake.m_Tracer.Build( std::move( triangles ) );
-	endStage( "The tracer" );
-	if ( bake.IsCancelled() )
-	{
-		return nullptr;
-	}
+	std::vector<TraceTriangle_t>().swap( skyTriangles );
+	endStage( "Faces that can see the sky" );
 	{
 		const CSolids solids( bake );
 		ParallelFor( bake.m_Faces.size(), 16, [ & ]( std::size_t nBegin, std::size_t nEnd ) {
@@ -3009,78 +4058,366 @@ std::shared_ptr<const CLighting> BakeLighting( const CScene &scene, std::span<co
 	const std::size_t nTexels = static_cast<std::size_t>( nWidth ) * static_cast<std::size_t>( nHeight );
 	std::vector<Rgb_t> direct( nTexels, Rgb_t{} );
 	std::vector<Rgb_t> source( nTexels, Rgb_t{} ); // what bounces: all but named lights' light
-	std::atomic<std::size_t> nDone{ 0 };
-	const std::size_t nFaces = bake.m_Faces.size();
-	bake.Progress( 10, "Direct light" );
-	ParallelFor( nFaces, 16, [ & ]( std::size_t nBegin, std::size_t nEnd ) {
-		for ( std::size_t f = nBegin; f < nEnd && !bake.IsCancelled(); f++ )
+	// Starting from a bake before: the faces that keep its light, whole or (a wide floor with
+	// the edit at one end of it) in the luxels the edit can't have changed.
+	std::size_t nKept = 0;
+	for ( const BakeFace_t &face : bake.m_Faces )
+	{
+		nKept += face.m_bKept || face.m_pBefore ? 1 : 0;
+	}
+	// 1: the luxel isn't lit now (it keeps the bake before's light, or its chunk isn't the one
+	// being lit).
+	std::vector<std::uint8_t> keptTexels( nKept > 0 ? nTexels : 0, 1 );
+	const auto lightBefore = [ & ]( const LightmapRect_t &rect, int i, int j ) {
+		const std::size_t nFrom = ( static_cast<std::size_t>( rect.m_nY + j ) * static_cast<std::size_t>( pPrevious->m_nWidth ) + static_cast<std::size_t>( rect.m_nX + i ) ) * 4;
+		return Rgb_t{ HalfToFloat( pPrevious->m_Texels[ nFrom ] ) * 255.0f, HalfToFloat( pPrevious->m_Texels[ nFrom + 1 ] ) * 255.0f, HalfToFloat( pPrevious->m_Texels[ nFrom + 2 ] ) * 255.0f };
+	};
+	// The direct light of some rows of a face's luxels. With a bake before, the luxels the edit
+	// can't have changed are left as they are (that bake's light, put there first):
+	// pastChanges is the face's LightsPastChanges. visibility: the whole face's, for its
+	// shadows' edges afterwards (empty when they aren't smoothed).
+	const std::size_t nSuns = static_cast<std::size_t>( std::ranges::count( bake.m_Lights, LightType_t::LIGHT_TYPE_SUN, &Light_t::m_nType ) );
+	const auto visibilityWords = [ & ]( const BakeFace_t &face ) { return ( face.m_Lights.size() + nSuns * SUN_SPREAD_SAMPLES + 63 ) / 64; };
+	const auto lightRows = [ & ]( std::size_t f, int nFromRow, int nToRow, std::span<std::uint64_t> visibility, std::span<const std::uint32_t> pastChanges ) {
+		const BakeFace_t &face = bake.m_Faces[ f ];
+		const std::size_t nWords = visibilityWords( face );
+		// What blocked each light last, tried first for the next luxel.
+		std::vector<std::uint32_t> hints( face.m_Lights.size(), CTracer::NO_HINT );
+		const bool bKeeps = face.m_pBefore && !face.m_bStale;
+		const bool bBounces = bKeeps && dirty.m_Landing.Most( face.m_Bounds, true ) >= LIGHT_CHANGE * LANDING_SHARE;
+		for ( int j = nFromRow; j < nToRow; j++ )
 		{
-			const BakeFace_t &face = bake.m_Faces[ f ];
-			if ( !face.m_bLit )
+			for ( int i = 0; i < face.m_nWidth; i++ )
 			{
-				continue;
-			}
-			const std::size_t nSuns = static_cast<std::size_t>( std::ranges::count( bake.m_Lights, LightType_t::LIGHT_TYPE_SUN, &Light_t::m_nType ) );
-			const std::size_t nWords = ( face.m_Lights.size() + nSuns * SUN_SPREAD_SAMPLES + 63 ) / 64;
-			std::vector<std::uint64_t> visibility( options.m_bSmoothShadows ? face.m_Samples.size() * nWords : 0 );
-			// What blocked each light last, tried first for the next luxel.
-			std::vector<std::uint32_t> hints( face.m_Lights.size(), CTracer::NO_HINT );
-			for ( int j = 0; j < face.m_nHeight; j++ )
-			{
-				for ( int i = 0; i < face.m_nWidth; i++ )
+				const std::size_t nTexel = bake.TexelIndex( face, i, j );
+				const LuxelSample_t &sample = face.m_Samples[ static_cast<std::size_t>( j * face.m_nWidth + i ) ];
+				if ( bKeeps && !IsLuxelAffected( bake, dirty, face, sample, pastChanges, std::ranges::max( lightBefore( *face.m_pBefore, i, j ) ), bBounces ) )
 				{
-					const std::size_t nTexel = bake.TexelIndex( face, i, j );
-					const LuxelSample_t &sample = face.m_Samples[ static_cast<std::size_t>( j * face.m_nWidth + i ) ];
-					if ( !sample.m_bBuried )
+					continue;
+				}
+				if ( !keptTexels.empty() )
+				{
+					keptTexels[ nTexel ] = 0;
+				}
+				if ( !sample.m_bBuried )
+				{
+					direct[ nTexel ] = DirectLight( bake, face.m_Lights, sample, static_cast<std::uint32_t>( nTexel ), &source[ nTexel ], true, hints, visibility.empty() ? std::span<std::uint64_t>{} : visibility.subspan( static_cast<std::size_t>( j * face.m_nWidth + i ) * nWords, nWords ) );
+				}
+			}
+		}
+	};
+	const auto smoothFace = [ & ]( std::size_t f, std::span<const std::uint64_t> visibility ) {
+		const BakeFace_t &face = bake.m_Faces[ f ];
+		SmoothShadowEdges( bake, face, visibility, visibilityWords( face ), direct, source, face.m_pBefore ? std::span<const std::uint8_t>{ keptTexels } : std::span<const std::uint8_t>{} );
+	};
+	const std::vector<Point_t> skyDirs = CosineDirections( std::max( options.m_nSkySamples, 1 ) );
+	const std::vector<Point_t> bounceDirs = CosineDirections( std::max( options.m_nBounceSamples, 1 ) );
+	const auto ambient = std::ranges::find( bake.m_Lights, LightType_t::LIGHT_TYPE_SKY_AMBIENT, &Light_t::m_nType );
+	const bool bSkyBounces = ambient != bake.m_Lights.end() && !ambient->m_bNamed;
+	std::vector<Rgb_t> bounced( nTexels, Rgb_t{} );
+	int nFirstPass = 0;
+	if ( nKept > 0 )
+	{
+		// From the bake before: what it lit keeps that light to begin with, and what the edit
+		// can have changed is lit again chunk by chunk, each one through (its direct light,
+		// the sky's, and one gather of what bounces off everything as it stands) before the
+		// next, so that what is seen first is done first and a bake cut short has whole chunks
+		// to show for it. What bounces is source: a kept luxel's is all its light.
+		ParallelFor( bake.m_Faces.size(), 64, [ & ]( std::size_t nBegin, std::size_t nEnd ) {
+			for ( std::size_t f = nBegin; f < nEnd; f++ )
+			{
+				const BakeFace_t &face = bake.m_Faces[ f ];
+				const LightmapRect_t *pRect = !face.m_bLit ? nullptr : face.m_bKept ? previousRect( face )
+																					: face.m_pBefore;
+				for ( int j = 0; pRect && j < face.m_nHeight; j++ )
+				{
+					for ( int i = 0; i < face.m_nWidth; i++ )
 					{
-						direct[ nTexel ] = DirectLight( bake, face.m_Lights, sample, static_cast<std::uint32_t>( nTexel ), &source[ nTexel ], true, hints, options.m_bSmoothShadows ? std::span( visibility ).subspan( static_cast<std::size_t>( j * face.m_nWidth + i ) * nWords, nWords ) : std::span<std::uint64_t>{} );
+						const std::size_t nTexel = bake.TexelIndex( face, i, j );
+						direct[ nTexel ] = source[ nTexel ] = lightBefore( *pRect, i, j );
 					}
 				}
 			}
-			if ( options.m_bSmoothShadows )
-				SmoothShadowEdges( bake, face, visibility, nWords, direct, source );
-		}
-		const std::size_t n = nDone.fetch_add( nEnd - nBegin ) + ( nEnd - nBegin );
-		bake.Progress( 10 + static_cast<int>( n * 40 / std::max<std::size_t>( nFaces, 1 ) ), "Direct light" );
-	} );
-	if ( bake.IsCancelled() )
-	{
-		return nullptr;
-	}
-	endStage( options.m_bSmoothShadows ? "Direct light and shadow edges" : "Direct light" );
-	FillBuried( bake, direct );
-	FillBuried( bake, source );
-	endStage( "Buried luxels" );
-	// The sky's ambient is soft: gathered on a sparser grid.
-	bake.Progress( 50, "Sky light" );
-	const std::vector<Point_t> skyDirs = CosineDirections( std::max( options.m_nSkySamples, 1 ) );
-	std::vector<Rgb_t> sky( nTexels, Rgb_t{} );
-	GatherSparse( bake, std::max( 1, options.m_nSkySpacing ), SKY_BLUR, sky, [ & ]( const LuxelSample_t &sample, std::uint32_t nSeed ) { return SkyAmbient( bake, sample, nSeed, skyDirs ); } );
-	FillBuried( bake, sky );
-	const auto ambient = std::ranges::find( bake.m_Lights, LightType_t::LIGHT_TYPE_SKY_AMBIENT, &Light_t::m_nType );
-	const bool bSkyBounces = ambient != bake.m_Lights.end() && !ambient->m_bNamed;
-	for ( std::size_t n = 0; n < nTexels; n++ )
-	{
-		for ( std::size_t k = 0; k < 3; k++ )
+		} );
+		endStage( "Light kept from the bake before" );
+		// The faces with no light at all first (the ones the edit made or moved: until lit
+		// they are drawn without any), then the nearest to where the map is looked at from.
+		std::vector<std::uint32_t> todo;
+		for ( std::size_t f = 0; f < bake.m_Faces.size(); f++ )
 		{
-			direct[ n ][ k ] += sky[ n ][ k ];
-			source[ n ][ k ] += bSkyBounces ? sky[ n ][ k ] : 0.0f;
+			BakeFace_t &face = bake.m_Faces[ f ];
+			if ( face.m_bLit && !face.m_bKept && !face.m_Samples.empty() )
+			{
+				face.m_bIdle = face.m_bPending = true;
+				todo.push_back( static_cast<std::uint32_t>( f ) );
+			}
 		}
+		std::vector<double> distance( bake.m_Faces.size(), 0.0 );
+		if ( options.m_ViewPoint )
+		{
+			const Box_t eye{ *options.m_ViewPoint, *options.m_ViewPoint };
+			for ( const std::uint32_t f : todo )
+			{
+				distance[ f ] = GapSquared( eye, bake.m_Faces[ f ].m_Bounds );
+			}
+		}
+		std::ranges::stable_sort( todo, [ & ]( std::uint32_t a, std::uint32_t b ) {
+			const bool bLitA = bake.m_Faces[ a ].m_pBefore != nullptr;
+			const bool bLitB = bake.m_Faces[ b ].m_pBefore != nullptr;
+			return bLitA != bLitB ? bLitB : distance[ a ] < distance[ b ];
+		} );
+		const auto eachTexel = [ & ]( std::span<const std::uint32_t> faces, auto &&visit ) {
+			for ( const std::uint32_t f : faces )
+			{
+				const BakeFace_t &face = bake.m_Faces[ f ];
+				for ( int j = 0; j < face.m_nHeight; j++ )
+				{
+					for ( int i = 0; i < face.m_nWidth; i++ )
+					{
+						visit( face, bake.TexelIndex( face, i, j ), i, j );
+					}
+				}
+			}
+		};
+		// What a bake cut short leaves for the next: the chunks done, the rest marked, and the
+		// bake before's props, overlays and points with those the edit can have changed named.
+		std::optional<std::pair<std::set<const CMapMesh *>, std::set<std::uint32_t>>> stale;
+		const auto show = [ & ] {
+			if ( !stale )
+			{
+				stale.emplace( pPrevious->m_StaleExtras, pPrevious->m_StalePoints );
+				for ( const std::shared_ptr<const CMapMesh> &pMesh : pPrevious->m_ExtraMeshes )
+				{
+					Box_t bounds;
+					for ( const MeshVertex_t &vertex : pMesh->m_Vertices )
+					{
+						bounds.Add( ToPoint( vertex.m_vecPosition ) );
+					}
+					if ( IsAffected( bake, dirty, bounds ) )
+					{
+						stale->first.insert( pMesh.get() );
+					}
+				}
+				for ( const auto &[ nObject, origin ] : extras.m_Points )
+				{
+					if ( IsAffected( bake, dirty, Box_t{ origin, origin } ) )
+					{
+						stale->second.insert( nObject );
+					}
+				}
+			}
+			const std::shared_ptr<CLighting> pPartial = MakeResult( scene, bake, direct, bounced );
+			pPartial->m_bUnfinished = true;
+			pPartial->m_Extras = pPrevious->m_Extras;
+			pPartial->m_ExtraMeshes = pPrevious->m_ExtraMeshes;
+			pPartial->m_Points = pPrevious->m_Points;
+			pPartial->m_StaleExtras = stale->first;
+			pPartial->m_StalePoints = stale->second;
+			pPartial->m_nTriangles = nTriangles;
+			options.m_pfnPartial( pPartial );
+		};
+		std::vector<Rgb_t> gathered( nTexels, Rgb_t{} );
+		std::vector<std::uint8_t> relit( nTexels, 0 );
+		std::array<double, 3> spent{}; // direct, sky, bounce
+		auto lapStart = std::chrono::steady_clock::now();
+		const auto lap = [ & ]( std::size_t nStage ) {
+			const auto now = std::chrono::steady_clock::now();
+			spent[ nStage ] += std::chrono::duration<double, std::milli>( now - lapStart ).count();
+			lapStart = now;
+		};
+		auto shown = lapStart;
+		std::size_t nChunks = 0;
+		for ( std::size_t nFrom = 0; nFrom < todo.size(); nChunks++ )
+		{
+			std::size_t nTo = nFrom;
+			for ( std::size_t nLuxels = 0; nTo < todo.size() && ( nTo == nFrom || nLuxels < options.m_nChunkLuxels ); nTo++ )
+			{
+				nLuxels += bake.m_Faces[ todo[ nTo ] ].m_Samples.size();
+			}
+			const std::span<const std::uint32_t> chunk{ todo.data() + nFrom, nTo - nFrom };
+			bake.Progress( 10 + static_cast<int>( nFrom * 60 / todo.size() ), "Lighting what changed" );
+			for ( const std::uint32_t f : chunk )
+			{
+				bake.m_Faces[ f ].m_bIdle = false;
+			}
+			// A wide face is as much work as a hundred small ones: its rows go in bands, lit
+			// side by side like the faces.
+			struct Band_t
+			{
+				std::uint32_t m_nSlot = 0; // in the chunk
+				int m_nFromRow = 0;
+				int m_nToRow = 0;
+			};
+			std::vector<Band_t> bands;
+			std::vector<std::vector<std::uint64_t>> visibility( chunk.size() );
+			std::vector<std::vector<std::uint32_t>> pastChanges( chunk.size() );
+			for ( std::uint32_t n = 0; n < chunk.size(); n++ )
+			{
+				const BakeFace_t &face = bake.m_Faces[ chunk[ n ] ];
+				if ( options.m_bSmoothShadows )
+				{
+					visibility[ n ].assign( face.m_Samples.size() * visibilityWords( face ), 0 );
+				}
+				if ( face.m_pBefore && !face.m_bStale )
+				{
+					pastChanges[ n ] = LightsPastChanges( bake, dirty, face );
+				}
+				const int nRows = std::max( 1, 256 / std::max( face.m_nWidth, 1 ) );
+				for ( int j = 0; j < face.m_nHeight; j += nRows )
+				{
+					bands.push_back( { n, j, std::min( j + nRows, face.m_nHeight ) } );
+				}
+			}
+			ParallelFor( bands.size(), 1, [ & ]( std::size_t nBegin, std::size_t nEnd ) {
+				for ( std::size_t n = nBegin; n < nEnd && !bake.IsCancelled(); n++ )
+				{
+					const Band_t &band = bands[ n ];
+					lightRows( chunk[ band.m_nSlot ], band.m_nFromRow, band.m_nToRow, visibility[ band.m_nSlot ], pastChanges[ band.m_nSlot ] );
+				}
+			} );
+			if ( options.m_bSmoothShadows )
+			{
+				ParallelFor( chunk.size(), 4, [ & ]( std::size_t nBegin, std::size_t nEnd ) {
+					for ( std::size_t n = nBegin; n < nEnd && !bake.IsCancelled(); n++ )
+					{
+						smoothFace( chunk[ n ], visibility[ n ] );
+					}
+				} );
+			}
+			if ( bake.IsCancelled() )
+			{
+				return nullptr;
+			}
+			FillBuried( bake, direct );
+			FillBuried( bake, source );
+			// The fills go over the buried luxels that keep their light too.
+			eachTexel( chunk, [ & ]( const BakeFace_t &face, std::size_t nTexel, int i, int j ) {
+				if ( face.m_pBefore && keptTexels[ nTexel ] )
+				{
+					direct[ nTexel ] = source[ nTexel ] = lightBefore( *face.m_pBefore, i, j );
+				}
+			} );
+			lap( 0 );
+			GatherSparse( bake, std::max( 1, options.m_nSkySpacing ), SKY_BLUR, gathered, [ & ]( const LuxelSample_t &sample, std::uint32_t nSeed ) { return SkyAmbient( bake, sample, nSeed, skyDirs ); }, &keptTexels );
+			FillBuried( bake, gathered );
+			eachTexel( chunk, [ & ]( const BakeFace_t &, std::size_t nTexel, int, int ) {
+				for ( std::size_t k = 0; k < 3 && !keptTexels[ nTexel ]; k++ )
+				{
+					direct[ nTexel ][ k ] += gathered[ nTexel ][ k ];
+					source[ nTexel ][ k ] += bSkyBounces ? gathered[ nTexel ][ k ] : 0.0f;
+				}
+				gathered[ nTexel ] = {};
+			} );
+			lap( 1 );
+			if ( bake.IsCancelled() )
+			{
+				return nullptr;
+			}
+			if ( options.m_nBounces > 0 )
+			{
+				GatherSparse( bake, std::max( 1, options.m_nBounceSpacing ), BOUNCE_BLUR, gathered, [ & ]( const LuxelSample_t &sample, std::uint32_t nSeed ) { return GatherBounce( bake, source, sample, nSeed ^ 0x9e3779b9u, bounceDirs ); }, &keptTexels );
+				FillBuried( bake, gathered );
+				if ( bake.IsCancelled() )
+				{
+					return nullptr;
+				}
+				eachTexel( chunk, [ & ]( const BakeFace_t &, std::size_t nTexel, int, int ) {
+					for ( std::size_t k = 0; k < 3 && !keptTexels[ nTexel ]; k++ )
+					{
+						source[ nTexel ][ k ] += gathered[ nTexel ][ k ];
+						bounced[ nTexel ][ k ] = gathered[ nTexel ][ k ];
+					}
+					gathered[ nTexel ] = {};
+				} );
+			}
+			lap( 2 );
+			// Done: the chunks after this one leave it alone, and see its light.
+			eachTexel( chunk, [ & ]( const BakeFace_t &, std::size_t nTexel, int, int ) {
+				relit[ nTexel ] = keptTexels[ nTexel ] ? 0 : 1;
+				keptTexels[ nTexel ] = 1;
+			} );
+			for ( const std::uint32_t f : chunk )
+			{
+				bake.m_Faces[ f ].m_bIdle = true;
+				bake.m_Faces[ f ].m_bPending = false;
+			}
+			nFrom = nTo;
+			if ( options.m_pfnPartial && nFrom < todo.size() && std::chrono::duration<double, std::milli>( std::chrono::steady_clock::now() - shown ).count() >= options.m_nPartialMs )
+			{
+				show();
+				shown = lapStart = std::chrono::steady_clock::now();
+			}
+		}
+		// Every chunk has its light: the passes that follow settle what they bounce onto each
+		// other, over all of them at once.
+		eachTexel( todo, [ & ]( const BakeFace_t &, std::size_t nTexel, int, int ) { keptTexels[ nTexel ] = relit[ nTexel ] ? 0 : 1; } );
+		for ( const std::uint32_t f : todo )
+		{
+			bake.m_Faces[ f ].m_bIdle = false;
+		}
+		const std::string szChunks = " (" + std::to_string( nChunks ) + ( nChunks == 1 ? " chunk)" : " chunks)" );
+		stages.push_back( { ( options.m_bSmoothShadows ? "Direct light and shadow edges" : "Direct light" ) + szChunks, spent[ 0 ] } );
+		stages.push_back( { "Sky light" + szChunks, spent[ 1 ] } );
+		stages.push_back( { "Bounce onto the faces lit again, pass 1" + szChunks, spent[ 2 ] } );
+		stageStart = std::chrono::steady_clock::now();
+		nFirstPass = 1;
 	}
-	std::vector<Rgb_t>().swap( sky );
-	endStage( "Sky light" );
-	if ( bake.IsCancelled() )
+	else
 	{
-		return nullptr;
-	}
-	if ( options.m_pfnPartial && options.m_nBounces > 0 )
-	{
-		options.m_pfnPartial( MakeResult( scene, bake, direct, {} ) );
+		std::atomic<std::size_t> nDone{ 0 };
+		const std::size_t nFaces = bake.m_Faces.size();
+		bake.Progress( 10, "Direct light" );
+		ParallelFor( nFaces, 16, [ & ]( std::size_t nBegin, std::size_t nEnd ) {
+			for ( std::size_t f = nBegin; f < nEnd && !bake.IsCancelled(); f++ )
+			{
+				const BakeFace_t &face = bake.m_Faces[ f ];
+				if ( !face.m_bLit )
+				{
+					continue;
+				}
+				std::vector<std::uint64_t> visibility( options.m_bSmoothShadows ? face.m_Samples.size() * visibilityWords( face ) : 0 );
+				lightRows( f, 0, face.m_nHeight, visibility, {} );
+				if ( options.m_bSmoothShadows )
+				{
+					smoothFace( f, visibility );
+				}
+			}
+			const std::size_t n = nDone.fetch_add( nEnd - nBegin ) + ( nEnd - nBegin );
+			bake.Progress( 10 + static_cast<int>( n * 40 / std::max<std::size_t>( nFaces, 1 ) ), "Direct light" );
+		} );
+		if ( bake.IsCancelled() )
+		{
+			return nullptr;
+		}
+		endStage( options.m_bSmoothShadows ? "Direct light and shadow edges" : "Direct light" );
+		FillBuried( bake, direct );
+		FillBuried( bake, source );
+		endStage( "Buried luxels" );
+		// The sky's ambient is soft: gathered on a sparser grid.
+		bake.Progress( 50, "Sky light" );
+		std::vector<Rgb_t> sky( nTexels, Rgb_t{} );
+		GatherSparse( bake, std::max( 1, options.m_nSkySpacing ), SKY_BLUR, sky, [ & ]( const LuxelSample_t &sample, std::uint32_t nSeed ) { return SkyAmbient( bake, sample, nSeed, skyDirs ); } );
+		FillBuried( bake, sky );
+		for ( std::size_t n = 0; n < nTexels; n++ )
+		{
+			for ( std::size_t k = 0; k < 3; k++ )
+			{
+				direct[ n ][ k ] += sky[ n ][ k ];
+				source[ n ][ k ] += bSkyBounces ? sky[ n ][ k ] : 0.0f;
+			}
+		}
+		endStage( "Sky light" );
+		if ( bake.IsCancelled() )
+		{
+			return nullptr;
+		}
+		if ( options.m_pfnPartial && options.m_nBounces > 0 )
+		{
+			options.m_pfnPartial( MakeResult( scene, bake, direct, {} ) );
+		}
 	}
 
 	// Bounces: each pass gathers what the last one left on the faces.
-	std::vector<Rgb_t> bounced( nTexels, Rgb_t{} );
-	const std::vector<Point_t> bounceDirs = CosineDirections( std::max( options.m_nBounceSamples, 1 ) );
 	std::vector<Rgb_t> last = std::move( source );
 	std::array<double, 3> lastTotal{};
 	std::array<double, 3> ratio{};
@@ -3089,7 +4426,47 @@ std::shared_ptr<const CLighting> BakeLighting( const CScene &scene, std::span<co
 		for ( std::size_t k = 0; k < 3; k++ )
 			accumulated[ k ] += value[ k ];
 	int nPasses = 0;
-	for ( int nBounce = 0; nBounce < options.m_nBounces; nBounce++ )
+	// With faces kept, their light has every bounce in it already: what the faces lit again get
+	// from all the faces is one gather of what those hold, made again as their own share of it
+	// settles (each pass takes the last one's place, where a whole bake's passes add up). The
+	// first was made chunk by chunk.
+	for ( int nPass = nFirstPass; nKept > 0 && nPass < std::min( options.m_nBounces, 3 ); nPass++ )
+	{
+		bake.Progress( 60 + 40 * nPass / 3, "Bounced light" );
+		std::vector<Rgb_t> next( nTexels, Rgb_t{} );
+		const std::uint32_t nSalt = static_cast<std::uint32_t>( nPass + 1 ) * 0x9e3779b9u;
+		GatherSparse( bake, std::max( 1, options.m_nBounceSpacing ), BOUNCE_BLUR, next, [ & ]( const LuxelSample_t &sample, std::uint32_t nSeed ) { return GatherBounce( bake, last, sample, nSeed ^ nSalt, bounceDirs ); }, &keptTexels );
+		FillBuried( bake, next );
+		if ( bake.IsCancelled() )
+		{
+			return nullptr;
+		}
+		for ( const BakeFace_t &face : bake.m_Faces )
+		{
+			if ( !face.m_bLit || face.m_bKept )
+			{
+				continue;
+			}
+			for ( int j = 0; j < face.m_nHeight; j++ )
+			{
+				for ( int i = 0; i < face.m_nWidth; i++ )
+				{
+					const std::size_t nTexel = bake.TexelIndex( face, i, j );
+					if ( keptTexels[ nTexel ] )
+					{
+						continue;
+					}
+					for ( std::size_t k = 0; k < 3; k++ )
+					{
+						last[ nTexel ][ k ] += next[ nTexel ][ k ] - bounced[ nTexel ][ k ];
+						bounced[ nTexel ][ k ] = next[ nTexel ][ k ];
+					}
+				}
+			}
+		}
+		endStage( "Bounce onto the faces lit again, pass " + std::to_string( nPass + 1 ) );
+	}
+	for ( int nBounce = 0; nKept == 0 && nBounce < options.m_nBounces; nBounce++ )
 	{
 		bake.Progress( 60 + 40 * nBounce / std::max( options.m_nBounces, 1 ), "Bounced light" );
 		std::vector<Rgb_t> next( nTexels, Rgb_t{} );
@@ -3126,7 +4503,7 @@ std::shared_ptr<const CLighting> BakeLighting( const CScene &scene, std::span<co
 		if ( options.m_bConverge && nPasses >= 2 && bSettled )
 			break;
 	}
-	if ( nPasses >= 2 && options.m_bConverge )
+	if ( nKept == 0 && nPasses >= 2 && options.m_bConverge )
 	{
 		// vrad bounces until the light stops changing. Each pass here brought about the same
 		// share of the one before, so the passes not made add up to the last one times
@@ -3158,9 +4535,34 @@ std::shared_ptr<const CLighting> BakeLighting( const CScene &scene, std::span<co
 			}
 		}
 		std::vector<Rgb_t>().swap( bounced );
+		// With faces kept, a prop, overlay or sprite keeps the bake before's light too when
+		// nothing that changed can have changed it.
+		const auto keptExtra = [ & ]( const std::shared_ptr<const CMapMesh> &pMesh ) {
+			if ( nKept == 0 || pPrevious->m_StaleExtras.contains( pMesh.get() ) )
+			{
+				return false;
+			}
+			const auto before = pPrevious->m_Extras.find( pMesh.get() );
+			if ( before == pPrevious->m_Extras.end() || !before->second || before->second->size() != pMesh->m_Vertices.size() )
+			{
+				return false;
+			}
+			Box_t bounds;
+			for ( const MeshVertex_t &vertex : pMesh->m_Vertices )
+			{
+				bounds.Add( ToPoint( vertex.m_vecPosition ) );
+			}
+			if ( IsAffected( bake, dirty, bounds ) )
+			{
+				return false;
+			}
+			pLighting->m_Extras[ pMesh.get() ] = before->second;
+			pLighting->m_ExtraMeshes.push_back( pMesh );
+			return true;
+		};
 		for ( const std::shared_ptr<const CMapMesh> &pMesh : extras.m_Props )
 		{
-			if ( pMesh && !pLighting->m_Extras.contains( pMesh.get() ) )
+			if ( pMesh && !pLighting->m_Extras.contains( pMesh.get() ) && !keptExtra( pMesh ) )
 			{
 				pLighting->m_Extras[ pMesh.get() ] = std::make_shared<const std::vector<LightVertex_t>>( LightPropVertices( bake, total, *pMesh ) );
 				pLighting->m_ExtraMeshes.push_back( pMesh );
@@ -3198,7 +4600,7 @@ std::shared_ptr<const CLighting> BakeLighting( const CScene &scene, std::span<co
 			surfaces.Build( std::move( lit ) );
 			for ( const std::shared_ptr<const CMapMesh> &pMesh : extras.m_Overlays )
 			{
-				if ( pMesh && !pLighting->m_Extras.contains( pMesh.get() ) )
+				if ( pMesh && !pLighting->m_Extras.contains( pMesh.get() ) && !keptExtra( pMesh ) )
 				{
 					pLighting->m_Extras[ pMesh.get() ] = std::make_shared<const std::vector<LightVertex_t>>( LightOverlayVertices( bake, surfaces, total, *pMesh ) );
 					pLighting->m_ExtraMeshes.push_back( pMesh );
@@ -3212,6 +4614,14 @@ std::shared_ptr<const CLighting> BakeLighting( const CScene &scene, std::span<co
 		{
 			Box_t at;
 			at.Add( origin );
+			if ( nKept > 0 )
+			{
+				if ( const auto before = pPrevious->m_Points.find( nObject ); before != pPrevious->m_Points.end() && !pPrevious->m_StalePoints.contains( nObject ) && !IsAffected( bake, dirty, at ) )
+				{
+					pLighting->m_Points[ nObject ] = before->second;
+					continue;
+				}
+			}
 			const std::vector<std::uint32_t> lights = LightsReaching( bake, at );
 			Rgb_t sum{};
 			for ( const Point_t &normal : { Point_t{ 1, 0, 0 }, Point_t{ -1, 0, 0 }, Point_t{ 0, 1, 0 }, Point_t{ 0, -1, 0 }, Point_t{ 0, 0, 1 }, Point_t{ 0, 0, -1 } } )
@@ -3239,7 +4649,307 @@ std::shared_ptr<const CLighting> BakeLighting( const CScene &scene, std::span<co
 			pLighting->m_nLuxels += face.m_Samples.size();
 		}
 	}
+	// Not those that kept their light in a face lit again.
+	for ( const BakeFace_t &face : bake.m_Faces )
+	{
+		for ( int j = 0; face.m_pBefore && j < face.m_nHeight; j++ )
+		{
+			for ( int i = 0; i < face.m_nWidth; i++ )
+			{
+				pLighting->m_nLuxels -= keptTexels[ bake.TexelIndex( face, i, j ) ] ? 1 : 0;
+			}
+		}
+	}
 	bake.Progress( 100, "Done" );
+	return pLighting;
+}
+
+namespace
+{
+
+// The file's first bytes, and the version of what follows. A change to what a bake makes of the
+// same map (or to what is written here) takes a new version, so files from before are left
+// unread.
+constexpr std::array<char, 4> LIGHTING_MAGIC{ 'X', 'V', 'L', 'T' };
+constexpr std::uint32_t LIGHTING_VERSION = 1;
+
+//-----------------------------------------------------------------------------
+// Purpose: A value's bytes, appended.
+//-----------------------------------------------------------------------------
+template <typename T>
+void Put( std::vector<std::uint8_t> &out, const T &value )
+{
+	static_assert( std::is_trivially_copyable_v<T> );
+	const std::size_t nAt = out.size();
+	out.resize( nAt + sizeof( T ) );
+	std::memcpy( out.data() + nAt, &value, sizeof( T ) );
+}
+
+// Reads values back in the order Put wrote them; m_bOk goes false past the end.
+struct LightingReader_t
+{
+	std::span<const std::uint8_t> m_Bytes;
+	std::size_t m_nAt = 0;
+	bool m_bOk = true;
+
+	template <typename T>
+	[[nodiscard]] T Get()
+	{
+		static_assert( std::is_trivially_copyable_v<T> );
+		T value{};
+		if ( !m_bOk || m_Bytes.size() - m_nAt < sizeof( T ) )
+		{
+			m_bOk = false;
+			return value;
+		}
+		std::memcpy( &value, m_Bytes.data() + m_nAt, sizeof( T ) );
+		m_nAt += sizeof( T );
+		return value;
+	}
+
+	// A count of things nBytes each: 0 (and not ok) when the file hasn't that many left.
+	[[nodiscard]] std::size_t GetCount( std::size_t nBytes )
+	{
+		const auto nCount = Get<std::uint64_t>();
+		if ( !m_bOk || nCount > ( m_Bytes.size() - m_nAt ) / std::max<std::size_t>( nBytes, 1 ) )
+		{
+			m_bOk = false;
+			return 0;
+		}
+		return static_cast<std::size_t>( nCount );
+	}
+};
+
+//-----------------------------------------------------------------------------
+// Purpose: A face's place in the atlas, field by field (the struct has gaps).
+//-----------------------------------------------------------------------------
+void PutRect( std::vector<std::uint8_t> &out, const LightmapRect_t &rect )
+{
+	for ( const int n : { rect.m_nX, rect.m_nY, rect.m_nWidth, rect.m_nHeight } )
+	{
+		Put( out, static_cast<std::int32_t>( n ) );
+	}
+	for ( const float fl : { rect.m_flMinU, rect.m_flMinV, rect.m_flMaxU, rect.m_flMaxV, rect.m_vecFirst.m_flX, rect.m_vecFirst.m_flY, rect.m_vecFirst.m_flZ } )
+	{
+		Put( out, fl );
+	}
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+LightmapRect_t GetRect( LightingReader_t &in )
+{
+	LightmapRect_t rect;
+	rect.m_nX = in.Get<std::int32_t>();
+	rect.m_nY = in.Get<std::int32_t>();
+	rect.m_nWidth = in.Get<std::int32_t>();
+	rect.m_nHeight = in.Get<std::int32_t>();
+	rect.m_flMinU = in.Get<float>();
+	rect.m_flMinV = in.Get<float>();
+	rect.m_flMaxU = in.Get<float>();
+	rect.m_flMaxV = in.Get<float>();
+	rect.m_vecFirst.m_flX = in.Get<float>();
+	rect.m_vecFirst.m_flY = in.Get<float>();
+	rect.m_vecFirst.m_flZ = in.Get<float>();
+	return rect;
+}
+
+constexpr std::size_t RECT_BYTES = 4 * sizeof( std::int32_t ) + 7 * sizeof( float );
+constexpr std::size_t LIGHT_BYTES = sizeof( std::int32_t ) + 6 * sizeof( double ) + 3 * sizeof( float ) + 11 * sizeof( double ) + sizeof( std::uint8_t );
+constexpr std::size_t BAKED_BYTES = 2 * sizeof( std::uint32_t ) + 6 * sizeof( double ) + sizeof( std::uint64_t ) + 2 * sizeof( std::uint32_t );
+
+} // namespace
+
+//-----------------------------------------------------------------------------
+// Purpose: See the header. The atlas goes without its fourth channel, which is always 1.
+//-----------------------------------------------------------------------------
+std::vector<std::uint8_t> WriteLighting( const CLighting &lighting )
+{
+	std::vector<std::uint8_t> out;
+	out.reserve( 256 + lighting.m_Texels.size() / 4 * 3 * sizeof( std::uint16_t ) );
+	Put( out, LIGHTING_MAGIC );
+	Put( out, LIGHTING_VERSION );
+	Put( out, lighting.m_nSettingsHash );
+	Put( out, lighting.m_nLightsHash );
+	Put( out, lighting.m_nInstanceHash );
+	Put( out, static_cast<std::int32_t>( lighting.m_nWidth ) );
+	Put( out, static_cast<std::int32_t>( lighting.m_nHeight ) );
+	Put( out, static_cast<std::int32_t>( lighting.m_nStep ) );
+	Put( out, static_cast<std::uint64_t>( lighting.m_nKeptFaces + lighting.m_nRelitFaces ) );
+	Put( out, static_cast<std::uint64_t>( lighting.m_nTriangles ) );
+
+	Put( out, static_cast<std::uint64_t>( lighting.m_BakedLights.size() ) );
+	for ( const Light_t &light : lighting.m_BakedLights )
+	{
+		Put( out, static_cast<std::int32_t>( light.m_nType ) );
+		Put( out, light.m_Origin );
+		Put( out, light.m_Direction );
+		Put( out, light.m_vecIntensity.m_flX );
+		Put( out, light.m_vecIntensity.m_flY );
+		Put( out, light.m_vecIntensity.m_flZ );
+		for ( const double fl : { light.m_flConstant, light.m_flLinear, light.m_flQuadratic, light.m_flCapDistance, light.m_flFadeStart, light.m_flFadeEnd, light.m_flInnerCos, light.m_flOuterCos, light.m_flExponent, light.m_flSunSpread, light.m_flReach } )
+		{
+			Put( out, fl );
+		}
+		Put( out, static_cast<std::uint8_t>( light.m_bNamed ? 1 : 0 ) );
+	}
+
+	Put( out, static_cast<std::uint64_t>( lighting.m_Faces.size() ) );
+	for ( const auto &[ face, rect ] : lighting.m_Faces )
+	{
+		Put( out, face.m_nSolid );
+		Put( out, face.m_nSide );
+		PutRect( out, rect );
+	}
+	Put( out, static_cast<std::uint64_t>( lighting.m_InstanceFaces.size() ) );
+	for ( const LightmapRect_t &rect : lighting.m_InstanceFaces )
+	{
+		PutRect( out, rect );
+	}
+
+	const std::size_t nTriangles = lighting.m_pBakedTriangles ? lighting.m_pBakedTriangles->size() : 0;
+	Put( out, static_cast<std::uint64_t>( lighting.m_Baked.size() ) );
+	for ( const CLighting::BakedFace_t &baked : lighting.m_Baked )
+	{
+		Put( out, baked.m_Face.m_nSolid );
+		Put( out, baked.m_Face.m_nSide );
+		Put( out, baked.m_Bounds.m_Mins );
+		Put( out, baked.m_Bounds.m_Maxs );
+		Put( out, baked.m_nHash );
+		Put( out, baked.m_nFirstTriangle );
+		Put( out, baked.m_nTriangles );
+	}
+	Put( out, static_cast<std::uint64_t>( nTriangles ) );
+	if ( nTriangles > 0 )
+	{
+		const std::size_t nAt = out.size();
+		out.resize( nAt + nTriangles * sizeof( std::array<float, 9> ) );
+		std::memcpy( out.data() + nAt, lighting.m_pBakedTriangles->data(), nTriangles * sizeof( std::array<float, 9> ) );
+	}
+
+	const std::size_t nTexels = lighting.m_Texels.size() / 4;
+	Put( out, static_cast<std::uint64_t>( nTexels ) );
+	const std::size_t nAt = out.size();
+	out.resize( nAt + nTexels * 3 * sizeof( std::uint16_t ) );
+	std::uint8_t *pTo = out.data() + nAt;
+	for ( std::size_t n = 0; n < nTexels; n++, pTo += 3 * sizeof( std::uint16_t ) )
+	{
+		std::memcpy( pTo, &lighting.m_Texels[ n * 4 ], 3 * sizeof( std::uint16_t ) );
+	}
+	return out;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: See the header. Everything read is checked against the file's length and the
+//          atlas' size before it is believed.
+//-----------------------------------------------------------------------------
+std::shared_ptr<const CLighting> ReadLighting( std::span<const std::uint8_t> bytes )
+{
+	LightingReader_t in{ bytes };
+	if ( in.Get<std::array<char, 4>>() != LIGHTING_MAGIC || in.Get<std::uint32_t>() != LIGHTING_VERSION || !in.m_bOk )
+	{
+		return nullptr;
+	}
+	auto pLighting = std::make_shared<CLighting>();
+	pLighting->m_bLoaded = true;
+	pLighting->m_nSettingsHash = in.Get<std::uint64_t>();
+	pLighting->m_nLightsHash = in.Get<std::uint64_t>();
+	pLighting->m_nInstanceHash = in.Get<std::uint64_t>();
+	pLighting->m_nWidth = in.Get<std::int32_t>();
+	pLighting->m_nHeight = in.Get<std::int32_t>();
+	pLighting->m_nStep = in.Get<std::int32_t>();
+	pLighting->m_nRelitFaces = static_cast<std::size_t>( in.Get<std::uint64_t>() );
+	pLighting->m_nTriangles = static_cast<std::size_t>( in.Get<std::uint64_t>() );
+	if ( !in.m_bOk || pLighting->m_nWidth <= 0 || pLighting->m_nHeight <= 0 || pLighting->m_nWidth > 16384 || pLighting->m_nHeight > 16384 || pLighting->m_nStep < 1 )
+	{
+		return nullptr;
+	}
+	const auto fits = [ & ]( const LightmapRect_t &rect ) {
+		return rect.m_nWidth == 0 || ( rect.m_nX >= 0 && rect.m_nY >= 0 && rect.m_nWidth > 0 && rect.m_nHeight > 0 && rect.m_nX <= pLighting->m_nWidth - rect.m_nWidth && rect.m_nY <= pLighting->m_nHeight - rect.m_nHeight );
+	};
+
+	pLighting->m_BakedLights.resize( in.GetCount( LIGHT_BYTES ) );
+	for ( Light_t &light : pLighting->m_BakedLights )
+	{
+		const auto nType = in.Get<std::int32_t>();
+		if ( nType < 0 || nType > static_cast<std::int32_t>( LightType_t::LIGHT_TYPE_SURFACE ) )
+		{
+			return nullptr;
+		}
+		light.m_nType = static_cast<LightType_t>( nType );
+		light.m_Origin = in.Get<Point_t>();
+		light.m_Direction = in.Get<Point_t>();
+		light.m_vecIntensity.m_flX = in.Get<float>();
+		light.m_vecIntensity.m_flY = in.Get<float>();
+		light.m_vecIntensity.m_flZ = in.Get<float>();
+		for ( double *pfl : { &light.m_flConstant, &light.m_flLinear, &light.m_flQuadratic, &light.m_flCapDistance, &light.m_flFadeStart, &light.m_flFadeEnd, &light.m_flInnerCos, &light.m_flOuterCos, &light.m_flExponent, &light.m_flSunSpread, &light.m_flReach } )
+		{
+			*pfl = in.Get<double>();
+		}
+		light.m_bNamed = in.Get<std::uint8_t>() != 0;
+	}
+	pLighting->m_nLights = pLighting->m_BakedLights.size();
+
+	const std::size_t nFaces = in.GetCount( 2 * sizeof( std::uint32_t ) + RECT_BYTES );
+	for ( std::size_t n = 0; n < nFaces; n++ )
+	{
+		FaceRef_t face;
+		face.m_nSolid = in.Get<std::uint32_t>();
+		face.m_nSide = in.Get<std::uint32_t>();
+		const LightmapRect_t rect = GetRect( in );
+		if ( !fits( rect ) )
+		{
+			return nullptr;
+		}
+		pLighting->m_Faces[ face ] = rect;
+	}
+	pLighting->m_InstanceFaces.resize( in.GetCount( RECT_BYTES ) );
+	for ( LightmapRect_t &rect : pLighting->m_InstanceFaces )
+	{
+		rect = GetRect( in );
+		if ( !fits( rect ) )
+		{
+			return nullptr;
+		}
+	}
+
+	pLighting->m_Baked.resize( in.GetCount( BAKED_BYTES ) );
+	for ( CLighting::BakedFace_t &baked : pLighting->m_Baked )
+	{
+		baked.m_Face.m_nSolid = in.Get<std::uint32_t>();
+		baked.m_Face.m_nSide = in.Get<std::uint32_t>();
+		baked.m_Bounds.m_Mins = in.Get<Point_t>();
+		baked.m_Bounds.m_Maxs = in.Get<Point_t>();
+		baked.m_nHash = in.Get<std::uint64_t>();
+		baked.m_nFirstTriangle = in.Get<std::uint32_t>();
+		baked.m_nTriangles = in.Get<std::uint32_t>();
+	}
+	if ( !std::ranges::is_sorted( pLighting->m_Baked, {}, &CLighting::BakedFace_t::m_Face ) )
+	{
+		return nullptr;
+	}
+	auto pTriangles = std::make_shared<std::vector<std::array<float, 9>>>( in.GetCount( sizeof( std::array<float, 9> ) ) );
+	if ( in.m_bOk && !pTriangles->empty() )
+	{
+		std::memcpy( pTriangles->data(), bytes.data() + in.m_nAt, pTriangles->size() * sizeof( std::array<float, 9> ) );
+		in.m_nAt += pTriangles->size() * sizeof( std::array<float, 9> );
+	}
+	pLighting->m_pBakedTriangles = pTriangles;
+
+	const std::size_t nTexels = in.GetCount( 3 * sizeof( std::uint16_t ) );
+	if ( !in.m_bOk || nTexels != static_cast<std::size_t>( pLighting->m_nWidth ) * static_cast<std::size_t>( pLighting->m_nHeight ) )
+	{
+		return nullptr;
+	}
+	const std::uint16_t nOne = FloatToHalf( 1.0f );
+	pLighting->m_Texels.resize( nTexels * 4 );
+	const std::uint8_t *pFrom = bytes.data() + in.m_nAt;
+	for ( std::size_t n = 0; n < nTexels; n++, pFrom += 3 * sizeof( std::uint16_t ) )
+	{
+		std::memcpy( &pLighting->m_Texels[ n * 4 ], pFrom, 3 * sizeof( std::uint16_t ) );
+		pLighting->m_Texels[ n * 4 + 3 ] = nOne;
+	}
 	return pLighting;
 }
 

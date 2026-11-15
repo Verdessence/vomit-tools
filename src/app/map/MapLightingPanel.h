@@ -50,6 +50,7 @@ private:
 	QCheckBox *m_pPropShadows = nullptr;
 	QCheckBox *m_pSmoothShadows = nullptr;
 	QCheckBox *m_pAutoBake = nullptr;
+	QCheckBox *m_pKeepBakes = nullptr;
 	QCheckBox *m_pInRadius = nullptr;
 	QDoubleSpinBox *m_pRadius = nullptr;
 	QSpinBox *m_pDelay = nullptr;

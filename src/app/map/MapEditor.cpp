@@ -91,6 +91,7 @@
 #include "map/MapConstants.h"
 #include "map/Compile.h"
 #include "map/MapCompileDialog.h"
+#include "DebugLog.h"
 #include "map/MapFaceEdit.h"
 #include "map/MapFilterControl.h"
 #include "PanelColumn.h"
@@ -120,6 +121,8 @@ namespace
 
 // The side panels' order, which are shown and which folded (CPanelColumn::GetState).
 constexpr char SIDE_PANELS_SETTING[] = "maps/sidePanels";
+constexpr char WORLD_GRID_SETTING[] = "maps/worldGrid";
+constexpr char WORLD_GRID_PLANE_SETTING[] = "maps/worldGridPlane"; // twelve numbers: the origin, then the three axes
 // The side's width, as last dragged.
 constexpr char SIDE_WIDTH_SETTING[] = "maps/sideWidth";
 // Where the side is split between the Filter Control and the panels, as last dragged.
@@ -271,26 +274,13 @@ CMapEditor::CMapEditor( const QString &szPath, bool bFromGame, QWidget *pParent 
 	connect( m_pProperties, &CMapProperties::FacesHighlighted, this, &CMapEditor::HighlightSides );
 	connect( this, &CMapEditor::FacePickChanged, m_pProperties, &CMapProperties::SetFacePickKey );
 	m_pFaceEdit = new CMapFaceEdit( *this );
-	// Hammer opens Face Edit as a window of its own; Preferences can put it in the side
-	// instead, in a panel of its own while the texture tool is on.
-	// Face Edit's place in the side: its own panel, there only while the texture tool is on.
+	// Face Edit is a tool's panel: in the side while the texture tool is on, or (the panel's
+	// own menu) in a window of its own, as Hammer's is.
 	m_pFaceEditHolder = new QWidget;
 	m_pFaceEditHolder->setObjectName( QStringLiteral( "mapFaceEditPanel" ) );
 	auto *pHolderLayout = new QVBoxLayout( m_pFaceEditHolder );
 	pHolderLayout->setContentsMargins( 0, 0, 0, 0 );
 	pHolderLayout->addWidget( m_pFaceEdit );
-	// Hammer's Face Edit Sheet is a window of its own; closing it puts the selection tool back.
-	m_pFaceEditWindow = new QDialog( this, Qt::Tool );
-	m_pFaceEditWindow->setObjectName( QStringLiteral( "mapFaceEditWindow" ) );
-	m_pFaceEditWindow->setWindowTitle( tr( "Face Edit Sheet" ) );
-	m_pFaceEditWindow->setModal( false );
-	new QVBoxLayout( m_pFaceEditWindow );
-	connect( m_pFaceEditWindow, &QDialog::finished, this, [ this ] {
-		if ( m_nTool == MapTool_t::MAP_TOOL_TEXTURE )
-		{
-			SetTool( MapTool_t::MAP_TOOL_SELECT );
-		}
-	} );
 	connect( m_pFaceEdit, &CMapFaceEdit::PaintModeChanged, this, [ this ] {
 		for ( CMapView *pView : GetViews() )
 		{
@@ -364,7 +354,7 @@ CMapEditor::CMapEditor( const QString &szPath, bool bFromGame, QWidget *pParent 
 			return CMaterialBrowser::Pick( this, *game, used, szCurrent );
 		} );
 	}
-	m_pPanels->AddPanel( QStringLiteral( "mapProperties" ), tr( "Map Properties" ), MakeMapIcon( MapIcon_t::MAP_ICON_PROPERTIES, panelIconColor ), m_pWorldProperties );
+	m_pPanels->AddPanel( QStringLiteral( "mapProperties" ), tr( "Map Properties" ), MakeMapIcon( MapIcon_t::MAP_ICON_MAP_PROPERTIES, panelIconColor ), m_pWorldProperties );
 	m_pPanels->SetHiddenByDefault( QStringLiteral( "mapProperties" ) );
 	m_pPanels->SetPinned( QStringLiteral( "mapProperties" ) ); // its tab apart, at the top
 	// The world's sheet follows edits only while it shows.
@@ -460,6 +450,10 @@ CMapEditor::CMapEditor( const QString &szPath, bool bFromGame, QWidget *pParent 
 		pTab->setIcon( QIcon( pixmap ) );
 		pTab->setToolTip( tr( "Check for Problems: %1, %2" ).arg( tr( "%n error(s)", nullptr, nErrors ), tr( "%n warning(s)", nullptr, nWarnings ) ) );
 	} );
+	// In their own windows, Object Properties and Map Properties are Hammer's dialogs: away
+	// until a command (Alt+Enter, right-click > Properties, a double-click) asks for them.
+	m_pPanels->SetOnDemand( QStringLiteral( "properties" ) );
+	m_pPanels->SetOnDemand( QStringLiteral( "mapProperties" ) );
 	// Lighting and Fog start folded: their headers are there, their settings out of the way until wanted.
 	m_pPanels->SetState( QSettings{}.value( QLatin1String( SIDE_PANELS_SETTING ), QVariantMap{ { QStringLiteral( "folded" ), QStringList{ QStringLiteral( "lighting" ), QStringLiteral( "fog" ), QStringLiteral( "screenEffect" ) } } } ).toMap() );
 	m_pPanels->SetOnePanel( CPreferences::Instance().GetMapPreferences().m_bOnePanel );
@@ -1025,9 +1019,9 @@ void CMapEditor::ShowBuildingGenerator()
 	if ( !pScene )
 		return;
 	xv::map::Box_t box{ { 0, 0, 0 }, { 256, 256, 128 } };
-	if ( m_NewBox && !m_NewBox->IsEmpty() )
-		box = *m_NewBox;
-	else if ( m_ParkedBox && !m_ParkedBox->IsEmpty() )
+	if ( GetNewBox() && !GetNewBox()->IsEmpty() )
+		box = *GetNewBox();
+	else if ( m_ParkedBox && !m_ParkedBoxPlane && !m_ParkedBox->IsEmpty() )
 		box = *m_ParkedBox;
 	else if ( !m_pDocument->GetSelection().empty() && !m_pDocument->GetSelectionBounds().IsEmpty() )
 		box = m_pDocument->GetSelectionBounds();
@@ -1072,6 +1066,7 @@ void CMapEditor::CreateBuilding()
 	pUndo->endMacro();
 	SetNewBox( std::nullopt );
 	m_ParkedBox.reset();
+	m_ParkedBoxPlane.reset();
 }
 
 //-----------------------------------------------------------------------------
@@ -1202,6 +1197,28 @@ void CMapEditor::BuildToolBars()
 	command( MapIcon_t::MAP_ICON_GRID_SMALLER, tr( "Smaller Grid" ), MapAction_t::MAP_ACTION_GRID_SMALLER, "mapGridSmaller" );
 	command( MapIcon_t::MAP_ICON_GRID_LARGER, tr( "Bigger Grid" ), MapAction_t::MAP_ACTION_GRID_LARGER, "mapGridLarger" );
 	toggle( MapIcon_t::MAP_ICON_GRID, tr( "Grid" ), MapAction_t::MAP_ACTION_TOGGLE_GRID, "mapToggleGrid", m_Settings.m_bShowGrid );
+	toggle( MapIcon_t::MAP_ICON_GRID_3D, tr( "3D Grid" ), MapAction_t::MAP_ACTION_TOGGLE_3D_GRID, "mapToggle3DGrid", m_Settings.m_bShow3DGrid );
+	{
+		// The world grid's button also holds where its plane is.
+		QAction *pWorldGrid = toggle( MapIcon_t::MAP_ICON_WORLD_GRID, tr( "World Grid" ), MapAction_t::MAP_ACTION_TOGGLE_WORLD_GRID, "mapToggleWorldGrid", m_Settings.m_bWorldGrid );
+		auto *pMenu = new QMenu( this );
+		QAction *pEdit = pMenu->addAction( tr( "Move or Turn" ), this, [ this ] { RunAction( MapAction_t::MAP_ACTION_WORLD_GRID_EDIT, m_pActiveView ); } );
+		pEdit->setObjectName( QStringLiteral( "mapWorldGridEdit" ) );
+		pEdit->setCheckable( true );
+		pEdit->setToolTip( tr( "A gizmo on the grid in the 3D views: drag it (or G and R) to move and turn the plane, double-click a surface to lay the grid on it" ) );
+		connect( pMenu, &QMenu::aboutToShow, pEdit, [ this, pEdit ] { pEdit->setChecked( IsWorldGridEdited() ); } );
+		pMenu->addSeparator();
+		pMenu->addAction( tr( "Height…" ), this, [ this ] { RunAction( MapAction_t::MAP_ACTION_WORLD_GRID_HEIGHT, m_pActiveView ); } );
+		pMenu->addAction( tr( "Under the Selection" ), this, [ this ] {
+			if ( const xv::map::Box_t bounds = m_pDocument->GetSelectionBounds(); !bounds.IsEmpty() )
+				SetWorldGrid( true, bounds.m_Mins[ 2 ] );
+		} );
+		pMenu->addAction( tr( "Level at Height 0" ), this, [ this ] {
+			m_Settings.m_bWorldGrid = true;
+			SetWorldGridPlane( MapGridPlane_t{} );
+		} );
+		pWorldGrid->setMenu( pMenu );
+	}
 	toggle( MapIcon_t::MAP_ICON_SNAP, tr( "Snap to Grid" ), MapAction_t::MAP_ACTION_TOGGLE_SNAP, "mapToggleSnap", m_Settings.m_bSnapToGrid );
 
 	bar( "mapLockBar", tr( "Locks" ) );
@@ -1216,6 +1233,7 @@ void CMapEditor::BuildToolBars()
 	toggle( MapIcon_t::MAP_ICON_TOOL_TEXTURES, tr( "Tool Textures" ), MapAction_t::MAP_ACTION_TOGGLE_TOOL_TEXTURES, "mapToggleToolTextures", m_Settings.m_bToolTextures );
 	toggle( MapIcon_t::MAP_ICON_NODRAW, tr( "Nodraw" ), MapAction_t::MAP_ACTION_TOGGLE_NODRAW, "mapToggleNodraw", m_Settings.m_bNodraw );
 	toggle( MapIcon_t::MAP_ICON_SKYBOX, tr( "3D Skybox" ), MapAction_t::MAP_ACTION_TOGGLE_SKYBOX_3D, "mapToggleSkybox3D", m_Settings.m_bSkybox3D );
+	toggle( MapIcon_t::MAP_ICON_SKY_FACES, tr( "Sky on Sky Faces" ), MapAction_t::MAP_ACTION_TOGGLE_SKY_FACES, "mapToggleSkyFaces", m_Settings.m_bSkyFaces );
 	toggle( MapIcon_t::MAP_ICON_SKY_2D, tr( "2D Sky" ), MapAction_t::MAP_ACTION_TOGGLE_SKY_2D, "mapToggleSky2D", m_Settings.m_bSky2D );
 	toggle( MapIcon_t::MAP_ICON_ORIGIN_AXES, tr( "Origin Axes" ), MapAction_t::MAP_ACTION_TOGGLE_ORIGIN_AXES, "mapToggleOriginAxes", m_Settings.m_bOriginAxes );
 	toggle( MapIcon_t::MAP_ICON_FOG, tr( "Fog" ), MapAction_t::MAP_ACTION_TOGGLE_FOG, "mapToggleFog", m_Settings.m_bFog );
@@ -1276,6 +1294,20 @@ void CMapEditor::Loaded()
 	m_RememberedCamera = RecallCamera();
 	m_Settings.m_nGridSize = GridSizeFor( scene.m_Map.m_ViewSettings.m_nGridSpacing );
 	m_Settings.m_bShowGrid = scene.m_Map.m_ViewSettings.m_bShowGrid;
+	m_Settings.m_bShow3DGrid = scene.m_Map.m_ViewSettings.m_bShow3DGrid;
+	m_Settings.m_bWorldGrid = QSettings{}.value( QLatin1String( WORLD_GRID_SETTING ), false ).toBool();
+	{
+		// The plane as it was left; anything that isn't twelve numbers is the level one.
+		const QStringList numbers = QSettings{}.value( QLatin1String( WORLD_GRID_PLANE_SETTING ) ).toString().split( QLatin1Char( ' ' ), Qt::SkipEmptyParts );
+		MapGridPlane_t plane;
+		bool bOk = numbers.size() == 12;
+		for ( int n = 0; bOk && n < 12; n++ )
+		{
+			const double flValue = numbers[ n ].toDouble( &bOk );
+			( n < 3 ? plane.m_Origin : plane.m_Axes[ static_cast<std::size_t>( n / 3 - 1 ) ] )[ static_cast<std::size_t>( n % 3 ) ] = flValue;
+		}
+		m_Settings.m_WorldGrid = bOk ? plane : MapGridPlane_t{};
+	}
 	m_Settings.m_bSnapToGrid = scene.m_Map.m_ViewSettings.m_bSnapToGrid;
 	m_pLoading->hide();
 	OfferRecovery();
@@ -1303,6 +1335,10 @@ void CMapEditor::Loaded()
 	if ( auto *pGrid = findChild<QAction *>( QStringLiteral( "mapToggleGrid" ) ) )
 	{
 		pGrid->setChecked( m_Settings.m_bShowGrid );
+	}
+	if ( auto *pGrid = findChild<QAction *>( QStringLiteral( "mapToggle3DGrid" ) ) )
+	{
+		pGrid->setChecked( m_Settings.m_bShow3DGrid );
 	}
 	StartResources();
 	UpdateGameStatus();
@@ -1332,6 +1368,7 @@ void CMapEditor::SetTool( MapTool_t nTool )
 	if ( bLeavingBlock )
 	{
 		m_ParkedBox = m_NewBox;
+		m_ParkedBoxPlane = m_NewBoxPlane;
 	}
 	// Leaving the cordon tool keeps the box it drew (Hammer: pick another tool to finish); taking
 	// it up shows the cordon there is.
@@ -1341,6 +1378,8 @@ void CMapEditor::SetTool( MapTool_t nTool )
 	}
 	SetFacePickKey( {} );
 	const bool bEnteringTexture = nTool == MapTool_t::MAP_TOOL_TEXTURE && m_nTool != MapTool_t::MAP_TOOL_TEXTURE;
+	if ( bEnteringTexture )
+		m_nToolBeforeTexture = m_nTool;
 	m_nTool = nTool;
 	if ( nTool == MapTool_t::MAP_TOOL_CORDON )
 	{
@@ -1369,7 +1408,7 @@ void CMapEditor::SetTool( MapTool_t nTool )
 	}
 	if ( bEnteringBlock )
 	{
-		SetNewBox( std::exchange( m_ParkedBox, std::nullopt ) );
+		SetNewBox( std::exchange( m_ParkedBox, std::nullopt ), std::exchange( m_ParkedBoxPlane, std::nullopt ) );
 	}
 	if ( nTool != MapTool_t::MAP_TOOL_ENTITY )
 	{
@@ -1440,55 +1479,27 @@ void CMapEditor::showEvent( QShowEvent *pEvent )
 }
 
 //-----------------------------------------------------------------------------
-// Purpose:
+// Purpose: Face Edit is a mode's panel, as Blender's tool settings: there (in the side, or in
+//          its window) only with its tool. It is far wider than the other panels; while it is
+//          away the side needn't be.
 //-----------------------------------------------------------------------------
-void CMapEditor::hideEvent( QHideEvent *pEvent )
+void CMapEditor::PlaceFaceEdit()
 {
-	QWidget::hideEvent( pEvent );
-	if ( m_pFaceEditWindow && !pEvent->spontaneous() )
+	const bool bTexture = m_nTool == MapTool_t::MAP_TOOL_TEXTURE;
+	const bool bWasPanel = m_pPanels->IsAvailable( QStringLiteral( "faceEdit" ) );
+	m_pPanels->SetAvailable( QStringLiteral( "faceEdit" ), bTexture );
+	if ( bTexture && !bWasPanel )
 	{
-		m_pFaceEditWindow->hide();
+		m_pPanels->ScrollTo( QStringLiteral( "faceEdit" ) );
 	}
 }
 
 //-----------------------------------------------------------------------------
-// Purpose: The sheet moves between the window and the side panel when Preferences changes;
-//          the window shows only while the texture tool is on.
+// Purpose: Face Edit's window when it is in one of its own, else none.
 //-----------------------------------------------------------------------------
-void CMapEditor::PlaceFaceEdit()
+QWidget *CMapEditor::GetFaceEditWindow() const
 {
-	const bool bWindow = CPreferences::Instance().GetMapPreferences().m_bFaceEditWindow;
-	const bool bTexture = m_nTool == MapTool_t::MAP_TOOL_TEXTURE;
-	if ( bWindow && m_pFaceEdit->parentWidget() != m_pFaceEditWindow )
-	{
-		m_pFaceEditHolder->layout()->removeWidget( m_pFaceEdit );
-		m_pFaceEditWindow->layout()->addWidget( m_pFaceEdit );
-		m_pFaceEdit->show();
-	}
-	else if ( !bWindow && m_pFaceEdit->parentWidget() == m_pFaceEditWindow )
-	{
-		m_pFaceEditWindow->layout()->removeWidget( m_pFaceEdit );
-		m_pFaceEditHolder->layout()->addWidget( m_pFaceEdit );
-		m_pFaceEdit->show();
-	}
-	// Face Edit is a mode's panel, as Blender's tool settings: in the side only with its tool.
-	// It is far wider than the other panels; while it is away the side needn't be.
-	const bool bPanel = bTexture && !bWindow;
-	const bool bWasPanel = m_pPanels->IsAvailable( QStringLiteral( "faceEdit" ) );
-	m_pPanels->SetAvailable( QStringLiteral( "faceEdit" ), bPanel );
-	if ( bPanel && !bWasPanel )
-	{
-		m_pPanels->ScrollTo( QStringLiteral( "faceEdit" ) );
-	}
-	if ( bWindow && bTexture && !m_pFaceEditWindow->isVisible() && isVisible() )
-	{
-		m_pFaceEditWindow->adjustSize();
-		m_pFaceEditWindow->show();
-	}
-	else if ( ( !bWindow || !bTexture ) && m_pFaceEditWindow->isVisible() )
-	{
-		m_pFaceEditWindow->hide();
-	}
+	return m_pPanels->GetWindow( QStringLiteral( "faceEdit" ) );
 }
 
 //-----------------------------------------------------------------------------
@@ -1676,6 +1687,7 @@ void CMapEditor::TakePreferences()
 	m_Settings.m_bUseGroupColors = preferences.m_bGroupColors;
 	m_Settings.m_bSkybox3D = preferences.m_bSkybox3D;
 	m_Settings.m_bSky2D = preferences.m_bSky2D;
+	m_Settings.m_bSkyFaces = preferences.m_bSkyFaces;
 	m_Settings.m_bOriginAxes = preferences.m_bOriginAxes;
 	m_Settings.m_bFog = preferences.m_bFog;
 	m_Settings.m_bHideSmallGrid = preferences.m_bHideSmallGrid;
@@ -2643,6 +2655,26 @@ bool CMapEditor::RunAction( MapAction_t nAction, CMapView *pFrom )
 			m_pDocument->QuickUnhideAll();
 			return true;
 		case MapAction_t::MAP_ACTION_TOGGLE_SNAP: return toggle( m_Settings.m_bSnapToGrid );
+		case MapAction_t::MAP_ACTION_TOGGLE_3D_GRID:
+			toggle( m_Settings.m_bShow3DGrid );
+			if ( auto *pGrid = findChild<QAction *>( QStringLiteral( "mapToggle3DGrid" ) ) )
+				pGrid->setChecked( m_Settings.m_bShow3DGrid );
+			return true;
+		case MapAction_t::MAP_ACTION_TOGGLE_WORLD_GRID:
+			m_Settings.m_bWorldGrid = !m_Settings.m_bWorldGrid;
+			SetWorldGridPlane( m_Settings.m_WorldGrid );
+			return true;
+		case MapAction_t::MAP_ACTION_WORLD_GRID_HEIGHT:
+		{
+			bool bOk = false;
+			const double flHeight = QInputDialog::getDouble( this, tr( "World Grid" ), tr( "The grid's height (Z):" ), m_Settings.m_WorldGrid.m_Origin[ 2 ], -65536.0, 65536.0, 2, &bOk );
+			if ( bOk )
+				SetWorldGrid( true, flHeight );
+			return true;
+		}
+		case MapAction_t::MAP_ACTION_WORLD_GRID_EDIT:
+			SetWorldGridEdited( !IsWorldGridEdited() );
+			return true;
 		case MapAction_t::MAP_ACTION_TOGGLE_TEXTURE_LOCK: return toggle( m_Settings.m_bTextureLock );
 		case MapAction_t::MAP_ACTION_TOGGLE_SCALE_LOCK: return toggle( m_Settings.m_bScaleLock );
 		case MapAction_t::MAP_ACTION_TOGGLE_PIVOT: return toggle( m_Settings.m_bPivot );
@@ -2732,6 +2764,7 @@ bool CMapEditor::RunAction( MapAction_t nAction, CMapView *pFrom )
 		case MapAction_t::MAP_ACTION_TOGGLE_NODRAW: return toggle( m_Settings.m_bNodraw );
 		case MapAction_t::MAP_ACTION_TOGGLE_SKYBOX_3D: return toggle( m_Settings.m_bSkybox3D );
 		case MapAction_t::MAP_ACTION_TOGGLE_SKY_2D: return toggle( m_Settings.m_bSky2D );
+		case MapAction_t::MAP_ACTION_TOGGLE_SKY_FACES: return toggle( m_Settings.m_bSkyFaces );
 		case MapAction_t::MAP_ACTION_TOGGLE_ORIGIN_AXES: return toggle( m_Settings.m_bOriginAxes );
 		case MapAction_t::MAP_ACTION_TOGGLE_FOG: return toggle( m_Settings.m_bFog );
 		case MapAction_t::MAP_ACTION_TOGGLE_WALKABLE: return toggle( m_Settings.m_bWalkable );
@@ -2777,7 +2810,8 @@ bool CMapEditor::RunAction( MapAction_t nAction, CMapView *pFrom )
 			SetTool( MapTool_t::MAP_TOOL_SPRINKLE );
 			return true;
 		case MapAction_t::MAP_ACTION_TOOL_TEXTURE:
-			SetTool( MapTool_t::MAP_TOOL_TEXTURE );
+			// Shift+A again puts Face Edit away, back to the tool it was opened from.
+			SetTool( m_nTool == MapTool_t::MAP_TOOL_TEXTURE ? m_nToolBeforeTexture : MapTool_t::MAP_TOOL_TEXTURE );
 			return true;
 		case MapAction_t::MAP_ACTION_TOOL_CLIP:
 			// Shift+X again goes round Hammer's modes: keep the front, the back, both.
@@ -3162,13 +3196,18 @@ void CMapEditor::ToggleCordon()
 //-----------------------------------------------------------------------------
 // Purpose:
 //-----------------------------------------------------------------------------
-void CMapEditor::SetNewBox( std::optional<xv::map::Box_t> box )
+void CMapEditor::SetNewBox( std::optional<xv::map::Box_t> box, std::optional<MapGridPlane_t> plane )
 {
-	if ( box == m_NewBox )
+	if ( !box )
+	{
+		plane.reset();
+	}
+	if ( box == m_NewBox && plane == m_NewBoxPlane )
 	{
 		return;
 	}
 	m_NewBox = box;
+	m_NewBoxPlane = plane;
 	RepaintTools();
 }
 
@@ -3178,7 +3217,8 @@ void CMapEditor::SetNewBox( std::optional<xv::map::Box_t> box )
 std::pair<double, double> CMapEditor::GetNewBoxDepth( int nAxis ) const
 {
 	const auto a = static_cast<std::size_t>( nAxis );
-	if ( m_NewBox )
+	// A turned box's measures are its plane's, not the world's.
+	if ( m_NewBox && !m_NewBoxPlane )
 	{
 		return { m_NewBox->m_Mins[ a ], m_NewBox->m_Maxs[ a ] };
 	}
@@ -3202,6 +3242,7 @@ void CMapEditor::CreateBlock()
 		return;
 	}
 	const xv::map::Box_t box = *m_NewBox;
+	const std::optional<MapGridPlane_t> plane = m_NewBoxPlane;
 	for ( std::size_t a = 0; a < 3; a++ )
 	{
 		if ( box.m_Maxs[ a ] - box.m_Mins[ a ] <= 0.0 )
@@ -3224,8 +3265,23 @@ void CMapEditor::CreateBlock()
 	faces.m_Color = { 0, static_cast<std::uint8_t>( pRandom->bounded( 100, 256 ) ), static_cast<std::uint8_t>( pRandom->bounded( 100, 256 ) ) };
 	std::vector<std::uint32_t> added;
 	const auto nKind = static_cast<xv::map::Primitive_t>( m_pPrimitive->currentData().toInt() );
-	xv::map::MapEdit_t edit = xv::map::AddObjects( *pScene, { xv::map::MakePrimitive( pScene->m_Map, nKind, box, faces, m_pSides->value() ) }, {}, &added );
-	m_LastBox = box;
+	xv::map::Solid_t solid = xv::map::MakePrimitive( pScene->m_Map, nKind, box, faces, m_pSides->value() );
+	if ( plane )
+	{
+		// Made along the world's axes, then stood on the plane: its textures turn with it, so
+		// they lie on its faces as they would on a block not turned.
+		xv::map::Transform_t placement;
+		for ( std::size_t nRow = 0; nRow < 3; nRow++ )
+			for ( std::size_t nAxis = 0; nAxis < 3; nAxis++ )
+				placement.m_Rotation[ nRow * 3 + nAxis ] = plane->m_Axes[ nAxis ][ nRow ];
+		placement.m_Offset = plane->m_Origin;
+		solid = xv::map::TransformSolid( solid, placement, true );
+	}
+	xv::map::MapEdit_t edit = xv::map::AddObjects( *pScene, { std::move( solid ) }, {}, &added );
+	if ( !plane )
+	{
+		m_LastBox = box;
+	}
 	SetNewBox( std::nullopt );
 	m_pDocument->Edit( std::move( edit ), tr( "Create %1" ).arg( m_pPrimitive->currentText() ), std::move( added ) );
 }
@@ -4904,6 +4960,75 @@ void CMapEditor::UpdateGameStatus()
 }
 
 //-----------------------------------------------------------------------------
+// Purpose: The world grid shown or not, and how high its plane is (its origin's z; its turn
+//          stays).
+//-----------------------------------------------------------------------------
+void CMapEditor::SetWorldGrid( bool bShown, double flHeight )
+{
+	m_Settings.m_bWorldGrid = bShown;
+	MapGridPlane_t plane = m_Settings.m_WorldGrid;
+	plane.m_Origin[ 2 ] = flHeight;
+	SetWorldGridPlane( plane );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Where the world grid's plane is; kept (with whether it shows) for the next map and
+//          run: it is the editor's, not the map's, a VMF has no place for it.
+//-----------------------------------------------------------------------------
+void CMapEditor::SetWorldGridPlane( const MapGridPlane_t &plane, bool bKeep )
+{
+	m_Settings.m_WorldGrid = plane;
+	if ( bKeep )
+	{
+		QStringList numbers;
+		for ( const double flPart : plane.m_Origin )
+			numbers << QString::number( flPart, 'g', 17 );
+		for ( const xv::map::Point_t &axis : plane.m_Axes )
+			for ( const double flPart : axis )
+				numbers << QString::number( flPart, 'g', 17 );
+		QSettings settings;
+		settings.setValue( QLatin1String( WORLD_GRID_SETTING ), m_Settings.m_bWorldGrid );
+		settings.setValue( QLatin1String( WORLD_GRID_PLANE_SETTING ), numbers.join( QLatin1Char( ' ' ) ) );
+	}
+	SettingsChanged();
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: The 3D views' gizmo on the world grid or back on the selection. The plane's lines
+//          are the same counted from any of their crossings, so the gizmo starts at the one
+//          nearest what the 3D view looks at (or a little ahead of it), not wherever the
+//          plane's origin was left.
+//-----------------------------------------------------------------------------
+void CMapEditor::SetWorldGridEdited( bool bEdited )
+{
+	m_bWorldGridEdit = bEdited;
+	if ( !bEdited )
+	{
+		emit StatusMessage( QString{} );
+		SettingsChanged();
+		return;
+	}
+	m_Settings.m_bWorldGrid = true;
+	MapGridPlane_t plane = m_Settings.m_WorldGrid;
+	const auto *pActive = qobject_cast<const CMapView3D *>( m_pActiveView );
+	std::optional<xv::map::CViewCamera> camera = pActive ? std::optional{ pActive->GetCamera() } : GetCamera();
+	if ( camera )
+	{
+		const xv::map::Point_t forward = camera->GetForward();
+		const double flAlong = xv::map::Dot( forward, plane.m_Axes[ 2 ] );
+		const double flGap = xv::map::Dot( xv::map::Subtract( plane.m_Origin, camera->m_Eye ), plane.m_Axes[ 2 ] );
+		const double t = std::abs( flAlong ) > 1e-6 ? flGap / flAlong : -1.0;
+		const xv::map::Point_t ahead = xv::map::Add( camera->m_Eye, xv::map::Scale( forward, t > 0.0 && t < 4096.0 ? t : 256.0 ) );
+		xv::map::Point_t local = plane.ToLocal( ahead );
+		const double flGrid = std::max( 1, m_Settings.m_nGridSize );
+		local = { std::round( local[ 0 ] / flGrid ) * flGrid, std::round( local[ 1 ] / flGrid ) * flGrid, 0.0 };
+		plane.m_Origin = plane.ToWorld( local );
+	}
+	SetWorldGridPlane( plane );
+	emit StatusMessage( tr( "World grid: drag the gizmo to move or turn it (G, R, then X, Y or Z), double-click a surface to lay it there; Escape when done" ) );
+}
+
+//-----------------------------------------------------------------------------
 // Purpose: Bakes again only when what a bake is made from changed: the scene (an edit), the
 //          materials once they have all been read, or the lighting preferences. Edits wait a
 //          moment, so a drag bakes once when it stops.
@@ -4931,6 +5056,19 @@ void CMapEditor::WantLighting()
 	{
 		return;
 	}
+	// An edit alone: the bake lights again only what it can have changed. So do the overlays and
+	// sprites that follow one (they are placed again a moment after it, and only take light:
+	// the bake lights the new ones). Materials read, props placed (they cast shadows the bake
+	// before can't tell apart) or a setting bake everything.
+	const bool bProps = extras[ 0 ] != m_LightingExtras[ 0 ] || extras[ 1 ] != m_LightingExtras[ 1 ];
+	if ( pMaterials != m_pLightingMaterials || wanted != m_LightingPreferences || bProps )
+	{
+		if ( !bFirst )
+		{
+			DebugLog() << "lighting: everything bakes again;" << ( pMaterials != m_pLightingMaterials ? "materials" : "" ) << ( wanted != m_LightingPreferences ? "settings" : "" ) << ( bProps ? "props" : "" ) << "changed";
+		}
+		m_bLightingWhole = true;
+	}
 	m_pLightingScene = std::move( pScene );
 	m_pLightingMaterials = pMaterials;
 	m_LightingPreferences = wanted;
@@ -4948,6 +5086,8 @@ void CMapEditor::BakeLightingNow()
 		return;
 	}
 	m_pLightingScene = m_pDocument->GetSharedScene();
+	m_bLightingWhole = true;
+	m_bLightingFresh = true;
 	m_pLightingTimer->start( 0 );
 }
 
@@ -4977,10 +5117,15 @@ void CMapEditor::StartLighting()
 	options.m_nMaxLuxels = static_cast<std::size_t>( std::max( 1, preferences.m_nLightLuxels ) ) << 20;
 	options.m_nSkySamples = std::max( 1, preferences.m_nLightSkySamples );
 	options.m_bSmoothShadows = preferences.m_bLightSmoothShadows;
-	if ( const std::optional<xv::map::CViewCamera> camera = GetCamera(); camera && preferences.m_bLightInRadius )
+	if ( const std::optional<xv::map::CViewCamera> camera = GetCamera() )
 	{
-		options.m_Centre = camera->m_Eye;
-		options.m_flRadius = std::max( 1.0, preferences.m_flLightRadius );
+		// A bake after an edit lights what is nearest the view first.
+		options.m_ViewPoint = camera->m_Eye;
+		if ( preferences.m_bLightInRadius )
+		{
+			options.m_Centre = camera->m_Eye;
+			options.m_flRadius = std::max( 1.0, preferences.m_flLightRadius );
+		}
 	}
 	xv::map::LightingExtras_t extras;
 	extras.m_bPropShadows = preferences.m_bLightPropShadows;
@@ -5007,7 +5152,14 @@ void CMapEditor::StartLighting()
 			extras.m_Points.emplace_back( sprite.m_nObject, sprite.m_Origin );
 		}
 	}
-	m_pLighting->Bake( m_pLightingScene, m_pResources->GetLightMaterials(), options, std::move( extras ) );
+	// An edit starts from the bake before; more than that changed, from an earlier bake only
+	// if one read just the same; Bake Lighting bakes everything, whatever was baked before.
+	const bool bWhole = std::exchange( m_bLightingWhole, false );
+	const bool bFresh = std::exchange( m_bLightingFresh, false );
+	m_pLighting->SetKeepBakes( preferences.m_bLightKeepBakes );
+	m_pLighting->Bake( m_pLightingScene, m_pResources->GetLightMaterials(), options, std::move( extras ), bFresh ? CMapLighting::Start_t::START_NOTHING : bWhole ? CMapLighting::Start_t::START_EARLIER
+																																								 : CMapLighting::Start_t::START_LAST,
+		m_pResources->IsFinished() );
 	UpdateGameStatus();
 }
 
@@ -5051,6 +5203,11 @@ void CMapEditor::FollowSelectionWithProperties()
 	{
 		return;
 	}
+	// In its own window it opens only when asked for (a double-click, Alt+Enter, Properties).
+	if ( m_pPanels->IsOnDemandWindow( QStringLiteral( "properties" ) ) )
+	{
+		return;
+	}
 	switch ( m_nTool )
 	{
 		case MapTool_t::MAP_TOOL_TEXTURE:
@@ -5082,6 +5239,9 @@ void CMapEditor::ShowProperties()
 {
 	OpenSide();
 	m_pPanels->Reveal( QStringLiteral( "properties" ) );
+	// In a window of its own, it takes the keys (a reveal on selecting doesn't).
+	if ( QWidget *pWindow = m_pPanels->GetWindow( QStringLiteral( "properties" ) ) )
+		pWindow->activateWindow();
 	m_pProperties->FocusKeys();
 }
 

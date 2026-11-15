@@ -22,7 +22,7 @@ layout(std140, binding = 0) uniform Frame {
 	vec4 faceShade;     // xyz
 	vec4 state;         // the state texture's width, and the most samples anisotropic filtering takes
 	vec4 instance;      // rgb, and how much of it func_instances' contents take
-	vec4 pass;          // x 1: the 3D skybox, drawn from its own camera first; y 1: a mesh as read
+	vec4 pass;          // x 1: the 3D skybox, drawn from its own camera first; y 1: a mesh as read; z 1: sky faces show their own texture
 	vec4 invalid;       // rgb, and how much of it broken solids' faces take
 	vec4 eyeLow;        // what float precision leaves of the eye after eye
 	vec4 lighting;      // the lighting preview's atlas width and height, brightness (times exposure), 1 (LDR) or 2 (HDR) when there is one
@@ -31,6 +31,14 @@ layout(std140, binding = 0) uniform Frame {
 	vec4 fogDirection;  // xyz, and 1 when measured from the eye (else along the view)
 	vec4 fogRange;      // start, end, 1 when there is fog; w 1: the light alone (mat_fullbright 2)
 	vec4 viewForward;   // xyz; w: the lighting preview's mat_monitorgamma / 2.2 (1: none)
+	vec4 grid;          // the 3D grid: spacing (0: none), world units a pixel covers per unit of distance, and at any distance
+	vec4 gridColor;     // its lines: rgb, and how far toward it a line takes the face
+	vec4 gridColor64;   // those every 64 units
+	vec4 gridColor1024; // those every 1024
+	vec4 worldGrid;     // the world grid's plane: spacing (0: none), how far it reaches from the eye, and where the point of it nearest the eye is along its axes
+	vec4 worldGridAt;   // that point, from the eye
+	vec4 worldGridU;    // the plane's axes
+	vec4 worldGridV;
 } frame;
 
 layout(std140, binding = 1) uniform Material {
@@ -41,7 +49,7 @@ layout(std140, binding = 1) uniform Material {
 	vec4 extra;   // 1: a sky face, showing the map's sky; times the object's colour; unlit; times the vertex's colour (particles: 2 weighted by alpha, 3 by the vertex's alpha)
 	vec4 selfIllum; // $selfillumtint, and 1 when it glows by its base texture's alpha
 	vec4 uvTransform; // $basetexturetransform: u' = a*u + b*v + tx, v' = c*u + d*v + ty (a b c d)
-	vec4 uvOffset;    // tx ty
+	vec4 uvOffset;    // tx ty; z 1: a brush face's (the 3D grid shows on it)
 	vec4 refraction;  // 1: Refract or Water (base is its normal map, base2 its tint texture); 1: the reflection's pass, else the tint's; 1: reflects; 1: reflects the sky, not env_cubemap
 	vec4 refractTint; // rgb
 	vec4 envTint;     // rgb; w: SpriteCard's $addself (particles)
@@ -76,6 +84,40 @@ const float MODE_FLAT = 1.0;
 const float MODE_TEXTURED_SHADED = 3.0;
 const float MODE_LIGHTMAP_GRID = 4.0;
 const float MODE_LIGHTING = 5.0;
+
+// How near a plane of a grid level the point is, in pixels along the face, as
+// xv::map::AddGrid's line: a plane the face lies in (or nearly) draws no line on it.
+float gridLine(float c, float spacing, float across, float pixel) {
+	if (across < 0.02) {
+		return 0.0;
+	}
+	float d = abs(c - spacing * floor(c / spacing + 0.5)) / across;
+	return clamp(1.5 - d / pixel, 0.0, 1.0);
+}
+
+// The 3D grid's lines over a brush face, as xv::map::AddGrid lays them.
+vec3 addGrid(vec3 color, vec3 n) {
+	vec3 dir = v_world - frame.eye.xyz - frame.eyeLow.xyz;
+	float pixel = length(dir) * frame.grid.y + frame.grid.z;
+	if (pixel <= 0.0) {
+		return color;
+	}
+	vec3 across = sqrt(max(vec3(1.0) - n * n, vec3(0.0)));
+	float g = frame.grid.x;
+	// On a light face the lines go dark (a quarter of their colour), so they show on both.
+	float shade = dot(color, vec3(0.2126, 0.7152, 0.0722)) > 0.5 ? 0.25 : 1.0;
+	for (int level = 0; level < 3; level++) {
+		float spacing = level == 0 ? g : (level == 1 ? 64.0 : 1024.0);
+		if (level > 0 && spacing <= g) {
+			continue;
+		}
+		vec4 c = level == 0 ? frame.gridColor : (level == 1 ? frame.gridColor64 : frame.gridColor1024);
+		float fade = clamp((spacing / pixel - 4.0) / 4.0, 0.0, 1.0);
+		float l = max(max(gridLine(v_world.x, spacing, across.x, pixel), gridLine(v_world.y, spacing, across.y, pixel)), gridLine(v_world.z, spacing, across.z, pixel));
+		color += (c.rgb * shade - color) * (c.a * fade * l);
+	}
+	return color;
+}
 
 // The face a direction hits: rt bk lf ft up dn as 0-5, as sky::Project picks it.
 int skyFaceOf(vec3 d, out float major) {
@@ -247,7 +289,8 @@ void main() {
 		fragColor = shadeRefract(across, down, n);
 		return;
 	}
-	if (textured && material.extra.x > 0.5 && sky.translate[0].w > 0.5) {
+	bool skyFace = material.extra.x > 0.5 && sky.translate[0].w > 0.5 && frame.pass.z < 0.5;
+	if (textured && skyFace) {
 		// Hammer++ shows the map's sky where its sky faces are, the way the game does.
 		color = vec4(skyColour(v_world - frame.eye.xyz), 1.0);
 	} else if (textured) {
@@ -309,7 +352,7 @@ void main() {
 	// The kinds of xv::map::LightVertex_t: none, the atlas, the vertex's own, fullbright.
 	float kind = v_light.w;
 	bool vertexLit = kind > 1.5 && kind < 2.5;
-	if (mode == MODE_LIGHTING && (material.extra.z < 0.5 || vertexLit) && !(material.extra.x > 0.5 && sky.translate[0].w > 0.5)) {
+	if (mode == MODE_LIGHTING && (material.extra.z < 0.5 || vertexLit) && !skyFace) {
 		vec3 light = vec3(0.0);
 		bool lit = false;
 		if (kind > 0.5 && kind < 1.5 && frame.lighting.w > 0.5 && frame.lighting.x > 0.0) {
@@ -338,7 +381,7 @@ void main() {
 		// Added after the light, so the detail glows (6's fade by threshold taken as 5's add).
 		color.rgb += detail.rgb * material.detail.y;
 	}
-	if (textured && mode != MODE_LIGHTMAP_GRID && frame.fogRange.z > 0.5 && !(material.extra.x > 0.5 && sky.translate[0].w > 0.5)) {
+	if (textured && mode != MODE_LIGHTMAP_GRID && frame.fogRange.z > 0.5 && !skyFace) {
 		// env_fog_controller's fog, as xv::map::ShadeFragment adds it.
 		vec3 dir = v_world - frame.eye.xyz - frame.eyeLow.xyz;
 		float distance = frame.fogDirection.w > 0.5 ? length(dir) : dot(dir, frame.viewForward.xyz);
@@ -361,6 +404,9 @@ void main() {
 	if ((mode == MODE_FLAT || mode == MODE_TEXTURED_SHADED) && material.extra.z < 0.5) {
 		color.rgb *= faceShade(n);
 	}
+	if (material.uvOffset.z > 0.5 && frame.pass.x < 0.5 && frame.grid.x > 0.0) {
+		color.rgb = addGrid(color.rgb, n);
+	}
 	int flags = int(v_state.a * 255.0 + 0.5);
 	if ((flags & 8) != 0) {
 		color.rgb = mix(color.rgb, frame.instance.rgb, frame.instance.a);
@@ -373,7 +419,7 @@ void main() {
 	}
 	// The HDR lighting preview's sky (its 2D sky and the 3D skybox) and unlit faces, marked for its
 	// auto exposure to leave out: xv::map::UNMEASURED_ALPHA.
-	if (mode == MODE_LIGHTING && frame.lighting.w > 1.5 && material.options.y < 0.5 && (frame.pass.x > 0.5 || (material.extra.x > 0.5 && sky.translate[0].w > 0.5) || kind > 2.5)) {
+	if (mode == MODE_LIGHTING && frame.lighting.w > 1.5 && material.options.y < 0.5 && (frame.pass.x > 0.5 || skyFace || kind > 2.5)) {
 		color.a = 254.0 / 255.0;
 	}
 	fragColor = color;

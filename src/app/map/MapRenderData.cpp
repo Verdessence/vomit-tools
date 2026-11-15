@@ -336,6 +336,9 @@ void CMapRenderData::Rebuild()
 
 	auto pMaterials = std::make_shared<std::vector<xv::map::RasterMaterial_t>>( m_nEntityMaterial + 1 );
 	pMaterials->back().m_bObjectColor = true;
+	// The map's own (its faces', and the places kept for new ones) take the 3D grid.
+	for ( std::uint32_t n = 0; n < m_nEntityMaterial; n++ )
+		( *pMaterials )[ n ].m_Shade.m_bGrid = true;
 	m_Frame.m_pMaterials = pMaterials;
 
 	UpdateFlatColors();
@@ -590,6 +593,9 @@ void CMapRenderData::SetMaterials( std::shared_ptr<const std::vector<xv::map::Ra
 	xv::map::RasterMaterial_t entity;
 	entity.m_bObjectColor = true;
 	( *pAll )[ nEntity ] = entity;
+	// Brush faces' materials come before the entity boxes': they take the 3D grid, props don't.
+	for ( std::uint32_t n = 0; n < nEntity; n++ )
+		( *pAll )[ n ].m_Shade.m_bGrid = true;
 	m_Frame.m_pMaterials = std::move( pAll );
 	m_Frame.m_pTextures = std::move( pTextures );
 	m_nGeneration++;
@@ -916,6 +922,7 @@ MapFrame_t CMapRenderData::Snapshot( const xv::map::CViewCamera &camera, const x
 	}
 	// The 2D sky behind everything, where nothing is drawn (the Sky toggle).
 	frame.m_Options.m_bSkyBackground = settings.m_bSky2D;
+	frame.m_Options.m_Shade.m_bSkyFaces = settings.m_bSkyFaces;
 	frame.m_nGeneration = m_nGeneration;
 	return frame;
 }

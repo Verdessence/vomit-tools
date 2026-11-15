@@ -189,6 +189,31 @@ struct LightingOptions_t
 	// Called from the baking thread with the direct light alone, before the bounces, to show
 	// something sooner.
 	std::function<void( std::shared_ptr<const CLighting> )> m_pfnPartial;
+	// A bake of the same map with the same settings, from before an edit: only what the edit
+	// can have changed is lit again, and the rest keeps that bake's light. What changed is found
+	// from what the bake recorded of its faces (CLighting::m_Baked): the boxes of the faces that
+	// moved, came or went. A face is lit again when it is near one of those boxes (the sky's
+	// ambient and bounced light change there), or when one lies between it and a light or the
+	// sun (a shadow may have moved across it). Bounced light onto those faces is gathered from
+	// what all the faces hold, the kept ones' as they were. A light that moved, came, went or
+	// changed lights again what it reaches (where it was and where it is). Another sun or sky,
+	// other instances or another luxel step than that bake's: everything is baked, as without
+	// one.
+	// Such a bake goes chunk by chunk, each lit through (direct, sky, a bounce) before the
+	// next, nearest m_ViewPoint first, and hands m_pfnPartial what it has so far now and then
+	// (CLighting::m_bUnfinished): the next bake can start from that as well, and lights only
+	// what this one hadn't reached yet beside what its own edit changed.
+	std::shared_ptr<const CLighting> m_pPrevious;
+	// Earlier bakes of this map, whatever it looked like then (kept by whoever asks, or read
+	// from a file: ReadLighting). One that read just what this bake reads (the same faces,
+	// lights, options and props' shadows) is handed back as it is, nothing baked: an undo, a
+	// setting put back. Else, when one made with the same options differs from this map by
+	// less than m_pPrevious does (or there is none, and it differs in under a tenth of the
+	// faces), the bake starts from that one instead.
+	std::vector<std::shared_ptr<const CLighting>> m_Cache;
+	std::optional<Point_t> m_ViewPoint; // where the map is looked at from; none: in the faces' order
+	std::size_t m_nChunkLuxels = std::size_t{ 1 } << 15; // faces go into a chunk until they have this many luxels
+	int m_nPartialMs = 750;             // what is done so far is handed over no more often than this
 };
 
 // Where a face's luxels are in the atlas. Luxel (u, v) of the face is atlas texel
@@ -251,6 +276,36 @@ public:
 	std::uint64_t m_nRevision = 0;           // the scene's, when it was baked
 	std::vector<BakeStage_t> m_Stages;       // in the order they ran
 	std::size_t m_nLuxels = 0;               // samples lit
+	// What the bake read of each of the map's faces that is lit or in the way of light, sorted
+	// by face: its box and a hash of its shape and of what lighting needs of it. A later bake
+	// starting from this one (LightingOptions_t::m_pPrevious) tells from them what changed.
+	struct BakedFace_t
+	{
+		FaceRef_t m_Face;
+		Box_t m_Bounds;
+		std::uint64_t m_nHash = 0;
+		std::uint32_t m_nFirstTriangle = 0; // in m_pBakedTriangles, when it is in the way of light
+		std::uint32_t m_nTriangles = 0;
+		bool m_bStale = false;              // an unfinished bake hadn't lit it yet: its light is older than the map it was read from
+	};
+	std::vector<BakedFace_t> m_Baked;
+	// The triangles of the faces in the way of light, three corners each: a later bake tells a
+	// shadow that moved by the faces that changed themselves, as they were and as they are.
+	std::shared_ptr<const std::vector<std::array<float, 9>>> m_pBakedTriangles;
+	// A bake after an edit, handed over before its last chunk: a later one may start from it.
+	// Its props, overlays and points are the bake before's; those the edit can have changed
+	// are listed, to be lit again.
+	bool m_bUnfinished = false;
+	std::set<const CMapMesh *> m_StaleExtras;
+	std::set<std::uint32_t> m_StalePoints;
+	std::uint64_t m_nLightsHash = 0;         // of the lights it read
+	std::vector<Light_t> m_BakedLights;      // and the lights themselves: a later bake lights again what those that changed reach
+	std::uint64_t m_nSettingsHash = 0;       // of the options its light depends on, and the props' shadows
+	std::uint64_t m_nInstanceHash = 0;       // of the instances' faces
+	bool m_bFromEarlier = false;             // nothing was baked: an earlier bake had read just the same
+	bool m_bLoaded = false;                  // read from a file (ReadLighting): its faces are named as that session named them
+	std::size_t m_nKeptFaces = 0;            // faces whose light is the bake's before
+	std::size_t m_nRelitFaces = 0;           // and those lit in this one
 	std::size_t m_nTriangles = 0;            // in the way of light (props' included)
 
 	// The light a texel holds, linear (1: fully lit), RGB.
@@ -263,6 +318,14 @@ public:
 };
 
 [[nodiscard]] std::shared_ptr<const CLighting> BakeLighting( const CScene &scene, std::span<const LightMaterial_t> materials, const LightingOptions_t &options = {}, const LightingExtras_t &extras = {} );
+
+// A finished bake as bytes, for keeping between sessions, and back. What is kept: the atlas,
+// where each face is in it, and what the bake read (faces, lights, options), so a bake of the
+// map opened again can start from it (LightingOptions_t::m_Cache). Not the props', overlays'
+// and sprites' light, which goes by meshes that are made anew: those are lit again.
+// ReadLighting gives nullptr for anything else than what this version wrote.
+[[nodiscard]] std::vector<std::uint8_t> WriteLighting( const CLighting &lighting );
+[[nodiscard]] std::shared_ptr<const CLighting> ReadLighting( std::span<const std::uint8_t> bytes );
 
 // Half floats, as the atlas stores them.
 [[nodiscard]] std::uint16_t FloatToHalf( float fl );

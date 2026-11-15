@@ -115,6 +115,7 @@ struct ShadeMaterial_t
 	float m_flDetailBlend = 1.0f;
 	std::array<float, 2> m_DetailScale{ 4.0f, 4.0f };
 	std::array<float, 6> m_DetailTransform{ 1, 0, 0, 1, 0, 0 };
+	bool m_bGrid = false; // a brush face's: the 3D grid shows on it (ShadeOptions_t::m_flGrid)
 	friend bool operator==( const ShadeMaterial_t &, const ShadeMaterial_t & ) = default;
 
 	[[nodiscard]] bool HasUvTransform() const { return m_UvTransform != std::array<float, 6>{ 1, 0, 0, 1, 0, 0 }; }
@@ -135,6 +136,8 @@ struct ShadeInput_t
 	bool m_bInstance = false;                  // a func_instance's: tinted
 	bool m_bInvalid = false;                   // a broken solid's: tinted
 	std::array<float, 4> m_Light{};            // how the lighting preview lights it (map/Lighting.h's LightVertex_t)
+	CVec3 m_vecWorld{};                        // where the point is (for the 3D grid)
+	bool m_bSkyPass = false;                   // drawn in the 3D skybox's pass (no grid there)
 };
 
 struct ShadeOptions_t
@@ -151,6 +154,7 @@ struct ShadeOptions_t
 	CVec3 m_vecFaceShade{ 0.65f, 0.8f, 1.0f }; // brightness of faces facing along x, y and z
 	float m_flLuxelShade = 0.75f;              // the lightmap grid's darker squares
 	const sky::CCube *m_pSky = nullptr;        // Hammer++'s 2D skybox on sky faces; null: none
+	bool m_bSkyFaces = true;                                // sky faces show that sky; off, their own texture (tools/toolsskybox as Hammer draws it)
 	const sky::SkyTransforms_t *m_pSkyTransforms = nullptr; // its faces' transforms as its proxies have moved them; null: as read
 	// What stands in for env_cubemap in reflections: the game's default cube map, as a map shows
 	// before buildcubemaps. Null: the sky does.
@@ -162,6 +166,14 @@ struct ShadeOptions_t
 	bool m_bLightOnly = false;                 // the lighting preview's light alone (mat_fullbright 2): textures a plain grey
 	CVec3 m_vecViewForward{ 1, 0, 0 };         // for fog measured along the view
 	float m_flMonitorGamma = 2.2f;             // the lighting preview's mat_monitorgamma (the game's brightness setting): 2.2 changes nothing
+	// The 3D grid (Hammer's P) on brush faces: its spacing (0: none), and the world units a pixel
+	// covers at a point, m_flGridPerDistance times its distance from the eye plus m_flGridPixel
+	// (orthographic views' whole size). Its lines, those every 64 units and those every 1024:
+	// rgb and how far toward it a line takes the face.
+	float m_flGrid = 0.0f;
+	float m_flGridPerDistance = 0.0f;
+	float m_flGridPixel = 0.0f;
+	std::array<std::array<float, 4>, 3> m_GridColors{};
 };
 
 // With HDR the game draws a lightmap linear, times a scale its shaders take from the engine
@@ -201,6 +213,17 @@ inline constexpr std::uint8_t UNMEASURED_ALPHA = 254;
 // up to that many along the footprint's long side at a finer level, averaged. map.frag's
 // SampleFiltered does the same.
 [[nodiscard]] std::array<float, 4> SampleFiltered( const RasterTexture_t &texture, std::array<float, 2> texel, const ShadeInput_t &input, const ShadeOptions_t &options );
+// The 3D grid's lines laid over a brush face's colour: each of the grid's levels (its spacing,
+// 64, 1024; those finer than the grid left out) toward its colour where the point is within a
+// pixel and a half of one of its planes, measured along the face, and fading out as its lines
+// come closer than eight pixels apart on screen; on a light face (luminance over a half) toward a
+// quarter of it, so the lines show on both. map.frag's addGrid does the same.
+void AddGrid( std::array<float, 4> &color, const ShadeInput_t &input, const ShadeOptions_t &options );
+// The world grid at a point of its plane (x and y), where a pixel covers footprint of the plane
+// along each: the levels' lines laid over each other as AddGrid's are, each a pixel and a half
+// wide and fading out as its lines come closer than eight pixels apart. Rgb weighted by the
+// alpha it comes with (0: no line here). mapgrid.frag does the same.
+[[nodiscard]] std::array<float, 4> WorldGridAt( std::array<float, 2> at, std::array<float, 2> footprint, float flGrid, const std::array<std::array<float, 4>, 3> &colors );
 // The fixed light Hammer's shaded modes use: by how much a face looks along each axis.
 [[nodiscard]] float FaceShade( CVec3 vecNormal, CVec3 vecShade );
 // RGBA 0-1; nullopt where alpha testing throws the point away.

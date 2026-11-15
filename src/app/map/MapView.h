@@ -8,6 +8,9 @@
 //===========================================================================//
 #pragma once
 
+#include <array>
+#include <cmath>
+
 #include <QWidget>
 
 #include "map/Geometry.h"
@@ -73,11 +76,56 @@ enum class MapEditMode_t
 	MAP_EDIT_MODE_SHEAR,
 };
 
+// The world grid's plane: a point of it (where its lines are counted from) and its axes, two
+// along it and the one out of it (unit vectors, square to each other).
+struct MapGridPlane_t
+{
+	xv::map::Point_t m_Origin{};
+	std::array<xv::map::Point_t, 3> m_Axes{ { { 1, 0, 0 }, { 0, 1, 0 }, { 0, 0, 1 } } };
+
+	// Whether its axes are the world's, in any order and either way: a box drawn on it is then
+	// a box along the world's axes too.
+	[[nodiscard]] bool IsAlongWorld() const
+	{
+		for ( const xv::map::Point_t &axis : m_Axes )
+		{
+			int nOnes = 0;
+			for ( const double flPart : axis )
+			{
+				if ( std::abs( std::abs( flPart ) - 1.0 ) < 1e-9 )
+					nOnes++;
+				else if ( std::abs( flPart ) > 1e-9 )
+					return false;
+			}
+			if ( nOnes != 1 )
+				return false;
+		}
+		return true;
+	}
+	// A point from the plane's own measures (along its axes from its origin), and back.
+	[[nodiscard]] xv::map::Point_t ToWorld( const xv::map::Point_t &local ) const
+	{
+		xv::map::Point_t world = m_Origin;
+		for ( std::size_t a = 0; a < 3; a++ )
+			world = xv::map::Add( world, xv::map::Scale( m_Axes[ a ], local[ a ] ) );
+		return world;
+	}
+	[[nodiscard]] xv::map::Point_t ToLocal( const xv::map::Point_t &world ) const
+	{
+		const xv::map::Point_t from = xv::map::Subtract( world, m_Origin );
+		return { xv::map::Dot( from, m_Axes[ 0 ] ), xv::map::Dot( from, m_Axes[ 1 ] ), xv::map::Dot( from, m_Axes[ 2 ] ) };
+	}
+	bool operator==( const MapGridPlane_t & ) const = default;
+};
+
 // How the views draw, shared by all of a map's views (Hammer's View menu toggles).
 struct MapViewSettings_t
 {
 	int m_nGridSize = 64;
 	bool m_bShowGrid = true;
+	bool m_bShow3DGrid = false; // the grid on the faces in 3D views (Hammer's P)
+	bool m_bWorldGrid = false;  // the grid on a plane of its own in 3D views, where there are no faces yet
+	MapGridPlane_t m_WorldGrid;   // that plane
 	bool m_bSnapToGrid = true;    // Shift+W
 	bool m_bTextureLock = true;   // textures move with the faces
 	bool m_bScaleLock = false;    // and stretch with them (Hammer's Texture Scale Lock)
@@ -88,6 +136,7 @@ struct MapViewSettings_t
 	bool m_bToolTextures = true;  // Ctrl+Shift+F2 (not nodraw, which has a toggle of its own)
 	bool m_bNodraw = true;
 	bool m_bSkybox3D = true;      // Alt+V
+	bool m_bSkyFaces = true;      // sky faces show the map's sky; off, tools/toolsskybox itself
 	bool m_bSky2D = true;         // the map's 2D sky behind everything in the textured 3D views
 	bool m_bOriginAxes = true;    // the world's X, Y and Z axes at 0 0 0 in the 3D views
 	bool m_bFog = true;           // env_fog_controller's fog in the textured 3D views
@@ -124,6 +173,7 @@ protected:
 	bool event( QEvent *pEvent ) override;
 	void enterEvent( QEnterEvent *pEvent ) override;
 	void keyPressEvent( QKeyEvent *pEvent ) override;
+	void mouseDoubleClickEvent( QMouseEvent *pEvent ) override;
 	void focusInEvent( QFocusEvent *pEvent ) override;
 	void focusOutEvent( QFocusEvent *pEvent ) override;
 	[[nodiscard]] MapKeyContext_t GetKeyContext() const { return Is2DView( GetType() ) ? MapKeyContext_t::MAP_KEY_CONTEXT_2D : MapKeyContext_t::MAP_KEY_CONTEXT_3D; }

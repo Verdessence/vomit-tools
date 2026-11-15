@@ -291,7 +291,7 @@ if(Qt6_VERSION VERSION_GREATER_EQUAL 6.7 AND TARGET Qt6::ShaderTools AND TARGET 
             GLSL "300es,330"
             HLSL 50
             MSL 12
-            FILES shaders/map.vert shaders/map.frag shaders/mapline.vert shaders/mapline.frag shaders/mapalpha.vert shaders/mapalpha.frag shaders/mapalphasky.frag shaders/mapsky.vert shaders/mapsky.frag)
+            FILES shaders/map.vert shaders/map.frag shaders/mapline.vert shaders/mapline.frag shaders/mapalpha.vert shaders/mapalpha.frag shaders/mapalphasky.frag shaders/mapsky.vert shaders/mapsky.frag shaders/mapgrid.vert shaders/mapgrid.frag)
     # Screen effects' pixel shaders are written as GLSL and baked for the card as the map opens them.
     # (its QShaderBaker is in the private module, as QRhi is in GuiPrivate).
     target_link_libraries(vomit_tools_ui PUBLIC Qt6::ShaderToolsPrivate)

@@ -1438,6 +1438,18 @@ void CMapView2D::PaintTools( QPainter &painter ) const
 		PaintHandles( painter, box );
 		PaintSizes( painter, box, Flatten( newBox->m_Maxs ) - Flatten( newBox->m_Mins ), boxColor );
 	}
+	else if ( const std::optional<MapGridPlane_t> &plane = m_Editor.GetNewBoxPlane(); plane && m_Editor.GetBlockBox() )
+	{
+		// A box standing on a turned plane: its edges as they lie, to look at. The 3D views
+		// size it; a drag here begins a box along the axes instead.
+		const xv::map::Box_t &turned = *m_Editor.GetBlockBox();
+		auto corner = [ & ]( int n ) { return ToWidget( Flatten( plane->ToWorld( xv::map::Point_t{ ( n & 1 ) ? turned.m_Maxs[ 0 ] : turned.m_Mins[ 0 ], ( n & 2 ) ? turned.m_Maxs[ 1 ] : turned.m_Mins[ 1 ], ( n & 4 ) ? turned.m_Maxs[ 2 ] : turned.m_Mins[ 2 ] } ) ) ); };
+		painter.setPen( QPen{ color, 0.0 } );
+		for ( int n = 0; n < 8; n++ )
+			for ( const int nBit : { 1, 2, 4 } )
+				if ( ( n & nBit ) == 0 )
+					painter.drawLine( corner( n ), corner( n | nBit ) );
+	}
 	if ( !bCordonTool && GetDocument().GetScene() )
 	{
 		// Hammer's thick red line round the cordon while it is on.

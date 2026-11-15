@@ -14,6 +14,7 @@
 
 #include "dmx/Dmx.h"
 #include "kv1/Kv1.h"
+#include "Preferences.h"
 #include "map/Sprites.h"
 #include "particles/Particles.h"
 
@@ -493,7 +494,12 @@ std::shared_ptr<const xv::map::CMapMesh> CMapParticles::BuildMesh( xv::map::Poin
 	{
 		const Sprite_t &sheet = pSelf->DetailSprite();
 		const std::array<int, 2> size{ std::max( 1, sheet.m_pTexture->m_nWidth ), std::max( 1, sheet.m_pTexture->m_nHeight ) };
-		m_pDetailProps->Layout( eye, right, up, xv::map::DetailView_t{}, nFirstMaterial + sheet.m_nMaterial, size, sprites );
+		// Further than the game's cl_detaildist by default: a map is looked at from further off
+		// than it is played.
+		xv::map::DetailView_t view;
+		view.m_flDistance = static_cast<float>( CPreferences::Instance().GetMapPreferences().m_flDetailDistance );
+		view.m_flFade = std::min( view.m_flFade, view.m_flDistance * 0.5f );
+		m_pDetailProps->Layout( eye, right, up, view, nFirstMaterial + sheet.m_nMaterial, size, sprites );
 	}
 	if ( !bParticles )
 	{

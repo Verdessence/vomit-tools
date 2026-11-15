@@ -103,6 +103,33 @@ public:
 	void PaintLabels( QPainter &painter );
 	// The gizmo at the selection, if there is one to show, and the camera at this view's size.
 	[[nodiscard]] std::optional<CMapGizmo> GetGizmo() const;
+	// The block tool's box in a 3D view. An arrow stands out of the middle of each face (axis
+	// * 2 + 0 for its low side, + 1 for its high one) and drags that face along its axis; a drag
+	// on the box itself slides it across the face pressed; G, R and E move, turn and size it
+	// with the keys (X, Y, Z for an axis), as they do the selection.
+	struct BoxArrow_t
+	{
+		QPointF m_From; // on screen
+		QPointF m_To;
+		double m_flDepth = 0.0;
+	};
+	[[nodiscard]] MapGridPlane_t BoxFrame() const;
+	[[nodiscard]] std::pair<xv::map::Point_t, xv::map::Point_t> BoxRay( QPointF at ) const;
+	[[nodiscard]] std::array<xv::map::Point_t, 6> BoxHandles( const xv::map::Box_t &box ) const;
+	[[nodiscard]] std::optional<BoxArrow_t> BoxArrow( const xv::map::Box_t &box, int nFace ) const;
+	[[nodiscard]] int BoxHandleAt( QPointF at ) const;
+	[[nodiscard]] std::optional<std::pair<int, xv::map::Point_t>> BoxSurfaceAt( QPointF at ) const;
+	void DragBox( QPointF at, Qt::KeyboardModifiers modifiers );
+	void EndBoxDrag( bool bCommit );
+	// A new box dragged out in the view: on the world grid's plane while it shows, else on the
+	// surface pressed (along the world's axes). On a plane turned off the world's axes the block
+	// is made when the drag ends; else the box is left to size, as one drawn in a 2D view.
+	bool BeginBlockDrag( QPointF at );
+	void DragBlock( QPointF at, Qt::KeyboardModifiers modifiers );
+	void EndBlockDrag( bool bCommit );
+	[[nodiscard]] bool IsDraggingBlock() const { return m_BlockPlane.has_value(); }
+	// The world grid's plane moved and turned by a transform (its axes kept square).
+	[[nodiscard]] static MapGridPlane_t MovedPlane( const MapGridPlane_t &plane, const xv::map::Transform_t &transform );
 	// A cross while the Displacement tab's brush is on, else the arrow (not during mouselook).
 	void UpdateCursor();
 	[[nodiscard]] bool HasPaintBrushRing() const;
@@ -120,6 +147,7 @@ protected:
 	void paintEvent( QPaintEvent *pEvent ) override;
 	void resizeEvent( QResizeEvent *pEvent ) override;
 	void mousePressEvent( QMouseEvent *pEvent ) override;
+	void mouseDoubleClickEvent( QMouseEvent *pEvent ) override;
 	void mouseMoveEvent( QMouseEvent *pEvent ) override;
 	void mouseReleaseEvent( QMouseEvent *pEvent ) override;
 	void wheelEvent( QWheelEvent *pEvent ) override;
@@ -140,6 +168,12 @@ private:
 	void SetMouselook( bool bOn );
 	// Turns the camera by a mouse movement, at the preferences' speed.
 	void Look( QPointF delta );
+	void DragCamera( Qt::MouseButtons buttons, QPointF delta );
+	void EndSpaceDrag();
+	// Hides the cursor and holds it in the view while the mouse moves the camera.
+	void CapturePointer( QPoint at, std::function<void( QPointF )> pfnMoved );
+	void ReleasePointer();
+	void WarpToMiddle();
 	void Select( QPointF at, bool bToggle );
 	// The block tool's box, the entity tool's marker and the gizmo, over the picture.
 	void PaintTools( QPainter &painter );
@@ -215,6 +249,7 @@ private:
 	QPoint m_LookFrom;          // where the cursor was when mouselook began: it goes back there
 	CPointerLock m_PointerLock; // Wayland: pins the pointer meanwhile
 	bool m_bSpaceHeld = false;
+	bool m_bSpaceDrag = false; // a drag begun with Space held: the camera's, whatever the tool
 	Qt::MouseButtons m_Dragging;
 	QPoint m_LastMouse;
 	QPoint m_PressAt;
@@ -231,6 +266,24 @@ private:
 	std::optional<CMapGizmo> m_DragGizmo;
 	std::shared_ptr<const xv::map::CScene> m_pGizmoScene;
 	std::vector<std::uint32_t> m_GizmoSelection;
+	// The block tool's box while it is dragged or moved by the keys: the box as it was.
+	std::optional<xv::map::Box_t> m_BoxFrom;
+	int m_nBoxFace = -1;      // the face dragged by its arrow
+	int m_nBoxFaceHover = -1; // the face whose arrow is under the pointer
+	int m_nBoxPlane = -1;     // the axis the box slides across, dragged by itself
+	xv::map::Point_t m_BoxGrab{}; // where on the box that drag began
+	bool m_bBoxHover = false; // the pointer is over the box itself
+	// A new box being dragged out: the plane it is drawn on, where on it the drag began, which
+	// side of the plane it stands on and how tall, the box in the plane's measures, and the
+	// editor's box as it was (a drag given up puts it back).
+	std::optional<MapGridPlane_t> m_BlockPlane;
+	std::array<double, 2> m_BlockFrom{};
+	double m_flBlockDepth = 0.0;
+	std::optional<xv::map::Box_t> m_BlockLocal;
+	std::optional<xv::map::Box_t> m_BlockBefore;
+	std::optional<MapGridPlane_t> m_BlockPlaneBefore;
+	// The world grid's plane as it was, while the gizmo or the keys move it.
+	std::optional<MapGridPlane_t> m_GridFrom;
 	// A paint stroke: the scene it started from, the displacements as the stroke leaves them,
 	// whether the right button (lowering) began it, where it last painted, and the brush's
 	// place under the mouse (its ring).

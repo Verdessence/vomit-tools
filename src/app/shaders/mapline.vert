@@ -17,7 +17,7 @@ layout(std140, binding = 0) uniform Frame {
 	vec4 faceShade;     // xyz
 	vec4 state;         // the state texture's width, and the most samples anisotropic filtering takes
 	vec4 instance;      // rgb, and how much of it func_instances' contents take
-	vec4 pass;          // x 1: the 3D skybox, drawn from its own camera first; y 1: a mesh as read
+	vec4 pass;          // x 1: the 3D skybox, drawn from its own camera first; y 1: a mesh as read; z 1: sky faces show their own texture
 	vec4 invalid;       // rgb, and how much of it broken solids' faces take
 	vec4 eyeLow;        // what float precision leaves of the eye after eye
 	vec4 lighting;      // the lighting preview's atlas width and height, brightness (times exposure), 1 (LDR) or 2 (HDR) when there is one
@@ -26,6 +26,14 @@ layout(std140, binding = 0) uniform Frame {
 	vec4 fogDirection;  // xyz, and 1 when measured from the eye (else along the view)
 	vec4 fogRange;      // start, end, 1 when there is fog; w 1: the light alone (mat_fullbright 2)
 	vec4 viewForward;   // xyz; w: the lighting preview's mat_monitorgamma / 2.2
+	vec4 grid;          // the 3D grid: spacing (0: none), world units a pixel covers per unit of distance, and at any distance
+	vec4 gridColor;     // its lines: rgb, and how far toward it a line takes the face
+	vec4 gridColor64;   // those every 64 units
+	vec4 gridColor1024; // those every 1024
+	vec4 worldGrid;     // the world grid's plane: spacing (0: none), how far it reaches from the eye, and where the point of it nearest the eye is along its axes
+	vec4 worldGridAt;   // that point, from the eye
+	vec4 worldGridU;    // the plane's axes
+	vec4 worldGridV;
 } frame;
 
 layout(std140, binding = 1) uniform Material {

@@ -162,6 +162,10 @@ CMapLightingPanel::CMapLightingPanel( CMapEditor &editor, QWidget *pParent )
 	m_pAutoBake = new QCheckBox( tr( "Bake again after every edit" ) );
 	m_pAutoBake->setObjectName( QStringLiteral( "mapLightingAutoBake" ) );
 	pLayout->addWidget( m_pAutoBake );
+	m_pKeepBakes = new QCheckBox( tr( "Keep bakes to use again" ) );
+	m_pKeepBakes->setObjectName( QStringLiteral( "mapLightingKeepBakes" ) );
+	m_pKeepBakes->setToolTip( tr( "A map lit the same as it was before isn't baked again: after an undo or a setting put back (a few bakes are kept in memory), and when the map is opened again (its last bake is kept in a file in the cache folder). Bake Lighting always bakes everything" ) );
+	pLayout->addWidget( m_pKeepBakes );
 	auto *pBake = new QPushButton( tr( "Bake Lighting" ) );
 	pBake->setObjectName( QStringLiteral( "mapLightingBake" ) );
 	connect( pBake, &QPushButton::clicked, this, [ this ] { m_Editor.BakeLightingNow(); } );
@@ -238,7 +242,7 @@ CMapLightingPanel::CMapLightingPanel( CMapEditor &editor, QWidget *pParent )
 	connect( m_pBrightness, &QDoubleSpinBox::valueChanged, this, &CMapLightingPanel::StorePreferences );
 	connect( m_pMonitorGamma, &QDoubleSpinBox::valueChanged, this, &CMapLightingPanel::StorePreferences );
 	connect( m_pRadius, &QDoubleSpinBox::valueChanged, this, &CMapLightingPanel::StorePreferences );
-	for ( QCheckBox *pCheck : { m_pHdr, m_pLightOnly, m_pPropShadows, m_pSmoothShadows, m_pAutoBake, m_pInRadius } )
+	for ( QCheckBox *pCheck : { m_pHdr, m_pLightOnly, m_pPropShadows, m_pSmoothShadows, m_pAutoBake, m_pKeepBakes, m_pInRadius } )
 	{
 		connect( pCheck, &QCheckBox::toggled, this, &CMapLightingPanel::StorePreferences );
 	}
@@ -273,6 +277,8 @@ void CMapLightingPanel::LoadPreferences()
 	m_pPropShadows->setChecked( preferences.m_bLightPropShadows );
 	m_pSmoothShadows->setChecked( preferences.m_bLightSmoothShadows );
 	m_pAutoBake->setChecked( preferences.m_bLightAutoBake );
+	const QSignalBlocker blockKeep( m_pKeepBakes );
+	m_pKeepBakes->setChecked( preferences.m_bLightKeepBakes );
 }
 
 //-----------------------------------------------------------------------------
@@ -290,6 +296,7 @@ void CMapLightingPanel::StorePreferences()
 	preferences.m_bLightPropShadows = m_pPropShadows->isChecked();
 	preferences.m_bLightSmoothShadows = m_pSmoothShadows->isChecked();
 	preferences.m_bLightAutoBake = m_pAutoBake->isChecked();
+	preferences.m_bLightKeepBakes = m_pKeepBakes->isChecked();
 	preferences.m_bLightInRadius = m_pInRadius->isChecked();
 	preferences.m_flLightRadius = m_pRadius->value();
 	preferences.m_nLightDelay = m_pDelay->value();
@@ -313,6 +320,10 @@ void CMapLightingPanel::UpdateStatus()
 		// Where the time went, stage by stage (none yet while only the direct light is in).
 		if ( !pLighting->m_Stages.empty() )
 		{
+			if ( pLighting->m_bFromEarlier )
+				szText += u'\n' + tr( "The same as an earlier bake: nothing baked" );
+			else if ( pLighting->m_nKeptFaces > 0 )
+				szText += u'\n' + tr( "Only what the edit changed: %1 faces lit again, %2 kept" ).arg( QLocale{}.toString( static_cast<qulonglong>( pLighting->m_nRelitFaces ) ), QLocale{}.toString( static_cast<qulonglong>( pLighting->m_nKeptFaces ) ) );
 			szText += u'\n' + tr( "%1 luxels, %2 triangles in the way:" ).arg( QLocale{}.toString( static_cast<qulonglong>( pLighting->m_nLuxels ) ), QLocale{}.toString( static_cast<qulonglong>( pLighting->m_nTriangles ) ) );
 			for ( const xv::map::BakeStage_t &stage : pLighting->m_Stages )
 				szText += u'\n' + tr( "  %1: %2 s" ).arg( QString::fromStdString( stage.m_szName ) ).arg( stage.m_flMs / 1000.0, 0, 'f', 2 );
@@ -374,6 +385,7 @@ void CMapLightingPanel::ResetToDefault()
 	preferences.m_bLightPropShadows = defaults.m_bLightPropShadows;
 	preferences.m_bLightSmoothShadows = defaults.m_bLightSmoothShadows;
 	preferences.m_bLightAutoBake = defaults.m_bLightAutoBake;
+	preferences.m_bLightKeepBakes = defaults.m_bLightKeepBakes;
 	preferences.m_bLightInRadius = defaults.m_bLightInRadius;
 	preferences.m_flLightRadius = defaults.m_flLightRadius;
 	preferences.m_nLightDelay = defaults.m_nLightDelay;

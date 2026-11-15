@@ -97,6 +97,13 @@ struct RasterOptions_t
 	// showing where the world's sky faces are, as the game shows it. Textured views only.
 	std::optional<CViewCamera> m_SkyboxCamera;
 	Box_t m_SkyboxRoom; // only what reaches into it is drawn in the skybox's pass
+	// The world grid: lines every m_flWorldGrid units (0: none) on the plane through
+	// m_WorldGridOrigin along m_WorldGridU and m_WorldGridV (unit vectors, square to each other),
+	// counted from the origin. Over empty space too, hidden by what is in front of it.
+	float m_flWorldGrid = 0.0f;
+	Point_t m_WorldGridOrigin{};
+	Point_t m_WorldGridU{ 1.0, 0.0, 0.0 };
+	Point_t m_WorldGridV{ 0.0, 1.0, 0.0 };
 };
 
 // Whether an object's triangles and lines in pMesh are drawn: it is shown, and pMesh doesn't hold

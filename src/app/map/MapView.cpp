@@ -102,6 +102,17 @@ void CMapView::keyPressEvent( QKeyEvent *pEvent )
 }
 
 //-----------------------------------------------------------------------------
+// Purpose: A double-click with the selection tool opens Object Properties on what the first
+//          click picked, as in Hammer. The second press is still a press to the tools.
+//-----------------------------------------------------------------------------
+void CMapView::mouseDoubleClickEvent( QMouseEvent *pEvent )
+{
+	QWidget::mouseDoubleClickEvent( pEvent );
+	if ( pEvent->button() == Qt::LeftButton && pEvent->modifiers() == Qt::NoModifier && m_Editor.GetTool() == MapTool_t::MAP_TOOL_SELECT && !GetDocument().GetSelection().empty() )
+		m_Editor.RunAction( MapAction_t::MAP_ACTION_PROPERTIES, this );
+}
+
+//-----------------------------------------------------------------------------
 // Purpose:
 //-----------------------------------------------------------------------------
 void CMapView::focusInEvent( QFocusEvent *pEvent )

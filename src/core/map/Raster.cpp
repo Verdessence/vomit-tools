@@ -181,6 +181,7 @@ private:
 	};
 	void AddLine( Point_t from, Point_t to, std::array<std::uint8_t, 3> color, bool bOnTop );
 	void DrawLines();
+	void DrawWorldGrid();
 
 	const RasterScene_t &m_Scene;
 	const CViewCamera &m_Camera;
@@ -408,6 +409,7 @@ void CRasterizer::FillTriangle( const ScreenVertex_t &a, const ScreenVertex_t &b
 	input.m_bSelected = ( nFlags & RASTER_OBJECT_SELECTED ) != 0;
 	input.m_bInstance = ( nFlags & RASTER_OBJECT_INSTANCE ) != 0;
 	input.m_bInvalid = ( nFlags & RASTER_OBJECT_INVALID ) != 0;
+	input.m_bSkyPass = m_bSkyPass;
 	if ( nObject < m_Scene.m_ObjectColors.size() )
 	{
 		const auto &color = m_Scene.m_ObjectColors[ nObject ];
@@ -461,7 +463,7 @@ void CRasterizer::FillTriangle( const ScreenVertex_t &a, const ScreenVertex_t &b
 			{
 				continue;
 			}
-			if ( m_pSkyMask && !m_bSkyPass && material.m_bSky && ( *m_pSkyMask )[ nPixel ] )
+			if ( m_pSkyMask && !m_bSkyPass && material.m_bSky && shade.m_bSkyFaces && ( *m_pSkyMask )[ nPixel ] )
 			{
 				// The 3D skybox shows here: the sky face only hides what is behind it.
 				flDepth = static_cast<float>( flZ );
@@ -490,6 +492,7 @@ void CRasterizer::FillTriangle( const ScreenVertex_t &a, const ScreenVertex_t &b
 			input.m_vecVertexColor = CVec3{ static_cast<float>( values[ 5 ] ), static_cast<float>( values[ 6 ] ), static_cast<float>( values[ 7 ] ) };
 			input.m_vecNormal = Normalized( input.m_vecVertexColor );
 			input.m_vecDirection = CVec3{ static_cast<float>( values[ 8 ] - m_Camera.m_Eye[ 0 ] ), static_cast<float>( values[ 9 ] - m_Camera.m_Eye[ 1 ] ), static_cast<float>( values[ 10 ] - m_Camera.m_Eye[ 2 ] ) };
+			input.m_vecWorld = CVec3{ static_cast<float>( values[ 8 ] ), static_cast<float>( values[ 9 ] ), static_cast<float>( values[ 10 ] ) };
 			std::uint8_t *p = m_Out.Pixel( x, y );
 			const bool bRefract = bBlend && IsRefracting( material, shade );
 			const std::optional<std::array<float, 4>> color = bRefract ? std::optional<std::array<float, 4>>{ std::array<float, 4>{} } : ShadeFragment( material, input, shade );
@@ -553,7 +556,7 @@ void CRasterizer::FillTriangle( const ScreenVertex_t &a, const ScreenVertex_t &b
 				}
 			}
 			// The HDR lighting preview's sky and unlit faces, marked for its auto exposure to leave out.
-			const bool bUnmeasured = m_bSkyPass || ( material.m_bSky && shade.m_pSky ) || input.m_Light[ 3 ] == LIGHT_KIND_FULLBRIGHT;
+			const bool bUnmeasured = m_bSkyPass || ( material.m_bSky && shade.m_pSky && shade.m_bSkyFaces ) || input.m_Light[ 3 ] == LIGHT_KIND_FULLBRIGHT;
 			p[ 3 ] = nBlendAlpha >= 0 ? static_cast<std::uint8_t>( nBlendAlpha ) : shade.m_nMode == RasterMode_t::RASTER_MODE_LIGHTING && shade.m_pLighting && shade.m_bLightHdr && !bBlend && bUnmeasured ? UNMEASURED_ALPHA
 																																																		   : 255;
 			if ( m_bSkyPass )
@@ -596,6 +599,92 @@ void CRasterizer::AddLine( Point_t from, Point_t to, std::array<std::uint8_t, 3>
 	{
 		m_Lines.push_back( line );
 	}
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: The world grid's plane over the picture, pixel by pixel: where the pixel's ray meets
+//          the plane, how much of the plane the pixel covers there (from its neighbours' rays,
+//          as a card's fwidth), and the grid's lines there laid over what is drawn, unless
+//          something is in front of the plane or lies in it.
+//-----------------------------------------------------------------------------
+void CRasterizer::DrawWorldGrid()
+{
+	const float flGrid = m_Options.m_flWorldGrid;
+	if ( flGrid <= 0.0f || m_Out.m_nWidth <= 0 || m_Out.m_nHeight <= 0 )
+	{
+		return;
+	}
+	// A coincident face wins: its depth is the plane's, give or take the arithmetic.
+	constexpr double BIAS = 4.0e-6;
+	const Point_t &planeOrigin = m_Options.m_WorldGridOrigin;
+	const Point_t &planeU = m_Options.m_WorldGridU;
+	const Point_t &planeV = m_Options.m_WorldGridV;
+	const Point_t planeNormal = Cross( planeU, planeV );
+	const Point_t forward = m_Camera.GetForward();
+	// A pixel's ray, its direction scaled to go one unit forward: then both its start and its
+	// direction change evenly across the picture, looking in perspective or not.
+	const auto ray = [ & ]( double x, double y ) {
+		const auto [ origin, direction ] = m_Camera.Ray( x, y );
+		return std::pair{ origin, Scale( direction, 1.0 / Dot( direction, forward ) ) };
+	};
+	const auto [ origin0, direction0 ] = ray( 0.5, 0.5 );
+	const auto [ originX, directionX ] = ray( 1.5, 0.5 );
+	const auto [ originY, directionY ] = ray( 0.5, 1.5 );
+	const Point_t originAcross = Subtract( originX, origin0 );
+	const Point_t originDown = Subtract( originY, origin0 );
+	const Point_t directionAcross = Subtract( directionX, direction0 );
+	const Point_t directionDown = Subtract( directionY, direction0 );
+	// Where the ray of pixel (x, y) meets the plane, in the world and along the plane's axes;
+	// false when it runs along it.
+	const auto meet = [ & ]( double x, double y, std::array<double, 2> &at, Point_t &world ) {
+		const Point_t origin = Add( origin0, Add( Scale( originAcross, x ), Scale( originDown, y ) ) );
+		const Point_t direction = Add( direction0, Add( Scale( directionAcross, x ), Scale( directionDown, y ) ) );
+		const double flAlong = Dot( direction, planeNormal );
+		if ( std::abs( flAlong ) < 1.0e-12 )
+		{
+			return false;
+		}
+		world = Add( origin, Scale( direction, Dot( Subtract( planeOrigin, origin ), planeNormal ) / flAlong ) );
+		const Point_t from = Subtract( world, planeOrigin );
+		at = { Dot( from, planeU ), Dot( from, planeV ) };
+		return true;
+	};
+	ParallelFor( static_cast<std::size_t>( m_Out.m_nHeight ), 16, [ & ]( std::size_t nBegin, std::size_t nEnd ) {
+		for ( std::size_t y = nBegin; y < nEnd; y++ )
+		{
+			for ( int x = 0; x < m_Out.m_nWidth; x++ )
+			{
+				std::array<double, 2> at{}, right{}, below{};
+				Point_t world{}, unused{};
+				if ( !meet( x, static_cast<double>( y ), at, world ) || !meet( x + 1.0, static_cast<double>( y ), right, unused ) || !meet( x, y + 1.0, below, unused ) )
+				{
+					continue;
+				}
+				const std::array<double, 4> clip = Transform( m_Matrix, CVec3{ static_cast<float>( world[ 0 ] ), static_cast<float>( world[ 1 ] ), static_cast<float>( world[ 2 ] ) } );
+				if ( clip[ 3 ] <= 0.0 )
+				{
+					continue;
+				}
+				const double flZ = clip[ 2 ] / clip[ 3 ] * 0.5 + 0.5;
+				const std::size_t nPixel = y * static_cast<std::size_t>( m_Out.m_nWidth ) + static_cast<std::size_t>( x );
+				if ( flZ < 0.0 || flZ > 1.0 || flZ + BIAS >= m_Depth[ nPixel ] )
+				{
+					continue;
+				}
+				const std::array<float, 2> footprint{ static_cast<float>( std::abs( right[ 0 ] - at[ 0 ] ) + std::abs( below[ 0 ] - at[ 0 ] ) ), static_cast<float>( std::abs( right[ 1 ] - at[ 1 ] ) + std::abs( below[ 1 ] - at[ 1 ] ) ) };
+				const std::array<float, 4> grid = WorldGridAt( { static_cast<float>( at[ 0 ] ), static_cast<float>( at[ 1 ] ) }, footprint, flGrid, m_Options.m_Shade.m_GridColors );
+				if ( grid[ 3 ] <= 0.0f )
+				{
+					continue;
+				}
+				std::uint8_t *p = m_Out.Pixel( x, static_cast<int>( y ) );
+				for ( std::size_t i = 0; i < 3; i++ )
+				{
+					p[ i ] = static_cast<std::uint8_t>( std::clamp( static_cast<float>( p[ i ] ) * ( 1.0f - grid[ 3 ] ) + grid[ i ] * 255.0f + 0.5f, 0.0f, 255.0f ) );
+				}
+			}
+		}
+	} );
 }
 
 //-----------------------------------------------------------------------------
@@ -773,6 +862,7 @@ void CRasterizer::Run()
 	{
 		return;
 	}
+	DrawWorldGrid();
 	// Wireframe: every shown object's edges in its colour, through each other as in Hammer.
 	const bool bWireframe = m_Options.m_Shade.m_nMode == RasterMode_t::RASTER_MODE_WIREFRAME;
 	for ( const CMapMesh *pMesh : m_Scene.m_Meshes )

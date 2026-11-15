@@ -123,6 +123,15 @@ public:
 	[[nodiscard]] CMapParticles &GetParticles() { return *m_pParticles; }
 	// A view shows the lighting preview: the map is baked (again, if it changed since), soon.
 	void WantLighting();
+	// The world grid in the 3D views: shown or not, and its plane's height (its origin's z).
+	void SetWorldGrid( bool bShown, double flHeight );
+	// Its plane, anywhere and turned any way. Not kept for the next run while it is only being
+	// tried (a drag still going).
+	void SetWorldGridPlane( const MapGridPlane_t &plane, bool bKeep = true );
+	// While it is edited, the 3D views' gizmo is the grid's: it moves and turns the plane.
+	[[nodiscard]] bool IsWorldGridEdited() const { return m_bWorldGridEdit && m_Settings.m_bWorldGrid; }
+	void SetWorldGridEdited( bool bEdited );
+	// A block made from a box measured along a plane's axes (the world grid's, turned).
 	// Bakes now, whatever changed (Hammer++'s Bake Lighting).
 	void BakeLightingNow();
 	[[nodiscard]] CMapFilterControl &GetFilterControl() { return *m_pFilter; }
@@ -153,8 +162,15 @@ public:
 	void SetPivot( const xv::map::Point_t &at );
 
 	// The block tool's box, dragged in a 2D view and shown in every view; Enter makes it a block.
-	[[nodiscard]] const std::optional<xv::map::Box_t> &GetNewBox() const { return m_NewBox; }
-	void SetNewBox( std::optional<xv::map::Box_t> box );
+	// The box being made, along the world's axes: what the 2D views show and size. None while
+	// the box stands on a turned plane (GetBlockBox and GetNewBoxPlane have that one).
+	[[nodiscard]] const std::optional<xv::map::Box_t> &GetNewBox() const { return m_NewBoxPlane ? m_NoBox : m_NewBox; }
+	// The box whichever way it stands: in its plane's own measures when it has a plane.
+	[[nodiscard]] const std::optional<xv::map::Box_t> &GetBlockBox() const { return m_NewBox; }
+	[[nodiscard]] const std::optional<MapGridPlane_t> &GetNewBoxPlane() const { return m_NewBoxPlane; }
+	void SetNewBox( std::optional<xv::map::Box_t> box, std::optional<MapGridPlane_t> plane = std::nullopt );
+	// The box sized or moved, on the plane it has.
+	void SetBlockBox( std::optional<xv::map::Box_t> box ) { SetNewBox( std::move( box ), std::optional<MapGridPlane_t>{ m_NewBoxPlane } ); }
 	// How far a new box reaches along an axis its 2D view doesn't show: as far as the box there
 	// already, else the selection, else the last block made.
 	[[nodiscard]] std::pair<double, double> GetNewBoxDepth( int nAxis ) const;
@@ -318,8 +334,8 @@ public:
 	void NoiseDisplacements( double flMin, double flMax );
 	void InvertDisplacementAlpha();
 	void SetDisplacementAttributes( int nPower, double flElevation, double flScale = 1.0, std::optional<int> nFlags = std::nullopt );
-	// Hammer's Face Edit Sheet as a window of its own (Preferences), else nothing.
-	[[nodiscard]] QDialog *GetFaceEditWindow() const { return m_pFaceEditWindow; }
+	// Face Edit's window while it is in one of its own (its panel's Own Window), else nothing.
+	[[nodiscard]] QWidget *GetFaceEditWindow() const;
 	// The displacements a brush paints: the selected faces', else the one under the mouse.
 	[[nodiscard]] std::vector<xv::map::FaceRef_t> GetPaintFaces( const std::optional<xv::map::FaceRef_t> &under ) const;
 	// A stroke's result (the painted copies, from pScene) made one undo step.
@@ -367,7 +383,6 @@ public:
 protected:
 	// The Face Edit window goes with the tab: hidden while another tab shows.
 	void showEvent( QShowEvent *pEvent ) override;
-	void hideEvent( QHideEvent *pEvent ) override;
 
 signals:
 	void SideStateChanged();
@@ -450,6 +465,8 @@ private:
 	std::shared_ptr<const xv::map::CScene> m_pLightingScene;
 	const void *m_pLightingMaterials = nullptr;
 	std::array<int, 8> m_LightingPreferences{};
+	bool m_bLightingWhole = true; // the next bake lights everything, not only what an edit changed
+	bool m_bLightingFresh = false; // and whatever was baked before (Bake Lighting)
 	std::array<const void *, 5> m_LightingExtras{}; // the props, overlays and sprites, whole and in parts
 	QString m_szPath;
 	bool m_bFromGame = false;
@@ -467,18 +484,23 @@ private:
 	QString m_szOfferedAutosave;
 	MapViewSettings_t m_Settings;
 	MapTool_t m_nTool = MapTool_t::MAP_TOOL_SELECT;
+	MapTool_t m_nToolBeforeTexture = MapTool_t::MAP_TOOL_SELECT; // where Shift+A again goes back to
 	MapEditMode_t m_nEditMode = MapEditMode_t::MAP_EDIT_MODE_RESIZE;
 	bool m_bGizmo = true;
 	QActionGroup *m_pGizmoModes = nullptr;
 	MapGizmoMode_t m_nGizmoChosen = MapGizmoMode_t::MAP_GIZMO_MODE_TRANSLATE;
 	MapGizmoMode_t m_nGizmoMode = MapGizmoMode_t::MAP_GIZMO_MODE_TRANSLATE;
 	bool m_bGizmoLocal = false;
+	bool m_bWorldGridEdit = false; // the 3D views' gizmo is on the world grid
 	std::optional<xv::map::Point_t> m_Pivot;        // where it was dragged to
 	std::vector<std::uint32_t> m_PivotSelection;  // for this selection
 	std::optional<xv::map::CViewCamera> m_RememberedCamera;
 	CMapView *m_pActiveView = nullptr;
 	std::optional<xv::map::Box_t> m_NewBox;
 	std::optional<xv::map::Box_t> m_ParkedBox; // the block tool's, while another tool is in use
+	std::optional<MapGridPlane_t> m_NewBoxPlane;    // the turned plane the box stands on, if any
+	std::optional<MapGridPlane_t> m_ParkedBoxPlane; // and the parked box's
+	std::optional<xv::map::Box_t> m_NoBox;          // what GetNewBox gives for a turned box
 	xv::map::Box_t m_LastBox{ { 0, 0, 0 }, { 64, 64, 64 } };
 	std::optional<xv::map::Point_t> m_EntityMarker;
 	std::optional<ClipLine_t> m_ClipLine;
@@ -506,7 +528,6 @@ private:
 	QComboBox *m_pPrimitive = nullptr; // the block tool's shape (Hammer's Objects box)
 	QSpinBox *m_pSides = nullptr;      // its Faces box
 	QPointer<QDialog> m_pCompileDialog;
-	QDialog *m_pFaceEditWindow = nullptr; // holds Face Edit when it is a window of its own
 	// Face Edit where Preferences wants it: its window, or the side panel under Object Properties.
 	void PlaceFaceEdit();
 	// The side brought out if it was dragged shut.

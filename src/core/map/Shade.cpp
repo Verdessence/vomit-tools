@@ -423,7 +423,8 @@ std::optional<std::array<float, 4>> ShadeFragment( const ShadeMaterial_t &materi
 	std::array<float, 3> albedo{}; // the texture's colour, before light
 	std::array<float, 4> detail{}; // $detail where the point is
 	const bool bTextured = options.m_nMode != RasterMode_t::RASTER_MODE_FLAT && options.m_nMode != RasterMode_t::RASTER_MODE_WIREFRAME;
-	if ( bTextured && material.m_bSky && options.m_pSky )
+	const bool bSkyFace = material.m_bSky && options.m_pSky && options.m_bSkyFaces;
+	if ( bTextured && bSkyFace )
 	{
 		// Hammer++ shows the map's sky where its sky faces are, the way the game does.
 		const std::array<float, 3> sky = sky::Sample( *options.m_pSky, input.m_vecDirection, options.m_pSkyTransforms );
@@ -522,7 +523,7 @@ std::optional<std::array<float, 4>> ShadeFragment( const ShadeMaterial_t &materi
 	}
 	const float flKind = input.m_Light[ 3 ];
 	const bool bVertexLit = flKind > 1.5f && flKind < 2.5f;
-	if ( options.m_nMode == RasterMode_t::RASTER_MODE_LIGHTING && ( !material.m_bUnlit || bVertexLit ) && !( material.m_bSky && options.m_pSky ) )
+	if ( options.m_nMode == RasterMode_t::RASTER_MODE_LIGHTING && ( !material.m_bUnlit || bVertexLit ) && !bSkyFace )
 	{
 		std::array<float, 3> light{};
 		bool bLit = false;
@@ -561,7 +562,7 @@ std::optional<std::array<float, 4>> ShadeFragment( const ShadeMaterial_t &materi
 		for ( std::size_t i = 0; i < 3; i++ )
 			color[ i ] += detail[ i ] * material.m_flDetailBlend;
 	}
-	if ( bTextured && options.m_pFog && !( material.m_bSky && options.m_pSky ) )
+	if ( bTextured && options.m_pFog && !bSkyFace )
 	{
 		// env_fog_controller's fog: toward its colour from fogstart to fogend, at most
 		// fogmaxdensity; with fogblend, between its two colours by the way the view looks.
@@ -601,6 +602,10 @@ std::optional<std::array<float, 4>> ShadeFragment( const ShadeMaterial_t &materi
 		color[ 1 ] *= flShade;
 		color[ 2 ] *= flShade;
 	}
+	if ( material.m_bGrid && !input.m_bSkyPass && options.m_flGrid > 0.0f )
+	{
+		AddGrid( color, input, options );
+	}
 	if ( input.m_bInstance )
 	{
 		color[ 0 ] += ( options.m_vecInstance.m_flX - color[ 0 ] ) * options.m_flInstanceTint;
@@ -620,6 +625,83 @@ std::optional<std::array<float, 4>> ShadeFragment( const ShadeMaterial_t &materi
 		color[ 2 ] += ( options.m_vecSelection.m_flZ - color[ 2 ] ) * options.m_flSelectionTint;
 	}
 	return color;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: In floats, as the card works it out.
+//-----------------------------------------------------------------------------
+std::array<float, 4> WorldGridAt( std::array<float, 2> at, std::array<float, 2> footprint, float flGrid, const std::array<std::array<float, 4>, 3> &colors )
+{
+	std::array<float, 4> sum{};
+	for ( std::size_t nLevel = 0; nLevel < 3; nLevel++ )
+	{
+		const float flSpacing = nLevel == 0 ? flGrid : nLevel == 1 ? 64.0f
+																   : 1024.0f;
+		if ( nLevel > 0 && flSpacing <= flGrid )
+		{
+			continue;
+		}
+		float flLine = 0.0f;
+		for ( std::size_t a = 0; a < 2; a++ )
+		{
+			const float flPixel = std::max( footprint[ a ], 1.0e-6f );
+			const float flDistance = std::abs( at[ a ] - flSpacing * std::floor( at[ a ] / flSpacing + 0.5f ) );
+			flLine = std::max( flLine, std::clamp( 1.5f - flDistance / flPixel, 0.0f, 1.0f ) * std::clamp( ( flSpacing / flPixel - 4.0f ) / 4.0f, 0.0f, 1.0f ) );
+		}
+		const std::array<float, 4> &level = colors[ nLevel ];
+		const float flAmount = level[ 3 ] * flLine;
+		for ( std::size_t i = 0; i < 3; i++ )
+		{
+			sum[ i ] = sum[ i ] * ( 1.0f - flAmount ) + level[ i ] * flAmount;
+		}
+		sum[ 3 ] = sum[ 3 ] * ( 1.0f - flAmount ) + flAmount;
+	}
+	return sum;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: In floats, as the card works it out.
+//-----------------------------------------------------------------------------
+void AddGrid( std::array<float, 4> &color, const ShadeInput_t &input, const ShadeOptions_t &options )
+{
+	const float flPixel = Length( input.m_vecDirection ) * options.m_flGridPerDistance + options.m_flGridPixel;
+	if ( flPixel <= 0.0f )
+	{
+		return;
+	}
+	const std::array<float, 3> world{ input.m_vecWorld.m_flX, input.m_vecWorld.m_flY, input.m_vecWorld.m_flZ };
+	const std::array<float, 3> normal{ input.m_vecNormal.m_flX, input.m_vecNormal.m_flY, input.m_vecNormal.m_flZ };
+	// How near a plane of the level the point is, in pixels along the face: a plane a face lies
+	// in (or nearly) draws no line on it.
+	const auto line = [ & ]( std::size_t a, float flSpacing ) {
+		const float flAcross = std::sqrt( std::max( 1.0f - normal[ a ] * normal[ a ], 0.0f ) );
+		if ( flAcross < 0.02f )
+		{
+			return 0.0f;
+		}
+		const float flDistance = std::abs( world[ a ] - flSpacing * std::floor( world[ a ] / flSpacing + 0.5f ) ) / flAcross;
+		return std::clamp( 1.5f - flDistance / flPixel, 0.0f, 1.0f );
+	};
+	const float flGrid = options.m_flGrid;
+	// On a light face the lines go dark (a quarter of their colour), so they show on both.
+	const float flShade = 0.2126f * color[ 0 ] + 0.7152f * color[ 1 ] + 0.0722f * color[ 2 ] > 0.5f ? 0.25f : 1.0f;
+	for ( std::size_t nLevel = 0; nLevel < 3; nLevel++ )
+	{
+		const float flSpacing = nLevel == 0 ? flGrid : nLevel == 1 ? 64.0f
+																   : 1024.0f;
+		if ( nLevel > 0 && flSpacing <= flGrid )
+		{
+			continue;
+		}
+		const std::array<float, 4> &level = options.m_GridColors[ nLevel ];
+		const float flFade = std::clamp( ( flSpacing / flPixel - 4.0f ) / 4.0f, 0.0f, 1.0f );
+		const float flLine = std::max( std::max( line( 0, flSpacing ), line( 1, flSpacing ) ), line( 2, flSpacing ) );
+		const float flAmount = level[ 3 ] * flFade * flLine;
+		for ( std::size_t i = 0; i < 3; i++ )
+		{
+			color[ i ] += ( level[ i ] * flShade - color[ i ] ) * flAmount;
+		}
+	}
 }
 
 //-----------------------------------------------------------------------------

@@ -274,6 +274,20 @@ QIcon MakeMapIcon( MapIcon_t nIcon, const QColor &color )
 				painter.drawLine( QPointF{ 16, y }, QPointF{ 23, y } );
 			}
 			break;
+		case MapIcon_t::MAP_ICON_MAP_PROPERTIES:
+		{
+			// The world: a piece of ground seen from above its edge, a cone standing on it and
+			// the sun over them.
+			painter.drawPolygon( QPolygonF{ { QPointF{ 2, 27 }, QPointF{ 21, 27 }, QPointF{ 29, 19 }, QPointF{ 10, 19 } } } );
+			painter.drawLine( QPointF{ 13, 7 }, QPointF{ 8.5, 22.5 } );
+			painter.drawLine( QPointF{ 13, 7 }, QPointF{ 17.5, 22.5 } );
+			// The cone's foot: the near half of its base.
+			painter.drawArc( QRectF{ 8.5, 20.5, 9, 4 }, 180 * 16, 180 * 16 );
+			painter.setBrush( color );
+			painter.drawEllipse( QPointF{ 25, 8 }, 3, 3 );
+			painter.setBrush( Qt::NoBrush );
+			break;
+		}
 		case MapIcon_t::MAP_ICON_MATERIAL:
 		{
 			// A ball with a shine on it, as a material is shown.
@@ -385,6 +399,35 @@ QIcon MakeMapIcon( MapIcon_t nIcon, const QColor &color )
 			}
 			break;
 		}
+		case MapIcon_t::MAP_ICON_GRID_3D:
+		{
+			// The grid on a floor seen in perspective: its far edge narrower than its near one.
+			painter.setPen( QPen{ color, 1.6 } );
+			const auto at = []( double u, double v ) { return QPointF{ 16 + ( u - 0.5 ) * ( 14 + 14 * v ), 8 + 20 * v }; };
+			for ( int i = 0; i <= 3; i++ )
+			{
+				painter.drawLine( at( i / 3.0, 0 ), at( i / 3.0, 1 ) );
+				const double v = ( i / 3.0 ) * ( i / 3.0 + 1 ) / 2; // closer together far off
+				painter.drawLine( at( 0, v ), at( 1, v ) );
+			}
+			break;
+		}
+		case MapIcon_t::MAP_ICON_WORLD_GRID:
+		{
+			// A floor's grid with nothing on it, and an arrow up and down: the height it is at.
+			painter.setPen( QPen{ color, 1.6 } );
+			const auto at = []( double u, double v ) { return QPointF{ 19 + ( u - 0.5 ) * ( 12 + 10 * v ), 16 + 12 * v }; };
+			for ( int i = 0; i <= 3; i++ )
+			{
+				painter.drawLine( at( i / 3.0, 0 ), at( i / 3.0, 1 ) );
+				const double v = ( i / 3.0 ) * ( i / 3.0 + 1 ) / 2;
+				painter.drawLine( at( 0, v ), at( 1, v ) );
+			}
+			painter.drawLine( QPointF{ 5, 4 }, QPointF{ 5, 14 } );
+			painter.drawPolyline( QPolygonF{ { QPointF{ 2.5, 6.5 }, QPointF{ 5, 4 }, QPointF{ 7.5, 6.5 } } } );
+			painter.drawPolyline( QPolygonF{ { QPointF{ 2.5, 11.5 }, QPointF{ 5, 14 }, QPointF{ 7.5, 11.5 } } } );
+			break;
+		}
 		case MapIcon_t::MAP_ICON_SNAP:
 			// A magnet.
 			painter.setPen( QPen{ color, 4.0, Qt::SolidLine, Qt::FlatCap } );
@@ -474,6 +517,19 @@ QIcon MakeMapIcon( MapIcon_t nIcon, const QColor &color )
 			painter.drawLine( origin, QPointF{ 20, 13 } );
 			painter.setPen( QPen{ mapstyle::AXIS_Z, 2.5, Qt::SolidLine, Qt::RoundCap } );
 			painter.drawLine( origin, QPointF{ 10, 4 } );
+			break;
+		}
+		case MapIcon_t::MAP_ICON_SKY_FACES:
+		{
+			// A cloud on a face: the sky drawn where the sky texture is.
+			painter.drawPolygon( QPolygonF{ { QPointF{ 4, 9 }, QPointF{ 28, 5 }, QPointF{ 28, 27 }, QPointF{ 4, 23 } } } );
+			QPainterPath cloud;
+			cloud.moveTo( 11, 20 );
+			cloud.cubicTo( 8, 20, 8, 16, 12, 16 );
+			cloud.cubicTo( 13, 12, 19, 12, 20, 15 );
+			cloud.cubicTo( 24, 14, 26, 20, 22, 20 );
+			cloud.closeSubpath();
+			painter.drawPath( cloud );
 			break;
 		}
 		case MapIcon_t::MAP_ICON_SKY_2D:

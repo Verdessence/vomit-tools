@@ -21,6 +21,10 @@ inline const QColor AXIS{ 0, 100, 100 };
 inline const QColor GRID{ 60, 60, 60 };
 inline const QColor GRID_10{ 115, 115, 115 };    // every GRID_HIGHLIGHT_EVERY lines, and every 64 units
 inline const QColor GRID_1024{ 100, 50, 5 };
+// The 3D grid over faces (P) and the world grid's plane (Shift+P): light, so it shows on dark and
+// mid textures; the grid's lines, those every 64 units and those every 1024, with how far toward
+// their colour each takes a face (or what is behind the plane).
+inline constexpr float GRID_3D[ 3 ][ 4 ] = { { 1.0f, 1.0f, 1.0f, 0.22f }, { 1.0f, 1.0f, 1.0f, 0.45f }, { 1.0f, 0.6f, 0.15f, 0.6f } };
 inline const QColor GRID_BEYOND{ 35, 35, 75 }; // past the FGD's @mapsize, when shown (not Hammer++'s)
 inline const QColor BACKGROUND{ 0, 0, 0 };
 inline const QColor BRUSH{ 255, 255, 255 };
@@ -100,7 +104,7 @@ inline constexpr float NEAR_PLANE = 4.0f;
 inline constexpr float FAR_PLANE = 32768.0f;      // ClippingPlane: the render distance
 inline constexpr float FAR_PLANE_STEP = 1.25f;    // keys 1 and 2
 inline constexpr float MODEL_DISTANCE = 32768.0f;
-inline constexpr float DETAIL_DISTANCE = 1500.0f;
+inline constexpr float DETAIL_DISTANCE = 2048.0f; // detail sprites (the game's cl_detaildist is 1200); each doubling costs about four times as much a frame
 inline constexpr float MOUSE_SENSITIVITY = 0.4f;  // degrees per pixel
 inline constexpr float MAX_FORWARD_SPEED = 1000.0f; // units a second
 inline constexpr float MAX_SPEED_TIME = 0.5f;     // seconds to reach it
