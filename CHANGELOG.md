@@ -1,5 +1,64 @@
 # Changelog
 
+## 0.9.0 — The HUD (2026-11-15)
+
+### HUD editor (new)
+- Tools > HUD Editor opens the game's HUD (`scripts/HudLayout.res`), a custom HUD's folder
+  (each HUD in the game's `custom/` is listed), or any layout file. The HUD's own scheme,
+  fonts, icons, language file and images come before the game's.
+- The elements are drawn as the game draws them, on any screen size: backgrounds, images,
+  labels in the scheme's fonts (its font files loaded), "#Tokens" from the language files,
+  the colours `scripts/hudanimations.txt` gives the panels, and sample values with their
+  icons for health, armour, ammo, the timer and money. Render Elements off shows boxes with
+  names instead. What only the game's code paints (radar, crosshair, weapon selection) is an
+  outline.
+- Drag elements, nudge them with the arrows, or edit their keys; "c", "r" and "f" anchors are
+  kept. Elements snap to each other and to the screen's edges and middle while dragged, with
+  guides (Snap on the bar; Alt drags freely). An element can be kept from being picked on the
+  screen. Lossless saving, undo.
+- Panel files (`resource/ui/*.res`: the team menu, the scoreboard…) open too, their controls
+  placed inside the panel, with the scheme's colours for each kind of control.
+- The main menu (`resource/GameMenu.res`) opens over the game's background, its items where
+  the game puts them; In Game shows the items a loaded map adds.
+- A scheme panel under the keys lists the scheme's colours, settings, fonts and borders, with
+  the ones the selected element uses marked; double-click puts a name into the selected key.
+- Lines with a condition (`[$WIN32]`, `[$POSIX]`…) apply by the system vomit-tools runs on, as
+  the game reads the file there.
+
+### Scheme editor (new)
+- `ClientScheme.res`, `SourceScheme.res` and any other scheme file open in an editor of their
+  own: Colours, Settings, Fonts (the face each gets at a screen height, with a sample),
+  Borders, Font Files and the whole file. Names and values are edited in place; add,
+  duplicate and remove entries; a colour picker with alpha. Lossless, with undo.
+- A line's condition is in a column of its own, in words (Windows, Linux and macOS, not Xbox
+  360); lines not read on this system are greyed.
+- Open HUD editor tabs follow each change to their scheme, saved or not.
+
+### Hammer maps
+- World Grid (Shift+P): a grid in the 3D views on a plane of its own. Move or Turn puts the
+  gizmo on it (arrows, rings, G and R with X/Y/Z, typed numbers; a double-click lays it on the
+  surface there).
+- The block tool in 3D draws on the world grid's plane while it shows, else on the surface
+  pressed; a box on a turned plane is made turned. The box's handles are no longer hidden by
+  the gizmo, and G, R and E work on it as on a selection.
+- The lighting preview after an edit starts from the bake before and lights only what the
+  edit can have changed, nearest the camera first, showing what is done as it goes; a light
+  that moved or changed lights again only where its light lands. Earlier bakes are kept: an
+  undo or a setting put back shows its bake at once, and a map opened again starts from its
+  last one (Keep Bakes to Use Again in the Lighting panel).
+- Sky on Sky Faces (the Show bar, Preferences > Maps): off, sky faces draw their tool
+  texture, as Hammer shows them.
+- Face Edit is a tool panel in the side; Own Window in its menu takes it out. Any side panel
+  can be taken out into a window of its own, kept with the layout.
+- How far detail props are drawn is a setting (Preferences > Maps).
+
+### Interface
+- Preferences > Interface: each kind of editor in a window of its own (maps in a Maps window,
+  particle files in a Particles window…), each with its tabs and the whole menu bar.
+- Preferences > Interface: a scale for the whole interface, from the next start.
+- Help > About > Licenses lists the third-party libraries one by one (with a filter), each
+  with its source, license and text.
+
 ## 0.8.0 — The Hammer (2026-11-12)
 
 ### Hammer maps (new)
