@@ -15,6 +15,7 @@ set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 option(VOMIT_TOOLS_BUILD_APP   "Build the Qt application" ON)
 option(VOMIT_TOOLS_BUILD_TESTS "Build the test suite"     ON)
 option(VOMIT_TOOLS_BUILD_CLI   "Build vomit-tools-cli"    ON)
+option(VOMIT_TOOLS_WHISPER     "Build whisper.cpp in, for transcripts of demos' voice chat" ON)
 option(VOMIT_TOOLS_KDE_THUMBNAILER "Build the KDE (Dolphin) thumbnail plugin when KDE Frameworks 6 KIO is found" ON)
 
 if(WIN32)

@@ -586,11 +586,12 @@ void CMapResources::PlaceEntities( const xv::map::CScene &scene, Placing_t &plac
 	}
 	if ( bPropsChanged )
 	{
-		auto pProps = std::make_shared<xv::map::CMapMesh>();
+		std::shared_ptr<xv::map::CMapMesh> pProps = m_bCombineProps ? std::make_shared<xv::map::CMapMesh>() : nullptr;
 		drawn.clear();
 		for ( const auto &[ nObject, pPart ] : placing.m_PropParts )
 		{
-			xv::map::AppendPlaced( *pProps, *pPart, xv::map::Transform_t{}, std::nullopt );
+			if ( pProps )
+				xv::map::AppendPlaced( *pProps, *pPart, xv::map::Transform_t{}, std::nullopt );
 			drawn.push_back( nObject );
 		}
 		post( [ this, pProps, pParts = std::make_shared<const xv::map::MeshParts_t>( placing.m_PropParts ), drawn = std::move( drawn ), nModels, nKeys = static_cast<int>( placing.m_Models.size() ) ]() mutable {
@@ -1108,4 +1109,13 @@ void CMapResources::Take( std::vector<Loaded_t> batch )
 		m_pDetailTypes = std::make_shared<const std::vector<std::string>>( m_DetailTypes );
 	}
 	emit Arrived();
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+const xv::map::PropModel_t *CMapResources::FindPropModel( const xv::map::PropKey_t &key ) const
+{
+	const auto found = m_Placing.m_Models.find( key );
+	return found != m_Placing.m_Models.end() && found->second.m_pModel ? &found->second : nullptr;
 }

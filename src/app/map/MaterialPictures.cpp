@@ -9,9 +9,9 @@
 #include <QCryptographicHash>
 #include <QDir>
 #include <QPainter>
-#include <QSaveFile>
 #include <QStandardPaths>
 #include "ImageFiles.h"
+#include "PictureCache.h"
 #include "map/MapResources.h"
 #include "map/Materials.h"
 #include "texture/Vtf.h"
@@ -75,14 +75,11 @@ MaterialPicture_t LoadMaterialPicture( const xv::vfs::CFileSystem &fileSystem, c
 {
 	const QByteArray hash = QCryptographicHash::hash( ( szGame + QLatin1Char( '\n' ) + szName ).toUtf8(), QCryptographicHash::Sha1 ).toHex();
 	const QString szFolder = MaterialPictureCacheFolder() + QStringLiteral( "/%1" ).arg( nPictureSize );
-	const QString szFile = szFolder + QLatin1Char( '/' ) + QString::fromLatin1( hash ) + QStringLiteral( ".png" );
+	const QString szFile = szFolder + QLatin1Char( '/' ) + QString::fromLatin1( hash );
 	MaterialPicture_t result;
-	result.m_Image.load( szFile );
+	result.m_Image = ReadCachedPicture( szFile, &result.m_Size );
 	if ( !result.m_Image.isNull() )
-	{
-		result.m_Size = QSize( result.m_Image.text( QStringLiteral( "source-width" ) ).toInt(), result.m_Image.text( QStringLiteral( "source-height" ) ).toInt() );
 		return result;
-	}
 	const xv::material::Reader_t read = [ &fileSystem ]( std::string_view szPath ) { return fileSystem.Read( szPath ); };
 	const auto info = xv::map::ReadMaterialInfo( szName.toStdString(), read );
 	if ( const auto bytes = info.m_szTexture.empty() ? std::nullopt : fileSystem.Read( "materials/" + info.m_szTexture + ".vtf" ) )
@@ -92,12 +89,8 @@ MaterialPicture_t LoadMaterialPicture( const xv::vfs::CFileSystem &fileSystem, c
 		if ( const auto pTexture = ReadMapTexture( *bytes, nPictureSize, true ); pTexture && !pTexture->m_Mips.empty() )
 		{
 			result.m_Image = Composed( ToQImage( pTexture->m_Mips.front() ).copy(), info.IsSeeThrough() || info.m_bAlphaTest, nPictureSize );
-			result.m_Image.setText( QStringLiteral( "source-width" ), QString::number( result.m_Size.width() ) );
-			result.m_Image.setText( QStringLiteral( "source-height" ), QString::number( result.m_Size.height() ) );
-			QDir().mkpath( szFolder );
-			QSaveFile cache( szFile );
-			if ( cache.open( QIODevice::WriteOnly ) && result.m_Image.save( &cache, "PNG" ) )
-				cache.commit();
+			if ( QDir().mkpath( szFolder ) )
+				(void)WriteCachedPicture( szFile, result.m_Image, result.m_Size );
 		}
 	}
 	if ( result.m_Image.isNull() )

@@ -314,10 +314,7 @@ int CDecompiler::NextId()
 }
 
 //-----------------------------------------------------------------------------
-// Purpose: The material a texinfo names. The compiler makes copies of materials for the
-//          cubemap each face reflects ("maps/<map>/brick/wall_128_-64_32"), for water's
-//          depth ("..._depth_-128") and for blends on plain brushes ("..._wvt_patch"); the
-//          name the map had is the one written.
+// Purpose: The material a texinfo names, as the map had it (MapMaterialName).
 //-----------------------------------------------------------------------------
 std::string CDecompiler::MaterialOf( int nTexInfo )
 {
@@ -344,21 +341,7 @@ std::string CDecompiler::MaterialOf( int nTexInfo )
 			}
 		}
 	}
-	// The copies can stack (a blend's patch, then that patch's cubemap copy): the folder comes
-	// off once, the endings until none is left.
-	static const std::regex folder( R"(^maps/[^/]+/(.+)$)", std::regex::icase );
-	static const std::regex ending( R"(^(.+?)(?:_-?\d+_-?\d+_-?\d+|_depth_-?\d+|_wvt_patch)$)", std::regex::icase );
-	std::string szSlashed = szName;
-	std::replace( szSlashed.begin(), szSlashed.end(), '\\', '/' );
-	std::smatch match;
-	if ( std::regex_match( szSlashed, match, folder ) )
-	{
-		szName = match[ 1 ].str();
-		while ( std::regex_match( szName, match, ending ) )
-		{
-			szName = match[ 1 ].str();
-		}
-	}
+	szName = MapMaterialName( szName );
 	m_MaterialNames.emplace( nTexData, szName );
 	return szName;
 }
@@ -1374,6 +1357,32 @@ std::optional<std::string> DecompileToVmf( std::span<const std::byte> file, Deco
 		*pReport = std::move( report );
 	}
 	return szOut;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: The compiler makes copies of materials for the cubemap each face reflects
+//          ("maps/<map>/brick/wall_128_-64_32"), for water's depth ("..._depth_-128") and for
+//          blends on plain brushes ("..._wvt_patch"). The copies can stack (a blend's patch,
+//          then that patch's cubemap copy): the folder comes off once, the endings until none
+//          is left.
+//-----------------------------------------------------------------------------
+std::string MapMaterialName( std::string_view szStored )
+{
+	static const std::regex folder( R"(^maps/[^/]+/(.+)$)", std::regex::icase );
+	static const std::regex ending( R"(^(.+?)(?:_-?\d+_-?\d+_-?\d+|_depth_-?\d+|_wvt_patch)$)", std::regex::icase );
+	std::string szName( szStored );
+	std::string szSlashed = szName;
+	std::replace( szSlashed.begin(), szSlashed.end(), '\\', '/' );
+	std::smatch match;
+	if ( std::regex_match( szSlashed, match, folder ) )
+	{
+		szName = match[ 1 ].str();
+		while ( std::regex_match( szName, match, ending ) )
+		{
+			szName = match[ 1 ].str();
+		}
+	}
+	return szName;
 }
 
 } // namespace xv::bsp

@@ -153,6 +153,9 @@ vomit-tools is GPL-3.0-or-later; see [LICENSE](LICENSE). It's built with:
 | [liblzma](https://github.com/tukaani-project/xz) (XZ Utils) | compression | 0BSD |
 | PPMd (from [7-Zip](https://github.com/ip7z/7zip)) | compression | Public domain |
 | [miniaudio](https://github.com/mackron/miniaudio) | sound playback | Unlicense OR MIT-0 |
+| [libopus](https://opus-codec.org) | demos' Steam voice | BSD-3-Clause |
+| [CELT](https://downloads.xiph.org/releases/celt/) 0.11.3 | demos' vaudio_celt voice | BSD-2-Clause |
+| [whisper.cpp](https://github.com/ggml-org/whisper.cpp) (with ggml) | demos' voice transcripts (optional) | MIT |
 | [stb](https://github.com/nothings/stb) | reading, writing, resizing and DXT-compressing images | MIT OR Unlicense |
 | [CoACD](https://github.com/SarahWeiii/CoACD) | model to VMF: convex decomposition | MIT |
 | [CDT](https://github.com/artem-ogre/CDT) | CoACD's triangulation | MPL-2.0 |
@@ -517,6 +520,14 @@ at local copies.
  Convex model export also fetches CoACD, CDT, spdlog and V-HACD;
 use `FETCHCONTENT_SOURCE_DIR_COACD`, `FETCHCONTENT_SOURCE_DIR_COACD_CDT`,
 `FETCHCONTENT_SOURCE_DIR_COACD_SPDLOG` and `FETCHCONTENT_SOURCE_DIR_VHACD` for offline copies.
+The demo viewer's voice chat fetches [libopus](https://opus-codec.org) (`FETCHCONTENT_SOURCE_DIR_OPUS`)
+and CELT 0.11.3 (`FETCHCONTENT_SOURCE_DIR_CELT`); its transcripts fetch
+[whisper.cpp](https://github.com/ggml-org/whisper.cpp) (`FETCHCONTENT_SOURCE_DIR_WHISPER`; turn them off with
+`-DVOMIT_TOOLS_WHISPER=OFF`). Transcribing needs a whisper model file (a ggml `.bin`), picked in the
+Voice tab; none is bundled.
+Picture caches use [libjxl](https://github.com/libjxl/libjxl). The app uses an installed version
+0.12 or newer where available, or fetches 0.12.0 with its pinned submodules.
+`FETCHCONTENT_SOURCE_DIR_JPEGXL` can point at a local checkout with those submodules for offline builds.
 Vulkan builds use an installed Vulkan-Headers package or fetch pinned headers automatically;
 `FETCHCONTENT_SOURCE_DIR_VULKAN_HEADERS` can point at an offline copy. A Vulkan SDK is not needed.
 

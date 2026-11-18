@@ -327,6 +327,7 @@ private:
 	std::unique_ptr<xv::vfs::CFileSystem> m_pFileSystem;
 	CSoundIndex m_SoundIndex;
 	CSoundPlayer *m_pPlayer = nullptr;
+	xv::audio::CEngine::Output_t m_nAudio = xv::audio::CEngine::Output_t::OUTPUT_DEVICE; // where sound goes (tests: offline)
 	CVfsModel *m_pModel = nullptr;
 	QSortFilterProxyModel *m_pFilter = nullptr;
 	QTreeView *m_pTree = nullptr;

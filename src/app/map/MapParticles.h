@@ -48,6 +48,20 @@ public:
 	// The scene's info_particle_systems and dust: those new or changed start over, the others
 	// play on.
 	void SetScene( std::shared_ptr<const xv::map::CScene> pScene );
+	// A system a demo has going (H7): its effect, its control points (the first is where it
+	// is), and how long it has been on.
+	struct Wanted_t
+	{
+		std::uint64_t m_nKey = 0; // the same while it plays on
+		std::string m_szEffect;
+		std::vector<std::optional<xv::CVec3>> m_Points;
+		float m_flAge = 0.0f;
+	};
+	// Plays exactly these, in place of the scene's (those not wanted stop): one not yet playing
+	// starts as it would be at its age (simulated for at most a few seconds of it); one
+	// playing goes on by flStep, or starts again at its age when bJumped (a seek). Systems that
+	// have finished stay finished. vecViewer stands in for the player.
+	void PlayDemo( const std::vector<Wanted_t> &wanted, float flStep, bool bJumped, xv::CVec3 vecViewer, std::uint32_t nObject );
 	// Every system and dust on by seconds (a system that has finished starts again); false when
 	// none plays.
 	bool Advance( float flSeconds );
@@ -105,6 +119,8 @@ private:
 		std::shared_ptr<const xv::particles::CLibrary> m_pLibrary;
 	};
 
+	// A system of found's, seeded, its control points set (the first must be).
+	[[nodiscard]] Playing_t StartSystem( const Found_t &found, std::uint32_t nSeed, const std::vector<std::optional<xv::CVec3>> &points );
 	// The sprite (and material) of a library's definition, read the first time it is asked for.
 	[[nodiscard]] const xv::particles::Sprite_t *SpriteFor( const xv::particles::CLibrary &library, std::size_t nDefinition );
 	struct Sprite_t;

@@ -30,6 +30,7 @@
 #include "map/Faces.h"
 #include "map/Vertex.h"
 #include "map/BrushMesh.h"
+#include "map/MapCompiled.h"
 #include "map/MapDocument.h"
 #include "map/MapGizmo.h"
 #include "map/MapRenderData.h"
@@ -322,9 +323,12 @@ public:
 	void CreateBuilding();
 	// Opened from a .vmm: its submaps are instances, and saving asks for a VMF.
 	[[nodiscard]] bool IsManifest() const { return m_szPath.endsWith( u".vmm", Qt::CaseInsensitive ); }
-	// Opened from a compiled map (.bsp), read back into brushes and entities: saving asks for
-	// a VMF, never writes over the map.
+	// Opened from a compiled map (.bsp): shown as compiled (its own faces and light over its
+	// brushes and entities read back), read-only, never saved.
 	[[nodiscard]] bool IsCompiled() const { return m_szPath.endsWith( u".bsp", Qt::CaseInsensitive ); }
+	// Before Load: the map's faces and light to draw (null: its brushes, as read back).
+	void SetCompiled( std::unique_ptr<CMapCompiled> pCompiled );
+	[[nodiscard]] CMapCompiled *GetCompiled() const { return m_pCompiled.get(); }
 	[[nodiscard]] CMapSprinklePanel &GetSprinkle() { return *m_pSprinkle; }
 	// The Displacement tab's edits, each one undo step, on the selected faces (else every face
 	// of the selected objects): displacements made at a power on four-sided faces, taken off,
@@ -456,6 +460,7 @@ private:
 
 	CMapDocument *m_pDocument = nullptr;
 	std::unique_ptr<CMapRenderData> m_pRenderData;
+	std::unique_ptr<CMapCompiled> m_pCompiled; // a .bsp's faces and light (IsCompiled)
 	CMapResources *m_pResources = nullptr;
 	CMapLighting *m_pLighting = nullptr;
 	CMapParticles *m_pParticles = nullptr;

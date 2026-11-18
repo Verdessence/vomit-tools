@@ -9,6 +9,7 @@
 #include "Hud.h"
 
 #include <algorithm>
+#include <cstdint>
 #include <cctype>
 #include <cmath>
 #include <locale>
@@ -472,6 +473,53 @@ std::map<std::string, Icon_t> ReadIcons( const kv1::CDocument &document )
 	for ( const kv1::CNode &root : document.m_Roots )
 		visit( visit, root );
 	return icons;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: UTF-16 code units (pairs joined) to UTF-8.
+//-----------------------------------------------------------------------------
+std::string LanguageText( std::string_view szBytes )
+{
+	if ( szBytes.size() < 2 || static_cast<unsigned char>( szBytes[ 0 ] ) != 0xFF || static_cast<unsigned char>( szBytes[ 1 ] ) != 0xFE )
+		return std::string( szBytes );
+	std::string szOut;
+	szOut.reserve( szBytes.size() / 2 );
+	const auto unit = [ & ]( std::size_t i ) { return static_cast<std::uint32_t>( static_cast<unsigned char>( szBytes[ i ] ) ) | static_cast<std::uint32_t>( static_cast<unsigned char>( szBytes[ i + 1 ] ) ) << 8; };
+	for ( std::size_t i = 2; i + 1 < szBytes.size(); i += 2 )
+	{
+		std::uint32_t nCode = unit( i );
+		// A surrogate pair: the code point past the first plane.
+		if ( nCode >= 0xD800 && nCode < 0xDC00 && i + 3 < szBytes.size() )
+		{
+			const std::uint32_t nLow = unit( i + 2 );
+			if ( nLow >= 0xDC00 && nLow < 0xE000 )
+			{
+				nCode = 0x10000 + ( ( nCode - 0xD800 ) << 10 ) + ( nLow - 0xDC00 );
+				i += 2;
+			}
+		}
+		if ( nCode < 0x80 )
+			szOut += static_cast<char>( nCode );
+		else if ( nCode < 0x800 )
+		{
+			szOut += static_cast<char>( 0xC0 | nCode >> 6 );
+			szOut += static_cast<char>( 0x80 | ( nCode & 0x3F ) );
+		}
+		else if ( nCode < 0x10000 )
+		{
+			szOut += static_cast<char>( 0xE0 | nCode >> 12 );
+			szOut += static_cast<char>( 0x80 | ( ( nCode >> 6 ) & 0x3F ) );
+			szOut += static_cast<char>( 0x80 | ( nCode & 0x3F ) );
+		}
+		else
+		{
+			szOut += static_cast<char>( 0xF0 | nCode >> 18 );
+			szOut += static_cast<char>( 0x80 | ( ( nCode >> 12 ) & 0x3F ) );
+			szOut += static_cast<char>( 0x80 | ( ( nCode >> 6 ) & 0x3F ) );
+			szOut += static_cast<char>( 0x80 | ( nCode & 0x3F ) );
+		}
+	}
+	return szOut;
 }
 
 //-----------------------------------------------------------------------------

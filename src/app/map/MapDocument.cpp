@@ -177,7 +177,7 @@ bool CMapDocument::IsModified() const
 //-----------------------------------------------------------------------------
 void CMapDocument::Edit( xv::map::MapEdit_t edit, const QString &szName, std::optional<std::vector<std::uint32_t>> selectAfter )
 {
-	if ( !m_pScene || edit.IsEmpty() )
+	if ( !m_pScene || edit.IsEmpty() || m_bReadOnly )
 	{
 		return;
 	}
@@ -190,7 +190,7 @@ void CMapDocument::Edit( xv::map::MapEdit_t edit, const QString &szName, std::op
 //-----------------------------------------------------------------------------
 bool CMapDocument::ReplaceLastEdit( xv::map::MapEdit_t edit, const QString &szName, std::shared_ptr<const xv::map::CScene> pBase, const std::vector<std::uint32_t> &selectionBefore )
 {
-	if ( !m_pScene || !pBase || edit.IsEmpty() || m_pUndo->index() != m_pUndo->count() || m_pUndo->index() < 1 )
+	if ( !m_pScene || !pBase || edit.IsEmpty() || m_bReadOnly || m_pUndo->index() != m_pUndo->count() || m_pUndo->index() < 1 )
 		return false;
 	auto *pCommand = dynamic_cast<CMapEditCommand *>( const_cast<QUndoCommand *>( m_pUndo->command( m_pUndo->index() - 1 ) ) );
 	if ( !pCommand )
@@ -272,7 +272,7 @@ void CMapDocument::MeasureEditListener( const QString &szName, const std::functi
 //-----------------------------------------------------------------------------
 void CMapDocument::BeginDisplacementPreview( std::vector<std::uint32_t> objects )
 {
-	if ( !m_pScene || m_pPreviewBase )
+	if ( !m_pScene || m_pPreviewBase || m_bReadOnly )
 		return;
 	m_pPreviewBase = m_pScene;
 	m_pDisplacementBase = m_pScene;
@@ -287,7 +287,7 @@ void CMapDocument::BeginDisplacementPreview( std::vector<std::uint32_t> objects 
 //-----------------------------------------------------------------------------
 void CMapDocument::CommitCameraPreview( xv::map::MapEdit_t edit, const QString &szName )
 {
-	if ( !m_bCamerasPreview || !m_pPreviewBase || !edit.IsCameraEdit() )
+	if ( !m_bCamerasPreview || !m_pPreviewBase || !edit.IsCameraEdit() || m_bReadOnly )
 		return;
 	auto back = xv::map::InverseOf( *m_pPreviewBase, edit );
 	auto pPrepared = m_pScene;
@@ -302,7 +302,7 @@ void CMapDocument::CommitCameraPreview( xv::map::MapEdit_t edit, const QString &
 //-----------------------------------------------------------------------------
 void CMapDocument::CommitDisplacementPreview( xv::map::MapEdit_t edit, const QString &szName )
 {
-	if ( !m_pPreviewBase || edit.IsEmpty() )
+	if ( !m_pPreviewBase || edit.IsEmpty() || m_bReadOnly )
 	{
 		EndPreview();
 		return;
@@ -320,7 +320,7 @@ void CMapDocument::CommitDisplacementPreview( xv::map::MapEdit_t edit, const QSt
 //-----------------------------------------------------------------------------
 void CMapDocument::Preview( const xv::map::MapEdit_t &edit, bool bDisplacements )
 {
-	if ( !m_pScene )
+	if ( !m_pScene || m_bReadOnly )
 	{
 		return;
 	}

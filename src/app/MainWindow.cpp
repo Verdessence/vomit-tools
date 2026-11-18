@@ -420,6 +420,7 @@ CMainWindow::CMainWindow( QWidget *pParent, xv::audio::CEngine::Output_t nAudio 
 	resize( 1400, 900 );
 	setAcceptDrops( true );
 	m_pPlayer = new CSoundPlayer( *m_pFileSystem, this, nAudio );
+	m_nAudio = nAudio;
 
 	m_pFilter->setSourceModel( m_pModel );
 	m_pFilter->setRecursiveFilteringEnabled( true );
@@ -5597,15 +5598,27 @@ CMapEditor *CMainWindow::OpenMapFile( const QString &szPath )
 	source.m_Game = m_Game;
 	// A compiled map is read back into a Hammer map's text (bsp/Decompile.h), and the files
 	// packed into it come before the game's, as they do when the game runs it.
+	std::unique_ptr<CMapCompiled> pCompiled;
 	if ( szOrigin.endsWith( u".bsp", Qt::CaseInsensitive ) )
 	{
 		xv::bsp::DecompileReport_t report;
 		std::string szError;
-		const auto text = xv::bsp::DecompileToVmf( std::as_bytes( std::span( source.m_Text ) ), &report, &szError );
+		auto text = xv::bsp::DecompileToVmf( std::as_bytes( std::span( source.m_Text ) ), &report, &szError );
 		if ( !text )
 		{
 			QMessageBox::warning( this, tr( "Cannot open" ), tr( "Could not read %1: %2." ).arg( QDir::toNativeSeparators( szOrigin ), QString::fromStdString( szError ) ) );
 			return nullptr;
+		}
+		// Shown as compiled: its own faces and light (bsp/Faces.h), drawn over what is read back.
+		std::string szCompiledError;
+		if ( auto compiled = xv::bsp::ReadCompiledMap( std::as_bytes( std::span( source.m_Text ) ), {}, &szCompiledError ) )
+		{
+			*text += CMapCompiled::MapText( *compiled );
+			pCompiled = std::make_unique<CMapCompiled>( std::make_shared<const xv::bsp::CompiledMap_t>( std::move( *compiled ) ) );
+		}
+		else
+		{
+			DebugLog() << QStringLiteral( "%1: its own faces couldn't be read (%2); its brushes are drawn" ).arg( source.m_szName, QString::fromStdString( szCompiledError ) );
 		}
 		source.m_Text.assign( text->begin(), text->end() );
 		const QString szDisk = bDisk ? szOrigin : DiskPathForGame( szOrigin );
@@ -5623,6 +5636,7 @@ CMapEditor *CMainWindow::OpenMapFile( const QString &szPath )
 		source.m_Fgds.push_back( ToPath( szFgd ) );
 	}
 	auto *pEditor = new CMapEditor( szOrigin, !bDisk );
+	pEditor->SetCompiled( std::move( pCompiled ) );
 	AddMapTab( pEditor );
 	pEditor->Load( std::move( source ) );
 	return pEditor;
@@ -5897,13 +5911,17 @@ CDemoViewer *CMainWindow::OpenDemoFile( const QString &szPath )
 	}
 	std::optional<xv::demo::CDemo> demo;
 	xv::demo::CPlayers players;
+	std::shared_ptr<const xv::demo::CContents> pContents;
 	std::string szError = "could not read the file";
-	// The players are followed through the packets while the bytes are at hand (a third of a
-	// second for an hour's demo).
+	// The players and the rest are followed through the packets while the bytes are at hand
+	// (about a second for an hour's demo).
 	const auto read = [ & ]( std::span<const std::byte> bytes ) {
 		demo = xv::demo::CDemo::Parse( bytes, &szError );
 		if ( demo )
+		{
 			players = xv::demo::CPlayers::Read( *demo, bytes );
+			pContents = std::make_shared<const xv::demo::CContents>( xv::demo::CContents::Read( *demo, bytes ) );
+		}
 	};
 	if ( bDisk )
 	{
@@ -5927,8 +5945,11 @@ CDemoViewer *CMainWindow::OpenDemoFile( const QString &szPath )
 		return nullptr;
 	}
 	const QString szMap = QString::fromUtf8( demo->GetHeader().m_szMap );
-	auto *pViewer = new CDemoViewer( szName, std::move( *demo ), bDisk ? ToPath( info.absoluteFilePath() ) : fs::path{}, !bDisk, std::move( players ) );
+	auto *pViewer = new CDemoViewer( szName, std::move( *demo ), bDisk ? ToPath( info.absoluteFilePath() ) : fs::path{}, !bDisk, std::move( players ), std::move( pContents ) );
 	LoadDemoMap( *pViewer, szMap, bDisk ? info.absolutePath() : QString{} );
+	// The HUD and the language come from the mounted game.
+	if ( m_Game )
+		pViewer->SetGameFiles( [ this ]( const std::string &szFile ) { return m_pFileSystem->Read( szFile ); }, m_nAudio );
 	const int nIndex = m_pTabs->addTab( pViewer, pViewer->GetTabTitle() );
 	m_pTabs->setTabToolTip( nIndex, szName );
 	m_pTabs->setCurrentIndex( nIndex );
@@ -5940,6 +5961,11 @@ CDemoViewer *CMainWindow::OpenDemoFile( const QString &szPath )
 //          game (which has the maps a server sent, too), else beside the demo or in a maps
 //          folder there.
 //-----------------------------------------------------------------------------
+// Purpose: The map a demo was recorded on, for its 3D view: maps/<name>.bsp from each of the
+//          mounted game's search paths (which have the maps a server sent, too), then beside
+//          the demo or in a maps folder there. Of several, the one whose hash is the one the
+//          server sent (a map compiled again is another map to the demo); else the first.
+//-----------------------------------------------------------------------------
 void CMainWindow::LoadDemoMap( CDemoViewer &viewer, const QString &szMap, const QString &szDemoFolder )
 {
 	if ( szMap.isEmpty() )
@@ -5948,35 +5974,77 @@ void CMainWindow::LoadDemoMap( CDemoViewer &viewer, const QString &szMap, const 
 		return;
 	}
 	const QString szGamePath = QStringLiteral( "maps/%1.bsp" ).arg( szMap );
-	QString szDisk = m_Game ? DiskPathForGame( szGamePath ) : QString{};
-	if ( szDisk.isEmpty() && !szDemoFolder.isEmpty() )
+	struct Candidate_t
 	{
-		for ( const QString &szTry : { szDemoFolder + QStringLiteral( "/maps/%1.bsp" ).arg( szMap ), szDemoFolder + QStringLiteral( "/%1.bsp" ).arg( szMap ) } )
+		std::vector<std::byte> m_Bytes;
+		QString m_szDisk; // empty for one inside an archive
+		QString m_szWhere;
+	};
+	std::vector<Candidate_t> candidates;
+	const auto addDisk = [ & ]( const QString &szPath ) {
+		if ( szPath.isEmpty() || !QFileInfo( szPath ).isFile() )
+			return;
+		for ( const Candidate_t &candidate : candidates )
 		{
-			if ( szDisk.isEmpty() && QFileInfo( szTry ).isFile() )
-				szDisk = szTry;
+			if ( !candidate.m_szDisk.isEmpty() && QFileInfo( candidate.m_szDisk ).canonicalFilePath() == QFileInfo( szPath ).canonicalFilePath() )
+				return;
+		}
+		// Straight into the bytes kept: a big map is hundreds of megabytes.
+		QFile file( szPath );
+		if ( !file.open( QIODevice::ReadOnly ) )
+			return;
+		std::vector<std::byte> bytes( static_cast<std::size_t>( file.size() ) );
+		if ( file.read( reinterpret_cast<char *>( bytes.data() ), file.size() ) == file.size() )
+			candidates.push_back( { std::move( bytes ), szPath, QDir::toNativeSeparators( szPath ) } );
+	};
+	if ( m_Game )
+	{
+		const std::string szPath = szGamePath.toStdString();
+		for ( const xv::vfs::MountRecord_t &record : m_pFileSystem->GetRecords() )
+		{
+			if ( !record.m_pMount || !record.m_pMount->Contains( szPath ) )
+				continue;
+			if ( const auto disk = record.m_pMount->DiskPath( szPath ) )
+				addDisk( QString::fromStdString( xv::vfs::ToUtf8( *disk ) ) );
+			else if ( auto bytes = record.m_pMount->Read( szPath ) )
+				candidates.push_back( { std::move( *bytes ), {}, QString::fromStdString( xv::vfs::ToUtf8( record.m_pMount->GetLocation() ) ) } );
 		}
 	}
-	std::optional<std::vector<std::byte>> bytes;
-	if ( !szDisk.isEmpty() )
+	if ( !szDemoFolder.isEmpty() )
 	{
-		if ( const auto data = ReadDiskFile( szDisk ) )
-		{
-			const auto *pBytes = reinterpret_cast<const std::byte *>( data->data() );
-			bytes.emplace( pBytes, pBytes + data->size() );
-		}
+		for ( const QString &szTry : { szDemoFolder + QStringLiteral( "/maps/%1.bsp" ).arg( szMap ), szDemoFolder + QStringLiteral( "/download/maps/%1.bsp" ).arg( szMap ), szDemoFolder + QStringLiteral( "/%1.bsp" ).arg( szMap ) } )
+			addDisk( szTry );
 	}
-	else if ( m_Game )
-	{
-		bytes = m_pFileSystem->Read( szGamePath.toStdString() );
-	}
-	if ( !bytes )
+	if ( candidates.empty() )
 	{
 		viewer.GetWorld().SetNoMap( m_Game ? tr( "%1 isn't among the game's files: the players are shown without their map." ).arg( szGamePath )
 										   : tr( "No game is mounted to read %1 from: the players are shown without their map." ).arg( szGamePath ) );
 		return;
 	}
-	viewer.GetWorld().LoadCompiledMap( std::move( *bytes ), m_Game, szMap + QStringLiteral( ".bsp" ), szDisk.isEmpty() ? fs::path{} : ToPath( szDisk ) );
+	std::size_t nPick = 0;
+	const xv::demo::CContents *pContents = viewer.GetContents();
+	const auto &info = pContents ? pContents->GetServerInfo() : std::nullopt;
+	if ( info && info->m_MapHash != std::array<std::uint8_t, 16>{} )
+	{
+		std::optional<std::size_t> match;
+		for ( std::size_t i = 0; i < candidates.size() && !match; i++ )
+		{
+			if ( xv::bsp::MapHash( candidates[ i ].m_Bytes ) == info->m_MapHash )
+				match = i;
+		}
+		if ( match )
+		{
+			nPick = *match;
+		}
+		else
+		{
+			viewer.AddWarning( tr( "None of the copies of %1 found (%2) is the one the demo was recorded on: the first is shown, and may not match what the players stood on." ).arg( szGamePath, QStringList( [ & ] { QStringList where; for ( const Candidate_t &c : candidates ) where << c.m_szWhere; return where; }() ).join( QStringLiteral( "; " ) ) ) );
+		}
+		if ( candidates.size() > 1 && match )
+			qDebug( "demo map: %s from %s (its hash is the demo's)", qPrintable( szGamePath ), qPrintable( candidates[ nPick ].m_szWhere ) );
+	}
+	Candidate_t &picked = candidates[ nPick ];
+	viewer.GetWorld().LoadCompiledMap( std::move( picked.m_Bytes ), m_Game, szMap + QStringLiteral( ".bsp" ), picked.m_szDisk.isEmpty() ? fs::path{} : ToPath( picked.m_szDisk ) );
 }
 
 //-----------------------------------------------------------------------------

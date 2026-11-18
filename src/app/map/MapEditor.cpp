@@ -153,6 +153,7 @@ CMapEditor::CMapEditor( const QString &szPath, bool bFromGame, QWidget *pParent 
 {
 	setObjectName( QStringLiteral( "mapEditor" ) );
 	m_pDocument = new CMapDocument( this );
+	m_pDocument->SetReadOnly( IsCompiled() );
 	m_pRenderData = std::make_unique<CMapRenderData>( *m_pDocument );
 	m_pResources = new CMapResources( this );
 	m_pRenderData->SetResources( m_pResources );
@@ -1284,11 +1285,23 @@ void CMapEditor::Load( CMapDocument::Source_t source )
 }
 
 //-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+void CMapEditor::SetCompiled( std::unique_ptr<CMapCompiled> pCompiled )
+{
+	m_pCompiled = std::move( pCompiled );
+}
+
+//-----------------------------------------------------------------------------
 // Purpose: The map is built: the views draw it and the grid takes the map's own settings.
 //-----------------------------------------------------------------------------
 void CMapEditor::Loaded()
 {
 	const xv::map::CScene &scene = *m_pDocument->GetScene();
+	if ( m_pCompiled )
+	{
+		m_pCompiled->Build( scene );
+	}
 	m_LastCameras = scene.m_Map.m_Cameras;
 	m_nLastActiveCamera = scene.m_Map.m_nActiveCamera;
 	m_RememberedCamera = RecallCamera();
@@ -4596,8 +4609,13 @@ bool CMapEditor::ConfirmClose()
 //-----------------------------------------------------------------------------
 bool CMapEditor::Save()
 {
+	if ( IsCompiled() )
+	{
+		emit StatusMessage( tr( "%1 is shown as compiled, read-only: it isn't saved" ).arg( GetTabTitle() ) );
+		return false;
+	}
 	// A manifest is shown as one map; it is saved as one (a VMF), never over the manifest.
-	if ( m_bFromGame || m_szPath.isEmpty() || !m_pDocument->IsLoaded() || IsManifest() || IsCompiled() )
+	if ( m_bFromGame || m_szPath.isEmpty() || !m_pDocument->IsLoaded() || IsManifest() )
 	{
 		return m_pDocument->IsLoaded() && SaveAs();
 	}
@@ -4623,15 +4641,16 @@ bool CMapEditor::SaveAs()
 	{
 		return false;
 	}
+	if ( IsCompiled() )
+	{
+		emit StatusMessage( tr( "%1 is shown as compiled, read-only: it isn't saved" ).arg( GetTabTitle() ) );
+		return false;
+	}
 	// A bare name starts in the folder the last file window finished in.
 	QString szStart = m_szPath.isEmpty() ? QStringLiteral( "untitled.vmf" ) : m_bFromGame ? QFileInfo{ m_szPath }.fileName()
 																						  : m_szPath;
 	if ( IsManifest() )
 		szStart = szStart.chopped( 4 ) + QStringLiteral( ".vmf" );
-	// A compiled map's VMF isn't the one it was compiled from: "_d", as decompilers name theirs,
-	// in the folder the last file window finished in (not among the game's maps).
-	if ( IsCompiled() )
-		szStart = QFileInfo{ m_szPath }.completeBaseName() + QStringLiteral( "_d.vmf" );
 	const QString szFile = AskSaveFile( this, tr( "Save Map As" ), szStart, tr( "Hammer maps (*.vmf)" ) );
 	if ( szFile.isEmpty() )
 	{
@@ -5045,6 +5064,10 @@ void CMapEditor::SetWorldGridEdited( bool bEdited )
 //-----------------------------------------------------------------------------
 void CMapEditor::WantLighting()
 {
+	if ( m_pCompiled )
+	{
+		return; // lit by its own light
+	}
 	if ( !m_pDocument->IsLoaded() )
 	{
 		return;

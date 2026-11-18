@@ -79,6 +79,11 @@ struct GeneralPreferences_t
 	QString m_szVrad;
 	QString m_szGameExe;
 	QString m_szBspDir;
+	// Demos' voice transcripts: the whisper.cpp model file (empty: none picked), and the
+	// language heard ("auto": told for each talker).
+	QStringList m_MutedDemoPlayers;
+	QString m_szWhisperModel;
+	QString m_szWhisperLanguage = QStringLiteral( "auto" );
 
 	friend bool operator==( const GeneralPreferences_t &, const GeneralPreferences_t & ) = default;
 };
@@ -328,6 +333,14 @@ public:
 	[[nodiscard]] QString GetBspDir() const { return m_General.m_szBspDir; }
 	void SetBspDir( const QString &szPath );
 
+	// The whisper.cpp model demos' voice is put in words with, and the language listened for.
+	[[nodiscard]] QString GetWhisperModel() const { return m_General.m_szWhisperModel; }
+	[[nodiscard]] const QStringList &GetMutedDemoPlayers() const { return m_General.m_MutedDemoPlayers; }
+	void SetDemoPlayerMuted( const QString &szSteamId, bool bMuted );
+	void SetWhisperModel( const QString &szPath );
+	[[nodiscard]] QString GetWhisperLanguage() const { return m_General.m_szWhisperLanguage; }
+	void SetWhisperLanguage( const QString &szLanguage );
+
 	// Whether every system in the particle editor's grid plays, rather than only the selected one.
 	[[nodiscard]] bool IsGridAnimatingAll() const { return m_General.m_bGridAnimatingAll; }
 	void SetGridAnimatingAll( bool bAll );
@@ -403,6 +416,7 @@ signals:
 	void EditorWindowsChanged( bool bWindows );
 	// The Discord settings changed (they live in QSettings under discord/).
 	void DiscordChanged();
+	void MutedDemoPlayersChanged();
 	void CodeEditorChanged();
 	void ThemeChanged();
 	void SimpleInterfaceChanged( bool bSimple );

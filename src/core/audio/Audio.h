@@ -33,6 +33,9 @@ struct CClip
 // WAV (PCM, float, Microsoft and IMA ADPCM) or MP3. Input is untrusted.
 [[nodiscard]] std::shared_ptr<const CClip> Decode( std::span<const std::byte> data, std::string *pError = nullptr );
 
+// Samples (interleaved, -1 to 1) as a 16-bit PCM WAV file.
+[[nodiscard]] std::vector<std::byte> EncodeWav( std::span<const float> samples, std::uint32_t nSampleRate, int nChannels = 1 );
+
 struct PlayParams_t
 {
 	float m_flVolume = 1.0f; // linear amplitude, as in Source's 0-1 volumes
@@ -72,6 +75,7 @@ public:
 	[[nodiscard]] std::optional<double> Position( Voice_t nVoice );
 	// Changes a playing voice's volume and pan (as in PlayParams_t); nothing once it has ended.
 	void SetMix( Voice_t nVoice, float flVolume, float flPan );
+	void SetPitch( Voice_t nVoice, float flPitch );
 	// Voices still playing; finished one-shots are released first.
 	[[nodiscard]] std::size_t VoiceCount();
 	void SetVolume( float flVolume );

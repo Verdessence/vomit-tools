@@ -131,7 +131,9 @@ public:
 			std::error_code typeError;
 			if ( it->is_regular_file( typeError ) )
 			{
-				m_Files.emplace( NormalizePath( ToUtf8( it->path().lexically_relative( location ) ) ), it->path() );
+				std::string szRelative = ToUtf8( it->path().lexically_relative( location ) );
+				std::string szKey = NormalizePath( szRelative );
+				m_Files.emplace( std::move( szKey ), std::move( szRelative ) );
 			}
 		}
 	}
@@ -145,7 +147,7 @@ public:
 			return std::nullopt;
 		}
 		std::string szPath = NormalizePath( ToUtf8( inside ) );
-		m_Files.insert_or_assign( szPath, file );
+		m_Files.insert_or_assign( szPath, ToUtf8( inside ) );
 		return szPath;
 	}
 
@@ -161,14 +163,17 @@ public:
 		{
 			return std::nullopt;
 		}
-		std::ifstream stream{ it->second, std::ios::binary };
+		std::ifstream stream{ GetLocation() / FromUtf8( it->second ), std::ios::binary | std::ios::ate };
 		if ( !stream )
 		{
 			return std::nullopt;
 		}
-		std::vector<char> chars{ std::istreambuf_iterator<char>{ stream }, std::istreambuf_iterator<char>{} };
-		std::vector<std::byte> bytes( chars.size() );
-		std::ranges::transform( chars, bytes.begin(), []( char c ) { return static_cast<std::byte>( c ); } );
+		std::vector<std::byte> bytes( static_cast<std::size_t>( std::max<std::streamoff>( stream.tellg(), 0 ) ) );
+		stream.seekg( 0 );
+		if ( !stream.read( reinterpret_cast<char *>( bytes.data() ), static_cast<std::streamsize>( bytes.size() ) ) )
+		{
+			return std::nullopt;
+		}
 		return bytes;
 	}
 
@@ -188,11 +193,14 @@ public:
 	[[nodiscard]] std::optional<fs::path> DiskPath( const std::string &szPath ) const override
 	{
 		const auto it = m_Files.find( szPath );
-		return it == m_Files.end() ? std::nullopt : std::optional{ it->second };
+		return it == m_Files.end() ? std::nullopt : std::optional{ GetLocation() / FromUtf8( it->second ) };
 	}
 
 private:
-	std::unordered_map<std::string, fs::path> m_Files; // normalized path -> real file
+	// Normalized path -> the file's own path under the folder. A string, not an fs::path: a
+	// path keeps an object for each of its parts, which over a game's folders (counted twice
+	// and more by gameinfo.txt) came to tens of megabytes a mount.
+	std::unordered_map<std::string, std::string> m_Files;
 };
 
 // An archive read through CPackage (a map's packed files).

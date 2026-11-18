@@ -109,6 +109,17 @@ vomit_tools_add_notice(NAME "PPMd (from 7-Zip)" FETCH ppmd
   This code is based on PPMd var.H (2001): Dmitry Shkarin : Public domain")
 vomit_tools_add_notice(NAME "miniaudio" FETCH miniaudio FILE ./LICENSE
         URL "https://github.com/mackron/miniaudio/archive/refs/tags/0.11.25.tar.gz" LICENSE "Unlicense OR MIT-0")
+vomit_tools_add_notice(NAME "libopus (Opus, for demos' Steam voice)" FETCH opus FILE COPYING
+        URL "https://downloads.xiph.org/releases/opus/opus-1.5.2.tar.gz" LICENSE "BSD-3-Clause"
+        NOTE "Opus's patent licences are listed at https://opus-codec.org/license/.")
+vomit_tools_add_notice(NAME "CELT 0.11.3 (for demos' vaudio_celt voice)" FETCH celt FILE COPYING
+        URL "https://downloads.xiph.org/releases/celt/celt-0.11.3.tar.gz" LICENSE "BSD-2-Clause"
+        NOTE "Only its library's sources (libcelt) are built, their global names prefixed with xv_celt011_.")
+if(VOMIT_TOOLS_WHISPER)
+    vomit_tools_add_notice(NAME "whisper.cpp and ggml (for transcripts of demos' voice)" FETCH whisper FILE LICENSE
+            URL "https://github.com/ggml-org/whisper.cpp/archive/refs/tags/v1.9.5.tar.gz" LICENSE "MIT"
+            NOTE "Built for the CPU only. Speech models are not included: the user picks a ggml model file.")
+endif()
 vomit_tools_add_notice(NAME "stb" FETCH stb FILE ./LICENSE
         URL "https://github.com/nothings/stb/archive/2c980bb59875b0d32144a71867fbdebb2f77cd20.tar.gz" LICENSE "MIT OR Unlicense")
 vomit_tools_add_notice(NAME "tinyexr" FETCH tinyexr FILE ./LICENSE
@@ -143,6 +154,21 @@ vomit_tools_add_notice(NAME "V-HACD (open render mesh voxel decomposition)" FETC
 
 vomit_tools_add_notice(NAME "Box3D (Erin Catto, the physics tool)" FETCH box3d FILE ./LICENSE
         URL "https://github.com/erincatto/box3d/tree/8441b4a06d6d09dcfb0b0f704df4d847d1437b92" LICENSE "MIT")
+
+if(VOMIT_TOOLS_JXL_TARGET)
+    vomit_tools_add_notice(NAME "libjxl (JPEG XL picture caches)"
+            FILE "${CMAKE_SOURCE_DIR}/LICENSES/libjxl-BSD-3-Clause.txt"
+            URL "https://github.com/libjxl/libjxl" LICENSE "BSD-3-Clause"
+            NOTE "Patent grant: https://github.com/libjxl/libjxl/blob/v0.12.0/PATENTS")
+    if(VOMIT_TOOLS_JXL_TARGET STREQUAL "jxl")
+        vomit_tools_add_notice(NAME "Brotli (libjxl)" FETCH jpegxl FILE third_party/brotli/LICENSE
+                URL "https://github.com/google/brotli" LICENSE "MIT")
+        vomit_tools_add_notice(NAME "Highway (libjxl)" FETCH jpegxl FILE third_party/highway/LICENSE
+                URL "https://github.com/google/highway" LICENSE "Apache-2.0")
+        vomit_tools_add_notice(NAME "skcms (libjxl)" FETCH jpegxl FILE third_party/skcms/LICENSE
+                URL "https://github.com/google/skcms" LICENSE "BSD-3-Clause")
+    endif()
+endif()
 
 file(WRITE "${VOMIT_TOOLS_NOTICES}.new" "${notices}")
 file(COPY_FILE "${VOMIT_TOOLS_NOTICES}.new" "${VOMIT_TOOLS_NOTICES}" ONLY_IF_DIFFERENT)

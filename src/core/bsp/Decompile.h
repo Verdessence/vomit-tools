@@ -16,6 +16,7 @@
 #include <optional>
 #include <span>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace xv::bsp
@@ -35,6 +36,10 @@ struct DecompileReport_t
 
 // The map as VMF text; nullopt (with the reason in pError) when the file isn't a map this
 // reads, or has no brushes to read (their lumps are missing or cut short).
+// The material a compiled face names as the map had it: the compiler's copies of materials
+// (for cubemaps, water depth, blends) traced back to the original.
+[[nodiscard]] std::string MapMaterialName( std::string_view szStored );
+
 [[nodiscard]] std::optional<std::string> DecompileToVmf( std::span<const std::byte> file, DecompileReport_t *pReport = nullptr, std::string *pError = nullptr );
 
 } // namespace xv::bsp

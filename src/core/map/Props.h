@@ -13,6 +13,7 @@
 #include <memory>
 #include <span>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "map/Geometry.h"
@@ -63,6 +64,9 @@ struct PropList_t
 // Every placement's model in world space, batched by material and by chunks of flChunkSize
 // (each prop goes in the chunk of its origin). Placements whose model has no triangles are
 // left out.
-[[nodiscard]] CMapMesh BuildPropMesh( std::span<const PropModel_t> models, std::span<const PropPlacement_t> placements, double flChunkSize = 1024.0 );
+// pSources, when given, gets each vertex's source: its placement's index and the vertex of
+// that placement's model it is (the same model's vertices come out in the same order however
+// they are posed, so a posed copy can be written over them).
+[[nodiscard]] CMapMesh BuildPropMesh( std::span<const PropModel_t> models, std::span<const PropPlacement_t> placements, double flChunkSize = 1024.0, std::vector<std::pair<std::uint32_t, std::uint32_t>> *pSources = nullptr );
 
 } // namespace xv::map

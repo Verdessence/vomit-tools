@@ -313,6 +313,9 @@ void ForEachGeneralPreference( Visit_t &&pfnVisit, General_t &...generals )
 	pfnVisit( "tools:vrad", "sourceTools/vrad", nullptr, generals.m_szVrad... );
 	pfnVisit( "tools:game", "sourceTools/game", "what runs the game on a map", generals.m_szGameExe... );
 	pfnVisit( "tools:bsp_dir", "sourceTools/bspDir", "where Run Map copies the compiled map; empty: the game's maps folder", generals.m_szBspDir... );
+	pfnVisit( "demo:muted_players", nullptr, "Steam IDs muted in the demo viewer", generals.m_MutedDemoPlayers... );
+	pfnVisit( "demo:whisper_model", nullptr, "a whisper.cpp model (ggml-base.bin...) for voice transcripts; empty: none", generals.m_szWhisperModel... );
+	pfnVisit( "demo:whisper_language", nullptr, "auto (told for each talker) or a language's code (en, ru...)", generals.m_szWhisperLanguage... );
 }
 
 //-----------------------------------------------------------------------------
@@ -1141,6 +1144,8 @@ void CPreferences::ApplyConfig()
 	{
 		emit SimpleInterfaceChanged( general.m_bSimpleInterface );
 	}
+	if ( old.m_MutedDemoPlayers != general.m_MutedDemoPlayers )
+		emit MutedDemoPlayersChanged();
 	if ( bCode )
 	{
 		emit CodeEditorChanged();
@@ -1399,6 +1404,47 @@ void CPreferences::SetBspDir( const QString &szPath )
 	{
 		m_General.m_szBspDir = szPath.trimmed();
 		Store( "tools:bsp_dir", m_General.m_szBspDir );
+	}
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Keep a Steam account muted in every demo.
+//-----------------------------------------------------------------------------
+void CPreferences::SetDemoPlayerMuted( const QString &szSteamId, bool bMuted )
+{
+	auto &ids = m_General.m_MutedDemoPlayers;
+	if ( bMuted == ids.contains( szSteamId ) )
+		return;
+	if ( bMuted )
+		ids.append( szSteamId );
+	else
+		ids.removeAll( szSteamId );
+	Store( "demo:muted_players", ids );
+	emit MutedDemoPlayersChanged();
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Remember the model used for demo voice transcripts.
+//-----------------------------------------------------------------------------
+void CPreferences::SetWhisperModel( const QString &szPath )
+{
+	if ( szPath != m_General.m_szWhisperModel )
+	{
+		m_General.m_szWhisperModel = szPath;
+		Store( "demo:whisper_model", m_General.m_szWhisperModel );
+	}
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+void CPreferences::SetWhisperLanguage( const QString &szLanguage )
+{
+	const QString szValue = szLanguage.trimmed().isEmpty() ? QStringLiteral( "auto" ) : szLanguage.trimmed();
+	if ( szValue != m_General.m_szWhisperLanguage )
+	{
+		m_General.m_szWhisperLanguage = szValue;
+		Store( "demo:whisper_language", m_General.m_szWhisperLanguage );
 	}
 }
 

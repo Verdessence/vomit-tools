@@ -571,17 +571,31 @@ void CMapRenderData::SetMaterials( std::shared_ptr<const std::vector<xv::map::Ra
 	}
 	if ( pMaterials == m_pReceivedMaterials && pTextures == m_Frame.m_pTextures )
 		return;
-	if ( m_Frame.m_pPropMesh )
-		for ( const auto &batch : m_Frame.m_pPropMesh->m_Batches )
+	const auto changedIn = [ & ]( const xv::map::CMapMesh &mesh ) {
+		for ( const auto &batch : mesh.m_Batches )
 		{
 			const auto n = batch.m_nMaterial;
 			if ( !m_pReceivedMaterials || !pMaterials || n >= m_pReceivedMaterials->size() || n >= pMaterials->size() ||
 				!SameButMotion( ( *m_pReceivedMaterials )[ n ], ( *pMaterials )[ n ] ) )
+				return true;
+		}
+		return false;
+	};
+	// The props' materials, from the whole or (without it) the parts.
+	bool bPropsChanged = m_Frame.m_pPropMesh && changedIn( *m_Frame.m_pPropMesh );
+	if ( !m_Frame.m_pPropMesh && m_Frame.m_pPropParts )
+	{
+		for ( const auto &[ nObject, pPart ] : *m_Frame.m_pPropParts )
+		{
+			if ( pPart && changedIn( *pPart ) )
 			{
-				++m_nPropMaterialsRevision;
+				bPropsChanged = true;
 				break;
 			}
 		}
+	}
+	if ( bPropsChanged )
+		++m_nPropMaterialsRevision;
 	m_pReceivedMaterials = pMaterials;
 	// The map's materials, then the one entity boxes are drawn with, then the props'.
 	auto pAll = std::make_shared<std::vector<xv::map::RasterMaterial_t>>( pMaterials ? *pMaterials : std::vector<xv::map::RasterMaterial_t>{} );
@@ -610,7 +624,7 @@ void CMapRenderData::SetProps( std::shared_ptr<const xv::map::CMapMesh> pProps, 
 	{
 		Rebuild();
 	}
-	if ( pProps == m_Frame.m_pPropMesh )
+	if ( pProps == m_Frame.m_pPropMesh && pParts == m_Frame.m_pPropParts )
 	{
 		return;
 	}
@@ -620,15 +634,27 @@ void CMapRenderData::SetProps( std::shared_ptr<const xv::map::CMapMesh> pProps, 
 	m_PropObjects = std::move( objects );
 	std::ranges::sort( m_PropObjects );
 	m_PropBounds.assign( m_PropObjects.size(), {} );
-	if ( m_Frame.m_pPropMesh )
-	{
-		for ( const xv::map::MeshVertex_t &vertex : m_Frame.m_pPropMesh->m_Vertices )
+	const auto addBounds = [ this ]( const xv::map::CMapMesh &mesh ) {
+		for ( const xv::map::MeshVertex_t &vertex : mesh.m_Vertices )
 		{
 			const auto it = std::ranges::lower_bound( m_PropObjects, vertex.m_nObject );
 			if ( it != m_PropObjects.end() && *it == vertex.m_nObject )
 			{
 				m_PropBounds[ static_cast<std::size_t>( it - m_PropObjects.begin() ) ].Add( xv::map::ToPoint( vertex.m_vecPosition ) );
 			}
+		}
+	};
+	// Without the whole (a view that has no use for it), the parts have the same vertices.
+	if ( m_Frame.m_pPropMesh )
+	{
+		addBounds( *m_Frame.m_pPropMesh );
+	}
+	else if ( m_Frame.m_pPropParts )
+	{
+		for ( const auto &[ nObject, pPart ] : *m_Frame.m_pPropParts )
+		{
+			if ( pPart )
+				addBounds( *pPart );
 		}
 	}
 	BuildEntityBoxes();

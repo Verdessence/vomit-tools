@@ -178,6 +178,9 @@ private:
 	// The block tool's box, the entity tool's marker and the gizmo, over the picture.
 	void PaintTools( QPainter &painter );
 	void PaintOriginAxes( QPainter &painter ) const;
+	// A selected game_text's message as the game shows it on a player's screen (each channel's
+	// last one selected), faded in and held.
+	void PaintGameTexts( QPainter &painter ) const;
 	void UpdateCollapsibleVertices();
 	bool BeginOverlayDrag( QPointF at );
 	// A selected overlay's corner (0 to 3) or centre (4) under the mouse, with the Overlay tool.

@@ -37,6 +37,7 @@
 #include <QVBoxLayout>
 
 #include "ImageFiles.h"
+#include "PictureCache.h"
 #include "model/Edit.h"
 #include "model/Mdl.h"
 #include "model/Model.h"
@@ -59,10 +60,10 @@ constexpr std::size_t SPRITE_CACHE = 256;
 // Purpose: Where a model's picture is kept: by its path and checksum, so a recompiled model is
 //          drawn again. ".none" marks a model that has nothing to draw.
 //-----------------------------------------------------------------------------
-QString PicturePath( const QString &szModel, int nChecksum, bool bNone )
+QString PicturePath( const QString &szModel, int nChecksum )
 {
 	const QByteArray hash = QCryptographicHash::hash( szModel.toLower().toUtf8(), QCryptographicHash::Md5 ).toHex();
-	return QStringLiteral( "%1/%2_%3%4" ).arg( CModelBrowser::CacheFolder(), QString::fromLatin1( hash ) ).arg( static_cast<quint32>( nChecksum ), 8, 16, QChar( u'0' ) ).arg( bNone ? QStringLiteral( ".none" ) : QStringLiteral( ".png" ) );
+	return QStringLiteral( "%1/%2_%3" ).arg( CModelBrowser::CacheFolder(), QString::fromLatin1( hash ) ).arg( static_cast<quint32>( nChecksum ), 8, 16, QChar( u'0' ) );
 }
 
 //-----------------------------------------------------------------------------
@@ -693,18 +694,18 @@ void CModelBrowser::Run( xv::vfs::CGameInfo game )
 		drawn[ static_cast<std::size_t>( nRow ) ] = true;
 
 		const QString szPath = names[ nRow ];
-		const QString szPicture = PicturePath( szPath, checksums[ static_cast<std::size_t>( nRow ) ], false );
-		const QString szNone = PicturePath( szPath, checksums[ static_cast<std::size_t>( nRow ) ], true );
+		const QString szPicture = PicturePath( szPath, checksums[ static_cast<std::size_t>( nRow ) ] );
+		const QString szNone = szPicture + QStringLiteral( ".none" );
 		QImage picture;
 		int nTriangles = -1;
 		std::string szProblem;
 		if ( QFile::exists( szNone ) )
 			szProblem = "no mesh";
-		else if ( !picture.load( szPicture ) )
+		else if ( ( picture = ReadCachedPicture( szPicture ) ).isNull() )
 		{
 			picture = DrawModel( paths[ static_cast<std::size_t>( nRow ) ], read, sprites, nTriangles, szProblem );
 			if ( !picture.isNull() )
-				picture.save( szPicture );
+				(void)WriteCachedPicture( szPicture, picture );
 			else if ( QFile none( szNone ); none.open( QIODevice::WriteOnly ) )
 				none.write( szProblem.c_str() );
 		}

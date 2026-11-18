@@ -7,6 +7,7 @@
 #include "Audio.h"
 
 #include <algorithm>
+#include <cmath>
 #include <map>
 
 #include <miniaudio.h>
@@ -49,6 +50,44 @@ std::uint64_t CClip::GetFrames() const
 double CClip::GetSeconds() const
 {
 	return m_nSampleRate ? static_cast<double>( GetFrames() ) / m_nSampleRate : 0.0;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: RIFF's header for 16-bit PCM, then the samples rounded and clamped.
+//-----------------------------------------------------------------------------
+std::vector<std::byte> EncodeWav( std::span<const float> samples, std::uint32_t nSampleRate, int nChannels )
+{
+	std::vector<std::byte> out;
+	const auto nBytes = static_cast<std::uint32_t>( samples.size() * 2 );
+	out.reserve( 44 + nBytes );
+	const auto text = [ &out ]( const char *psz ) {
+		for ( ; *psz; psz++ )
+			out.push_back( static_cast<std::byte>( *psz ) );
+	};
+	const auto u32 = [ &out ]( std::uint32_t n ) {
+		for ( int i = 0; i < 4; i++ )
+			out.push_back( static_cast<std::byte>( ( n >> ( 8 * i ) ) & 0xff ) );
+	};
+	const auto u16 = [ &out ]( std::uint16_t n ) {
+		out.push_back( static_cast<std::byte>( n & 0xff ) );
+		out.push_back( static_cast<std::byte>( n >> 8 ) );
+	};
+	const auto nChannelCount = static_cast<std::uint16_t>( std::max( 1, nChannels ) );
+	text( "RIFF" );
+	u32( 36 + nBytes );
+	text( "WAVEfmt " );
+	u32( 16 );
+	u16( 1 ); // PCM
+	u16( nChannelCount );
+	u32( nSampleRate );
+	u32( nSampleRate * nChannelCount * 2 );
+	u16( static_cast<std::uint16_t>( nChannelCount * 2 ) );
+	u16( 16 );
+	text( "data" );
+	u32( nBytes );
+	for ( const float flSample : samples )
+		u16( static_cast<std::uint16_t>( static_cast<std::int16_t>( std::lround( std::clamp( flSample, -1.0f, 1.0f ) * 32767.0f ) ) ) );
+	return out;
 }
 
 //-----------------------------------------------------------------------------
@@ -273,6 +312,18 @@ void CEngine::SetMix( Voice_t nVoice, float flVolume, float flPan )
 	{
 		ma_sound_set_volume( &it->second->m_Sound, flVolume );
 		ma_sound_set_pan( &it->second->m_Sound, flPan );
+	}
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Playback speed, as PlayParams_t's.
+//-----------------------------------------------------------------------------
+void CEngine::SetPitch( Voice_t nVoice, float flPitch )
+{
+	const auto it = m_pImpl->m_Voices.find( nVoice );
+	if ( it != m_pImpl->m_Voices.end() )
+	{
+		ma_sound_set_pitch( &it->second->m_Sound, flPitch > 0 ? flPitch : 1.0f );
 	}
 }
 

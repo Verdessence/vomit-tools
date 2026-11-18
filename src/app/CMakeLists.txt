@@ -11,8 +11,17 @@ add_library(vomit_tools_ui STATIC
         CodeEdit.h
         CrashHandler.cpp
         CrashHandler.h
+        DemoHud.cpp
+        DemoHud.h
+        DemoSound.cpp
+        DemoSound.h
+        DemoVoice.cpp
+        DemoVoice.h
         DemoViewer.cpp
         DemoViewer.h
+        DemoViewModel.cpp
+        DemoFigures.cpp
+        DemoFigures.h
         DemoWorld.cpp
         DemoWorld.h
         StripperEditor.cpp
@@ -77,6 +86,7 @@ add_library(vomit_tools_ui STATIC
         MaterialView.h
         ModelRenderer.cpp
         ModelRenderer.h
+        PictureCache.cpp
         ModelBrowser.cpp
         ModelBrowser.h
         ModelDocument.cpp
@@ -172,6 +182,8 @@ add_library(vomit_tools_ui STATIC
         VpkEditor.h
         EditorTab.h
         map/MapConstants.h
+        map/MapCompiled.cpp
+        map/MapCompiled.h
         map/MapDocument.cpp
         map/MapDocument.h
         map/MapEditor.cpp
@@ -325,7 +337,8 @@ set_source_files_properties("${VOMIT_TOOLS_NOTICES}" PROPERTIES QT_RESOURCE_ALIA
 qt_add_resources(vomit_tools_ui "vomit_tools_licenses"
         PREFIX "/licenses"
         FILES "${CMAKE_SOURCE_DIR}/LICENSE" "${VOMIT_TOOLS_NOTICES}")
-target_link_libraries(vomit_tools_ui PUBLIC vomit_tools::core Qt6::Widgets Qt6::Network)
+target_link_libraries(vomit_tools_ui PUBLIC vomit_tools::core Qt6::Widgets Qt6::Network
+        PRIVATE ${VOMIT_TOOLS_JXL_TARGET})
 # On Linux, open and save windows ask the desktop's file chooser through the XDG portal, over D-Bus.
 if(TARGET Qt6::DBus)
     target_sources(vomit_tools_ui PRIVATE PortalFileChooser.cpp PortalFileChooser.h)

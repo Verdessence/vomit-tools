@@ -24,6 +24,7 @@
 
 #include "Process.h"
 #include "bsp/Decompile.h"
+#include "bsp/Faces.h"
 #include "map/Compile.h"
 #include "map/GameConfig.h"
 #include "vfs/Vfs.h"
@@ -56,6 +57,9 @@ const char *const MAP_USAGE = R"(vomit-tools-cli map: Hammer maps
   vomit-tools-cli map decompile <map.bsp> [<out.vmf>]
       Writes a compiled map back as a Hammer map (beside the .bsp, as <map>_d.vmf, unless
       named): its brushes, displacements, entities, static props, overlays and cubemaps.
+  vomit-tools-cli map faces <map.bsp> [--ldr]
+      Reads a compiled map's faces as the game draws them, with its baked light (the HDR
+      compile's unless --ldr), and counts what it found.
 
 Exit code 0 when everything ran, 2 when the map leaked, 1 otherwise.
 )";
@@ -420,6 +424,74 @@ int Decompile( const std::vector<std::string> &inputs )
 	return 0;
 }
 
+//-----------------------------------------------------------------------------
+// Purpose: map faces: a compiled map's own faces and lightmaps read, and counted.
+//-----------------------------------------------------------------------------
+int Faces( const std::vector<std::string> &inputs, const std::set<std::string> &switches )
+{
+	if ( inputs.size() != 1 )
+	{
+		std::fprintf( stderr, "map faces: give a .bsp\n" );
+		return 1;
+	}
+	const fs::path bsp( inputs[ 0 ] );
+	std::ifstream in( bsp, std::ios::binary );
+	if ( !in )
+	{
+		std::fprintf( stderr, "map faces: could not open %s\n", inputs[ 0 ].c_str() );
+		return 1;
+	}
+	const std::vector<char> data( ( std::istreambuf_iterator<char>( in ) ), std::istreambuf_iterator<char>() );
+	xv::bsp::CompiledOptions_t options;
+	options.m_bHdr = !switches.contains( "--ldr" );
+	std::string szError;
+	const auto compiled = xv::bsp::ReadCompiledMap( std::as_bytes( std::span( data ) ), options, &szError );
+	if ( !compiled )
+	{
+		std::fprintf( stderr, "map faces: %s\n", szError.c_str() );
+		return 1;
+	}
+	std::size_t nFaces = 0;
+	std::size_t nTriangles = 0;
+	std::size_t nVertices = 0;
+	for ( const xv::bsp::CompiledModel_t &model : compiled->m_Models )
+	{
+		nFaces += static_cast<std::size_t>( model.m_nFaces );
+		nTriangles += model.m_pMesh->m_Indices.size() / 3;
+		nVertices += model.m_pMesh->m_Vertices.size();
+	}
+	std::printf( "%zu models, %zu faces (%d lit, %d drawn as they are, %d displacements), %zu triangles, %zu vertices, %zu materials\n", compiled->m_Models.size(), nFaces, compiled->m_nLitFaces, compiled->m_nUnlitFaces, compiled->m_nDisplacements, nTriangles, nVertices, compiled->m_Materials.size() );
+	std::printf( "light: %s, atlas %d x %d\n", compiled->m_bHdr ? "HDR" : "LDR", compiled->m_pLighting->m_nWidth, compiled->m_pLighting->m_nHeight );
+	if ( const auto &pAmbient = compiled->m_pAmbient; pAmbient && !pAmbient->IsEmpty() )
+	{
+		// Where the cubes are found: down a vertical line through the middle of the world.
+		const xv::map::Box_t &bounds = compiled->m_Models[ 0 ].m_Bounds;
+		int nFound = 0;
+		xv::CVec3 vecSum;
+		for ( int i = 0; i < 64; i++ )
+		{
+			for ( int j = 0; j < 64; j++ )
+			{
+				for ( int k = 0; k < 16; k++ )
+				{
+					const xv::map::Point_t at{ bounds.m_Mins[ 0 ] + ( bounds.m_Maxs[ 0 ] - bounds.m_Mins[ 0 ] ) * ( i + 0.5 ) / 64.0, bounds.m_Mins[ 1 ] + ( bounds.m_Maxs[ 1 ] - bounds.m_Mins[ 1 ] ) * ( j + 0.5 ) / 64.0, bounds.m_Mins[ 2 ] + ( bounds.m_Maxs[ 2 ] - bounds.m_Mins[ 2 ] ) * ( k + 0.5 ) / 16.0 };
+					if ( const auto cube = pAmbient->CubeAt( at ) )
+					{
+						nFound++;
+						vecSum += xv::bsp::CAmbientLighting::LightFor( *cube, { 0.0f, 0.0f, 1.0f } );
+					}
+				}
+			}
+		}
+		std::printf( "ambient cubes: found at %d of %d points, mean light from above %.4f %.4f %.4f\n", nFound, 64 * 64 * 16, nFound ? vecSum.m_flX / nFound : 0.0, nFound ? vecSum.m_flY / nFound : 0.0, nFound ? vecSum.m_flZ / nFound : 0.0 );
+	}
+	for ( const std::string &szProblem : compiled->m_Problems )
+	{
+		std::printf( "problem: %s\n", szProblem.c_str() );
+	}
+	return 0;
+}
+
 } // namespace
 
 //-----------------------------------------------------------------------------
@@ -469,6 +541,10 @@ int MapCommand( int argc, char **argv )
 	if ( szCommand == "decompile" )
 	{
 		return Decompile( inputs );
+	}
+	if ( szCommand == "faces" )
+	{
+		return Faces( inputs, switches );
 	}
 	std::fprintf( stderr, "map: unknown command %s\n\n%s", szCommand.c_str(), MAP_USAGE );
 	return 1;

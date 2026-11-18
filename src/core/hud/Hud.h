@@ -173,6 +173,9 @@ struct Icon_t
 };
 // The icons of a textures file, by lower-case name.
 [[nodiscard]] std::map<std::string, Icon_t> ReadIcons( const kv1::CDocument &document );
+// A language file's text as UTF-8: the files are UTF-16 with a byte order mark (little
+// end first), or already UTF-8.
+[[nodiscard]] std::string LanguageText( std::string_view szBytes );
 // A language file's tokens (resource/<game>_english.txt, as UTF-8), by lower-case name
 // without the "#".
 [[nodiscard]] std::map<std::string, std::string> ReadTokens( const kv1::CDocument &document );

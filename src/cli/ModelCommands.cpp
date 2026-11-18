@@ -164,7 +164,7 @@ Input_t Input( const std::string &name, const fs::path &game )
 //-----------------------------------------------------------------------------
 int ModelCommand( int argc, char **argv )
 {
-	const char *usage = "model info <mdl...> [--game gameinfo.txt]\nmodel export <mdl> -o folder [--format obj|smd|gltf|qc|pack] [--game gameinfo.txt]\n  [--skin N --lod N --sequence N --first N --last N --fps N --base-blend]\nmodel vmf <mdl> <out.vmf> [--game gameinfo.txt]\n  [--hulls auto|physics|decompose|cutout --texture nodraw|dev|model]\n  [--grid N --max-hulls N --max-sides N --max-vertices N --concavity N --voxel-resolution N]\n  [--offset X Y Z --world --no-reference --no-hammer-vertices --reuse-materials]\n  [--skin N --lod N --bodygroup INDEX MODEL (repeatable)]\nmodel set surfaceprop|mass|flags|contents <value> <mdl...> [-o folder] [--game gameinfo.txt]\nmodel scale <factor> <mdl...> [-o folder] [--game gameinfo.txt]\n";
+	const char *usage = "model info <mdl...> [--game gameinfo.txt] [--sequences]\nmodel export <mdl> -o folder [--format obj|smd|gltf|qc|pack] [--game gameinfo.txt]\n  [--skin N --lod N --sequence N --first N --last N --fps N --base-blend]\nmodel vmf <mdl> <out.vmf> [--game gameinfo.txt]\n  [--hulls auto|physics|decompose|cutout --texture nodraw|dev|model]\n  [--grid N --max-hulls N --max-sides N --max-vertices N --concavity N --voxel-resolution N]\n  [--offset X Y Z --world --no-reference --no-hammer-vertices --reuse-materials]\n  [--skin N --lod N --bodygroup INDEX MODEL (repeatable)]\nmodel set surfaceprop|mass|flags|contents <value> <mdl...> [-o folder] [--game gameinfo.txt]\nmodel scale <factor> <mdl...> [-o folder] [--game gameinfo.txt]\n";
 	if ( !argc || std::string_view( argv[ 0 ] ) == "--help" || std::string_view( argv[ 0 ] ) == "-h" )
 	{
 		std::printf( "%s", usage );
@@ -178,6 +178,7 @@ int ModelCommand( int argc, char **argv )
 		fs::path output, game;
 		model::Selection_t selection;
 		model::Clip_t clip;
+		bool bSequences = false;
 		model::VmfOptions_t vmfOptions;
 		for ( int i = 1; i < argc; i++ )
 		{
@@ -263,6 +264,8 @@ int ModelCommand( int argc, char **argv )
 				clip.m_flFps = Number( value() );
 			else if ( arg == "--base-blend" )
 				clip.m_bAllowBaseBlend = true;
+			else if ( command == "info" && arg == "--sequences" )
+				bSequences = true;
 			else if ( arg == "--help" || arg == "-h" )
 			{
 				std::printf( "%s", usage );
@@ -322,6 +325,24 @@ int ModelCommand( int argc, char **argv )
 						std::printf( "  %zu vertices  %d triangles\n", mesh->m_Vertices.size(), mesh->GetTriangleCount() );
 					else
 						std::printf( "  %s\n", error.c_str() );
+					for ( const std::string &szInclude : studio->m_Includes )
+						std::printf( "  includes %s\n", szInclude.c_str() );
+					for ( const model::PoseParameter_t &param : studio->m_Parameters )
+						std::printf( "  pose parameter %s  %g to %g%s\n", param.m_szName.c_str(), static_cast<double>( param.m_flStart ), static_cast<double>( param.m_flEnd ), param.m_flLoop != 0.0f ? "  (loops)" : "" );
+					// Each sequence: its name and activity, its blend grid and the pose parameters
+					// that move through it, its first animation's frames and rate.
+					for ( std::size_t i = 0; bSequences && i < studio->m_Sequences.size(); i++ )
+					{
+						const model::Sequence_t &seq = studio->m_Sequences[ i ];
+						const auto paramName = [ & ]( int nParam ) { return nParam >= 0 && static_cast<std::size_t>( nParam ) < studio->m_Parameters.size() ? studio->m_Parameters[ static_cast<std::size_t>( nParam ) ].m_szName : std::string( "-" ); };
+						std::string szFrames;
+						if ( !seq.m_Animations.empty() && seq.m_Animations.front() >= 0 && static_cast<std::size_t>( seq.m_Animations.front() ) < studio->m_Animations.size() )
+						{
+							const model::Animation_t &anim = studio->m_Animations[ static_cast<std::size_t>( seq.m_Animations.front() ) ];
+							szFrames = "  " + std::to_string( anim.m_nFrames ) + " frames at " + std::to_string( static_cast<int>( anim.m_flFps ) );
+						}
+						std::printf( "  %4zu %s  %s  %dx%d %s %s%s%s\n", i, seq.m_szName.c_str(), seq.m_szActivity.empty() ? "-" : seq.m_szActivity.c_str(), seq.m_Size[ 0 ], seq.m_Size[ 1 ], paramName( seq.m_Parameters[ 0 ] ).c_str(), paramName( seq.m_Parameters[ 1 ] ).c_str(), szFrames.c_str(), seq.m_bHasLayers ? "  layered" : "" );
+					}
 					continue;
 				}
 				if ( command == "export" )

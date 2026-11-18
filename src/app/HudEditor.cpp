@@ -356,7 +356,7 @@ void CHudCanvas::paintEvent( QPaintEvent *pEvent )
 			// under the pointer.
 			painter.save();
 			painter.setOpacity( element.m_bVisible ? 1.0 : 0.35 );
-			const bool bDrawn = PaintRendered( painter, element, box );
+			const bool bDrawn = PaintRendered( painter, element, box, GetZoom() );
 			painter.restore();
 			painter.setFont( font );
 			if ( !bDrawn || i == m_nHover )
@@ -443,10 +443,9 @@ void CHudCanvas::paintEvent( QPaintEvent *pEvent )
 //          and for the well-known panels a sample of what they show (an icon, digits, a
 //          caption) where the layout places each.
 //-----------------------------------------------------------------------------
-bool CHudCanvas::PaintRendered( QPainter &painter, const xv::hud::Element_t &element, const QRectF &box ) const
+bool CHudCanvas::PaintRendered( QPainter &painter, const xv::hud::Element_t &element, const QRectF &box, double flZoom ) const
 {
 	const xv::hud::CScheme &scheme = m_Editor.GetScheme();
-	const double flZoom = GetZoom();
 	const double flScale = m_Editor.GetScreen().GetScale();
 	bool bDrawn = false;
 	if ( box.width() <= 0.0 || box.height() <= 0.0 )
@@ -479,7 +478,7 @@ bool CHudCanvas::PaintRendered( QPainter &painter, const xv::hud::Element_t &ele
 	// controls are all part of the one thing it shows.
 	const xv::hud::Screen_t &screen = m_Editor.GetScreen();
 	const double flCover = static_cast<double>( element.m_Rect.m_nWide ) * element.m_Rect.m_nTall / ( static_cast<double>( screen.m_nWide ) * screen.m_nTall );
-	const bool bPicked = &element == &m_Editor.GetElements()[ static_cast<std::size_t>( std::max( m_Editor.GetSelected(), 0 ) ) ] && m_Editor.GetSelected() >= 0;
+	const bool bPicked = !m_Editor.IsLive() && &element == &m_Editor.GetElements()[ static_cast<std::size_t>( std::max( m_Editor.GetSelected(), 0 ) ) ] && m_Editor.GetSelected() >= 0;
 	const bool bButton = QString::fromStdString( element.m_szControl ).contains( QStringLiteral( "button" ), Qt::CaseInsensitive );
 	if ( element.m_bMenu && ( !background || background->m_nA == 0 ) )
 	{
@@ -608,7 +607,17 @@ bool CHudCanvas::PaintRendered( QPainter &painter, const xv::hud::Element_t &ele
 		painter.drawLine( box.center() - QPointF( 0, flArm ), box.center() + QPointF( 0, flArm ) );
 		bDrawn = true;
 	}
-	if ( const xv::hud::Sample_t *pSample = xv::hud::SampleFor( element.m_szName ) )
+	// Live, what the moment shows in place of the sample.
+	xv::hud::Sample_t live;
+	const xv::hud::Sample_t *pSample = xv::hud::SampleFor( element.m_szName );
+	if ( const CHudEditor::LiveValues_t *pLive = m_Editor.IsLive() ? m_Editor.LiveFor( element.m_szName ) : nullptr )
+	{
+		live = { pLive->m_szIcon, pLive->m_szDigits, pLive->m_szIcon2, pLive->m_szDigits2, pLive->m_szLabel };
+		if ( pSample && pLive->m_szLabel.empty() )
+			live.m_szLabel = pSample->m_szLabel;
+		pSample = &live;
+	}
+	if ( pSample )
 	{
 		if ( element.m_Bar && element.m_Bar->m_nWide > 0 && element.m_Bar->m_nTall > 0 && !pSample->m_szDigits2.empty() )
 		{
@@ -657,6 +666,30 @@ bool CHudCanvas::PaintRendered( QPainter &painter, const xv::hud::Element_t &ele
 	}
 	painter.restore();
 	return bDrawn;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: The visible elements from the lowest zpos up; live, only those the moment names.
+//-----------------------------------------------------------------------------
+void CHudCanvas::PaintGame( QPainter &painter, const QRectF &screen, double flZoom ) const
+{
+	const auto &elements = m_Editor.GetElements();
+	std::vector<int> order( elements.size() );
+	std::iota( order.begin(), order.end(), 0 );
+	std::ranges::stable_sort( order, [ & ]( int a, int b ) { return elements[ a ].m_nZ < elements[ b ].m_nZ; } );
+	painter.save();
+	painter.setClipRect( screen, Qt::IntersectClip );
+	for ( const int i : order )
+	{
+		const xv::hud::Element_t &element = elements[ static_cast<std::size_t>( i ) ];
+		if ( m_Editor.IsLive() ? !m_Editor.LiveFor( element.m_szName ) : !element.m_bVisible || !m_Editor.IsShown( i ) )
+			continue;
+		const QRectF box( screen.left() + element.m_Rect.m_nX * flZoom, screen.top() + element.m_Rect.m_nY * flZoom, element.m_Rect.m_nWide * flZoom, element.m_Rect.m_nTall * flZoom );
+		painter.save();
+		PaintRendered( painter, element, box, flZoom );
+		painter.restore();
+	}
+	painter.restore();
 }
 
 //-----------------------------------------------------------------------------
@@ -1493,6 +1526,33 @@ void CHudEditor::SetScreen( const xv::hud::Screen_t &screen )
 	}
 	Rebuild();
 	FillScheme();
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+void CHudEditor::SetLive( std::map<std::string, LiveValues_t> live )
+{
+	m_Live = std::move( live );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+const CHudEditor::LiveValues_t *CHudEditor::LiveFor( std::string_view szElement ) const
+{
+	const auto found = m_Live.find( QString::fromUtf8( szElement.data(), static_cast<qsizetype>( szElement.size() ) ).toLower().toStdString() );
+	return found == m_Live.end() ? nullptr : &found->second;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+void CHudEditor::PaintScreen( QPainter &painter, const QRectF &target ) const
+{
+	if ( m_Screen.m_nTall <= 0 || target.height() <= 0.0 )
+		return;
+	m_pCanvas->PaintGame( painter, target, target.height() / m_Screen.m_nTall );
 }
 
 //-----------------------------------------------------------------------------

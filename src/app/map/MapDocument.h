@@ -65,6 +65,9 @@ public:
 	void Stop();
 
 	[[nodiscard]] bool IsLoaded() const { return m_pScene != nullptr; }
+	// A map shown as compiled (a .bsp): edits, and their previews, aren't taken.
+	void SetReadOnly( bool bReadOnly ) { m_bReadOnly = bReadOnly; }
+	[[nodiscard]] bool IsReadOnly() const { return m_bReadOnly; }
 	[[nodiscard]] const xv::map::CScene *GetScene() const { return m_pScene.get(); }
 	[[nodiscard]] std::shared_ptr<const xv::map::CScene> GetSharedScene() const { return m_pScene; }
 	// Every path_track's and path_corner's link to its next corner in the scene shown, worked
@@ -196,6 +199,7 @@ private:
 	std::shared_ptr<const xv::map::CScene> m_pPreviewBase; // the scene before the drag
 	std::optional<xv::vfs::CGameInfo> m_Game;
 	bool m_bRecovered = false;
+	bool m_bReadOnly = false;
 	bool m_bLoadingRecovered = false; // the load under way is of an autosave
 	QString m_szFgdSource;
 	xv::map::HammerDefaults_t m_Defaults;

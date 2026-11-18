@@ -74,13 +74,19 @@ public:
 	[[nodiscard]] std::shared_ptr<const std::vector<std::string>> GetDetailTypes() const { return m_pDetailTypes; }
 	// The props placed in the world, once their models and materials are read, and the
 	// entities they draw (which then show no box).
+	// Null when the props aren't combined (SetCombiningProps); the parts have them then.
 	[[nodiscard]] std::shared_ptr<const xv::map::CMapMesh> GetProps() const { return m_pProps; }
+	// Whether the props are also put together in one mesh (GetProps), as the 2D views draw them;
+	// a view with only 3D ones draws the parts and is spared the second copy. Set before Start.
+	void SetCombiningProps( bool bCombine ) { m_bCombineProps = bCombine; }
 	[[nodiscard]] const std::vector<std::uint32_t> &GetPropObjects() const { return m_PropObjects; }
 	// The entities shown as sprites, with their materials' sizes.
 	[[nodiscard]] std::shared_ptr<const std::vector<xv::map::SpritePlacement_t>> GetSprites() const { return m_pSprites; }
 	// The overlays and decals laid on the faces.
 	[[nodiscard]] std::shared_ptr<const xv::map::CMapMesh> GetOverlays() const { return m_pOverlays; }
 	[[nodiscard]] std::shared_ptr<const xv::map::MeshParts_t> GetPropParts() const { return m_pPropParts; }
+	// A model the scene's entities show, as loaded (null while it isn't, or when it isn't there).
+	[[nodiscard]] const xv::map::PropModel_t *FindPropModel( const xv::map::PropKey_t &key ) const;
 	[[nodiscard]] std::shared_ptr<const xv::map::MeshParts_t> GetOverlayParts() const { return m_pOverlayParts; }
 	[[nodiscard]] xv::map::CMapMesh BuildEntityPreview( const xv::map::CScene &scene, const std::vector<std::uint32_t> &objects, xv::map::Point_t right, xv::map::Point_t up, const xv::map::CScene *pBase = nullptr ) const;
 	[[nodiscard]] int GetModelsLoaded() const { return m_nModels; }
@@ -163,6 +169,7 @@ private:
 	std::shared_ptr<const xv::map::CScene> m_pRefreshNext;
 	std::vector<std::uint32_t> m_RefreshChanged;
 	std::atomic<bool> m_bStop{ false };
+	bool m_bCombineProps = true;
 	int m_nGeneration = 0;
 	std::vector<xv::map::RasterMaterial_t> m_Current;
 	std::vector<std::shared_ptr<xv::map::RasterTexture_t>> m_Keep;

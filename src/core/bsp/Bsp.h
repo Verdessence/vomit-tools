@@ -11,6 +11,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
+#include <functional>
 #include <optional>
 #include <span>
 #include <string>
@@ -47,7 +48,8 @@ class CBsp
 {
 public:
 	// nullopt (with the reason in pError) when the file isn't a map this can read.
-	[[nodiscard]] static std::optional<CBsp> Load( const std::filesystem::path &file, std::string *pError = nullptr );
+	// Without bPakfile, the pakfile lump isn't read (GetPakfile is empty).
+	[[nodiscard]] static std::optional<CBsp> Load( const std::filesystem::path &file, std::string *pError = nullptr, bool bPakfile = true );
 	[[nodiscard]] static std::optional<CBsp> Parse( std::span<const std::byte> bytes, std::string *pError = nullptr );
 
 	[[nodiscard]] int GetVersion() const { return m_nVersion; }
@@ -60,6 +62,8 @@ public:
 	[[nodiscard]] const std::vector<std::byte> &GetPakfile() const { return m_Pakfile; }
 
 private:
+	[[nodiscard]] static std::optional<CBsp> Build( std::span<const std::byte> header, std::uint64_t nFileSize, const std::function<std::optional<std::vector<std::byte>>( const Lump_t & )> &pfnStored, bool bPakfile, std::string *pError );
+
 	int m_nVersion = 0;
 	int m_nRevision = 0;
 	std::array<Lump_t, LUMP_COUNT> m_Lumps{};
@@ -74,6 +78,10 @@ private:
 // Bytes that may be a compressed lump (a game lump's): unpacked when they begin "LZMA", as
 // they are otherwise; nullopt when they won't unpack.
 [[nodiscard]] std::optional<std::vector<std::byte>> UnpackIfCompressed( std::span<const std::byte> stored );
+// The map's hash as a server sends it to its clients (svc_ServerInfo): the MD5 of every lump
+// but the entity lump, in lump order, as stored. Two compiles of a map differ in it; a
+// Stripper config (which changes only entities) doesn't. nullopt when the file isn't a map.
+[[nodiscard]] std::optional<std::array<std::uint8_t, 16>> MapHash( std::span<const std::byte> file );
 // The lump's name ("Entities", "Pakfile"...), by index; numbered for unknown ones.
 [[nodiscard]] std::string LumpName( int nIndex );
 // Raw LZMA data with its 5 property bytes, unpacked to its known size (compressed lumps, and

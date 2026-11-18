@@ -260,9 +260,10 @@ bool UnpackSnappy( std::span<const std::byte> packed, std::vector<std::byte> &ou
 //-----------------------------------------------------------------------------
 // Purpose:
 //-----------------------------------------------------------------------------
-CNetworkState::CNetworkState( Watch_t pfnWatch, int nSlots )
+CNetworkState::CNetworkState( Watch_t pfnWatch, int nSlots, int nMaxSlots )
 	: m_pfnWatch( std::move( pfnWatch ) ),
 	  m_nSlots( std::max( nSlots, 0 ) ),
+	  m_nMaxSlots( std::max( { nSlots, nMaxSlots, 0 } ) ),
 	  m_Entities( MAX_ENTITIES )
 {
 }
@@ -531,6 +532,7 @@ CNetworkState::Flat_t *CNetworkState::Flatten( int nClass )
 	flat.m_Props = std::move( props );
 	flat.m_bMade = true;
 
+	flat.m_nSlots = m_nSlots;
 	if ( m_pfnWatch )
 	{
 		flat.m_Watch = m_pfnWatch( serverClass, flat.m_Props );
@@ -542,9 +544,13 @@ CNetworkState::Flat_t *CNetworkState::Flatten( int nClass )
 		{
 			const int nCode = flat.m_Watch[ i ];
 			const PropKind_t nKind = flat.m_Props[ i ].m_nKind;
-			if ( nCode >= 0 && ( nCode / 4 >= m_nSlots || nCode % 4 > 2 || nKind == PropKind_t::PROP_KIND_STRING || nKind == PropKind_t::PROP_KIND_ARRAY ) )
+			if ( nCode >= 0 && ( nCode / 4 >= m_nMaxSlots || nCode % 4 > 2 || nKind == PropKind_t::PROP_KIND_STRING || nKind == PropKind_t::PROP_KIND_ARRAY ) )
 			{
 				flat.m_Watch[ i ] = -1;
+			}
+			else if ( nCode >= 0 )
+			{
+				flat.m_nSlots = std::max( flat.m_nSlots, nCode / 4 + 1 );
 			}
 		}
 	}
@@ -709,6 +715,35 @@ bool CNetworkState::ReadProps( CBitReader &reader, const Flat_t &flat, std::vect
 }
 
 //-----------------------------------------------------------------------------
+// Purpose: As ReadProps, with every property kept in its own slot.
+//-----------------------------------------------------------------------------
+bool CNetworkState::ReadClassProps( int nClass, CBitReader &reader, std::vector<PropValue_t> &values )
+{
+	const Flat_t *pFlat = Flatten( nClass );
+	if ( !pFlat )
+	{
+		return false;
+	}
+	values.resize( pFlat->m_Props.size() );
+	int nProp = -1;
+	while ( reader.ReadBit() )
+	{
+		nProp += static_cast<int>( reader.ReadVarBits() ) + 1;
+		if ( nProp < 0 || static_cast<std::size_t>( nProp ) >= pFlat->m_Props.size() )
+		{
+			return false;
+		}
+		const std::size_t n = static_cast<std::size_t>( nProp );
+		ReadValue( reader, pFlat->m_Props[ n ], *pFlat, values[ n ].data(), 3 );
+		if ( reader.IsOverflowed() )
+		{
+			return false;
+		}
+	}
+	return !reader.IsOverflowed();
+}
+
+//-----------------------------------------------------------------------------
 // Purpose: The values every entity of a class starts from: the class's entry in the
 //          instancebaseline table (named by the class's number), written as an entity's
 //          properties are.
@@ -722,7 +757,7 @@ const std::vector<PropValue_t> *CNetworkState::InstanceBaseline( int nClass, Fla
 		return &flat.m_Baseline;
 	}
 	flat.m_nBaselineRevision = nRevision;
-	flat.m_Baseline.assign( static_cast<std::size_t>( m_nSlots ), PropValue_t{} );
+	flat.m_Baseline.assign( static_cast<std::size_t>( flat.m_nSlots ), PropValue_t{} );
 	if ( pTable )
 	{
 		const std::string szClass = std::to_string( nClass );
@@ -958,9 +993,10 @@ bool CNetworkState::ReadPacketEntities( CBitReader &reader )
 {
 	(void)reader.ReadBits( ENTITY_BITS ); // the most entities there can be
 	const bool bDelta = reader.ReadBit();
+	int nFromTick = -1;
 	if ( bDelta )
 	{
-		(void)reader.ReadBits( 32 ); // the tick it changes
+		nFromTick = static_cast<int>( reader.ReadBits( 32 ) ); // the snapshot it changes
 	}
 	const std::size_t nBaseline = reader.ReadBits( 1 );
 	const int nUpdated = static_cast<int>( reader.ReadBits( ENTITY_BITS ) );
@@ -971,12 +1007,26 @@ bool CNetworkState::ReadPacketEntities( CBitReader &reader )
 	{
 		return Fail( "an entity message is cut short" );
 	}
+	if ( m_ServerInfo && !m_ServerInfo->m_bSourceTv )
+	{
+		m_bKeep = true;
+	}
+	if ( bDelta && m_bKeep && nFromTick != m_nStateTick && !RestoreTick( nFromTick ) )
+	{
+		return Fail( "an entity message changes a snapshot from too long before (tick " + std::to_string( nFromTick ) + ")" );
+	}
+	const std::size_t nTouchedFrom = m_Changed.size();
 	if ( !bDelta )
 	{
-		for ( Entity_t &entity : m_Entities )
+		for ( std::size_t n = 0; n < m_Entities.size(); n++ )
 		{
-			entity.m_nClass = -1;
-			entity.m_Values.clear();
+			if ( m_Entities[ n ].m_nClass >= 0 )
+			{
+				m_Changed.push_back( static_cast<int>( n ) );
+			}
+			m_Entities[ n ].m_nClass = -1;
+			m_Entities[ n ].m_bOutOfSight = false;
+			m_Entities[ n ].m_Values.clear();
 		}
 	}
 	int nEntity = -1;
@@ -988,11 +1038,13 @@ bool CNetworkState::ReadPacketEntities( CBitReader &reader )
 			return Fail( "an entity message names an entity past the last" );
 		}
 		Entity_t &entity = m_Entities[ static_cast<std::size_t>( nEntity ) ];
+		m_Changed.push_back( nEntity );
 		if ( data.ReadBit() )
 		{
 			// Out of sight; a second bit says it is gone for good. Either way it is described
 			// again from its class when it comes back.
-			(void)data.ReadBit();
+			const bool bDeleted = data.ReadBit() != 0;
+			entity.m_bOutOfSight = !bDeleted && entity.m_nClass >= 0;
 			entity.m_nClass = -1;
 			entity.m_Values.clear();
 			continue;
@@ -1051,15 +1103,125 @@ bool CNetworkState::ReadPacketEntities( CBitReader &reader )
 		{
 			const std::size_t nGone = data.ReadBits( ENTITY_BITS );
 			m_Entities[ nGone ].m_nClass = -1;
+			m_Entities[ nGone ].m_bOutOfSight = false;
 			m_Entities[ nGone ].m_Values.clear();
+			m_Changed.push_back( static_cast<int>( nGone ) );
 		}
 	}
 	if ( data.IsOverflowed() )
 	{
 		return Fail( "an entity message is cut short" );
 	}
+	if ( m_bKeep )
+	{
+		Remember( std::span<const int>( m_Changed ).subspan( nTouchedFrom ) );
+	}
+	m_nStateTick = m_nServerTick;
 	m_nSnapshots++;
 	return true;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: m_Entities as the kept snapshot of a tick had them: the entities whose version
+//          differs are copied back (and count as changed). False when it isn't kept.
+//-----------------------------------------------------------------------------
+bool CNetworkState::RestoreTick( int nTick )
+{
+	const auto found = std::ranges::find( m_Kept, nTick, &Kept_t::m_nTick );
+	if ( found == m_Kept.end() || m_Versions.size() != m_Entities.size() )
+	{
+		return false;
+	}
+	for ( std::size_t n = 0; n < m_Entities.size(); n++ )
+	{
+		const std::uint32_t nVersion = found->m_Versions[ n ];
+		if ( nVersion == m_Versions[ n ] )
+		{
+			continue;
+		}
+		if ( nVersion == NO_VERSION )
+		{
+			m_Entities[ n ].m_nClass = -1;
+			m_Entities[ n ].m_Values.clear();
+		}
+		else
+		{
+			m_Entities[ n ] = m_Pool[ nVersion ];
+		}
+		m_Versions[ n ] = nVersion;
+		m_Changed.push_back( static_cast<int>( n ) );
+	}
+	m_nStateTick = nTick;
+	return true;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: The snapshot just made, kept: a new version of each entity it touched, the others'
+//          as the snapshot it was made from had them.
+//-----------------------------------------------------------------------------
+void CNetworkState::Remember( std::span<const int> touched )
+{
+	if ( m_Versions.size() != m_Entities.size() )
+	{
+		m_Versions.assign( m_Entities.size(), NO_VERSION );
+	}
+	for ( const int nEntity : touched )
+	{
+		const std::size_t n = static_cast<std::size_t>( nEntity );
+		if ( m_Entities[ n ].m_nClass < 0 )
+		{
+			m_Versions[ n ] = NO_VERSION;
+		}
+		else
+		{
+			m_Versions[ n ] = static_cast<std::uint32_t>( m_Pool.size() );
+			m_Pool.push_back( m_Entities[ n ] );
+		}
+	}
+	// A tick made again (a snapshot sent twice) stands for the later one.
+	std::erase_if( m_Kept, [ this ]( const Kept_t &kept ) { return kept.m_nTick == m_nServerTick; } );
+	if ( m_Kept.size() >= KEPT_SNAPSHOTS )
+	{
+		m_Kept.erase( m_Kept.begin() );
+	}
+	m_Kept.push_back( { m_nServerTick, m_Versions } );
+	if ( m_Pool.size() > POOL_COMPACT_AT )
+	{
+		CompactPool();
+	}
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: The versions no kept snapshot has any more, dropped.
+//-----------------------------------------------------------------------------
+void CNetworkState::CompactPool()
+{
+	std::vector<std::uint32_t> remap( m_Pool.size(), NO_VERSION );
+	std::vector<Entity_t> pool;
+	const auto keep = [ & ]( std::uint32_t &nVersion ) {
+		if ( nVersion == NO_VERSION )
+		{
+			return;
+		}
+		if ( remap[ nVersion ] == NO_VERSION )
+		{
+			remap[ nVersion ] = static_cast<std::uint32_t>( pool.size() );
+			pool.push_back( std::move( m_Pool[ nVersion ] ) );
+		}
+		nVersion = remap[ nVersion ];
+	};
+	for ( Kept_t &kept : m_Kept )
+	{
+		for ( std::uint32_t &nVersion : kept.m_Versions )
+		{
+			keep( nVersion );
+		}
+	}
+	for ( std::uint32_t &nVersion : m_Versions )
+	{
+		keep( nVersion );
+	}
+	m_Pool = std::move( pool );
 }
 
 //-----------------------------------------------------------------------------
@@ -1073,10 +1235,26 @@ bool CNetworkState::ReadMessage( int nType, CBitReader &reader )
 		case MESSAGE_KIND_NOP:
 			return true;
 		case MESSAGE_KIND_DISCONNECT:
-		case MESSAGE_KIND_STRING_COMMAND:
-		case MESSAGE_KIND_PRINT:
 			(void)reader.ReadString();
 			return true;
+		case MESSAGE_KIND_STRING_COMMAND:
+		{
+			const std::string szText = reader.ReadString();
+			if ( m_pListener )
+			{
+				m_pListener->OnStringCommand( szText );
+			}
+			return true;
+		}
+		case MESSAGE_KIND_PRINT:
+		{
+			const std::string szText = reader.ReadString();
+			if ( m_pListener )
+			{
+				m_pListener->OnPrint( szText );
+			}
+			return true;
+		}
 		case MESSAGE_KIND_FILE:
 			reader.Skip( 32 );
 			(void)reader.ReadString();
@@ -1084,7 +1262,8 @@ bool CNetworkState::ReadMessage( int nType, CBitReader &reader )
 			return true;
 		case MESSAGE_KIND_TICK:
 			// The tick, then how long the server's frames take and how much that varies.
-			reader.Skip( 32 + 16 + 16 );
+			m_nServerTick = static_cast<int>( reader.ReadBits( 32 ) );
+			reader.Skip( 16 + 16 );
 			return true;
 		case MESSAGE_KIND_SET_CONVARS:
 		{
@@ -1109,7 +1288,9 @@ bool CNetworkState::ReadMessage( int nType, CBitReader &reader )
 			}
 			reader.Skip( 32 ); // how many maps the server has run
 			info.m_bSourceTv = reader.ReadBit();
-			reader.Skip( 1 + 32 + 16 + 128 ); // dedicated, the client's checksum, the class count, the map's hash
+			reader.Skip( 1 + 32 + 16 ); // dedicated, the client's checksum, the class count
+			for ( std::uint8_t &nByte : info.m_MapHash )
+				nByte = static_cast<std::uint8_t>( reader.ReadBits( 8 ) );
 			info.m_nPlayerSlot = static_cast<int>( reader.ReadBits( 8 ) );
 			info.m_nMaxClients = static_cast<int>( reader.ReadBits( 8 ) );
 			info.m_flTickInterval = reader.ReadFloat();
@@ -1149,27 +1330,48 @@ bool CNetworkState::ReadMessage( int nType, CBitReader &reader )
 		case MESSAGE_KIND_UPDATE_STRING_TABLE:
 			return ReadUpdateStringTable( reader );
 		case MESSAGE_KIND_VOICE_INIT:
-			(void)reader.ReadString();
-			if ( reader.ReadBits( 8 ) == 255 )
+		{
+			const std::string szCodec = reader.ReadString();
+			const int nQuality = static_cast<int>( reader.ReadBits( 8 ) );
+			const int nRate = nQuality == 255 ? static_cast<int>( reader.ReadBits( 16 ) ) : 0;
+			if ( m_pListener && !reader.IsOverflowed() )
 			{
-				reader.Skip( 16 ); // the sample rate
+				m_pListener->OnVoiceInit( szCodec, nQuality, nRate );
 			}
 			return true;
+		}
 		case MESSAGE_KIND_VOICE_DATA:
-			reader.Skip( 8 + 8 );
-			reader.Skip( reader.ReadBits( 16 ) );
-			return true;
-		case MESSAGE_KIND_SOUNDS:
-			if ( reader.ReadBit() )
+		{
+			const int nClient = static_cast<int>( reader.ReadBits( 8 ) );
+			const bool bProximity = reader.ReadBits( 8 ) != 0;
+			const CBitReader data = reader.ReadBlock( reader.ReadBits( 16 ) );
+			if ( m_pListener && !reader.IsOverflowed() )
 			{
-				reader.Skip( reader.ReadBits( 8 ) );
+				m_pListener->OnVoiceData( nClient, bProximity, data );
+			}
+			return true;
+		}
+		case MESSAGE_KIND_SOUNDS:
+		{
+			const bool bReliable = reader.ReadBit();
+			int nCount = 1;
+			std::size_t nBits = 0;
+			if ( bReliable )
+			{
+				nBits = reader.ReadBits( 8 );
 			}
 			else
 			{
-				reader.Skip( 8 );
-				reader.Skip( reader.ReadBits( 16 ) );
+				nCount = static_cast<int>( reader.ReadBits( 8 ) );
+				nBits = reader.ReadBits( 16 );
+			}
+			const CBitReader data = reader.ReadBlock( nBits );
+			if ( m_pListener && !reader.IsOverflowed() )
+			{
+				m_pListener->OnSounds( bReliable, nCount, data );
 			}
 			return true;
+		}
 		case MESSAGE_KIND_SET_VIEW:
 			reader.Skip( ENTITY_BITS );
 			return true;
@@ -1194,39 +1396,81 @@ bool CNetworkState::ReadMessage( int nType, CBitReader &reader )
 			reader.Skip( 9 ); // the decal's texture
 			if ( reader.ReadBit() )
 			{
-				reader.Skip( ENTITY_BITS + 12 ); // the entity it is on, and that one's model
+				reader.Skip( ENTITY_BITS + 13 ); // the entity it is on, and that one's model
 			}
 			reader.Skip( 1 );
 			return true;
 		}
 		case MESSAGE_KIND_USER_MESSAGE:
-			reader.Skip( 8 );
-			reader.Skip( reader.ReadBits( 11 ) );
+		{
+			const int nKind = static_cast<int>( reader.ReadBits( 8 ) );
+			const CBitReader data = reader.ReadBlock( reader.ReadBits( 11 ) );
+			if ( m_pListener && !reader.IsOverflowed() )
+			{
+				m_pListener->OnUserMessage( nKind, data );
+			}
 			return true;
+		}
 		case MESSAGE_KIND_ENTITY_MESSAGE:
-			reader.Skip( ENTITY_BITS + 9 );
-			reader.Skip( reader.ReadBits( 11 ) );
+		{
+			const int nEntity = static_cast<int>( reader.ReadBits( ENTITY_BITS ) );
+			const int nClass = static_cast<int>( reader.ReadBits( 9 ) );
+			const CBitReader data = reader.ReadBlock( reader.ReadBits( 11 ) );
+			if ( m_pListener && !reader.IsOverflowed() )
+			{
+				m_pListener->OnEntityMessage( nEntity, nClass, data );
+			}
 			return true;
+		}
 		case MESSAGE_KIND_GAME_EVENT:
-			reader.Skip( reader.ReadBits( 11 ) );
+		{
+			const CBitReader data = reader.ReadBlock( reader.ReadBits( 11 ) );
+			if ( m_pListener && !reader.IsOverflowed() )
+			{
+				m_pListener->OnGameEvent( data );
+			}
 			return true;
+		}
 		case MESSAGE_KIND_PACKET_ENTITIES:
 			return ReadPacketEntities( reader );
 		case MESSAGE_KIND_TEMP_ENTITIES:
-			reader.Skip( 8 );
-			reader.Skip( reader.ReadVarInt() );
+		{
+			const int nCount = static_cast<int>( reader.ReadBits( 8 ) );
+			const CBitReader data = reader.ReadBlock( reader.ReadVarInt() );
+			if ( m_pListener && !reader.IsOverflowed() )
+			{
+				m_pListener->OnTempEntities( nCount, data );
+			}
 			return true;
+		}
 		case MESSAGE_KIND_PREFETCH:
 			reader.Skip( 14 );
 			return true;
 		case MESSAGE_KIND_MENU:
-			reader.Skip( 16 );
-			reader.Skip( static_cast<std::size_t>( reader.ReadBits( 16 ) ) * 8 );
+		{
+			const int nKind = static_cast<int>( reader.ReadBits( 16 ) );
+			std::vector<std::byte> bytes( reader.ReadBits( 16 ) );
+			if ( reader.GetLeft() < bytes.size() * 8 )
+			{
+				return Fail( "a menu is cut short" );
+			}
+			reader.ReadBytes( bytes.data(), bytes.size() );
+			if ( m_pListener )
+			{
+				m_pListener->OnMenu( nKind, bytes );
+			}
 			return true;
+		}
 		case MESSAGE_KIND_GAME_EVENT_LIST:
-			reader.Skip( 9 );
-			reader.Skip( reader.ReadBits( 20 ) );
+		{
+			const int nCount = static_cast<int>( reader.ReadBits( 9 ) );
+			const CBitReader data = reader.ReadBlock( reader.ReadBits( 20 ) );
+			if ( m_pListener && !reader.IsOverflowed() )
+			{
+				m_pListener->OnGameEventList( nCount, data );
+			}
 			return true;
+		}
 		case MESSAGE_KIND_GET_CVAR_VALUE:
 			reader.Skip( 32 );
 			(void)reader.ReadString();
@@ -1252,6 +1496,10 @@ bool CNetworkState::ReadPacket( std::span<const std::byte> block )
 	while ( reader.GetLeft() >= MESSAGE_KIND_BITS )
 	{
 		const int nType = static_cast<int>( reader.ReadBits( MESSAGE_KIND_BITS ) );
+		if ( m_pListener )
+		{
+			m_pListener->OnMessage( nType );
+		}
 		if ( !ReadMessage( nType, reader ) )
 		{
 			return false;

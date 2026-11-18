@@ -6,6 +6,8 @@
 //===========================================================================//
 #include "Bsp.h"
 
+#include <sourcepp/crypto/MD5.h>
+
 #include <cstring>
 #include <fstream>
 
@@ -50,7 +52,7 @@ std::uint32_t Read32( std::span<const std::byte> bytes, std::size_t nAt )
 // Purpose: Reads the lump table with the fields in the given order; false when a lump lies
 //          outside the file, which means the order is wrong (or the file is cut short).
 //-----------------------------------------------------------------------------
-bool ReadLumps( std::span<const std::byte> bytes, bool bVersionFirst, std::array<Lump_t, LUMP_COUNT> &lumps )
+bool ReadLumps( std::span<const std::byte> bytes, std::uint64_t nFileSize, bool bVersionFirst, std::array<Lump_t, LUMP_COUNT> &lumps )
 {
 	for ( int i = 0; i < LUMP_COUNT; i++ )
 	{
@@ -61,7 +63,7 @@ bool ReadLumps( std::span<const std::byte> bytes, bool bVersionFirst, std::array
 		lump.m_nLength = Read32( bytes, nAt + ( bVersionFirst ? 8 : 4 ) );
 		lump.m_nVersion = Read32( bytes, nAt + ( bVersionFirst ? 0 : 8 ) );
 		lump.m_nUncompressed = Read32( bytes, nAt + 12 );
-		if ( lump.m_nLength != 0 && ( lump.m_nOffset < HEADER_SIZE || static_cast<std::uint64_t>( lump.m_nOffset ) + lump.m_nLength > bytes.size() ) )
+		if ( lump.m_nLength != 0 && ( lump.m_nOffset < HEADER_SIZE || static_cast<std::uint64_t>( lump.m_nOffset ) + lump.m_nLength > nFileSize ) )
 		{
 			return false;
 		}
@@ -227,9 +229,10 @@ std::vector<Entity_t> ParseEntities( std::string_view szText )
 }
 
 //-----------------------------------------------------------------------------
-// Purpose:
+// Purpose: Only the header and the lumps kept are read: a big map is hundreds of megabytes,
+//          most of them faces and light nothing here looks at.
 //-----------------------------------------------------------------------------
-std::optional<CBsp> CBsp::Load( const fs::path &file, std::string *pError )
+std::optional<CBsp> CBsp::Load( const fs::path &file, std::string *pError, bool bPakfile )
 {
 	std::ifstream in( file, std::ios::binary );
 	if ( !in )
@@ -240,15 +243,50 @@ std::optional<CBsp> CBsp::Load( const fs::path &file, std::string *pError )
 		}
 		return std::nullopt;
 	}
-	std::vector<char> data( ( std::istreambuf_iterator<char>( in ) ), std::istreambuf_iterator<char>() );
-	return Parse( std::as_bytes( std::span( data ) ), pError );
+	in.seekg( 0, std::ios::end );
+	const auto nSize = static_cast<std::uint64_t>( std::max<std::streamoff>( in.tellg(), 0 ) );
+	in.seekg( 0 );
+	std::vector<std::byte> header( std::min<std::uint64_t>( nSize, HEADER_SIZE ) );
+	in.read( reinterpret_cast<char *>( header.data() ), static_cast<std::streamsize>( header.size() ) );
+	if ( !in )
+	{
+		header.clear();
+	}
+	return Build(
+		header, nSize,
+		[ &in ]( const Lump_t &lump ) -> std::optional<std::vector<std::byte>> {
+			std::vector<std::byte> stored( lump.m_nLength );
+			in.clear();
+			in.seekg( static_cast<std::streamoff>( lump.m_nOffset ) );
+			if ( !in.read( reinterpret_cast<char *>( stored.data() ), static_cast<std::streamsize>( stored.size() ) ) )
+			{
+				return std::nullopt;
+			}
+			return stored;
+		},
+		bPakfile, pError );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+std::optional<CBsp> CBsp::Parse( std::span<const std::byte> bytes, std::string *pError )
+{
+	return Build(
+		bytes.first( std::min<std::size_t>( bytes.size(), HEADER_SIZE ) ), bytes.size(),
+		[ bytes ]( const Lump_t &lump ) -> std::optional<std::vector<std::byte>> {
+			const auto stored = bytes.subspan( lump.m_nOffset, lump.m_nLength );
+			return std::vector<std::byte>( stored.begin(), stored.end() );
+		},
+		true, pError );
 }
 
 //-----------------------------------------------------------------------------
 // Purpose: Left 4 Dead 2's version 21 maps put each lump's version before its offset; the order
-//          that keeps every lump inside the file is the one used.
+//          that keeps every lump inside the file is the one used. pfnStored gives a lump's
+//          bytes as the file has them.
 //-----------------------------------------------------------------------------
-std::optional<CBsp> CBsp::Parse( std::span<const std::byte> bytes, std::string *pError )
+std::optional<CBsp> CBsp::Build( std::span<const std::byte> header, std::uint64_t nFileSize, const std::function<std::optional<std::vector<std::byte>>( const Lump_t & )> &pfnStored, bool bPakfile, std::string *pError )
 {
 	const auto fail = [ & ]( const char *pszWhy ) -> std::optional<CBsp> {
 		if ( pError )
@@ -257,14 +295,14 @@ std::optional<CBsp> CBsp::Parse( std::span<const std::byte> bytes, std::string *
 		}
 		return std::nullopt;
 	};
-	if ( bytes.size() < HEADER_SIZE || Read32( bytes, 0 ) != BSP_IDENT )
+	if ( header.size() < HEADER_SIZE || Read32( header, 0 ) != BSP_IDENT )
 	{
 		return fail( "not a Source map (no VBSP header)" );
 	}
 	CBsp bsp;
-	bsp.m_nVersion = static_cast<int>( Read32( bytes, 4 ) );
-	bsp.m_nRevision = static_cast<int>( Read32( bytes, HEADER_SIZE - 4 ) );
-	if ( !ReadLumps( bytes, false, bsp.m_Lumps ) && !ReadLumps( bytes, true, bsp.m_Lumps ) )
+	bsp.m_nVersion = static_cast<int>( Read32( header, 4 ) );
+	bsp.m_nRevision = static_cast<int>( Read32( header, HEADER_SIZE - 4 ) );
+	if ( !ReadLumps( header, nFileSize, false, bsp.m_Lumps ) && !ReadLumps( header, nFileSize, true, bsp.m_Lumps ) )
 	{
 		return fail( "the map's lump table points outside the file; it may be cut short" );
 	}
@@ -272,23 +310,53 @@ std::optional<CBsp> CBsp::Parse( std::span<const std::byte> bytes, std::string *
 	// A lump's bytes, unpacked when compressed; nullopt when that fails.
 	const auto lumpBytes = [ & ]( int nLump ) -> std::optional<std::vector<std::byte>> {
 		const Lump_t &lump = bsp.m_Lumps[ static_cast<std::size_t>( nLump ) ];
-		const auto stored = bytes.subspan( lump.m_nOffset, lump.m_nLength );
-		if ( lump.m_nUncompressed != 0 )
+		auto stored = pfnStored( lump );
+		if ( !stored || lump.m_nUncompressed == 0 )
 		{
-			return Decompress( stored );
+			return stored;
 		}
-		return std::vector<std::byte>( stored.begin(), stored.end() );
+		return Decompress( *stored );
 	};
 	if ( const auto text = lumpBytes( LUMP_ENTITIES ) )
 	{
 		bsp.m_Entities = ParseEntities( std::string_view( reinterpret_cast<const char *>( text->data() ), text->size() ) );
 		bsp.m_bEntitiesRead = true;
 	}
-	if ( auto zip = lumpBytes( LUMP_PAKFILE ) )
+	if ( bPakfile )
 	{
-		bsp.m_Pakfile = std::move( *zip );
+		if ( auto zip = lumpBytes( LUMP_PAKFILE ) )
+		{
+			bsp.m_Pakfile = std::move( *zip );
+		}
 	}
 	return bsp;
+}
+
+} // namespace xv::bsp
+
+namespace xv::bsp
+{
+
+//-----------------------------------------------------------------------------
+// Purpose: The lumps' bytes one after the other, then hashed.
+//-----------------------------------------------------------------------------
+std::optional<std::array<std::uint8_t, 16>> MapHash( std::span<const std::byte> file )
+{
+	const std::optional<CBsp> bsp = CBsp::Parse( file );
+	if ( !bsp )
+		return std::nullopt;
+	std::vector<std::byte> lumps;
+	for ( const Lump_t &lump : bsp->GetLumps() )
+	{
+		if ( lump.m_nIndex == LUMP_ENTITIES || lump.m_nLength == 0 || static_cast<std::uint64_t>( lump.m_nOffset ) + lump.m_nLength > file.size() )
+			continue;
+		lumps.insert( lumps.end(), file.begin() + lump.m_nOffset, file.begin() + lump.m_nOffset + lump.m_nLength );
+	}
+	const std::array<std::byte, 16> digest = sourcepp::crypto::computeMD5( lumps );
+	std::array<std::uint8_t, 16> hash{};
+	for ( std::size_t i = 0; i < hash.size(); i++ )
+		hash[ i ] = static_cast<std::uint8_t>( digest[ i ] );
+	return hash;
 }
 
 } // namespace xv::bsp

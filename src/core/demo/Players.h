@@ -53,7 +53,9 @@ struct PlayerIdentity_t
 {
 	int m_nTick = 0;
 	std::string m_szName; // empty: nobody (the player left)
-	std::string m_szSteamId;
+	std::string m_szSteamId;   // as the game wrote it: "STEAM_0:1:2345", "BOT", "[U:1:4691]"
+	std::uint32_t m_nAccount = 0; // the Steam account number the game sent beside it; 0: none
+	std::uint32_t m_nLogo = 0;    // the CRC of the player's spray (its first custom file); 0: none
 	int m_nUserId = 0;
 	bool m_bBot = false;
 	bool m_bSourceTv = false; // the server's own recorder, which takes a slot
@@ -123,6 +125,16 @@ private:
 	double m_flTickInterval = 0.0;
 	int m_nSnapshots = 0;
 };
+
+// A Steam account's 64-bit id (an individual account in the public universe), from the id
+// the game wrote ("STEAM_0:Y:Z", "[U:1:N]") or, failing that, the account number beside it;
+// none for bots, SourceTV and players without one.
+[[nodiscard]] std::optional<std::uint64_t> SteamId64( const PlayerIdentity_t &identity );
+// The same id in its older ("STEAM_0:Y:Z") and newer ("[U:1:N]") written forms.
+[[nodiscard]] std::string SteamId2( std::uint64_t nSteamId64 );
+[[nodiscard]] std::string SteamId3( std::uint64_t nSteamId64 );
+// The Steam Community page of a 64-bit id.
+[[nodiscard]] std::string SteamProfileUrl( std::uint64_t nSteamId64 );
 
 // What a game calls a team ("Terrorists" for Counter-Strike's 2); "Team 5" for one it has no
 // name for.

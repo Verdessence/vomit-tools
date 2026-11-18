@@ -56,6 +56,9 @@ public:
 	[[nodiscard]] QRectF ToWidget( const xv::hud::Rect_t &rect ) const;
 	void SetBackground( const QImage &image );
 	[[nodiscard]] bool HasBackground() const { return !m_Background.isNull(); }
+	// The elements as the game draws them, nothing of the editor's over them, onto screen
+	// (the whole screen's rectangle) at zoom widget pixels a screen pixel.
+	void PaintGame( QPainter &painter, const QRectF &screen, double flZoom ) const;
 
 protected:
 	void paintEvent( QPaintEvent *pEvent ) override;
@@ -70,7 +73,7 @@ private:
 	[[nodiscard]] QRectF GetScreenRect() const;
 	[[nodiscard]] double GetZoom() const;
 	// One element as the game draws it; false when nothing of it shows.
-	bool PaintRendered( QPainter &painter, const xv::hud::Element_t &element, const QRectF &box ) const;
+	bool PaintRendered( QPainter &painter, const xv::hud::Element_t &element, const QRectF &box, double flZoom ) const;
 
 	CHudEditor &m_Editor;
 	QImage m_Background;
@@ -151,6 +154,19 @@ public:
 	// "#Token" in the game's language; anything else as it is.
 	[[nodiscard]] QString Localize( const std::string &szText ) const;
 	void SetScreen( const xv::hud::Screen_t &screen );
+	// The HUD as it is at a moment (the demo viewer's): only the elements named here (by
+	// lower-case name) are drawn, with these in place of the samples' icons and numbers.
+	// Empty: the editor's own way, every element with its sample.
+	struct LiveValues_t
+	{
+		std::string m_szIcon, m_szDigits, m_szIcon2, m_szDigits2, m_szLabel;
+	};
+	void SetLive( std::map<std::string, LiveValues_t> live );
+	[[nodiscard]] bool IsLive() const { return !m_Live.empty(); }
+	[[nodiscard]] const LiveValues_t *LiveFor( std::string_view szElement ) const;
+	// The screen as the game draws it, filling target (which should have the screen's
+	// proportions: SetScreen first).
+	void PaintScreen( QPainter &painter, const QRectF &target ) const;
 	[[nodiscard]] const xv::hud::Screen_t &GetScreen() const { return m_Screen; }
 	[[nodiscard]] const std::vector<xv::hud::Element_t> &GetElements() const { return m_Elements; }
 	[[nodiscard]] const xv::kv1::CDocument &GetDocument() const { return m_Document; }
@@ -218,6 +234,7 @@ private:
 	std::set<std::string> m_Unshown;    // and those left out of the screen
 	xv::hud::Animations_t m_Animations;
 	std::map<std::string, std::string> m_Variables; // lower-case name -> the value tried
+	std::map<std::string, LiveValues_t> m_Live;
 	// Read when first needed.
 	mutable std::optional<std::map<std::string, std::string>> m_Tokens;
 	mutable std::map<std::string, QImage> m_Images;

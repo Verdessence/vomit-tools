@@ -7,6 +7,7 @@
 #include "Players.h"
 
 #include <algorithm>
+#include <charconv>
 #include <cmath>
 #include <cstring>
 
@@ -37,10 +38,15 @@ constexpr std::size_t USER_INFO_NAME_SIZE = 32;
 constexpr std::size_t USER_INFO_USER_ID = 32;
 constexpr std::size_t USER_INFO_STEAM_ID = 36;
 constexpr std::size_t USER_INFO_STEAM_ID_SIZE = 33;
+constexpr std::size_t USER_INFO_ACCOUNT = 72;
+// The four custom files' CRCs (the first is the spray), after the two flags, four-aligned.
+constexpr std::size_t USER_INFO_LOGO = 112;
 constexpr std::size_t USER_INFO_BOT = 108;
 constexpr std::size_t USER_INFO_SOURCE_TV = 109;
 // Players aren't numbered past this when the demo doesn't say how many there can be.
 constexpr int FALLBACK_MAX_CLIENTS = 64;
+// An individual account in Steam's public universe is this plus its account number.
+constexpr std::uint64_t STEAM_ID64_BASE = 76561197960265728ULL;
 constexpr double FALLBACK_TICK_INTERVAL = 0.015;
 // Nothing moves faster than this (the engine's own limit on a velocity's parts, units a
 // second): a player further along than that between two snapshots was put there.
@@ -126,6 +132,81 @@ float LerpAngle( float flFrom, float flTo, float flPart )
 }
 
 } // namespace
+
+//-----------------------------------------------------------------------------
+// Purpose: The account number in "STEAM_X:Y:Z" (Z * 2 + Y) or "[U:1:N]" (N); none for any
+//          other text ("BOT", "STEAM_ID_PENDING", "STEAM_ID_LAN").
+//-----------------------------------------------------------------------------
+std::optional<std::uint64_t> SteamId64( const PlayerIdentity_t &identity )
+{
+	if ( identity.m_bBot || identity.m_bSourceTv )
+	{
+		return std::nullopt;
+	}
+	const std::string &szId = identity.m_szSteamId;
+	const auto number = []( std::string_view szText ) -> std::optional<std::uint64_t> {
+		std::uint64_t n = 0;
+		const auto [ pEnd, ec ] = std::from_chars( szText.data(), szText.data() + szText.size(), n );
+		if ( ec != std::errc{} || pEnd != szText.data() + szText.size() )
+		{
+			return std::nullopt;
+		}
+		return n;
+	};
+	std::optional<std::uint64_t> nAccount;
+	if ( szId.starts_with( "STEAM_" ) )
+	{
+		const std::size_t nFirst = szId.find( ':' );
+		const std::size_t nSecond = nFirst == std::string::npos ? std::string::npos : szId.find( ':', nFirst + 1 );
+		if ( nSecond != std::string::npos )
+		{
+			const auto nLow = number( std::string_view( szId ).substr( nFirst + 1, nSecond - nFirst - 1 ) );
+			const auto nHigh = number( std::string_view( szId ).substr( nSecond + 1 ) );
+			if ( nLow && nHigh && *nLow <= 1 )
+			{
+				nAccount = *nHigh * 2 + *nLow;
+			}
+		}
+	}
+	else if ( szId.starts_with( "[U:1:" ) && szId.ends_with( ']' ) )
+	{
+		nAccount = number( std::string_view( szId ).substr( 5, szId.size() - 6 ) );
+	}
+	if ( !nAccount && identity.m_nAccount != 0 )
+	{
+		nAccount = identity.m_nAccount;
+	}
+	if ( !nAccount || *nAccount == 0 || *nAccount > 0xffffffffULL )
+	{
+		return std::nullopt;
+	}
+	return STEAM_ID64_BASE + *nAccount;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Universe 0, as Source games write it.
+//-----------------------------------------------------------------------------
+std::string SteamId2( std::uint64_t nSteamId64 )
+{
+	const std::uint64_t nAccount = nSteamId64 - STEAM_ID64_BASE;
+	return "STEAM_0:" + std::to_string( nAccount & 1 ) + ":" + std::to_string( nAccount >> 1 );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+std::string SteamId3( std::uint64_t nSteamId64 )
+{
+	return "[U:1:" + std::to_string( nSteamId64 - STEAM_ID64_BASE ) + "]";
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+std::string SteamProfileUrl( std::uint64_t nSteamId64 )
+{
+	return "https://steamcommunity.com/profiles/" + std::to_string( nSteamId64 );
+}
 
 //-----------------------------------------------------------------------------
 // Purpose:
@@ -216,6 +297,9 @@ CPlayers CPlayers::Read( const CDemo &demo, std::span<const std::byte> file, con
 				std::int32_t nUserId = 0;
 				std::memcpy( &nUserId, data.data() + USER_INFO_USER_ID, sizeof( nUserId ) );
 				identity.m_nUserId = nUserId;
+				std::memcpy( &identity.m_nAccount, data.data() + USER_INFO_ACCOUNT, sizeof( identity.m_nAccount ) );
+				if ( data.size() >= USER_INFO_LOGO + 4 )
+					std::memcpy( &identity.m_nLogo, data.data() + USER_INFO_LOGO, sizeof( identity.m_nLogo ) );
 				identity.m_bBot = data[ USER_INFO_BOT ] != std::byte{ 0 } || identity.m_szSteamId == "BOT";
 				identity.m_bSourceTv = data[ USER_INFO_SOURCE_TV ] != std::byte{ 0 };
 			}
@@ -258,10 +342,19 @@ CPlayers CPlayers::Read( const CDemo &demo, std::span<const std::byte> file, con
 			{
 				if ( !samples.empty() && samples.back().m_bThere )
 				{
-					PlayerSample_t gone = samples.back();
-					gone.m_nTick = nTick;
-					gone.m_bThere = false;
-					samples.push_back( gone );
+					// Gone the tick it was noted (a player's own demo can have both in one
+					// tick): the later word stands.
+					if ( samples.back().m_nTick >= nTick )
+					{
+						samples.back().m_bThere = false;
+					}
+					else
+					{
+						PlayerSample_t gone = samples.back();
+						gone.m_nTick = nTick;
+						gone.m_bThere = false;
+						samples.push_back( gone );
+					}
 				}
 				continue;
 			}

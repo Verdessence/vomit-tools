@@ -43,6 +43,7 @@
 #include "map/MapEditor.h"
 #include "map/MapScreenEffect.h"
 #include "map/MapPhysics.h"
+#include "DemoHud.h"
 #include "Graphics.h"
 #include "GpuView.h"
 #ifdef VOMIT_TOOLS_GPU
@@ -412,11 +413,21 @@ MapFrame_t CMapView3D::MakeFrame( QSize size )
 			for ( std::size_t j = 0; j < 4; j++ )
 				options.m_Shade.m_GridColors[ i ][ j ] = mapstyle::GRID_3D[ i ][ j ];
 	}
-	if ( options.m_Shade.m_nMode == xv::map::RasterMode_t::RASTER_MODE_LIGHTING )
+	// A compiled map is lit by its own light, never baked again.
+	CMapCompiled *pCompiled = m_Editor.GetCompiled();
+	if ( pCompiled && !pCompiled->IsBuilt() )
+	{
+		pCompiled = nullptr;
+	}
+	if ( options.m_Shade.m_nMode == xv::map::RasterMode_t::RASTER_MODE_LIGHTING && !pCompiled )
 	{
 		m_Editor.WantLighting();
 	}
 	MapFrame_t frame = m_Editor.GetRenderData().Snapshot( camera, options, m_Editor.GetSettings() );
+	if ( pCompiled )
+	{
+		pCompiled->Apply( frame, pCompiled->GetLumpPlacements() );
+	}
 	if ( m_Editor.GetTool() == MapTool_t::MAP_TOOL_BRUSH_EDIT && frame.m_pFlags )
 	{
 		auto pFlags = std::make_shared<std::vector<std::uint8_t>>( *frame.m_pFlags );
@@ -558,6 +569,40 @@ QImage CMapView3D::RenderNow( QSize size )
 }
 
 //-----------------------------------------------------------------------------
+// Purpose: The view stands for the player's screen; a message on a channel replaces the one
+//          before it there, so of several selected the last on each channel shows.
+//-----------------------------------------------------------------------------
+void CMapView3D::PaintGameTexts( QPainter &painter ) const
+{
+	const xv::map::CScene *pScene = GetDocument().GetScene();
+	if ( !pScene )
+		return;
+	std::map<int, xv::demo::HudText_t> channels;
+	for ( const std::uint32_t nObject : GetDocument().GetSelection() )
+	{
+		if ( nObject >= pScene->GetObjectCount() || pScene->IsSolidObject( nObject ) )
+			continue;
+		const int nEntity = pScene->GetObjectEntity( nObject );
+		if ( nEntity < 0 || static_cast<std::size_t>( nEntity ) >= pScene->m_Map.m_Entities.size() )
+			continue;
+		const xv::map::Entity_t &entity = pScene->m_Map.m_Entities[ static_cast<std::size_t>( nEntity ) ];
+		if ( !xv::kv1::EqualsIgnoreCase( entity.GetClassname(), "game_text" ) )
+			continue;
+		xv::demo::HudText_t text = xv::demo::HudTextFromGameText( [ & ]( std::string_view szKey ) { return entity.GetValue( szKey ); } );
+		if ( !text.m_szText.empty() )
+			channels[ text.m_nChannel ] = std::move( text );
+	}
+	if ( channels.empty() )
+		return;
+	painter.save();
+	painter.setRenderHint( QPainter::TextAntialiasing, true );
+	const QFont font = DemoHudTextFont( height() );
+	for ( const auto &[ nChannel, text ] : channels )
+		DemoPaintHudText( painter, rect(), text, xv::demo::HudTextHeldAt( text ), font );
+	painter.restore();
+}
+
+//-----------------------------------------------------------------------------
 // Purpose:
 //-----------------------------------------------------------------------------
 void CMapView3D::paintEvent( QPaintEvent * )
@@ -673,6 +718,7 @@ void CMapView3D::PaintLabels( QPainter &painter )
 			DebugLog() << "map 3D view:" << lines.join( QStringLiteral( "; " ) );
 		}
 	}
+	PaintGameTexts( painter );
 	PaintOriginAxes( painter );
 	PaintTools( painter );
 	// The axes as the camera sees them, in the bottom left corner: which way is which.

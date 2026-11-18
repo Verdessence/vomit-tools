@@ -72,15 +72,16 @@ PropList_t ListProps( const CScene &scene )
 //-----------------------------------------------------------------------------
 // Purpose:
 //-----------------------------------------------------------------------------
-CMapMesh BuildPropMesh( std::span<const PropModel_t> models, std::span<const PropPlacement_t> placements, double flChunkSize )
+CMapMesh BuildPropMesh( std::span<const PropModel_t> models, std::span<const PropPlacement_t> placements, double flChunkSize, std::vector<std::pair<std::uint32_t, std::uint32_t>> *pSources )
 {
 	CMapMesh mesh;
 	std::vector<PropTriangle_t> triangles;
 	std::map<std::array<std::int64_t, 3>, std::uint32_t> chunkOf;
 	std::vector<std::uint32_t> remap;
 	std::vector<std::pair<std::uint32_t, std::uint32_t>> edges;
-	for ( const PropPlacement_t &placement : placements )
+	for ( std::size_t nPlacement = 0; nPlacement < placements.size(); nPlacement++ )
 	{
+		const PropPlacement_t &placement = placements[ nPlacement ];
 		if ( placement.m_nModel >= models.size() || !models[ placement.m_nModel ].m_pModel )
 		{
 			continue;
@@ -136,6 +137,10 @@ CMapMesh BuildPropMesh( std::span<const PropModel_t> models, std::span<const Pro
 						placed.push_back( nVertex );
 						mesh.m_Chunks[ nChunk ].m_Bounds.Add( Point_t{ vertex.m_vecPosition.m_flX, vertex.m_vecPosition.m_flY, vertex.m_vecPosition.m_flZ } );
 						mesh.m_Vertices.push_back( vertex );
+						if ( pSources )
+						{
+							pSources->emplace_back( static_cast<std::uint32_t>( nPlacement ), nVertex );
+						}
 					}
 					corners[ k ] = remap[ nVertex ];
 				}

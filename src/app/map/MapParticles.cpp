@@ -25,6 +25,9 @@ namespace
 constexpr std::size_t MAX_PLAYING = 256;
 // The seconds a system is given to start with, so it shows as it looks once going.
 constexpr float WARM_UP = 1.0f;
+// A demo's system started late (it was switched on before the playhead, or the playhead
+// jumped) is simulated for this much of its age at most.
+constexpr float DEMO_CATCH_UP = 3.0f;
 
 //-----------------------------------------------------------------------------
 // Purpose: The control points an info_particle_system gives: its origin, then the origins of
@@ -250,22 +253,9 @@ void CMapParticles::SetScene( std::shared_ptr<const xv::map::CScene> pScene )
 			playing.push_back( std::move( *old ) );
 			continue;
 		}
-		Playing_t system;
+		Playing_t system = StartSystem( found->second, static_cast<std::uint32_t>( entity.m_nId ), points );
 		system.m_nObject = nObject;
 		system.m_szKey = std::move( szKey );
-		system.m_pLibrary = found->second.m_pLibrary;
-		system.m_pSimulation = std::make_unique<xv::particles::CSimulation>( found->second.m_pLibrary, found->second.m_nDefinition, static_cast<std::uint32_t>( entity.m_nId ) );
-		for ( std::size_t n = 0; n < points.size(); n++ )
-		{
-			if ( points[ n ] )
-				system.m_pSimulation->SetControlPoint( static_cast<int>( n ), *points[ n ] );
-		}
-		const xv::particles::CLibrary *pLibrary = found->second.m_pLibrary.get();
-		system.m_pSimulation->SetSequenceFrames( [ this, pLibrary ]( std::size_t nDefinition, int nSequence ) {
-			const xv::particles::Sprite_t *pSprite = SpriteFor( *pLibrary, nDefinition );
-			const auto *pSequence = pSprite ? pSprite->m_Sheet.Sequence( nSequence ) : nullptr;
-			return pSequence ? static_cast<int>( pSequence->m_Frames.size() ) : 0;
-		} );
 		system.m_pSimulation->SetViewer( *points[ 0 ] + xv::CVec3{ -200, 0, 60 } );
 		system.m_pSimulation->Advance( WARM_UP );
 		playing.push_back( std::move( system ) );
@@ -273,6 +263,79 @@ void CMapParticles::SetScene( std::shared_ptr<const xv::map::CScene> pScene )
 	m_Playing = std::move( playing );
 	m_Dust = std::move( dust );
 	UpdateDetail();
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+CMapParticles::Playing_t CMapParticles::StartSystem( const Found_t &found, std::uint32_t nSeed, const std::vector<std::optional<xv::CVec3>> &points )
+{
+	Playing_t system;
+	system.m_pLibrary = found.m_pLibrary;
+	system.m_pSimulation = std::make_unique<xv::particles::CSimulation>( found.m_pLibrary, found.m_nDefinition, nSeed );
+	for ( std::size_t n = 0; n < points.size(); n++ )
+	{
+		if ( points[ n ] )
+			system.m_pSimulation->SetControlPoint( static_cast<int>( n ), *points[ n ] );
+	}
+	const xv::particles::CLibrary *pLibrary = found.m_pLibrary.get();
+	system.m_pSimulation->SetSequenceFrames( [ this, pLibrary ]( std::size_t nDefinition, int nSequence ) {
+		const xv::particles::Sprite_t *pSprite = SpriteFor( *pLibrary, nDefinition );
+		const auto *pSequence = pSprite ? pSprite->m_Sheet.Sequence( nSequence ) : nullptr;
+		return pSequence ? static_cast<int>( pSequence->m_Frames.size() ) : 0;
+	} );
+	return system;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Systems are matched to what plays by their keys; one new (or after a seek) is
+//          simulated up to its age, but no more than DEMO_CATCH_UP of it: a system on for
+//          minutes looks as it does after a few seconds.
+//-----------------------------------------------------------------------------
+void CMapParticles::PlayDemo( const std::vector<Wanted_t> &wanted, float flStep, bool bJumped, xv::CVec3 vecViewer, std::uint32_t nObject )
+{
+	m_pScene.reset();
+	m_Dust.clear();
+	if ( !m_bReady )
+	{
+		return;
+	}
+	std::vector<Playing_t> playing;
+	m_Missing.clear();
+	for ( const Wanted_t &want : wanted )
+	{
+		if ( playing.size() >= MAX_PLAYING || want.m_Points.empty() || !want.m_Points[ 0 ] )
+			continue;
+		const std::string szKey = std::to_string( want.m_nKey );
+		const auto old = std::ranges::find( m_Playing, szKey, &Playing_t::m_szKey );
+		if ( old != m_Playing.end() && old->m_pSimulation && !bJumped )
+		{
+			for ( std::size_t n = 0; n < want.m_Points.size(); n++ )
+			{
+				if ( want.m_Points[ n ] )
+					old->m_pSimulation->SetControlPoint( static_cast<int>( n ), *want.m_Points[ n ] );
+			}
+			old->m_nObject = nObject;
+			old->m_pSimulation->SetViewer( vecViewer );
+			old->m_pSimulation->Advance( std::max( 0.0f, flStep ) );
+			playing.push_back( std::move( *old ) );
+			continue;
+		}
+		const auto found = m_Systems.find( want.m_szEffect );
+		if ( found == m_Systems.end() )
+		{
+			if ( std::ranges::find( m_Missing, want.m_szEffect ) == m_Missing.end() )
+				m_Missing.push_back( want.m_szEffect );
+			continue;
+		}
+		Playing_t system = StartSystem( found->second, static_cast<std::uint32_t>( want.m_nKey ), want.m_Points );
+		system.m_szKey = szKey;
+		system.m_nObject = nObject;
+		system.m_pSimulation->SetViewer( vecViewer );
+		system.m_pSimulation->Advance( std::clamp( want.m_flAge, 0.0f, DEMO_CATCH_UP ) );
+		playing.push_back( std::move( system ) );
+	}
+	m_Playing = std::move( playing );
 }
 
 //-----------------------------------------------------------------------------
