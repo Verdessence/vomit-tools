@@ -62,6 +62,7 @@
 #include "particles/Names.h"
 #include "particles/Simulation.h"
 #include "util/Numbers.h"
+#include "vfs/Package.h"
 #include "vfs/Vfs.h"
 
 namespace particles = xv::particles;
@@ -385,9 +386,10 @@ std::size_t ComponentCount( AttrType_t nType )
 //-----------------------------------------------------------------------------
 // Purpose: Takes ownership of document.
 //-----------------------------------------------------------------------------
-CParticleEditor::CParticleEditor( CParticleDocument *pDocument, QWidget *pParent )
+CParticleEditor::CParticleEditor( CParticleDocument *pDocument, QWidget *pParent, std::shared_ptr<const xv::vfs::CPackage> pPackage )
 	: QWidget( pParent ),
-	  m_pDocument( pDocument )
+	  m_pDocument( pDocument ),
+	  m_pPackage( std::move( pPackage ) )
 {
 	m_pDocument->setParent( this );
 
@@ -712,13 +714,20 @@ CParticleEditor::CParticleEditor( CParticleDocument *pDocument, QWidget *pParent
 void CParticleEditor::SetGame( ParticleGame_t game )
 {
 	m_Game = std::move( game );
-	// Materials come from the game, else from the mod folder the file sits in (<mod>/particles/x.pcf).
+	// Packed materials take priority over the game's copies and the PCF's loose mod folder.
 	std::filesystem::path modFolder;
 	if ( const auto &disk = m_pDocument->GetDiskPath(); !disk.empty() && disk.parent_path().filename() == "particles" )
 	{
 		modFolder = disk.parent_path().parent_path();
 	}
-	m_pPreview->SetReader( [ pfnRead = m_Game.m_pfnReadFile, modFolder ]( std::string_view szPath ) -> std::optional<std::vector<std::byte>> {
+	m_pPreview->SetReader( [ pPackage = m_pPackage, pfnRead = m_Game.m_pfnReadFile, modFolder ]( std::string_view szPath ) -> std::optional<std::vector<std::byte>> {
+		if ( pPackage )
+		{
+			if ( auto data = pPackage->Read( szPath ) )
+			{
+				return data;
+			}
+		}
 		if ( pfnRead )
 		{
 			if ( auto data = pfnRead( szPath ) )
@@ -861,6 +870,12 @@ void CParticleEditor::Relint()
 	context.m_pGame = m_Game.m_pSchema.get();
 	context.m_szPath = xv::vfs::NormalizePath( m_pDocument->GetGamePath().toStdString() );
 	context.m_pfnFileExists = m_Game.m_pfnFileExists;
+	if ( m_pPackage && m_Game.m_pfnFileExists )
+	{
+		context.m_pfnFileExists = [ this ]( std::string_view szPath ) {
+			return m_pPackage->Find( szPath ) || m_Game.m_pfnFileExists( szPath );
+		};
+	}
 	if ( m_Game.m_Manifest )
 	{
 		context.m_ListedInManifest = GetListedInManifest();

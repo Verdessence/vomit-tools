@@ -40,6 +40,11 @@ class QToolButton;
 class QTreeWidget;
 class QTreeWidgetItem;
 
+namespace xv::vfs
+{
+class CPackage;
+}
+
 struct ParticleGame_t
 {
 	std::shared_ptr<const xv::particles::CSchema> m_pSchema;      // what the game's particle files use; null without a game
@@ -61,7 +66,7 @@ class CParticleEditor : public QWidget
 
 public:
 	// Takes ownership of document.
-	explicit CParticleEditor( CParticleDocument *pDocument, QWidget *pParent = nullptr );
+	explicit CParticleEditor( CParticleDocument *pDocument, QWidget *pParent = nullptr, std::shared_ptr<const xv::vfs::CPackage> pPackage = {} );
 
 	[[nodiscard]] CParticleDocument *GetDocument() const { return m_pDocument; }
 	void SetGame( ParticleGame_t game );
@@ -143,6 +148,7 @@ private:
 	[[nodiscard]] QWidget *SimpleValueEditor( std::int32_t nElement, const xv::dmx::Attribute_t &attribute );
 
 	CParticleDocument *m_pDocument;
+	std::shared_ptr<const xv::vfs::CPackage> m_pPackage;
 	ParticleGame_t m_Game;
 	xv::particles::CSchema m_Schema;
 	std::vector<xv::particles::Issue_t> m_Issues;

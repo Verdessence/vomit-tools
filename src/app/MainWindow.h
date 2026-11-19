@@ -280,7 +280,7 @@ private:
 	// The textures the game has, as materials name them (no materials/, no .vtf).
 	[[nodiscard]] QStringList TextureNames() const;
 	void NewParticleFile();
-	CParticleEditor *AddParticleEditor( CParticleDocument *pDocument );
+	CParticleEditor *AddParticleEditor( CParticleDocument *pDocument, std::shared_ptr<const xv::vfs::CPackage> pPackage = {} );
 	bool Save( CParticleEditor *pEditor );
 	// Save As also converts: binary 1 or 2, or keyvalues2 text for reading.
 	bool SaveAs( CParticleEditor *pEditor );

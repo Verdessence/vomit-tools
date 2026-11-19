@@ -42,6 +42,7 @@ public:
 	~CVpkEditor() override;
 
 	[[nodiscard]] const xv::vfs::CPackage &GetPackage() const { return *m_pPackage; }
+	[[nodiscard]] std::shared_ptr<const xv::vfs::CPackage> GetSharedPackage() const { return m_pPackage; }
 	[[nodiscard]] QString GetFileName() const;
 	// A map's Stripper config edited in its Entities tab: unsaved changes, and saving them.
 	[[nodiscard]] bool IsModified() const;
@@ -87,7 +88,7 @@ private:
 	void SetPreviewWidget( QWidget *pView );
 	void PreviewEntry( const xv::vfs::PackageEntry_t &entry );
 
-	std::unique_ptr<xv::vfs::CPackage> m_pPackage;
+	std::shared_ptr<const xv::vfs::CPackage> m_pPackage;
 	CSoundPlayer *m_pPlayer = nullptr;
 	xv::material::Reader_t m_pfnRead; // the archive first, then the game
 	std::function<bool( const QString & )> m_pfnCanOpen;

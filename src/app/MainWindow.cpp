@@ -1613,7 +1613,7 @@ QWidget *CMainWindow::OpenArchiveFile( CVpkEditor *pArchive, const QString &szPa
 	{
 		auto *pDocument = new CParticleDocument( szName, std::move( *particles ) );
 		pDocument->MarkUnsaved();
-		return AddParticleEditor( pDocument );
+		return AddParticleEditor( pDocument, pArchive->GetSharedPackage() );
 	}
 	if ( szName.endsWith( u".vtf" ) )
 	{
@@ -3101,9 +3101,9 @@ CParticleEditor *CMainWindow::OpenParticleFile( const QString &szGamePath )
 //-----------------------------------------------------------------------------
 // Purpose:
 //-----------------------------------------------------------------------------
-CParticleEditor *CMainWindow::AddParticleEditor( CParticleDocument *pDocument )
+CParticleEditor *CMainWindow::AddParticleEditor( CParticleDocument *pDocument, std::shared_ptr<const xv::vfs::CPackage> pPackage )
 {
-	auto *pEditor = new CParticleEditor( pDocument );
+	auto *pEditor = new CParticleEditor( pDocument, nullptr, std::move( pPackage ) );
 	pEditor->SetGame( ParticleGame() );
 	m_pUndoGroup->addStack( pDocument->GetUndoStack() );
 	m_pTabs->addTab( pEditor, pDocument->GetFileName() );
