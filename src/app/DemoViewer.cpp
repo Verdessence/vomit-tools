@@ -3205,7 +3205,7 @@ std::optional<std::pair<int, bool>> CDemoViewer::ConnectionTime( const xv::demo:
 QString CDemoViewer::FormatConnection( const std::pair<int, bool> &time ) const
 {
 	const int nSeconds = time.first;
-	QString szTime = QStringLiteral( "%1:%2" ).arg( nSeconds / 60 % 60, nSeconds >= 3600 ? 2 : 1, 10, u'0' ).arg( nSeconds % 60, 2, 10, u'0' );
+	QString szTime = QStringLiteral( "%1:%2" ).arg( nSeconds / 60 % 60, nSeconds >= 3600 ? 2 : 1, 10, QLatin1Char( '0' ) ).arg( nSeconds % 60, 2, 10, QLatin1Char( '0' ) );
 	if ( nSeconds >= 3600 )
 		szTime.prepend( QString::number( nSeconds / 3600 ) + u':' );
 	if ( time.second )
