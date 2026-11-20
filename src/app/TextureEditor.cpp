@@ -5,6 +5,7 @@
 //
 //===========================================================================//
 #include "TextureEditor.h"
+#include "QtPaths.h"
 #include "TextureCanvas.h"
 
 #include <algorithm>
@@ -235,7 +236,7 @@ CTextureEditor::CTextureEditor( CTextureDocument *pDocument, QWidget *pParent )
 	auto *pToolbar = new QToolBar;
 	pToolbar->setToolButtonStyle( Qt::ToolButtonTextOnly );
 	QAction *pImport = pToolbar->addAction( tr( "Import…" ), this, [ this ] {
-		const QString szStart = m_pDocument->GetDiskPath().empty() ? QString{} : QFileInfo{ QString::fromStdString( m_pDocument->GetDiskPath().string() ) }.absolutePath();
+		const QString szStart = m_pDocument->GetDiskPath().empty() ? QString{} : QFileInfo{ ToQString( m_pDocument->GetDiskPath() ) }.absolutePath();
 		const QStringList files = AskOpenFiles( this, tr( "Import Pictures" ), szStart,
 			PictureFilter( true ) );
 		if ( !files.isEmpty() )
@@ -257,7 +258,7 @@ CTextureEditor::CTextureEditor( CTextureDocument *pDocument, QWidget *pParent )
 		const bool bHdr = IsFloatFormat( m_pDocument->GetVtf().m_Info.m_nFormat );
 		// A texture not on disk yet starts in the last folder used.
 		const QString szName = BaseName() + ( bHdr ? QStringLiteral( ".hdr" ) : QStringLiteral( ".png" ) );
-		const QString szStart = m_pDocument->GetDiskPath().empty() ? szName : QDir{ QFileInfo{ QString::fromStdString( m_pDocument->GetDiskPath().string() ) }.absolutePath() }.filePath( szName );
+		const QString szStart = m_pDocument->GetDiskPath().empty() ? szName : QDir{ QFileInfo{ ToQString( m_pDocument->GetDiskPath() ) }.absolutePath() }.filePath( szName );
 		QStringList filters;
 		for ( const QString &szType : PictureTypesForSaving() )
 		{
@@ -281,7 +282,7 @@ CTextureEditor::CTextureEditor( CTextureDocument *pDocument, QWidget *pParent )
 		const QString szType = QInputDialog::getItem( this, tr( "Export" ), tr( "Save them as:" ), types, IsFloatFormat( m_pDocument->GetVtf().m_Info.m_nFormat ) ? static_cast<int>( types.indexOf( QStringLiteral( "hdr" ) ) ) : 0, false, &bOk );
 		if ( bOk )
 		{
-			QMessageBox::information( this, tr( "Export" ), tr( "Saved %n picture(s) in %1.", nullptr, ExportAll( szFolder, szType ) ).arg( QDir::toNativeSeparators( szFolder ) ) );
+			QMessageBox::information( this, tr( "Export" ), tr( "Saved %n picture(s) in %1.", nullptr, ExportAll( szFolder, szType ) ).arg( QDir::fromNativeSeparators( szFolder ) ) );
 		}
 	} );
 	pExportMenu->addAction( tr( "Copy Image" ), this, [ this ] {
@@ -558,7 +559,16 @@ CTextureEditor::CTextureEditor( CTextureDocument *pDocument, QWidget *pParent )
 	connect( m_pFace, &QComboBox::currentIndexChanged, this, &CTextureEditor::UpdateView );
 	connect( m_pSlice, &QSpinBox::valueChanged, this, &CTextureEditor::UpdateView );
 	connect( m_pDocument, &CTextureDocument::Changed, this, &CTextureEditor::Refresh );
-	connect( &CInterfaceMode::Instance(), &CInterfaceMode::Changed, this, &CTextureEditor::FillInfo );
+	const auto applyInterface = [ this, pSpray ] {
+		const bool bSimple = CInterfaceMode::Instance().IsSimple();
+		pSpray->setText( bSimple ? tr( "Make Game Spray" ) : tr( "Make Spray" ) );
+		m_pCross->setText( bSimple ? tr( "Unfold Cube Map" ) : tr( "Cross" ) );
+		m_pAsMaterial->setText( bSimple ? tr( "Preview Material" ) : tr( "As Material" ) );
+		FillSelectors();
+		FillInfo();
+	};
+	connect( &CInterfaceMode::Instance(), &CInterfaceMode::Changed, this, applyInterface );
+	applyInterface();
 	Refresh();
 }
 
@@ -589,7 +599,10 @@ void CTextureEditor::FillSelectors()
 	m_pMip->clear();
 	for ( int nLevel = 0; nLevel < info.m_nMipCount; nLevel++ )
 	{
-		m_pMip->addItem( tr( "Mip %1 · %2×%3" ).arg( nLevel ).arg( std::max( 1, info.m_nWidth >> nLevel ) ).arg( std::max( 1, info.m_nHeight >> nLevel ) ) );
+		const bool bSimple = CInterfaceMode::Instance().IsSimple();
+		const QString szLevel = bSimple && nLevel == 0 ? tr( "Original · %1×%2" ) : bSimple ? tr( "Smaller %1 · %2×%3" ).arg( nLevel )
+																							: tr( "Mip %1 · %2×%3" ).arg( nLevel );
+		m_pMip->addItem( szLevel.arg( std::max( 1, info.m_nWidth >> nLevel ) ).arg( std::max( 1, info.m_nHeight >> nLevel ) ) );
 	}
 	m_pMip->setCurrentIndex( nMip );
 	m_pFrame->setRange( 1, info.m_nFrames );
@@ -627,6 +640,8 @@ void CTextureEditor::FillInfo()
 	const VtfInfo_t &info = vtf.m_Info;
 	const bool bSimple = CInterfaceMode::Instance().IsSimple();
 	const xv::particles::CNames &names = ParticleNames();
+	const auto moreFlags = m_pInfo->findItems( tr( "More Flags" ), Qt::MatchExactly | Qt::MatchRecursive, 0 );
+	const bool bMoreExpanded = !moreFlags.isEmpty() && moreFlags.front()->isExpanded();
 	m_bFilling = true;
 	m_pInfo->clear();
 	const auto group = [ this ]( const QString &szTitle ) {
@@ -754,10 +769,15 @@ void CTextureEditor::FillInfo()
 
 	// Ticked here; each tick is an edit.
 	QTreeWidgetItem *pFlags = group( tr( "Flags" ) );
+	QTreeWidgetItem *pMoreFlags = nullptr;
+	if ( bSimple )
+		pMoreFlags = row( pFlags, tr( "More Flags" ), {} );
 	for ( const ListedFlag_t &flag : ListedFlags( info.m_nFlags, true ) )
 	{
 		const xv::particles::PlainName_t plain = names.Texture( "flag:" + std::string{ flag.m_szName } );
-		QTreeWidgetItem *pFlag = row( pFlags, bSimple ? Qs( plain.m_szName ) : Qs( flag.m_szName ), {}, ( bSimple ? Qs( flag.m_szName ) : Qs( plain.m_szName ) ) + u'\n' + Qs( plain.m_szMeaning ) );
+		constexpr std::uint32_t COMMON = vtf_flag::POINTSAMPLE | vtf_flag::TRILINEAR | vtf_flag::CLAMPS | vtf_flag::CLAMPT | vtf_flag::NOMIP | vtf_flag::NORMAL;
+		QTreeWidgetItem *pParent = pMoreFlags && !( ( COMMON | info.m_nFlags ) & flag.m_nBit ) ? pMoreFlags : pFlags;
+		QTreeWidgetItem *pFlag = row( pParent, bSimple ? Qs( plain.m_szName ) : Qs( flag.m_szName ), {}, ( bSimple ? Qs( flag.m_szName ) : Qs( plain.m_szName ) ) + u'\n' + Qs( plain.m_szMeaning ) );
 		pFlag->setFirstColumnSpanned( true );
 		pFlag->setData( 0, ROLE_FLAG, static_cast<qulonglong>( flag.m_nBit ) );
 		pFlag->setCheckState( 0, info.m_nFlags & flag.m_nBit ? Qt::Checked : Qt::Unchecked );
@@ -766,6 +786,8 @@ void CTextureEditor::FillInfo()
 			pFlag->setFlags( pFlag->flags() & ~Qt::ItemIsEnabled ); // follows the faces
 		}
 	}
+	if ( pMoreFlags )
+		pMoreFlags->setExpanded( bMoreExpanded );
 	if ( !bSimple )
 	{
 		row( pFlags, tr( "Value" ), QStringLiteral( "0x%1" ).arg( info.m_nFlags, 8, 16, QLatin1Char( '0' ) ) );
@@ -1128,7 +1150,7 @@ void CTextureEditor::UpdateMaterialTab()
 		return;
 	}
 	m_pMaterialName->setText( m_pMaterial->IsNew() ? tr( "<b>%1</b> · not saved yet" ).arg( m_pMaterial->GetFileName().toHtmlEscaped() ) : QStringLiteral( "<b>%1</b>" ).arg( m_pMaterial->GetFileName().toHtmlEscaped() ) );
-	m_pMaterialName->setToolTip( m_pMaterial->GetDiskPath().empty() ? m_pMaterial->GetGamePath() : QString::fromStdString( m_pMaterial->GetDiskPath().string() ) );
+	m_pMaterialName->setToolTip( m_pMaterial->GetDiskPath().empty() ? m_pMaterial->GetGamePath() : ToQString( m_pMaterial->GetDiskPath() ) );
 }
 
 //-----------------------------------------------------------------------------

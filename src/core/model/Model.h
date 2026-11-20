@@ -114,6 +114,7 @@ struct Selection_t
 	std::vector<int> m_Bodygroups;
 	int m_nSkin = 0;
 	int m_nLod = 0;
+	int m_nBody = 0; // encoded bodygroups, used where no individual choice is given
 };
 
 // Reads models/<...>.mdl and its .vvd and .vtx. The files are untrusted: every count and offset is

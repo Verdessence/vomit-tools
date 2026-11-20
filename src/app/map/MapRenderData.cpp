@@ -864,7 +864,7 @@ MapFrame_t CMapRenderData::Snapshot( const xv::map::CViewCamera &camera, const x
 		{
 			m_SpritesRight = right;
 			m_SpritesUp = up;
-			m_Frame.m_pSpriteMesh = std::make_shared<const xv::map::CMapMesh>( xv::map::BuildSpriteMesh( *m_pSprites, right, up ) );
+			m_Frame.m_pSpriteMesh = std::make_shared<const xv::map::CMapMesh>( xv::map::BuildSpriteMesh( *m_pSprites, right, up, true ) );
 		}
 	}
 	if ( m_Frame.m_bEntityPreview && ( camera.GetRight() != m_PreviewRight || camera.GetUp() != m_PreviewUp ) )

@@ -15,6 +15,7 @@
 #include <vector>
 
 #include <QDialog>
+#include <QDateTime>
 #include <QElapsedTimer>
 #include <QString>
 #include <QTemporaryDir>
@@ -103,6 +104,10 @@ private:
 	QPlainTextEdit *m_pLog = nullptr;
 	QListWidget *m_pProblems = nullptr;
 	QLabel *m_pStatus = nullptr;
+	QPushButton *m_pPortal = nullptr;
+	QString m_szCompiledPortal;
+	QDateTime m_PreviousPortalTime;
+	qint64 m_nPreviousPortalSize = 0;
 	QPushButton *m_pGo = nullptr;
 	QPushButton *m_pCancel = nullptr;
 };

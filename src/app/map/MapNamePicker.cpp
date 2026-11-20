@@ -10,6 +10,7 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QListView>
+#include <QPushButton>
 #include <QSortFilterProxyModel>
 #include <QStringListModel>
 #include <QVBoxLayout>
@@ -108,6 +109,22 @@ std::optional<QString> CMapNamePicker::Pick( QWidget *pParent, const QString &sz
 	if ( picker.exec() != QDialog::Accepted || picker.GetPicked().isEmpty() )
 		return std::nullopt;
 	return picker.GetPicked();
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Hear a highlighted sound without committing the picker selection.
+//-----------------------------------------------------------------------------
+void CMapNamePicker::AddPreviewButtons( std::function<void( const QString & )> pfnPlay, std::function<void()> pfnStop )
+{
+	auto *pButtons = findChild<QDialogButtonBox *>();
+	auto *pPlay = pButtons->addButton( tr( "Play" ), QDialogButtonBox::ActionRole );
+	auto *pStop = pButtons->addButton( tr( "Stop" ), QDialogButtonBox::ActionRole );
+	connect( pPlay, &QPushButton::clicked, this, [ this, pfnPlay = std::move( pfnPlay ) ] {
+		if ( const QString szSound = GetPicked(); !szSound.isEmpty() )
+			pfnPlay( szSound );
+	} );
+	connect( pStop, &QPushButton::clicked, this, pfnStop );
+	connect( this, &QDialog::finished, this, std::move( pfnStop ) );
 }
 
 //-----------------------------------------------------------------------------

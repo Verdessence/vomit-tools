@@ -13,6 +13,8 @@
 //===========================================================================//
 #pragma once
 
+class CLoadingView;
+
 #include <array>
 #include <condition_variable>
 #include <filesystem>
@@ -277,6 +279,7 @@ private:
 	CMapResources *m_pResources = nullptr;
 	CGpuView *m_pGpu = nullptr;
 	CDemoWorldOverlay *m_pOverlay = nullptr;
+	CLoadingView *m_pLoading = nullptr;
 	QString m_szStatus;
 	std::optional<xv::vfs::CGameInfo> m_Game;
 

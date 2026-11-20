@@ -3,6 +3,8 @@
 // Purpose: See ModelDetails.h.
 //===========================================================================//
 #include "ModelDetails.h"
+
+#include "LoadingView.h"
 #include "ModelView.h"
 #include "ModelFlags.h"
 #include "ModelRenderer.h"
@@ -113,6 +115,7 @@ CModelDetails::CModelDetails( QWidget *pParent )
 	pLayout->addWidget( m_pName );
 	m_pView = new CModelView;
 	m_pView->setFixedHeight( 230 );
+	m_pLoading = new CLoadingView( m_pView, LoadingLayout_t::LOADING_LAYOUT_PREVIEW );
 	pLayout->addWidget( m_pView );
 	auto *pOverlays = new QHBoxLayout;
 	m_pBounds = new QCheckBox( tr( "Bounds" ) );
@@ -235,7 +238,12 @@ void CModelDetails::SelectModel( const QString &szPath )
 	m_bLoading = !szPath.isEmpty();
 	m_pDebounce->stop();
 	if ( m_bLoading )
+	{
+		m_pLoading->Begin( tr( "Reading the model…" ) );
 		m_pDebounce->start();
+	}
+	else
+		m_pLoading->End();
 }
 //-----------------------------------------------------------------------------
 // Purpose: Releases view pointers before their backing data and resets selection-specific facts.
@@ -273,6 +281,7 @@ void CModelDetails::StartLoad()
 {
 	if ( m_szPath.isEmpty() )
 		return;
+	m_pLoading->Begin( tr( "Reading the model…" ) );
 	Job_t job;
 	job.m_Game = m_Game;
 	job.m_szPath = m_szPath;
@@ -419,6 +428,7 @@ void CModelDetails::Present( std::shared_ptr<ModelDetailsData_t> data, int nGene
 	Clear();
 	m_pData = std::move( data );
 	m_bLoading = false;
+	m_pLoading->End();
 	m_pName->setText( m_szPath );
 	m_pWarning->setText( m_pData->m_Problems.join( u'\n' ) );
 	m_pWarning->setVisible( !m_pData->m_Problems.empty() );

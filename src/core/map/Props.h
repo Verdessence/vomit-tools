@@ -47,6 +47,7 @@ struct PropKey_t
 {
 	std::string m_szModel; // "models/props/crate.mdl"
 	int m_nSkin = 0;
+	int m_nBody = 0;
 
 	friend auto operator<=>( const PropKey_t &, const PropKey_t & ) = default;
 };

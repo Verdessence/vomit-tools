@@ -14,6 +14,7 @@
 #include <memory>
 #include <optional>
 #include <thread>
+#include <tuple>
 #include <vector>
 
 #include <QObject>
@@ -122,6 +123,7 @@ private:
 		bool m_bMissing = false;
 		bool m_bTool = false;
 		bool m_bNodraw = false;
+		float m_flSpriteRate = 0.0f;
 		bool m_bSprite = false; // drawn unlit, tinted by its entity, blended
 		bool m_bAdditive = false; // a sprite added rather than blended by its alpha
 		bool m_bOverlay = false;  // an overlay's or a decal's: blended by its alpha
@@ -138,10 +140,13 @@ private:
 	struct Placing_t
 	{
 		std::map<xv::map::PropKey_t, xv::map::PropModel_t> m_Models;  // by model and skin (no model: not there)
-		std::map<std::string, std::uint32_t, std::less<>> m_Places;    // table places past the map's own, by material name ("+" after a sprite's that adds)
+		std::map<std::string, std::uint32_t, std::less<>> m_Places;    // table places past the map's own, by model material name
 		std::vector<std::array<int, 2>> m_Sizes;                       // by table place: the base texture's size
 		std::vector<bool> m_Drawable;
+		std::map<std::tuple<std::string, bool, float>, std::uint32_t> m_SpritePlaces;
 		std::vector<bool> m_Additive;
+		std::vector<bool> m_Upright;
+		std::vector<float> m_SpriteRates;
 		std::vector<double> m_DecalScales;
 		std::map<std::string, std::uint32_t, std::less<>> m_OverlayPlaces;
 		xv::map::MeshParts_t m_OverlayParts;
@@ -156,7 +161,7 @@ private:
 	void PlaceEntities( const xv::map::CScene &scene, Placing_t &placing, const ReadMaterials_t &readMaterials, const xv::model::Reader_t &readModel, const Post_t &post, const std::vector<std::uint32_t> &changed = {} );
 	void PlaceOverlays( const xv::map::CScene &scene, Placing_t &placing, const ReadMaterials_t &readMaterials, const Post_t &post, const std::vector<std::uint32_t> &changed = {} );
 	// Reads materials (their index and name) through read, textures decoded on every core.
-	[[nodiscard]] static std::vector<Loaded_t> ReadMaterials( const std::vector<std::pair<std::uint32_t, std::string>> &todo, MaterialUse_t nUse, const xv::material::Reader_t &read, int nMaxSize, bool bDecoded, const std::vector<bool> &additive );
+	[[nodiscard]] static std::vector<Loaded_t> ReadMaterials( const std::vector<std::pair<std::uint32_t, std::string>> &todo, MaterialUse_t nUse, const xv::material::Reader_t &read, int nMaxSize, bool bDecoded, const std::vector<bool> &additive, const std::vector<float> &spriteRates = {} );
 	void Take( std::vector<Loaded_t> batch );
 
 	std::thread m_Worker;
@@ -181,6 +186,7 @@ private:
 		std::vector<std::shared_ptr<xv::map::RasterTexture_t>> m_Frames;
 		std::vector<std::shared_ptr<xv::map::RasterTexture_t>> m_DetailFrames;
 		xv::map::RasterMaterial_t m_Still;
+		float m_flSpriteRate = 0.0f;
 	};
 	std::vector<Animated_t> m_Animated;
 	std::shared_ptr<const std::vector<xv::map::RasterMaterial_t>> m_pMaterials;
@@ -210,5 +216,3 @@ private:
 // A DXT texture keeps those mips as they are for the card; bDecode also decodes them (any other
 // format is decoded regardless, there being nothing smaller to keep).
 [[nodiscard]] std::shared_ptr<xv::map::RasterTexture_t> ReadMapTexture( std::span<const std::byte> vtf, int nMaxSize, bool bDecode = true, int nFrame = 0 );
-// How many frames a VTF has (1 for a plain texture, 0 when it can't be read).
-[[nodiscard]] int MapTextureFrames( std::span<const std::byte> vtf );

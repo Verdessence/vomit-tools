@@ -9,6 +9,8 @@
 #include <algorithm>
 #include <unordered_map>
 
+#include <QLocale>
+
 #include "FileIcons.h"
 #include "vfs/Vfs.h"
 
@@ -243,9 +245,16 @@ QVariant CVfsModel::data( const QModelIndex &index, int nRole ) const
 			{
 				return bFolder ? FolderKind() : FileKind( pNode->m_szName );
 			}
-			return pNode->m_pMount ? QString::fromStdString( pNode->m_pMount->GetLocation().filename().string() ) : QVariant{};
-		case Qt::ToolTipRole:
-			return pNode->m_pMount ? QString::fromStdString( pNode->m_pMount->GetLocation().string() ) : QVariant{};
+			if ( index.column() == COLUMN_SIZE_COLUMN )
+			{
+				if ( pNode->m_pMount )
+					if ( const auto nSize = pNode->m_pMount->FileSize( pNode->m_szPath ) )
+						return QLocale{}.formattedDataSize( static_cast<qint64>( *nSize ) );
+				return {};
+			}
+			return pNode->m_pMount ? QString::fromStdString( xv::vfs::ToUtf8( pNode->m_pMount->GetLocation().filename() ) ) : QVariant{};
+		case Qt::TextAlignmentRole:
+			return index.column() == COLUMN_SIZE_COLUMN ? QVariant( Qt::AlignRight | Qt::AlignVCenter ) : QVariant{};
 		case Qt::DecorationRole:
 			if ( index.column() == COLUMN_NAME_COLUMN )
 			{
@@ -276,6 +285,8 @@ QVariant CVfsModel::headerData( int nSection, Qt::Orientation nOrientation, int 
 			return tr( "Name" );
 		case COLUMN_TYPE_COLUMN:
 			return tr( "Type" );
+		case COLUMN_SIZE_COLUMN:
+			return tr( "Size" );
 		default:
 			return tr( "Read from" );
 	}

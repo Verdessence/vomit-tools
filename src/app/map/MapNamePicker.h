@@ -7,6 +7,7 @@
 //===========================================================================//
 #pragma once
 
+#include <functional>
 #include <optional>
 
 #include <QDialog>
@@ -26,6 +27,7 @@ public:
 
 	// Runs the picker; the name picked, if one was.
 	static std::optional<QString> Pick( QWidget *pParent, const QString &szTitle, QStringList names, const QString &szCurrent );
+	void AddPreviewButtons( std::function<void( const QString & )> pfnPlay, std::function<void()> pfnStop );
 	[[nodiscard]] QString GetPicked() const;
 	[[nodiscard]] QLineEdit *GetFilter() const { return m_pFilter; }
 	[[nodiscard]] QListView *GetView() const { return m_pView; }

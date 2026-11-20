@@ -82,7 +82,7 @@ void CStripperEditor::SetMap( const std::filesystem::path &map )
 	connect( m_pView, &CEntityView::ConfigModifiedChanged, this, &CStripperEditor::ModifiedChanged );
 	m_pLayout->addWidget( m_pView, 1 );
 	if ( !m_Map.empty() )
-		m_pMapLabel->setText( tr( "Previewed on %1" ).arg( QDir::toNativeSeparators( QString::fromStdU16String( m_Map.u16string() ) ) ) );
+		m_pMapLabel->setText( tr( "Previewed on %1" ).arg( QDir::fromNativeSeparators( QString::fromStdU16String( m_Map.u16string() ) ) ) );
 	else if ( !szProblem.isEmpty() )
 		m_pMapLabel->setText( tr( "Couldn't read the map: %1. Only what the config adds is shown." ).arg( szProblem ) );
 	else

@@ -22,11 +22,14 @@ constexpr double SPRITE_CELL = 1024.0;
 //-----------------------------------------------------------------------------
 // Purpose:
 //-----------------------------------------------------------------------------
-CMapMesh BuildSpriteMesh( std::span<const SpritePlacement_t> sprites, Point_t right, Point_t up )
+CMapMesh BuildSpriteMesh( std::span<const SpritePlacement_t> sprites, Point_t right, Point_t up, bool bUseOrientation )
 {
 	CMapMesh mesh;
 	// The camera looks along up x right; the squares face back the other way, towards it.
 	const Point_t facing = Cross( right, up );
+	const Point_t worldUp{ 0.0, 0.0, 1.0 };
+	const Point_t horizontal = Cross( worldUp, facing );
+	const Point_t uprightRight = Dot( horizontal, horizontal ) > 1e-12 ? Normalized( horizontal ) : Normalized( Point_t{ right[ 0 ], right[ 1 ], 0.0 } );
 	std::vector<std::size_t> order( sprites.size() );
 	for ( std::size_t i = 0; i < order.size(); i++ )
 	{
@@ -41,8 +44,9 @@ CMapMesh BuildSpriteMesh( std::span<const SpritePlacement_t> sprites, Point_t ri
 	{
 		const std::size_t i = order[ n ];
 		const SpritePlacement_t &sprite = sprites[ i ];
-		const Point_t r = Scale( right, sprite.m_flHalfWidth );
-		const Point_t u = Scale( up, sprite.m_flHalfHeight );
+		const bool bUpright = bUseOrientation && sprite.m_bUpright;
+		const Point_t r = Scale( bUpright ? uprightRight : right, sprite.m_flHalfWidth );
+		const Point_t u = Scale( bUpright ? worldUp : up, sprite.m_flHalfHeight );
 		// Top left, top right, bottom right, bottom left: clockwise seen from the camera.
 		const std::array<Point_t, 4> corners{ Add( Subtract( sprite.m_Origin, r ), u ), Add( Add( sprite.m_Origin, r ), u ), Subtract( Add( sprite.m_Origin, r ), u ), Subtract( Subtract( sprite.m_Origin, r ), u ) };
 		const std::array<std::array<float, 2>, 4> texels{ { { 0.0f, 0.0f }, { 1.0f, 0.0f }, { 1.0f, 1.0f }, { 0.0f, 1.0f } } };
@@ -51,7 +55,7 @@ CMapMesh BuildSpriteMesh( std::span<const SpritePlacement_t> sprites, Point_t ri
 		{
 			MeshVertex_t vertex;
 			vertex.m_vecPosition = ToVec3( corners[ k ] );
-			vertex.m_vecNormal = ToVec3( facing );
+			vertex.m_vecNormal = ToVec3( bUpright ? Cross( uprightRight, worldUp ) : facing );
 			vertex.m_Texel = { texels[ k ][ 0 ] * static_cast<float>( sprite.m_TextureSize[ 0 ] ), texels[ k ][ 1 ] * static_cast<float>( sprite.m_TextureSize[ 1 ] ) };
 			vertex.m_nObject = sprite.m_nObject;
 			mesh.m_Vertices.push_back( vertex );

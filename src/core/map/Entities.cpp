@@ -139,6 +139,7 @@ EntityVisual_t DescribeEntity( const Entity_t &entity, const CFgd *pFgd )
 	visual.m_Box.m_Mins = { -8, -8, -8 };
 	visual.m_Box.m_Maxs = { 8, 8, 8 };
 	visual.m_nSkin = ParseNumber<int>( entity.GetValue( "skin" ) ).value_or( 0 );
+	visual.m_nBody = std::max( 0, ParseNumber<int>( entity.GetValue( "body" ) ).value_or( ParseNumber<int>( entity.GetValue( "SetBodyGroup" ) ).value_or( 0 ) ) );
 	for ( const char *szKey : { "modelscale", "uniformscale" } )
 	{
 		if ( const auto flScale = ParseNumber<double>( entity.GetValue( szKey ) ); flScale && *flScale > 0.0 )
@@ -149,6 +150,13 @@ EntityVisual_t DescribeEntity( const Entity_t &entity, const CFgd *pFgd )
 	}
 
 	const FgdClass_t *pClass = visual.m_pClass;
+	const std::string_view szModelKey = entity.GetValue( "model" );
+	if ( entity.GetClassname().starts_with( "prop_" ) && IsModelPath( szModelKey ) )
+	{
+		visual.m_szModel = std::string{ szModelKey };
+		std::ranges::replace( visual.m_szModel, '\\', '/' );
+		visual.m_bModelBox = true;
+	}
 	if ( !pClass )
 	{
 		return visual;
@@ -249,6 +257,17 @@ EntityVisual_t DescribeEntity( const Entity_t &entity, const CFgd *pFgd )
 			}
 		}
 	}
+	if ( visual.m_szModel.empty() )
+		for ( const FgdKey_t &key : pClass->m_Keys )
+		{
+			const auto szPath = entity.GetValue( key.m_szName );
+			if ( key.m_szType == "studio" && IsModelPath( szPath ) )
+			{
+				visual.m_szModel = std::string{ szPath };
+				std::ranges::replace( visual.m_szModel, '\\', '/' );
+				break;
+			}
+		}
 	return visual;
 }
 

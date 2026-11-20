@@ -54,6 +54,7 @@ struct RasterTexture_t
 	texture::VtfFormat_t m_nCompressedFormat = texture::VtfFormat_t::VTF_FORMAT_NONE;
 	int m_nWidth = 0;                             // the VTF's own size (the mips kept may start below it)
 	int m_nHeight = 0;
+	bool m_bPoint = false;
 	bool m_bClampS = false;
 	bool m_bClampT = false;
 	std::array<float, 3> m_Reflectivity{};       // the VTF's, for the light faces bounce

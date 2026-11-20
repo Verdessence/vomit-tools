@@ -8,6 +8,7 @@
 #pragma once
 
 #include <cstddef>
+#include <cstdint>
 #include <filesystem>
 #include <functional>
 #include <map>
@@ -71,6 +72,9 @@ public:
 	[[nodiscard]] virtual std::optional<std::vector<std::byte>> Read( const std::string &szPath ) const = 0;
 	virtual void ForEachFile( const std::function<void( const std::string &szPath )> &pfnCallback ) const = 0;
 	[[nodiscard]] virtual std::size_t GetFileCount() const = 0;
+
+	// Uncompressed size, without reading the file contents.
+	[[nodiscard]] virtual std::optional<std::uintmax_t> FileSize( const std::string &szPath ) const;
 
 	// The real file behind a path, for folder mounts; nullopt for files inside a VPK.
 	[[nodiscard]] virtual std::optional<std::filesystem::path> DiskPath( const std::string &szPath ) const;

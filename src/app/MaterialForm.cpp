@@ -446,7 +446,7 @@ CAddParameterDialog::CAddParameterDialog( const QString &szShader, const QString
 	m_pList->setObjectName( QStringLiteral( "parameterList" ) );
 	m_pList->setHeaderHidden( true );
 	m_pList->setColumnCount( 2 );
-	m_pList->setRootIsDecorated( false );
+	m_pList->setRootIsDecorated( bSimple );
 	m_pList->setUniformRowHeights( true );
 	m_pList->header()->setSectionResizeMode( 0, QHeaderView::ResizeToContents );
 	m_pList->header()->setStretchLastSection( true );
@@ -480,6 +480,7 @@ CAddParameterDialog::CAddParameterDialog( const QString &szShader, const QString
 		pItem->setForeground( 1, palette().color( QPalette::PlaceholderText ) );
 	}
 	pOthers->setHidden( pOthers->childCount() == 0 );
+	pOthers->setExpanded( !bSimple );
 
 	auto *pButtons = new QDialogButtonBox( QDialogButtonBox::Ok | QDialogButtonBox::Cancel );
 	pButtons->button( QDialogButtonBox::Ok )->setText( tr( "Add" ) );
@@ -549,6 +550,8 @@ void CAddParameterDialog::Filter()
 			}
 		}
 		pGroup->setHidden( nShown == 0 );
+		if ( nShown > 0 && !szSearch.isEmpty() )
+			pGroup->setExpanded( true );
 	}
 	m_pList->setCurrentItem( pFirst );
 }

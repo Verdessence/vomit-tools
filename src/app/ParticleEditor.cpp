@@ -54,6 +54,7 @@
 #include "Language.h"
 #include "MenuPicker.h"
 #include "ParticlePreview.h"
+#include "LoadingView.h"
 #include "map/MaterialBrowser.h"
 #include "QtPaths.h"
 #include "SpinBoxes.h"
@@ -2212,8 +2213,7 @@ void CParticleEditor::RebuildGrid()
 	const QString szFilter = m_pFilter->text().trimmed();
 	const QSignalBlocker blocker{ m_pGrid };
 	m_pGrid->clear();
-	QPixmap blank( THUMBNAIL_SIZE, THUMBNAIL_SIZE );
-	blank.fill( QColor( 33, 36, 38 ) );
+	const QIcon waiting = LoadingThumbnail();
 	for ( std::int32_t nSystem : particles::Systems( doc ) )
 	{
 		const QString szName = Qs( doc.m_Elements[ static_cast<std::size_t>( nSystem ) ].m_szName );
@@ -2226,7 +2226,7 @@ void CParticleEditor::RebuildGrid()
 		pItem->setToolTip( szName );
 		pItem->setFlags( pItem->flags() | Qt::ItemIsEditable );
 		const auto it = m_Thumbnails.find( nSystem );
-		pItem->setIcon( it != m_Thumbnails.end() ? it->second : QIcon{ blank } );
+		pItem->setIcon( it != m_Thumbnails.end() ? it->second : waiting );
 		if ( nSystem == m_nSystem )
 		{
 			m_pGrid->setCurrentItem( pItem );

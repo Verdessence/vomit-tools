@@ -32,6 +32,7 @@ class QPushButton;
 class QTabWidget;
 class QTimer;
 class QToolButton;
+class CLoadingView;
 class QTreeWidget;
 class QTreeWidgetItem;
 
@@ -72,6 +73,7 @@ private:
 	QTabWidget *m_pTabs = nullptr;
 	QTreeWidget *m_pMaterials = nullptr;
 	QTreeWidget *m_pShaders = nullptr;
+	CLoadingView *m_pLoading = nullptr;
 	std::array<std::array<QDoubleSpinBox *, 4>, 4> m_Constants{};
 	QPushButton *m_pReset = nullptr;
 	QLabel *m_pStatistics = nullptr;

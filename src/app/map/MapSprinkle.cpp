@@ -134,7 +134,7 @@ void CMapSprinklePanel::Load( const std::optional<std::filesystem::path> &gameDi
 		for ( const auto &type : m_Types )
 		{
 			m_pType->addItem( QString::fromStdString( type.m_szName ) );
-			m_pType->setItemData( m_pType->count() - 1, QString::fromStdString( type.m_File.string() ), Qt::ToolTipRole );
+			m_pType->setItemData( m_pType->count() - 1, QString::fromStdU16String( type.m_File.generic_u16string() ), Qt::ToolTipRole );
 		}
 		const int nWas = m_pType->findText( szWas );
 		if ( nWas >= 0 )

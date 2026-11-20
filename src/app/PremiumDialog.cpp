@@ -23,7 +23,7 @@
 namespace
 {
 
-constexpr auto SHOWN_KEY = "premiumShown";
+constexpr auto COMPLETED_KEY = "premiumCompleted";
 
 // The window's text, from data/premium.txt.
 struct PremiumText_t
@@ -73,7 +73,7 @@ CPremiumDialog::CPremiumDialog( QWidget *pParent )
 {
 	setObjectName( QStringLiteral( "premium" ) );
 	const PremiumText_t text = ReadText();
-	setWindowTitle( text.Get( "title", QStringLiteral( "vomit-tools Premium" ) ) );
+	setWindowTitle( text.Get( "title", QStringLiteral( "Vomit Tools Premium" ) ) );
 
 	// The character, playing over and over (a GIF; a still picture works too).
 	auto *pPicture = new QLabel;
@@ -138,20 +138,28 @@ CPremiumDialog::CPremiumDialog( QWidget *pParent )
 	m_pCard = new QLineEdit;
 	m_pCard->setObjectName( QStringLiteral( "premiumCard" ) );
 	m_pExpiry = new QLineEdit;
+	m_pExpiry->setObjectName( QStringLiteral( "premiumExpiry" ) );
 	m_pCode = new QLineEdit;
+	m_pCode->setObjectName( QStringLiteral( "premiumCode" ) );
 	m_pCode->setEchoMode( QLineEdit::Password );
 	auto *pForm = new QFormLayout;
 	pForm->addRow( text.Get( "card", tr( "Card number:" ) ), m_pCard );
 	pForm->addRow( text.Get( "expiry", tr( "Expiry date:" ) ), m_pExpiry );
 	pForm->addRow( text.Get( "code", tr( "Security code:" ) ), m_pCode );
 	auto *pNote = new QLabel( text.Get( "note" ) );
-	pNote->setEnabled( false );
+	pNote->setForegroundRole( QPalette::Text );
 	pNote->setWordWrap( true );
 	pNote->setAlignment( Qt::AlignCenter );
 
 	auto *pAccept = new QPushButton( text.Get( "accept", tr( "OK" ) ) );
 	pAccept->setObjectName( QStringLiteral( "premiumAccept" ) );
 	pAccept->setDefault( true );
+	const auto update = [ this, pAccept ] {
+		pAccept->setEnabled( !m_pCard->text().trimmed().isEmpty() && !m_pExpiry->text().trimmed().isEmpty() && !m_pCode->text().trimmed().isEmpty() );
+	};
+	for ( QLineEdit *pField : { m_pCard, m_pExpiry, m_pCode } )
+		connect( pField, &QLineEdit::textChanged, this, update );
+	update();
 	auto *pLater = new QPushButton( text.Get( "later", tr( "Later" ) ) );
 	connect( pAccept, &QPushButton::clicked, this, [ this, szThanks = text.Get( "thanks" ) ] {
 		m_pCard->clear();
@@ -161,6 +169,7 @@ CPremiumDialog::CPremiumDialog( QWidget *pParent )
 		{
 			QMessageBox::information( this, windowTitle(), szThanks );
 		}
+		MarkCompleted();
 		accept();
 	} );
 	connect( pLater, &QPushButton::clicked, this, &QDialog::reject );
@@ -182,21 +191,20 @@ CPremiumDialog::CPremiumDialog( QWidget *pParent )
 	pLayout->addWidget( pPicture );
 	pLayout->addLayout( pRight, 1 );
 	resize( 720, sizeHint().height() );
-	MarkShown();
 }
 
 //-----------------------------------------------------------------------------
 // Purpose:
 //-----------------------------------------------------------------------------
-bool CPremiumDialog::HasBeenShown()
+bool CPremiumDialog::HasCompleted()
 {
-	return QSettings{}.value( SHOWN_KEY, false ).toBool();
+	return QSettings{}.value( COMPLETED_KEY, false ).toBool();
 }
 
 //-----------------------------------------------------------------------------
 // Purpose:
 //-----------------------------------------------------------------------------
-void CPremiumDialog::MarkShown()
+void CPremiumDialog::MarkCompleted()
 {
-	QSettings{}.setValue( SHOWN_KEY, true );
+	QSettings{}.setValue( COMPLETED_KEY, true );
 }

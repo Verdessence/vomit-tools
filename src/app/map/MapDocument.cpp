@@ -5,6 +5,7 @@
 //
 //===========================================================================//
 #include "MapDocument.h"
+#include "Preferences.h"
 #include "map/InstanceEdit.h"
 
 #include "map/Cordon.h"
@@ -593,7 +594,7 @@ void CMapDocument::Run( Source_t source, int nGeneration )
 		}
 		else
 		{
-			missing << QString::fromStdString( fgd.string() );
+			missing << QString::fromStdU16String( fgd.generic_u16string() );
 		}
 	}
 	QString szFgdSource = tr( "Preferences" );
@@ -651,11 +652,35 @@ void CMapDocument::SetPointfile( std::optional<std::vector<xv::map::Point_t>> po
 }
 
 //-----------------------------------------------------------------------------
+// Purpose: Replace the portal overlay and discard the previous file's selection.
+//-----------------------------------------------------------------------------
+void CMapDocument::SetPortals( std::vector<xv::map::Portal_t> portals )
+{
+	m_Portals = std::move( portals );
+	m_SelectedPortal.reset();
+	emit PortalsChanged();
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Highlight a portal without changing the editable map selection.
+//-----------------------------------------------------------------------------
+void CMapDocument::SelectPortal( std::size_t nPortal )
+{
+	m_SelectedPortal = nPortal;
+	emit PortalsChanged();
+}
+
+//-----------------------------------------------------------------------------
 // Purpose: The map is built: what starts hidden follows the flags Hammer saved.
 //-----------------------------------------------------------------------------
 void CMapDocument::Finish( std::shared_ptr<xv::map::CScene> pScene, QString szFgdSource, xv::map::HammerDefaults_t defaults )
 {
 	m_szFgdSource = std::move( szFgdSource );
+	const MapPreferences_t &preferences = CPreferences::Instance().GetMapPreferences();
+	if ( const QString szPoint = preferences.m_szDefaultPointEntity.trimmed(); !szPoint.isEmpty() )
+		defaults.m_szPointEntity = szPoint.toStdString();
+	if ( const QString szBrush = preferences.m_szDefaultBrushEntity.trimmed(); !szBrush.isEmpty() )
+		defaults.m_szSolidEntity = szBrush.toStdString();
 	m_Defaults = std::move( defaults );
 	m_nLoads++;
 	const std::uint32_t nObjects = pScene->GetObjectCount();

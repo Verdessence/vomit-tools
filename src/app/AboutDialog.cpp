@@ -57,9 +57,9 @@ QString CompilerName()
 CAboutDialog::CAboutDialog( QWidget *pParent )
 	: QDialog( pParent )
 {
-	setWindowTitle( tr( "About vomit-tools" ) );
+	setWindowTitle( tr( "About Vomit Tools" ) );
 
-	auto *pName = new QLabel( QStringLiteral( "vomit-tools" ) );
+	auto *pName = new QLabel( tr( "Vomit Tools" ) );
 	QFont big = pName->font();
 	big.setPointSizeF( big.pointSizeF() * 1.8 );
 	big.setBold( true );
@@ -70,14 +70,14 @@ CAboutDialog::CAboutDialog( QWidget *pParent )
 	pVersion->setTextInteractionFlags( Qt::TextSelectableByMouse );
 
 	auto *pAbout = new QLabel( tr(
-		"<p>Soundscape, skybox and particle editors for Source engine games.</p>"
+		"<p>All in one IDE for Source engine games.</p>"
 		"<p>Source code and releases: <a href=\"%1\">%1</a></p>"
 		"<p>Free software under the <a href=\"https://www.gnu.org/licenses/gpl-3.0.html\">GNU GPL, version 3 or later</a>. "
 		"Built on <a href=\"https://www.qt.io\">Qt</a> (LGPLv3), "
 		"<a href=\"https://github.com/craftablescience/sourcepp\">sourcepp</a> (MIT), "
 		"<a href=\"https://miniaud.io\">miniaudio</a> (public domain / MIT-0) and "
 		"<a href=\"https://github.com/nothings/stb\">stb</a> (public domain / MIT), with the compression "
-		"and hashing libraries sourcepp uses. <b>Licenses</b> has every one with its terms.</p>"
+		"and hashing libraries sourcepp uses.</p>"
 		"<p>Not affiliated with Valve. Source and Counter-Strike are trademarks of Valve Corporation.</p>" )
 			.arg( QLatin1StringView{ REPOSITORY } ) );
 	pAbout->setWordWrap( true );

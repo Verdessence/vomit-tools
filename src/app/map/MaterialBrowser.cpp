@@ -6,6 +6,8 @@
 //===========================================================================//
 #include "MaterialBrowser.h"
 
+#include "LoadingView.h"
+
 #include <algorithm>
 #include <chrono>
 
@@ -30,6 +32,7 @@
 #include <QSortFilterProxyModel>
 #include <QSplitter>
 #include <QStandardPaths>
+#include <QStyledItemDelegate>
 #include <QVBoxLayout>
 
 #include "ImageFiles.h"
@@ -41,6 +44,28 @@
 
 namespace
 {
+
+class CMaterialPictureDelegate final : public QStyledItemDelegate
+{
+public:
+	using QStyledItemDelegate::QStyledItemDelegate;
+
+protected:
+	void initStyleOption( QStyleOptionViewItem *pOption, const QModelIndex &index ) const override;
+};
+
+//-----------------------------------------------------------------------------
+// Purpose: Reserve the thumbnail space until the loader returns the material's picture.
+//-----------------------------------------------------------------------------
+void CMaterialPictureDelegate::initStyleOption( QStyleOptionViewItem *pOption, const QModelIndex &index ) const
+{
+	QStyledItemDelegate::initStyleOption( pOption, index );
+	if ( pOption->icon.isNull() )
+	{
+		pOption->icon = LoadingThumbnail();
+		pOption->features |= QStyleOptionViewItem::HasDecoration;
+	}
+}
 
 constexpr int SMALL_PICTURE = 128; // what is kept for every material; smaller sizes are scaled from it
 constexpr int LARGE_PICTURE = 512; // made only for those shown at 256 or 512
@@ -329,8 +354,11 @@ CMaterialBrowser::CMaterialBrowser( const xv::vfs::CGameInfo &game, QStringList 
 	m_pFilter = pFilter;
 	m_pView = new QListView;
 	m_pView->setObjectName( QStringLiteral( "materialBrowserView" ) );
+	m_pLoading = new CLoadingView( m_pView->viewport(), LoadingLayout_t::LOADING_LAYOUT_GRID );
+	m_pLoading->Begin( tr( "Listing materials…" ) );
 	connect( m_pList, &CMaterialList::dataChanged, m_pView, [ this ] { m_pView->viewport()->update(); } );
 	m_pView->setModel( m_pFilter );
+	m_pView->setItemDelegate( new CMaterialPictureDelegate( m_pView ) );
 	m_pView->setViewMode( QListView::IconMode );
 	m_pView->setResizeMode( QListView::Adjust );
 	m_pView->setMovement( QListView::Static );
@@ -428,6 +456,7 @@ CMaterialPreview::CMaterialPreview( const xv::vfs::CGameInfo &game, QWidget *pPa
 	m_pPicture->setObjectName( QStringLiteral( "materialPreviewPicture" ) );
 	m_pPicture->setAlignment( Qt::AlignCenter );
 	m_pPicture->setMinimumSize( PREVIEW_SIZE, PREVIEW_SIZE );
+	m_pLoading = new CLoadingView( m_pPicture, LoadingLayout_t::LOADING_LAYOUT_PREVIEW );
 	m_pName = new QLabel;
 	m_pName->setObjectName( QStringLiteral( "materialPreviewName" ) );
 	m_pName->setWordWrap( true );
@@ -501,6 +530,7 @@ CMaterialPreview::CMaterialPreview( const xv::vfs::CGameInfo &game, QWidget *pPa
 			QMetaObject::invokeMethod( this, [ this, nGeneration, pLoaded = std::shared_ptr<const Loaded_t>( std::move( pLoaded ) ) ] {
 				if ( nGeneration != m_nGeneration )
 					return;
+				m_pLoading->End();
 				m_pLoaded = pLoaded;
 				m_szShown = pLoaded->m_szName;
 				m_Clock.restart();
@@ -542,6 +572,7 @@ void CMaterialPreview::Show( const QString &szName )
 	{
 		m_pWait->stop();
 		m_pAnimate->stop();
+		m_pLoading->End();
 		m_pLoaded.reset();
 		m_szShown.clear();
 		Render();
@@ -556,6 +587,7 @@ void CMaterialPreview::Show( const QString &szName )
 //-----------------------------------------------------------------------------
 void CMaterialPreview::Load()
 {
+	m_pLoading->Begin( tr( "Reading the material…" ) );
 	{
 		const std::lock_guard lock( m_Mutex );
 		m_szQueued = m_szWanted;
@@ -754,6 +786,7 @@ void CMaterialBrowser::Run()
 		m_pList->SetNames( names );
 		m_pList->SetSprites( std::move( sprites ) );
 		m_bListed = true;
+		m_pLoading->End();
 		ApplyFilter(); }, Qt::QueuedConnection );
 	std::vector<bool> done( paths.size(), false );
 	std::size_t nNext = 0;

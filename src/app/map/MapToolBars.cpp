@@ -56,6 +56,20 @@ QIcon MakeMapIcon( MapIcon_t nIcon, const QColor &color )
 	painter.setPen( QPen{ color, 2.5, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin } );
 	switch ( nIcon )
 	{
+		case MapIcon_t::MAP_ICON_HOME:
+			painter.drawPolyline( QPolygonF{ { { 3, 15 }, { 16, 4 }, { 29, 15 } } } );
+			painter.drawPolyline( QPolygonF{ { { 7, 12 }, { 7, 27 }, { 13, 27 }, { 13, 19 }, { 19, 19 }, { 19, 27 }, { 25, 27 }, { 25, 12 } } } );
+			break;
+		case MapIcon_t::MAP_ICON_SOUND:
+			painter.drawPolygon( QPolygonF{ { { 4, 12 }, { 9, 12 }, { 17, 6 }, { 17, 26 }, { 9, 20 }, { 4, 20 } } } );
+			painter.drawArc( QRectF{ 12, 10, 12, 12 }, -50 * 16, 100 * 16 );
+			painter.drawArc( QRectF{ 9, 6, 20, 20 }, -50 * 16, 100 * 16 );
+			break;
+		case MapIcon_t::MAP_ICON_ARCHIVE:
+			painter.drawRoundedRect( QRectF( 4, 5, 24, 7 ), 1, 1 );
+			painter.drawRect( QRectF( 6, 12, 20, 15 ) );
+			painter.drawLine( 13, 17, 19, 17 );
+			break;
 		case MapIcon_t::MAP_ICON_MODEL_EXTRUDE:
 			painter.drawRect( 5, 17, 22, 10 );
 			painter.drawLine( 16, 19, 16, 4 );

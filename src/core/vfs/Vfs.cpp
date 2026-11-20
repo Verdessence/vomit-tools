@@ -232,6 +232,13 @@ public:
 		return m_pPackage->Read( it->second );
 	}
 
+	[[nodiscard]] std::optional<std::uintmax_t> FileSize( const std::string &szPath ) const override
+	{
+		if ( const PackageEntry_t *pEntry = m_pPackage->Find( szPath ) )
+			return pEntry->m_nSize;
+		return std::nullopt;
+	}
+
 	void ForEachFile( const std::function<void( const std::string & )> &pfnCallback ) const override
 	{
 		for ( const auto &[ path, _ ] : m_Entries )
@@ -277,6 +284,15 @@ public:
 		return m_pPack->readEntry( it->second );
 	}
 
+	[[nodiscard]] std::optional<std::uintmax_t> FileSize( const std::string &szPath ) const override
+	{
+		const auto it = m_Entries.find( szPath );
+		if ( it != m_Entries.end() )
+			if ( const auto entry = m_pPack->findEntry( it->second, false ) )
+				return entry->length;
+		return std::nullopt;
+	}
+
 	void ForEachFile( const std::function<void( const std::string & )> &pfnCallback ) const override
 	{
 		for ( const auto &[ path, _ ] : m_Entries )
@@ -314,6 +330,19 @@ std::string ToUtf8( const fs::path &path )
 fs::path FromUtf8( std::string_view szUtf8 )
 {
 	return fs::path{ std::u8string{ szUtf8.begin(), szUtf8.end() } };
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Read a loose file's size from its directory metadata.
+//-----------------------------------------------------------------------------
+std::optional<std::uintmax_t> CMount::FileSize( const std::string &szPath ) const
+{
+	const auto disk = DiskPath( szPath );
+	if ( !disk )
+		return std::nullopt;
+	std::error_code error;
+	const auto nSize = fs::file_size( *disk, error );
+	return error ? std::nullopt : std::optional{ nSize };
 }
 
 //-----------------------------------------------------------------------------

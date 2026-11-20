@@ -654,7 +654,8 @@ Sprite_t FallbackSprite()
 //-----------------------------------------------------------------------------
 // Purpose: Reads materials/<material>.vmt as the game does (a patch's include, the fallbacks)
 //          and its $basetexture through read: the blend, SpriteCard's overbright and $addself,
-//          $color for the shaders that take it, $alpha, and the texture's point sampling.
+//          $color for the shaders that take it, $vertexcolor and $vertexalpha, $alpha, and the
+//          texture's point sampling.
 //-----------------------------------------------------------------------------
 Sprite_t LoadSprite( std::string_view szMaterial, const FileReader_t &pfnRead )
 {
@@ -693,6 +694,10 @@ Sprite_t LoadSprite( std::string_view szMaterial, const FileReader_t &pfnRead )
 	{
 		const CVec3 vecColor = parsed->Color( "$color" );
 		sprite.m_vecTint = { vecColor.m_flX, vecColor.m_flY, vecColor.m_flZ };
+		// SpriteCard is made for particles and always takes their colour and alpha; the other
+		// shaders take a vertex's only when the material asks.
+		sprite.m_bVertexColor = parsed->Flag( "$vertexcolor" );
+		sprite.m_bVertexAlpha = parsed->Flag( "$vertexalpha" );
 	}
 	sprite.m_flAlpha = std::clamp( parsed->Number( "$alpha", 1.0f ), 0.0f, 1.0f );
 	if ( szShader == "refract" )
@@ -931,7 +936,7 @@ std::vector<ScreenQuad_t> Layout( const CSimulation &simulation, const CCamera &
 						quad.m_flDepth = 0.25f * ( quad.m_Corners[ 0 ][ 2 ] + quad.m_Corners[ 1 ][ 2 ] + quad.m_Corners[ 2 ][ 2 ] + quad.m_Corners[ 3 ][ 2 ] );
 						quad.m_pSprite = pSprite;
 						quad.m_Rect = piece.m_Rect;
-						quad.m_flAlpha = std::clamp( piece.m_flAlpha, 0.0f, 1.0f ) * pSprite->m_flAlpha;
+						quad.m_flAlpha = pSprite->Alpha( piece.m_flAlpha );
 						quad.m_vecColor = pSprite->Color( piece.m_vecColor );
 						quad.m_nBlend = pSprite->m_nBlend;
 						quad.m_flAddSelf = pSprite->m_flAddSelf;
@@ -955,7 +960,7 @@ std::vector<ScreenQuad_t> Layout( const CSimulation &simulation, const CCamera &
 					quad.m_flDepth = ( *center )[ 2 ];
 					quad.m_pSprite = pSprite;
 					quad.m_Rect = FrameRect( *pSprite, pRenderer, p );
-					quad.m_flAlpha = std::clamp( p.m_flAlpha, 0.0f, 1.0f ) * pSprite->m_flAlpha;
+					quad.m_flAlpha = pSprite->Alpha( p.m_flAlpha );
 					quad.m_vecColor = pSprite->Color( p.m_vecColor );
 					quad.m_nBlend = pSprite->m_nBlend;
 					quad.m_flAddSelf = pSprite->m_flAddSelf;
@@ -1109,7 +1114,7 @@ std::vector<WorldQuad_t> WorldLayout( const CSimulation &simulation, CVec3 vecEy
 						quad.m_nDefinition = nIndex;
 						quad.m_flDepth = Dot( ( piece.m_vecA + piece.m_vecB ) * 0.5f - vecEye, vecForward );
 						quad.m_Rect = piece.m_Rect;
-						quad.m_flAlpha = std::clamp( piece.m_flAlpha, 0.0f, 1.0f ) * pSprite->m_flAlpha;
+						quad.m_flAlpha = pSprite->Alpha( piece.m_flAlpha );
 						quad.m_vecColor = pSprite->Color( piece.m_vecColor );
 						if ( !corners || quad.m_flDepth <= 0.0f || quad.m_flAlpha <= 0.0f )
 							continue;
@@ -1125,7 +1130,7 @@ std::vector<WorldQuad_t> WorldLayout( const CSimulation &simulation, CVec3 vecEy
 					quad.m_nDefinition = nIndex;
 					quad.m_flDepth = Dot( p.m_vecPosition - vecEye, vecForward );
 					quad.m_Rect = FrameRect( *pSprite, pRenderer, p );
-					quad.m_flAlpha = std::clamp( p.m_flAlpha, 0.0f, 1.0f ) * pSprite->m_flAlpha;
+					quad.m_flAlpha = pSprite->Alpha( p.m_flAlpha );
 					quad.m_vecColor = pSprite->Color( p.m_vecColor );
 					if ( quad.m_flDepth <= 0.0f || quad.m_flAlpha <= 0.0f )
 						continue;

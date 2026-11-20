@@ -8,6 +8,7 @@
 //===========================================================================//
 #pragma once
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <functional>
@@ -47,14 +48,24 @@ struct Sprite_t
 	float m_flAddSelf = 0.0f;                 // SpriteCard's $addself: adds the texture on top of blending it
 	std::array<float, 3> m_vecTint{ 1, 1, 1 }; // $color, for the shaders that take it (SpriteCard doesn't)
 	float m_flAlpha = 1.0f;                   // $alpha
+	bool m_bVertexColor = true;               // takes the particle's colour (SpriteCard always; others with $vertexcolor)
+	bool m_bVertexAlpha = true;               // takes the particle's alpha (SpriteCard always; others with $vertexalpha)
 	bool m_bPointSample = false;              // the VTF's POINTSAMPLE flag: texels drawn as hard squares
 	bool m_bVisible = true;                   // false for materials the preview can't draw (refraction)
 	std::string m_szProblem;                  // why the texture couldn't be used, if it couldn't
 
-	// A particle's colour as this material draws it: overbright and tint applied.
+	// A particle's colour as this material draws it: overbright and tint applied. A material
+	// that ignores vertex colour draws its texture untinted by the particle.
 	[[nodiscard]] std::array<float, 3> Color( const std::array<float, 3> &vecParticle ) const
 	{
-		return { vecParticle[ 0 ] * m_flOverbright * m_vecTint[ 0 ], vecParticle[ 1 ] * m_flOverbright * m_vecTint[ 1 ], vecParticle[ 2 ] * m_flOverbright * m_vecTint[ 2 ] };
+		const std::array<float, 3> vecVertex = m_bVertexColor ? vecParticle : std::array<float, 3>{ 1, 1, 1 };
+		return { vecVertex[ 0 ] * m_flOverbright * m_vecTint[ 0 ], vecVertex[ 1 ] * m_flOverbright * m_vecTint[ 1 ], vecVertex[ 2 ] * m_flOverbright * m_vecTint[ 2 ] };
+	}
+
+	// A particle's alpha as this material draws it, with $alpha.
+	[[nodiscard]] float Alpha( float flParticle ) const
+	{
+		return ( m_bVertexAlpha ? std::clamp( flParticle, 0.0f, 1.0f ) : 1.0f ) * m_flAlpha;
 	}
 };
 using FileReader_t = std::function<std::optional<std::vector<std::byte>>( std::string_view szGamePath )>;

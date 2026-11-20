@@ -8,6 +8,8 @@
 //===========================================================================//
 #pragma once
 
+class CLoadingView;
+
 #include <QVariantMap>
 
 #include <array>
@@ -24,6 +26,8 @@
 #include <QWidget>
 
 #include "EditorTab.h"
+#include "audio/Audio.h"
+#include "kv1/Kv1.h"
 #include "map/Clip.h"
 #include "map/DispEdit.h"
 #include "map/Prefab.h"
@@ -79,10 +83,12 @@ public:
 	// szPath is the file on disk, or its path in the game when bFromGame; empty for a new map.
 	CMapEditor( const QString &szPath, bool bFromGame, QWidget *pParent = nullptr );
 	~CMapEditor() override;
+	void SetAudioOutput( xv::audio::CEngine::Output_t nOutput ) { m_nAudioOutput = nOutput; }
 
 	void Load( CMapDocument::Source_t source );
 	[[nodiscard]] CMapDocument &GetDocument() { return *m_pDocument; }
 	[[nodiscard]] const CMapDocument &GetDocument() const { return *m_pDocument; }
+	void SetUnsavedName( const QString &szName ) { m_szUnsavedName = szName; }
 	[[nodiscard]] const QString &GetPath() const { return m_szPath; }
 	[[nodiscard]] const MapViewSettings_t &GetSettings() const { return m_Settings; }
 	// The env_fog_controller the views show (its entity id; 0: the first that starts on).
@@ -137,6 +143,7 @@ public:
 	void BakeLightingNow();
 	[[nodiscard]] CMapFilterControl &GetFilterControl() { return *m_pFilter; }
 	[[nodiscard]] CMapProperties &GetProperties() { return *m_pProperties; }
+	void ApplyModelPreview( MapFrame_t &frame );
 	// Where the 3D camera is, for the 2D views to draw it (the first 3D pane's).
 	[[nodiscard]] std::optional<xv::map::CViewCamera> GetCamera() const;
 	// Where the camera was when this map was last closed, unless the file was saved since
@@ -208,6 +215,10 @@ public:
 	// Map > Load Pointfile / Unload / Go to Leak: a leak's line (the .lin beside the map).
 	void LoadPointfile();
 	void UnloadPointfile();
+	void LoadPortalFile();
+	bool LoadPortalFile( const QString &szFile );
+	void UnloadPortalFile();
+	[[nodiscard]] const QString &GetPortalPath() const { return m_szPortalPath; }
 	void GoToLeak();
 	// The clipping tool's line: two points in a 2D view's plane (the axis the view doesn't show
 	// is nAxis); Hammer's three modes; Enter cuts the selection.
@@ -316,6 +327,9 @@ public:
 	// What Object Properties' Browse lists for a key type ("sound", "particlesystem"); materials,
 	// sprites and models have browsers of their own.
 	[[nodiscard]] QStringList KeyNames( const std::string &szType );
+	void LoadPropertySounds( std::shared_ptr<const xv::vfs::CFileSystem> pFiles );
+	void PlayPropertySound( const QString &szSound, std::optional<double> pitch, std::optional<double> volume );
+	void StopPropertySound();
 	[[nodiscard]] CMapFaceEdit &GetFaceEdit() { return *m_pFaceEdit; }
 	// Tools > Building Generator: its panel, with the block tool's box (else the selection's
 	// bounds); Create adds the template's brushes as one group in one undo step.
@@ -390,12 +404,14 @@ public:
 protected:
 	// The Face Edit window goes with the tab: hidden while another tab shows.
 	void showEvent( QShowEvent *pEvent ) override;
+	void hideEvent( QHideEvent *pEvent ) override;
 
 signals:
 	void SideStateChanged();
 	void OpenInstanceRequested( const QString &szPath );
 	void FacePickChanged( const QString &szKey );
 	void StatusMessage( const QString &szText );
+	void OpenModelMaterialRequested( const QString &szPath );
 	// The tab's title changed (saved under another name, or modified).
 	void TitleChanged();
 	void CurrentMaterialChanged( const QString &szMaterial );
@@ -476,7 +492,9 @@ private:
 	bool m_bLightingWhole = true; // the next bake lights everything, not only what an edit changed
 	bool m_bLightingFresh = false; // and whatever was baked before (Bake Lighting)
 	std::array<const void *, 5> m_LightingExtras{}; // the props, overlays and sprites, whole and in parts
+	QString m_szPortalPath;
 	QString m_szPath;
+	QString m_szUnsavedName;
 	bool m_bFromGame = false;
 	// What the map was last loaded from, but its text: a recovery loads the autosave with it.
 	CMapDocument::Source_t m_LastSource;
@@ -569,7 +587,7 @@ private:
 	QWidget *m_pFaceEditHolder = nullptr; // Face Edit's panel, when it isn't in its window
 	CPanelColumn *m_pPanels = nullptr;    // the side's panels below the Filter Control
 	std::vector<xv::map::FaceRef_t> m_SelectedFaces;
-	QLabel *m_pLoading = nullptr;
+	CLoadingView *m_pLoading = nullptr;
 	QActionGroup *m_pTools = nullptr;
 	CMapToolHost *m_pToolHost = nullptr;
 	// The bars' commands and the bars as they first come, until the host takes them.
@@ -584,4 +602,8 @@ private:
 	QLabel *m_pStatusGame = nullptr;
 	std::map<std::string, QStringList> m_KeyNames; // KeyNames' lists, for the mount they came from
 	const void *m_pKeyNamesFor = nullptr;
+	xv::audio::CEngine::Output_t m_nAudioOutput = xv::audio::CEngine::Output_t::OUTPUT_DEVICE;
+	std::shared_ptr<const xv::vfs::CFileSystem> m_pSoundFiles;
+	std::unique_ptr<class CSoundPlayer> m_pPropertySound;
+	std::map<std::string, xv::kv1::CNode> m_SoundScripts;
 };

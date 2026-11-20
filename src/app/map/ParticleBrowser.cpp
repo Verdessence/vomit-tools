@@ -5,6 +5,7 @@
 //
 //===========================================================================//
 #include "ParticleBrowser.h"
+#include "LoadingView.h"
 
 #include <QCoreApplication>
 #include <QDialogButtonBox>
@@ -268,11 +269,8 @@ void CParticleBrowser::SetGrid( bool bGrid )
 	m_pList->setChecked( !bGrid );
 	m_pGrid->setChecked( bGrid );
 	QSettings{}.setValue( QLatin1String( GRID_SETTING ), bGrid );
-	// Until its picture is made, a tile holds a clear one of its size: the grid measures every
-	// item as one, so they all have room for a picture.
-	QPixmap clear( PICTURE_SIZE, PICTURE_SIZE );
-	clear.fill( Qt::transparent );
-	const QIcon waiting( clear );
+	// Reserve a picture cell until the thumbnail pass reaches the system.
+	const QIcon waiting = LoadingThumbnail();
 	for ( int i = 0; i < m_pModel->rowCount(); i++ )
 	{
 		QStandardItem *pItem = m_pModel->item( i );
@@ -287,8 +285,10 @@ void CParticleBrowser::SetGrid( bool bGrid )
 			szText += QStringLiteral( "    " ) + pItem->toolTip();
 		pItem->setText( szText );
 		const auto picture = m_Pictures.find( szName );
-		pItem->setIcon( !bGrid ? QIcon{} : picture != m_Pictures.end() && !picture->second.isNull() ? picture->second
-																									: waiting );
+		if ( !bGrid )
+			pItem->setIcon( {} );
+		else
+			pItem->setIcon( picture == m_Pictures.end() ? waiting : picture->second );
 	}
 	// The size kept for every item is the old mode's until it is measured again.
 	m_pView->setUniformItemSizes( false );

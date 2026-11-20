@@ -8,6 +8,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cmath>
 #include <cstring>
 #include <filesystem>
 #include <regex>
@@ -680,7 +681,7 @@ std::vector<Point_t> ReadPointfile( std::string_view szText )
 std::vector<Portal_t> ReadPortalFile( std::string_view szText )
 {
 	std::vector<Portal_t> portals;
-	if ( !szText.starts_with( "PRT1" ) )
+	if ( !( szText.starts_with( "PRT1\n" ) || szText.starts_with( "PRT1\r\n" ) ) )
 	{
 		return portals;
 	}
@@ -707,16 +708,25 @@ std::vector<Portal_t> ReadPortalFile( std::string_view szText )
 		{
 			continue;
 		}
-		Portal_t portal;
-		const int nPoints = ParseNumber<int>( numbers[ 0 ] ).value_or( 0 );
-		portal.m_nLeafA = ParseNumber<int>( numbers[ 1 ] ).value_or( 0 );
-		portal.m_nLeafB = ParseNumber<int>( numbers[ 2 ] ).value_or( 0 );
-		for ( int i = 0; i < nPoints && 3 + static_cast<std::size_t>( i ) * 3 + 2 < numbers.size(); i++ )
+		const auto nPoints = ParseNumber<int>( numbers[ 0 ] );
+		const auto nLeafA = ParseNumber<int>( numbers[ 1 ] );
+		const auto nLeafB = ParseNumber<int>( numbers[ 2 ] );
+		if ( !nPoints || *nPoints < 3 || static_cast<std::size_t>( *nPoints ) != ( numbers.size() - 3 ) / 3 ||
+			( numbers.size() - 3 ) % 3 != 0 || !nLeafA || *nLeafA < 0 || !nLeafB || *nLeafB < 0 )
+			continue;
+		Portal_t portal{ *nLeafA, *nLeafB, {} };
+		portal.m_Points.reserve( *nPoints );
+		for ( std::size_t n = 3; n < numbers.size(); n += 3 )
 		{
-			const std::size_t n = 3 + static_cast<std::size_t>( i ) * 3;
-			portal.m_Points.push_back( { ParseNumber<double>( numbers[ n ] ).value_or( 0 ), ParseNumber<double>( numbers[ n + 1 ] ).value_or( 0 ), ParseNumber<double>( numbers[ n + 2 ] ).value_or( 0 ) } );
+			const auto x = ParseNumber<double>( numbers[ n ] );
+			const auto y = ParseNumber<double>( numbers[ n + 1 ] );
+			const auto z = ParseNumber<double>( numbers[ n + 2 ] );
+			if ( !x || !y || !z || !std::isfinite( *x ) || !std::isfinite( *y ) || !std::isfinite( *z ) )
+				break;
+			portal.m_Points.push_back( { *x, *y, *z } );
 		}
-		portals.push_back( std::move( portal ) );
+		if ( portal.m_Points.size() == static_cast<std::size_t>( *nPoints ) )
+			portals.push_back( std::move( portal ) );
 	}
 	return portals;
 }

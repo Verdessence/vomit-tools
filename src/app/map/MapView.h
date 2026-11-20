@@ -10,6 +10,10 @@
 
 #include <array>
 #include <cmath>
+#include <functional>
+#include <optional>
+
+#include <QLineF>
 
 #include <QWidget>
 
@@ -178,6 +182,11 @@ protected:
 	void focusOutEvent( QFocusEvent *pEvent ) override;
 	[[nodiscard]] MapKeyContext_t GetKeyContext() const { return Is2DView( GetType() ) ? MapKeyContext_t::MAP_KEY_CONTEXT_2D : MapKeyContext_t::MAP_KEY_CONTEXT_3D; }
 	[[nodiscard]] CMapDocument &GetDocument() const;
+
+	using PortalProjection_t = std::function<std::optional<QLineF>( const xv::map::Point_t &, const xv::map::Point_t & )>;
+	[[nodiscard]] virtual PortalProjection_t PortalProjection() const = 0;
+	void PaintPortals( QPainter &painter ) const;
+	[[nodiscard]] bool PickPortal( QPointF at );
 
 	CMapEditor &m_Editor;
 };

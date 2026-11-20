@@ -7,6 +7,7 @@
 //===========================================================================//
 #include "Materials.h"
 
+#include <algorithm>
 #include <cmath>
 
 #include "kv1/Kv1.h"
@@ -141,6 +142,13 @@ MaterialInfo_t DescribeMaterial( const material::CMaterial &material )
 	info.m_vecColor = material.Color( "$color" );
 	info.m_bNoCull = material.Flag( "$nocull" );
 	info.m_flDecalScale = material.Number( "$decalscale", 1.0f );
+	const auto szOrientation = material.Value( "$spriteorientation" );
+	info.m_bSpriteUpright = kv1::EqualsIgnoreCase( szOrientation, "parallel_upright" ) || kv1::EqualsIgnoreCase( szOrientation, "vp_parallel_upright" );
+	info.m_bProxyBaseFrame = std::ranges::any_of( material.m_Proxies, []( const material::Proxy_t &proxy ) {
+		return kv1::EqualsIgnoreCase( proxy.m_szName, "AnimatedTexture" ) && std::ranges::any_of( proxy.m_Settings, []( const auto &setting ) {
+			return kv1::EqualsIgnoreCase( setting.first, "animatedtextureframenumvar" ) && kv1::EqualsIgnoreCase( setting.second, "$frame" );
+		} );
+	} );
 	if ( auto pProxies = std::make_shared<const material::CProxies>( material ); pProxies->IsAnimated() )
 	{
 		info.m_pProxies = std::move( pProxies );

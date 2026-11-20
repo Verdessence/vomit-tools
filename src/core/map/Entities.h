@@ -37,6 +37,7 @@ struct EntityVisual_t
 	bool m_bModelBox = false;             // studioprop: the box comes from the model
 	bool m_bInvertPitch = false;          // lightprop
 	int m_nSkin = 0;
+	int m_nBody = 0;
 	double m_flModelScale = 1.0;
 
 	std::string m_szSprite;               // a material to draw facing the camera

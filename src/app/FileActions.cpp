@@ -134,7 +134,7 @@ void ShowFileMenu( QWidget *pParent, const QPoint &globalAt, const QString &szPa
 	menu.addAction( QObject::tr( "Open with Default App" ), [ szPath ] { QDesktopServices::openUrl( QUrl::fromLocalFile( szPath ) ); } );
 	menu.addAction( QObject::tr( "Show in File Manager" ), [ szPath ] { RevealInFileManager( szPath ); } );
 	menu.addSeparator();
-	menu.addAction( QObject::tr( "Copy Path" ), [ szPath ] { QGuiApplication::clipboard()->setText( QDir::toNativeSeparators( szPath ) ); } );
+	menu.addAction( QObject::tr( "Copy Path" ), [ szPath ] { QGuiApplication::clipboard()->setText( QDir::fromNativeSeparators( szPath ) ); } );
 	menu.addAction( QObject::tr( "Copy Name" ), [ info ] { QGuiApplication::clipboard()->setText( info.fileName() ); } );
 	menu.addSeparator();
 	menu.addAction( QObject::tr( "Rename…" ), [ pParent, info ] {

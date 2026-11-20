@@ -5,6 +5,7 @@
 //
 //===========================================================================//
 #include "SkyEditor.h"
+#include "LoadingView.h"
 
 #include <cmath>
 #include <functional>
@@ -530,6 +531,8 @@ QStringList CSkyEditor::LoadFiles( const QStringList &given )
 			}
 		}
 	}
+	CLoadingView loading( m_pView, LoadingLayout_t::LOADING_LAYOUT_PREVIEW );
+	CWaitCursor wait( &loading, tr( "Reading the skybox faces…" ) );
 	QStringList problems;
 	std::array<std::optional<CSkyDocument::Slot_t>, 6> changes;
 	for ( const QString &szPath : paths )
@@ -556,6 +559,7 @@ QStringList CSkyEditor::LoadFiles( const QStringList &given )
 	}
 	if ( !problems.isEmpty() )
 	{
+		wait.Finish();
 		QMessageBox::warning( this, tr( "Load Faces" ), problems.join( u'\n' ) );
 	}
 	return problems;
@@ -566,11 +570,14 @@ QStringList CSkyEditor::LoadFiles( const QStringList &given )
 //-----------------------------------------------------------------------------
 bool CSkyEditor::LoadFace( Face_t nFace, const QString &szPath )
 {
+	CLoadingView loading( m_pView, LoadingLayout_t::LOADING_LAYOUT_PREVIEW );
+	CWaitCursor wait( &loading, tr( "Reading the skybox face…" ) );
 	QString szError;
 	auto image = ReadImageFile( szPath, &szError );
 	if ( !image )
 	{
-		QMessageBox::warning( this, tr( "Load Image" ), tr( "Could not read %1:\n%2" ).arg( QDir::toNativeSeparators( szPath ), szError ) );
+		wait.Finish();
+		QMessageBox::warning( this, tr( "Load Image" ), tr( "Could not read %1:\n%2" ).arg( QDir::fromNativeSeparators( szPath ), szError ) );
 		return false;
 	}
 	m_pDocument->SetSlot( nFace, { std::make_shared<const xv::texture::CImage>( std::move( *image ) ), szPath, {}, {}, {}, {} }, tr( "Set %1" ).arg( FaceName( nFace ) ) );
@@ -616,10 +623,11 @@ bool CSkyEditor::ImportPanorama( const QString &szGiven, const xv::sky::Panorama
 	QFile file{ szPath };
 	if ( !file.open( QIODevice::ReadOnly ) )
 	{
-		QMessageBox::warning( this, tr( "Import Panorama" ), tr( "Could not read %1:\n%2" ).arg( QDir::toNativeSeparators( szPath ), file.errorString() ) );
+		QMessageBox::warning( this, tr( "Import Panorama" ), tr( "Could not read %1:\n%2" ).arg( QDir::fromNativeSeparators( szPath ), file.errorString() ) );
 		return false;
 	}
-	QApplication::setOverrideCursor( Qt::WaitCursor );
+	CLoadingView loading( m_pView, LoadingLayout_t::LOADING_LAYOUT_PREVIEW );
+	CWaitCursor read( &loading, tr( "Reading the panorama…" ) );
 	const QByteArray data = file.readAll();
 	const std::span<const std::byte> bytes{ reinterpret_cast<const std::byte *>( data.constData() ), static_cast<std::size_t>( data.size() ) };
 	std::string szError;
@@ -632,10 +640,10 @@ bool CSkyEditor::ImportPanorama( const QString &szGiven, const xv::sky::Panorama
 			panorama = xv::texture::ToFloat( *image );
 		}
 	}
-	QApplication::restoreOverrideCursor();
+	read.Finish();
 	if ( !panorama || panorama->Empty() )
 	{
-		QMessageBox::warning( this, tr( "Import Panorama" ), tr( "Could not read %1:\n%2" ).arg( QDir::toNativeSeparators( szPath ), QString::fromStdString( szError.empty() ? std::string{ "not an image" } : szError ) ) );
+		QMessageBox::warning( this, tr( "Import Panorama" ), tr( "Could not read %1:\n%2" ).arg( QDir::fromNativeSeparators( szPath ), QString::fromStdString( szError.empty() ? std::string{ "not an image" } : szError ) ) );
 		return false;
 	}
 	// An equirectangular panorama is twice as wide as tall; anything else would come out
@@ -650,6 +658,7 @@ bool CSkyEditor::ImportPanorama( const QString &szGiven, const xv::sky::Panorama
 	xv::sky::PanoramaSky_t sky;
 	if ( pOptions )
 	{
+		CWaitCursor build( &loading, tr( "Building the skybox faces…" ) );
 		sky = xv::sky::SkyFromPanorama( *panorama, *pOptions, bHdr );
 	}
 	else
@@ -659,9 +668,8 @@ bool CSkyEditor::ImportPanorama( const QString &szGiven, const xv::sky::Panorama
 		{
 			return false;
 		}
-		QApplication::setOverrideCursor( Qt::WaitCursor );
+		CWaitCursor build( &loading, tr( "Building the skybox faces…" ) );
 		sky = dialog.MakeSky();
-		QApplication::restoreOverrideCursor();
 	}
 	if ( sky.m_Faces[ 0 ].Empty() )
 	{
@@ -723,7 +731,7 @@ bool CSkyEditor::CanExport() const
 void CSkyEditor::ShowExported( const QString &szFolder )
 {
 	m_pExported->setText( tr( "Exported to %1. In game, with a map loaded, open the console and enter: sv_skyname %2" )
-			.arg( QDir::toNativeSeparators( szFolder ), m_pDocument->GetName() ) );
+			.arg( QDir::fromNativeSeparators( szFolder ), m_pDocument->GetName() ) );
 	m_pExported->show();
 }
 

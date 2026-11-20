@@ -57,7 +57,7 @@ PropList_t ListProps( const CScene &scene )
 			continue;
 		}
 		// The game's file system ignores case; one load serves every spelling.
-		PropKey_t key{ visual.m_szModel, visual.m_nSkin };
+		PropKey_t key{ visual.m_szModel, visual.m_nSkin, visual.m_nBody };
 		std::ranges::transform( key.m_szModel, key.m_szModel.begin(), []( unsigned char ch ) { return static_cast<char>( std::tolower( ch ) ); } );
 		const auto [ it, bAdded ] = known.try_emplace( key, static_cast<std::uint32_t>( list.m_Keys.size() ) );
 		if ( bAdded )

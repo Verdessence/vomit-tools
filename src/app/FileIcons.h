@@ -22,6 +22,9 @@
 [[nodiscard]] QString FileKind( QStringView szName );
 [[nodiscard]] QString FolderKind();
 
+// A monochrome icon against the widget palette, including when the icon theme is different.
+[[nodiscard]] QIcon ForegroundIcon( QIcon icon );
+
 // For QFileSystemModel: the same icons and kinds as the other trees.
 class CFileIconProvider : public QAbstractFileIconProvider
 {

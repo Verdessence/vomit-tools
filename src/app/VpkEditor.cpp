@@ -5,6 +5,7 @@
 //
 //===========================================================================//
 #include "VpkEditor.h"
+#include "LoadingView.h"
 #include "StickyTreeParents.h"
 #include "FileIcons.h"
 
@@ -445,6 +446,7 @@ CVpkEditor::CVpkEditor( std::unique_ptr<xv::vfs::CPackage> pPackage, CSoundPlaye
 	} );
 
 	m_pPreviewHost = new QWidget;
+	m_pLoading = new CLoadingView( m_pPreviewHost, LoadingLayout_t::LOADING_LAYOUT_PREVIEW );
 	auto *pPreviewLayout = new QVBoxLayout( m_pPreviewHost );
 	pPreviewLayout->setContentsMargins( 0, 0, 0, 0 );
 
@@ -482,7 +484,7 @@ CVpkEditor::CVpkEditor( std::unique_ptr<xv::vfs::CPackage> pPackage, CSoundPlaye
 	m_nMatches = static_cast<int>( m_pPackage->GetEntries().size() );
 	m_pCount->setText( tr( "%n file(s), %1", nullptr, m_nMatches ).arg( QLocale{}.formattedDataSize( static_cast<qint64>( m_pPackage->GetTotalSize() ) ) ) );
 	auto *pInfo = new QLabel( tr( "%1\n%2 archive, %n file(s).\n\nPick a file to preview it. Search with the box above; export with the buttons or the right-click menu.", nullptr, m_nMatches )
-			.arg( QDir::toNativeSeparators( ToQString( m_pPackage->GetFile() ) ), QString::fromStdString( m_pPackage->GetFormat() ) ) );
+			.arg( ToQString( m_pPackage->GetFile() ), QString::fromStdString( m_pPackage->GetFormat() ) ) );
 	pInfo->setAlignment( Qt::AlignCenter );
 	pInfo->setWordWrap( true );
 	SetPreviewWidget( pInfo );
@@ -594,6 +596,7 @@ void CVpkEditor::Preview( const QString &szPath )
 //-----------------------------------------------------------------------------
 void CVpkEditor::PreviewEntry( const xv::vfs::PackageEntry_t &entry )
 {
+	CWaitCursor wait( m_pLoading, tr( "Reading the packed file…" ) );
 	const xv::vfs::PackageEntry_t *it = &entry;
 	const auto bytes = m_pPackage->Read( entry );
 	if ( !bytes )
@@ -829,7 +832,7 @@ int CVpkEditor::ExportTo( const QStringList &files, const QString &szFolder, con
 	const bool bCancelled = pProgress && pProgress->wasCanceled();
 	pProgress.reset();
 
-	const QString szWhere = QDir::toNativeSeparators( szFolder );
+	const QString szWhere = QDir::fromNativeSeparators( szFolder );
 	emit StatusMessage( tr( "Exported %n file(s) to %1", nullptr, nWritten ).arg( szWhere ) );
 	if ( bQuiet )
 	{

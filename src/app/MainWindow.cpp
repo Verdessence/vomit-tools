@@ -29,6 +29,7 @@
 #include <QCryptographicHash>
 #include <QDesktopServices>
 #include <QFrame>
+#include <QGridLayout>
 #include <QDockWidget>
 #include <QDragEnterEvent>
 #include <QDropEvent>
@@ -36,6 +37,9 @@
 #include <QFileInfo>
 #include <QHBoxLayout>
 #include <QHeaderView>
+#include <QComboBox>
+#include <QDialogButtonBox>
+#include <QFormLayout>
 #include <QInputDialog>
 #include <QLabel>
 #include <QLineEdit>
@@ -53,7 +57,6 @@
 #include <QSaveFile>
 #include <QSet>
 #include <QSettings>
-#include <QSlider>
 #include <QSortFilterProxyModel>
 #include <QSplitter>
 #include <QStyle>
@@ -61,6 +64,7 @@
 #include <QSysInfo>
 #include <QStandardPaths>
 #include <QStatusBar>
+#include <QStackedWidget>
 #include <QTabBar>
 #include <QTabWidget>
 #include <QTableWidget>
@@ -78,8 +82,10 @@
 #include "FileActions.h"
 #include "FileDialogs.h"
 #include "FileIcons.h"
+#include "map/MapToolBars.h"
 #include "FileViews.h"
 #include "FolderBrowser.h"
+#include "LoadingView.h"
 #include "ImageFiles.h"
 #include "InterfaceMode.h"
 #include "KvCard.h"
@@ -183,7 +189,7 @@ constexpr auto SESSION_KEY = "lastSession";
 constexpr auto SESSION_CURRENT_KEY = "lastSessionTab";
 constexpr auto SESSION_SIDE_KEY = "lastSessionSide";
 constexpr auto RECENT_KEY = "recentPaths";
-constexpr auto VOLUME_KEY = "volume";
+constexpr auto OPEN_FILTER_KEY = "openFileFilter";
 constexpr auto SKY_EXPORT_KEY = "skyExportFolder";
 constexpr auto RECENT_EDITED_KEY = "recentEdited"; // path: when it was last saved here
 constexpr int RECENT_LIMIT = 100;
@@ -416,7 +422,7 @@ CMainWindow::CMainWindow( QWidget *pParent, xv::audio::CEngine::Output_t nAudio 
 	  m_pFilter( new QSortFilterProxyModel( this ) ),
 	  m_pUndoGroup( new QUndoGroup( this ) )
 {
-	setWindowTitle( QStringLiteral( "vomit-tools" ) );
+	setWindowTitle( tr( "Vomit Tools" ) );
 	resize( 1400, 900 );
 	setAcceptDrops( true );
 	m_pPlayer = new CSoundPlayer( *m_pFileSystem, this, nAudio );
@@ -435,16 +441,19 @@ CMainWindow::CMainWindow( QWidget *pParent, xv::audio::CEngine::Output_t nAudio 
 
 	m_pTree = new QTreeView;
 	m_pTree->setModel( m_pFilter );
+	m_pGameLoading = new CLoadingView( m_pTree->viewport(), LoadingLayout_t::LOADING_LAYOUT_ROWS );
 	m_pTree->setUniformRowHeights( true );
 	new CStickyTreeParents( m_pTree ); // the open folders over the rows they hold
 	// Every column can be sized; the widths are kept between runs.
 	m_pTree->header()->setSectionResizeMode( QHeaderView::Interactive );
 	m_pTree->header()->setStretchLastSection( false );
-	m_pTree->setColumnWidth( CVfsModel::COLUMN_NAME_COLUMN, 220 );
-	m_pTree->setColumnWidth( CVfsModel::COLUMN_TYPE_COLUMN, 110 );
-	// Its own key: a layout saved before the Type column came would put the columns out of step.
-	m_pTree->header()->restoreState( QSettings{}.value( QStringLiteral( "gameTreeColumns" ) ).toByteArray() );
-	connect( m_pTree->header(), &QHeaderView::sectionResized, this, [ this ] { QSettings{}.setValue( QStringLiteral( "gameTreeColumns" ), m_pTree->header()->saveState() ); } );
+	m_pTree->setColumnWidth( CVfsModel::COLUMN_NAME_COLUMN, 168 );
+	m_pTree->setColumnWidth( CVfsModel::COLUMN_TYPE_COLUMN, 88 );
+	m_pTree->setColumnWidth( CVfsModel::COLUMN_SIZE_COLUMN, 68 );
+	m_pTree->setColumnWidth( CVfsModel::COLUMN_SOURCE_COLUMN, 90 );
+	// The extra column changes the order of the sections stored by older versions.
+	m_pTree->header()->restoreState( QSettings{}.value( QStringLiteral( "gameTreeColumnsWithSize" ) ).toByteArray() );
+	connect( m_pTree->header(), &QHeaderView::sectionResized, this, [ this ] { QSettings{}.setValue( QStringLiteral( "gameTreeColumnsWithSize" ), m_pTree->header()->saveState() ); } );
 	m_pTree->setContextMenuPolicy( Qt::CustomContextMenu );
 	connect( m_pTree, &QTreeView::customContextMenuRequested, this, [ this ]( const QPoint &at ) {
 		const QModelIndex proxyIndex = m_pTree->indexAt( at );
@@ -493,7 +502,6 @@ CMainWindow::CMainWindow( QWidget *pParent, xv::audio::CEngine::Output_t nAudio 
 		}
 		menu.exec( m_pTree->viewport()->mapToGlobal( at ) );
 	} );
-	m_pTree->setToolTip( tr( "The game's files as the engine sees them. Double-click a soundscape, soundscript, sky material or particle file to edit it" ) );
 	connect( m_pTree->selectionModel(), &QItemSelectionModel::currentChanged, this, &CMainWindow::PreviewFile );
 	connect( m_pTree, &QTreeView::activated, this, [ this ]( const QModelIndex &proxyIndex ) {
 		const QString szPath = m_pFilter->mapToSource( proxyIndex ).data( CVfsModel::ROLE_PATH_ROLE ).toString();
@@ -560,21 +568,32 @@ CMainWindow::CMainWindow( QWidget *pParent, xv::audio::CEngine::Output_t nAudio 
 	connect( m_pFolders, &CFolderBrowser::FileSelected, this, &CMainWindow::PreviewDiskFile );
 	connect( m_pFolders, &CFolderBrowser::FileActivated, this, &CMainWindow::OpenDiskFile );
 
-	m_pSides = new QTabWidget;
-	m_pSides->setDocumentMode( true );
-	m_pSides->addTab( m_pGameBrowser, tr( "Game" ) );
-	m_pSides->addTab( m_pFolders, tr( "Folder" ) );
+	m_pSides = new QStackedWidget;
+	m_pSides->setObjectName( QStringLiteral( "fileBrowserPages" ) );
+	m_pSides->addWidget( m_pGameBrowser );
+	m_pSides->addWidget( m_pFolders );
+
+	auto *pBrowserTabs = new QTabBar;
+	pBrowserTabs->setObjectName( QStringLiteral( "fileBrowserTabs" ) );
+	pBrowserTabs->setDocumentMode( true );
+	pBrowserTabs->setDrawBase( false );
+	pBrowserTabs->setExpanding( false );
+	pBrowserTabs->addTab( tr( "Game" ) );
+	pBrowserTabs->addTab( tr( "Folder" ) );
+	connect( pBrowserTabs, &QTabBar::currentChanged, m_pSides, &QStackedWidget::setCurrentIndex );
+	connect( m_pSides, &QStackedWidget::currentChanged, pBrowserTabs, &QTabBar::setCurrentIndex );
 
 	m_pPreviewHost = new QWidget;
 	auto *pPreviewLayout = new QVBoxLayout( m_pPreviewHost );
 	pPreviewLayout->setContentsMargins( 0, 0, 0, 0 );
 	pPreviewLayout->addWidget( Placeholder( tr( "Open a game, a folder or a file from the File menu, or drop files and folders here.\n\n"
 												"Soundscapes (soundscapes_*.txt) and soundscripts (game_sounds_*.txt) open in the sound editor, skies "
-												"in the skybox editor (File → New Skybox) and particle files (.pcf) in the particle editor; sounds, "
+												"in the skybox editor (File → New… → Skybox) and particle files (.pcf) in the particle editor; sounds, "
 												"textures and other files show here." ) ) );
 
 	m_pTabs = new CEditorTabWidget;
 	m_pTabs->setObjectName( QStringLiteral( "editorTabs" ) );
+	m_pEditorLoading = new CLoadingView( m_pTabs, LoadingLayout_t::LOADING_LAYOUT_PREVIEW );
 	m_pTabs->setDocumentMode( true );
 	m_pTabs->setTabsClosable( true );
 	m_pTabs->addTab( m_pPreviewHost, tr( "Preview" ) );
@@ -598,12 +617,11 @@ CMainWindow::CMainWindow( QWidget *pParent, xv::audio::CEngine::Output_t nAudio 
 		UpdateMapMenu();
 	} );
 
-	// The groups' strip over the tabs.
+	// The header switches between groups and the preview.
 	m_pTabGroups = new CTabGroups( m_pTabs );
 	m_pTabGroups->SetKeyFunction( [ this ]( QWidget *pTab ) { return SessionEntryFor( m_pTabs->indexOf( pTab ) ); } );
 	// With each kind of editor in a window of its own, the windows are the groups.
 	const auto groupTabs = [ this ] { m_pTabGroups->SetEnabled( CPreferences::Instance().IsTabGroups() && !CPreferences::Instance().IsEditorWindows() ); };
-	groupTabs();
 	connect( &CPreferences::Instance(), &CPreferences::TabGroupsChanged, m_pTabGroups, groupTabs );
 	connect( &CPreferences::Instance(), &CPreferences::EditorWindowsChanged, this, [ this, groupTabs ]( bool bWindows ) {
 		groupTabs();
@@ -619,23 +637,57 @@ CMainWindow::CMainWindow( QWidget *pParent, xv::audio::CEngine::Output_t nAudio 
 	auto *pDiscordTimer = new QTimer( this );
 	connect( pDiscordTimer, &QTimer::timeout, this, &CMainWindow::UpdateDiscord );
 	pDiscordTimer->start( 5000 );
-	auto *pTabArea = new QWidget;
-	auto *pTabLayout = new QVBoxLayout( pTabArea );
-	pTabLayout->setContentsMargins( 0, 0, 0, 0 );
-	pTabLayout->setSpacing( 0 );
-	pTabLayout->addWidget( m_pTabGroups->GetBar() );
-	pTabLayout->addWidget( m_pTabs, 1 );
+	auto *pHeader = new QWidget;
+	pHeader->setObjectName( QStringLiteral( "workspaceHeader" ) );
+	auto *pHeaderLayout = new QGridLayout( pHeader );
+	pHeaderLayout->setContentsMargins( 6, 0, 6, 0 );
+	pHeaderLayout->setSpacing( 0 );
+	// Balance the browser tabs with an equal column so the strip centres in the window.
+	const int nBrowserTabsWidth = pBrowserTabs->sizeHint().width() + 6;
+	pHeaderLayout->setColumnMinimumWidth( 0, nBrowserTabsWidth );
+	pHeaderLayout->setColumnMinimumWidth( 2, nBrowserTabsWidth );
+	pHeaderLayout->setColumnStretch( 0, 1 );
+	pHeaderLayout->setColumnStretch( 2, 1 );
+	pHeaderLayout->addWidget( pBrowserTabs, 0, 0, Qt::AlignLeft | Qt::AlignBottom );
+	auto *pPad = new QFrame;
+	pPad->setObjectName( QStringLiteral( "workspacePad" ) );
+	pPad->setStyleSheet( QStringLiteral( "QFrame#workspacePad { background: palette(base); border: 1px solid palette(mid); border-radius: 6px; }" ) );
+	auto *pPadLayout = new QHBoxLayout( pPad );
+	pPadLayout->setContentsMargins( 4, 1, 4, 1 );
+	pPadLayout->setSpacing( 1 );
+	auto *pHome = new QToolButton;
+	pHome->setStyleSheet( QStringLiteral(
+		"QToolButton { background: palette(button); border: 1px solid palette(mid); border-radius: 13px; }"
+		"QToolButton:hover { background: palette(alternate-base); }"
+		"QToolButton:focus, QToolButton:pressed { border-color: palette(highlight); }" ) );
+	pHome->setIcon( ForegroundIcon( MakeMapIcon( MapIcon_t::MAP_ICON_HOME, Qt::white ) ) );
+	pHome->setIconSize( QSize( 17, 17 ) );
+	pHome->setFixedSize( 26, 26 );
+	pHome->setToolTip( tr( "Home and Preview" ) );
+	pHome->setAccessibleName( pHome->toolTip() );
+	connect( pHome, &QToolButton::clicked, this, [ this ] { m_pTabs->setCurrentWidget( m_pPreviewHost ); } );
+	pPadLayout->addWidget( pHome );
+	pPadLayout->addWidget( m_pTabGroups->GetBar() );
+	pHeaderLayout->addWidget( pPad, 0, 1 );
+	groupTabs();
+
+	auto *pEditorColumn = new QWidget;
+	auto *pEditorLayout = new QVBoxLayout( pEditorColumn );
+	pEditorLayout->setContentsMargins( 0, 0, 0, 0 );
+	pEditorLayout->setSpacing( 0 );
+	pEditorLayout->addWidget( BuildConfigBar() );
+	pEditorLayout->addWidget( m_pTabs, 1 );
 
 	auto *pSplitter = new QSplitter;
 	pSplitter->addWidget( m_pSides );
-	pSplitter->addWidget( pTabArea );
+	pSplitter->addWidget( pEditorColumn );
 	pSplitter->setStretchFactor( 1, 3 );
-	pSplitter->setSizes( { 320, 1080 } );
+	pSplitter->setSizes( { 420, 980 } );
 	auto *pCentral = new QWidget;
 	auto *pCentralLayout = new QVBoxLayout( pCentral );
 	pCentralLayout->setContentsMargins( 0, 0, 0, 0 );
 	pCentralLayout->setSpacing( 0 );
-	pCentralLayout->addWidget( BuildConfigBar() );
+	pCentralLayout->addWidget( pHeader );
 	pCentralLayout->addWidget( pSplitter, 1 );
 	setCentralWidget( pCentral );
 
@@ -658,9 +710,11 @@ CMainWindow::CMainWindow( QWidget *pParent, xv::audio::CEngine::Output_t nAudio 
 	addDockWidget( Qt::BottomDockWidgetArea, pMountsDock );
 	pMountsDock->hide();
 
-	BuildPlaybackBar();
+	ConnectPlaybackStatus();
+	m_pGameIcon = new QLabel;
+	statusBar()->addWidget( m_pGameIcon );
 	m_pGameLabel = new QLabel;
-	statusBar()->addPermanentWidget( m_pGameLabel );
+	statusBar()->addWidget( m_pGameLabel );
 	UpdateGameLabel();
 	statusBar()->addPermanentWidget( BuildFooter() );
 
@@ -679,18 +733,12 @@ CMainWindow::~CMainWindow() = default;
 //-----------------------------------------------------------------------------
 void CMainWindow::BuildMenus( QAction *pSearchPathsToggle )
 {
+	// Breeze can draw menu titles with KDE's text colour over a different qt6ct palette.
+	menuBar()->setStyleSheet( QStringLiteral(
+		"QMenuBar::item { color: palette(window-text); background: transparent; }"
+		"QMenuBar::item:selected, QMenuBar::item:pressed { color: palette(highlighted-text); background: palette(highlight); }" ) );
 	auto *pFile = menuBar()->addMenu( tr( "&File" ) );
-	auto *pNew = pFile->addMenu( tr( "&New" ) );
-	pNew->setObjectName( QStringLiteral( "fileNewMenu" ) );
-	pNew->addAction( tr( "&Map (VMF)" ), this, [ this ] { NewMap(); } );
-	pNew->addAction( tr( "&Particle File…" ), this, &CMainWindow::NewParticleFile );
-	pNew->addAction( tr( "S&kybox" ), this, [ this ] { NewSky(); } );
-	pNew->addAction( tr( "&Detail File…" ), this, [ this ] { NewDetailFile(); } );
-	pNew->addAction( tr( "&Soundscape File…" ), this, [ this ] { NewSoundFile( FileKind_t::FILE_KIND_SOUNDSCAPE ); } );
-	pNew->addAction( tr( "Sound&script File…" ), this, [ this ] { NewSoundFile( FileKind_t::FILE_KIND_SOUNDSCRIPT ); } );
-	pNew->addSeparator();
-	pNew->addAction( tr( "&VTF from Pictures…" ), this, &CMainWindow::ChooseNewTexture );
-	pNew->addAction( tr( "Con&vert a Folder of Textures…" ), this, &CMainWindow::ChooseBatchConvert );
+	pFile->addAction( tr( "&New…" ), QKeySequence::New, this, &CMainWindow::ChooseNewFile )->setObjectName( QStringLiteral( "fileNewAction" ) );
 	// Archives and compiled maps open through File… too: its chooser lists them.
 	auto *pOpen = pFile->addMenu( tr( "&Open" ) );
 	pOpen->setObjectName( QStringLiteral( "fileOpenMenu" ) );
@@ -791,14 +839,11 @@ void CMainWindow::BuildMenus( QAction *pSearchPathsToggle )
 	pEdit->addAction( pUndo );
 	pEdit->addAction( pRedo );
 	pEdit->addSeparator();
-	pEdit->addAction( tr( "&Find Particle System…" ), QKeySequence{ Qt::CTRL | Qt::SHIFT | Qt::Key_F }, this, [ this ] { FindParticleSystem(); } );
-	pEdit->addSeparator();
 	// The platform's shortcut where it has one (macOS), Ctrl+, elsewhere.
 	const QKeySequence preferencesKey = QKeySequence::keyBindings( QKeySequence::Preferences ).isEmpty() ? QKeySequence{ Qt::CTRL | Qt::Key_Comma } : QKeySequence{ QKeySequence::Preferences };
 	QAction *pPreferences = pEdit->addAction( tr( "&Preferences…" ), preferencesKey, this, &CMainWindow::ShowPreferences );
 	pPreferences->setObjectName( QStringLiteral( "preferencesAction" ) );
 	pPreferences->setMenuRole( QAction::PreferencesRole );
-	pEdit->addAction( tr( "Open Settings &File" ), this, &CMainWindow::OpenConfigFile )->setToolTip( tr( "vomit-tools.nut: every setting, the keys and rules, as Squirrel tables" ) );
 
 	auto *pGame = menuBar()->addMenu( tr( "&Game" ) );
 	pGame->addAction( tr( "&Reload Files" ), QKeySequence::Refresh, this, &CMainWindow::Remount );
@@ -811,17 +856,6 @@ void CMainWindow::BuildMenus( QAction *pSearchPathsToggle )
 			QDesktopServices::openUrl( QUrl::fromLocalFile( ToQString( GetWriteFolder() ) ) );
 		}
 	} );
-	pGame->addSeparator();
-	QAction *pModelBrowser = pGame->addAction( tr( "Browse M&odels" ), QKeySequence( Qt::CTRL | Qt::SHIFT | Qt::Key_M ), this, &CMainWindow::OpenModelBrowser );
-	pModelBrowser->setObjectName( QStringLiteral( "modelBrowserAction" ) );
-	auto *pSkies = pGame->addMenu( tr( "Open &Sky" ) );
-	pSkies->setObjectName( QStringLiteral( "gameSkyMenu" ) );
-	connect( pSkies, &QMenu::aboutToShow, this, [ this, pSkies ] { FillSkyMenu( pSkies ); } );
-	auto *pManifests = pGame->addMenu( tr( "Generate &Manifest" ) );
-	pManifests->addAction( tr( "&Soundscapes…" ), this, [ this ] { GenerateManifest( CManifestDialog::Format_t::FORMAT_SOUNDSCAPES ); } );
-	pManifests->addAction( tr( "Sound&scripts…" ), this, [ this ] { GenerateManifest( CManifestDialog::Format_t::FORMAT_SOUNDSCRIPTS ); } );
-	pManifests->addAction( tr( "&Particles…" ), this, [ this ] { GenerateManifest( CManifestDialog::Format_t::FORMAT_PARTICLES ); } );
-	pManifests->addAction( tr( "A &Map's Particles…" ), this, &CMainWindow::ChooseMapParticles );
 	pGame->addSeparator();
 	pGame->addAction( pSearchPathsToggle );
 
@@ -979,10 +1013,31 @@ void CMainWindow::BuildMenus( QAction *pSearchPathsToggle )
 			pMap->GoToLeak();
 		}
 	} );
+	m_pMapMenu->addAction( tr( "Load Portal File…" ), this, [ this ] {
+				  if ( auto *pMap = GetCurrentMap() )
+					  pMap->LoadPortalFile();
+			  } )
+		->setObjectName( QStringLiteral( "mapLoadPortalFile" ) );
+	m_pMapMenu->addAction( tr( "Unload Portal File" ), this, [ this ] {
+				  if ( auto *pMap = GetCurrentMap() )
+					  pMap->UnloadPortalFile();
+			  } )
+		->setObjectName( QStringLiteral( "mapUnloadPortalFile" ) );
 	m_pMapMenu->menuAction()->setVisible( false );
 
 	// Simple or regular names, everywhere and remembered.
 	auto *pTools = menuBar()->addMenu( tr( "&Tools" ) );
+	QAction *pModelBrowser = pTools->addAction( tr( "Browse M&odels" ), QKeySequence( Qt::CTRL | Qt::SHIFT | Qt::Key_M ), this, &CMainWindow::OpenModelBrowser );
+	pModelBrowser->setObjectName( QStringLiteral( "modelBrowserAction" ) );
+	auto *pSkies = pTools->addMenu( tr( "Open &Sky" ) );
+	pSkies->setObjectName( QStringLiteral( "gameSkyMenu" ) );
+	connect( pSkies, &QMenu::aboutToShow, this, [ this, pSkies ] { FillSkyMenu( pSkies ); } );
+	auto *pManifests = pTools->addMenu( tr( "Generate &Manifest" ) );
+	pManifests->addAction( tr( "&Soundscapes…" ), this, [ this ] { GenerateManifest( CManifestDialog::Format_t::FORMAT_SOUNDSCAPES ); } );
+	pManifests->addAction( tr( "Sound&scripts…" ), this, [ this ] { GenerateManifest( CManifestDialog::Format_t::FORMAT_SOUNDSCRIPTS ); } );
+	pManifests->addAction( tr( "&Particles…" ), this, [ this ] { GenerateManifest( CManifestDialog::Format_t::FORMAT_PARTICLES ); } );
+	pManifests->addAction( tr( "A &Map's Particles…" ), this, &CMainWindow::ChooseMapParticles );
+	pTools->addSeparator();
 	auto *pCreatePrefab = pTools->addAction( tr( "Create Prefab..." ), this, [ this ] { if ( auto *pMap = GetCurrentMap() ) pMap->CreatePrefab(); } );
 	pCreatePrefab->setObjectName( QStringLiteral( "mapCreatePrefabAction" ) );
 	auto *pBuilding = pTools->addAction( tr( "&Building Generator…" ), this, [ this ] { if ( auto *pMap = GetCurrentMap() ) pMap->ShowBuildingGenerator(); } );
@@ -1007,7 +1062,7 @@ void CMainWindow::BuildMenus( QAction *pSearchPathsToggle )
 			for ( const QFileInfo &folder : custom.entryInfoList( QDir::Dirs | QDir::NoDotAndDotDot, QDir::Name ) )
 			{
 				if ( IsHudFolder( folder.absoluteFilePath() ) )
-					pHud->addAction( tr( "custom/%1" ).arg( folder.fileName() ), this, [ this, szFolder = folder.absoluteFilePath() ] { OpenHudFolder( szFolder ); } )->setToolTip( QDir::toNativeSeparators( folder.absoluteFilePath() ) );
+					pHud->addAction( tr( "custom/%1" ).arg( folder.fileName() ), this, [ this, szFolder = folder.absoluteFilePath() ] { OpenHudFolder( szFolder ); } )->setToolTip( QDir::fromNativeSeparators( folder.absoluteFilePath() ) );
 			}
 		}
 		pHud->addSeparator();
@@ -1057,7 +1112,7 @@ void CMainWindow::BuildMenus( QAction *pSearchPathsToggle )
 	connect( &CInterfaceMode::Instance(), &CInterfaceMode::Changed, pSimple, &QAction::setChecked );
 
 	auto *pHelp = menuBar()->addMenu( tr( "&Help" ) );
-	pHelp->addAction( tr( "&About vomit-tools" ), this, [ this ] { CAboutDialog{ this }.exec(); } );
+	pHelp->addAction( tr( "&About Vomit Tools" ), this, [ this ] { CAboutDialog{ this }.exec(); } );
 	pHelp->addAction( tr( "About &Premium…" ), this, [ this ] { CPremiumDialog{ this }.exec(); } );
 	pHelp->addAction( tr( "About &Qt" ), qApp, &QApplication::aboutQt );
 }
@@ -1071,75 +1126,63 @@ void CMainWindow::SetUpHammer()
 		return;
 	CHammerSetupDialog dialog( m_Game->m_GameDir, QString::fromStdString( m_Game->m_szGame ), this );
 	if ( dialog.exec() == QDialog::Accepted )
-		statusBar()->showMessage( tr( "Saved %1" ).arg( QString::fromStdString( xv::vfs::ToUtf8( dialog.GetConfigFile() ) ) ), 8000 );
+		statusBar()->showMessage( tr( "Saved %1" ).arg( ToQString( dialog.GetConfigFile() ) ), 8000 );
 }
 
 //-----------------------------------------------------------------------------
-// Purpose: "VOMIT TOOLS - FREE EDITION - <version> - <OS> - MADE IN THE PHILIPPINES", bottom
-//          right.
+// Purpose: Edition and build information at the right of the status bar.
 //-----------------------------------------------------------------------------
-QLabel *CMainWindow::BuildFooter()
+QWidget *CMainWindow::BuildFooter()
 {
-	auto *pFooter = new QLabel( QStringLiteral( "VOMIT TOOLS - FREE EDITION - %1 - %2 - MADE IN THE PHILIPPINES" )
-			.arg( QString::fromUtf8( buildinfo::version ), QSysInfo::prettyProductName().toUpper() ) );
+	auto *pFooter = new QWidget( statusBar() );
 	pFooter->setObjectName( QStringLiteral( "footer" ) );
-	pFooter->setToolTip( CAboutDialog::BuildDetails() );
-	QFont font = pFooter->font();
-	font.setPointSizeF( font.pointSizeF() * 0.85 );
-	font.setLetterSpacing( QFont::PercentageSpacing, 105 );
-	pFooter->setFont( font );
-	pFooter->setForegroundRole( QPalette::PlaceholderText );
-	pFooter->setContentsMargins( 12, 0, 4, 0 );
+	auto *pLayout = new QHBoxLayout( pFooter );
+	pLayout->setContentsMargins( 8, 0, 4, 0 );
+	auto *pText = new QLabel;
+	pText->setObjectName( QStringLiteral( "footerVersion" ) );
+	pLayout->addWidget( pText );
+	auto *pOs = new QLabel;
+	const QSize iconSize( 16, 16 );
+#ifdef Q_OS_WIN
+	const QString szOsIcon = QStringLiteral( "distributor-logo-windows" );
+#elif defined( Q_OS_MACOS )
+	const QString szOsIcon = QStringLiteral( "distributor-logo-apple" );
+#else
+	const QString szOsIcon = QStringLiteral( "distributor-logo-%1" ).arg( QSysInfo::productType() );
+#endif
+	pOs->setPixmap( QIcon::fromTheme( szOsIcon, style()->standardIcon( QStyle::SP_ComputerIcon ) ).pixmap( iconSize, devicePixelRatioF() ) );
+	pOs->setToolTip( QSysInfo::prettyProductName() );
+	pOs->setAccessibleName( pOs->toolTip() );
+	pLayout->addWidget( pOs );
+	auto *pMadeIn = new QLabel( tr( "made in" ) );
+	pLayout->addWidget( pMadeIn );
+	auto *pFlag = new QLabel;
+	pFlag->setPixmap( QIcon( QStringLiteral( ":/assets/flag-ph.png" ) ).pixmap( QSize( 20, 10 ), devicePixelRatioF() ) );
+	pFlag->setToolTip( tr( "Made in the Philippines" ) );
+	pFlag->setAccessibleName( tr( "Philippines" ) );
+	pLayout->addWidget( pFlag );
+	const auto updateInfo = [ pFooter, pText, pOs, pMadeIn, pFlag ]( FooterInfo_t nInfo ) {
+		const bool bFull = nInfo == FooterInfo_t::FOOTER_INFO_FULL;
+		const QString szVersion = QString::fromUtf8( buildinfo::version );
+		pText->setText( bFull ? tr( "Free Edition · %1" ).arg( szVersion ) : szVersion );
+		pOs->setVisible( bFull );
+		pMadeIn->setVisible( bFull );
+		pFlag->setVisible( bFull );
+		pFooter->setToolTip( bFull ? CAboutDialog::BuildDetails() : QString{} );
+		pFooter->setVisible( nInfo != FooterInfo_t::FOOTER_INFO_HIDDEN );
+	};
+	connect( &CPreferences::Instance(), &CPreferences::FooterInfoChanged, pFooter, updateInfo );
+	updateInfo( CPreferences::Instance().GetFooterInfo() );
 	return pFooter;
 }
 
 //-----------------------------------------------------------------------------
-// Purpose:
+// Purpose: Show playback feedback while the editor handles its own controls.
 //-----------------------------------------------------------------------------
-void CMainWindow::BuildPlaybackBar()
+void CMainWindow::ConnectPlaybackStatus()
 {
-	auto *pStop = new QToolButton;
-	pStop->setText( QStringLiteral( "■" ) );
-	pStop->setToolTip( tr( "Stop all sounds" ) );
-	pStop->setAutoRaise( true );
-	pStop->setEnabled( false );
-	connect( pStop, &QToolButton::clicked, m_pPlayer, &CSoundPlayer::Stop );
-
-	auto *pVolume = new QSlider( Qt::Horizontal );
-	pVolume->setRange( 0, 100 );
-	pVolume->setFixedWidth( 90 );
-	pVolume->setToolTip( tr( "Preview volume" ) );
-	pVolume->setValue( QSettings{}.value( VOLUME_KEY, 80 ).toInt() );
-	m_pPlayer->SetVolume( static_cast<float>( pVolume->value() ) / 100.0f );
-	connect( pVolume, &QSlider::valueChanged, this, [ this ]( int nValue ) {
-		m_pPlayer->SetVolume( static_cast<float>( nValue ) / 100.0f );
-		QSettings{}.setValue( VOLUME_KEY, nValue );
-	} );
-
-	m_pNowPlaying = new QLabel;
-	m_pNowPlaying->setFixedWidth( 360 );
-
-	auto *pBar = m_pPlaybackBar = new QWidget;
-	pBar->setObjectName( QStringLiteral( "playbackBar" ) );
-	auto *pLayout = new QHBoxLayout( pBar );
-	pLayout->setContentsMargins( 0, 0, 0, 0 );
-	pLayout->addWidget( pStop );
-	pLayout->addWidget( pVolume );
-	pLayout->addWidget( m_pNowPlaying, 1 );
-	// Permanent, so status messages show beside it instead of on top of it.
-	statusBar()->addPermanentWidget( pBar );
-
-	connect( m_pPlayer, &CSoundPlayer::Started, this, [ this, pStop ]( const QString &szDescription ) {
-		pStop->setEnabled( true );
-		m_pPlaybackBar->show();
-		const QString szText = QStringLiteral( "♪ " ) + szDescription;
-		m_pNowPlaying->setText( m_pNowPlaying->fontMetrics().elidedText( szText, Qt::ElideMiddle, m_pNowPlaying->width() ) );
-		m_pNowPlaying->setToolTip( szDescription );
-	} );
-	connect( m_pPlayer, &CSoundPlayer::Stopped, this, [ this, pStop ] {
-		pStop->setEnabled( false );
-		m_pNowPlaying->clear();
-		UpdateMapMenu();
+	connect( m_pPlayer, &CSoundPlayer::Started, this, [ this ]( const QString &szDescription ) {
+		statusBar()->showMessage( tr( "Playing %1" ).arg( szDescription ), 4000 );
 	} );
 	connect( m_pPlayer, &CSoundPlayer::Failed, this, [ this ]( const QString &szMessage ) {
 		statusBar()->showMessage( szMessage, 6000 );
@@ -1203,9 +1246,9 @@ void CMainWindow::FillRecentMenu( QMenu *pMenu )
 			continue;
 		const bool bGame = info.fileName().compare( u"gameinfo.txt", Qt::CaseInsensitive ) == 0;
 		QString szLabel = bGame ? tr( "%1 (game)" ).arg( info.dir().dirName() ) : info.fileName();
-		const QString szFolder = QDir::toNativeSeparators( info.absolutePath() );
+		const QString szFolder = QDir::fromNativeSeparators( info.absolutePath() );
 		szLabel += QStringLiteral( "  \u2014  " ) + szFolder;
-		QString szTip = QDir::toNativeSeparators( szPath );
+		QString szTip = QDir::fromNativeSeparators( szPath );
 		if ( const QDateTime saved = edited.value( szPath ).toDateTime(); saved.isValid() )
 		{
 			szLabel = QStringLiteral( "\u270E " ) + szLabel;
@@ -1282,14 +1325,109 @@ void CMainWindow::ChooseGameInfo()
 }
 
 //-----------------------------------------------------------------------------
+// Purpose: Choose a document to create or an image import in one dialog.
+//-----------------------------------------------------------------------------
+void CMainWindow::ChooseNewFile()
+{
+	enum NewFile_t
+	{
+		NEW_FILE_MAP,
+		NEW_FILE_PARTICLES,
+		NEW_FILE_SKY,
+		NEW_FILE_DETAILS,
+		NEW_FILE_SOUNDSCAPE,
+		NEW_FILE_SOUNDSCRIPT,
+		NEW_FILE_TEXTURE,
+		NEW_FILE_BATCH
+	};
+	QDialog dialog( this );
+	dialog.setWindowTitle( tr( "New File" ) );
+	dialog.setObjectName( QStringLiteral( "newFileDialog" ) );
+	auto *pType = new QComboBox;
+	pType->addItem( tr( "Map (VMF)" ), NEW_FILE_MAP );
+	pType->addItem( tr( "Particle file (PCF)" ), NEW_FILE_PARTICLES );
+	pType->addItem( tr( "Skybox" ), NEW_FILE_SKY );
+	pType->addItem( tr( "Detail file (VBSP)" ), NEW_FILE_DETAILS );
+	pType->addItem( tr( "Soundscape" ), NEW_FILE_SOUNDSCAPE );
+	pType->addItem( tr( "Soundscript" ), NEW_FILE_SOUNDSCRIPT );
+	pType->insertSeparator( pType->count() );
+	pType->addItem( tr( "VTF from pictures" ), NEW_FILE_TEXTURE );
+	pType->addItem( tr( "Convert a folder of textures" ), NEW_FILE_BATCH );
+	auto *pName = new QLineEdit;
+	auto *pForm = new QFormLayout;
+	pForm->addRow( tr( "Type" ), pType );
+	pForm->addRow( tr( "Name" ), pName );
+	auto *pButtons = new QDialogButtonBox( QDialogButtonBox::Ok | QDialogButtonBox::Cancel );
+	auto *pAccept = pButtons->button( QDialogButtonBox::Ok );
+	const auto update = [ & ] {
+		const int nType = pType->currentData().toInt();
+		const bool bImport = nType >= NEW_FILE_TEXTURE;
+		const bool bRequired = nType == NEW_FILE_PARTICLES || nType == NEW_FILE_SOUNDSCAPE || nType == NEW_FILE_SOUNDSCRIPT;
+		pForm->setRowVisible( pName, nType != NEW_FILE_BATCH );
+		pName->setPlaceholderText( bRequired ? tr( "Required" ) : nType == NEW_FILE_DETAILS ? QStringLiteral( "detail.vbsp" )
+																							: tr( "Optional" ) );
+		pAccept->setText( bImport ? tr( "Import…" ) : tr( "Create" ) );
+		const QString szName = pName->text().trimmed();
+		static const QRegularExpression invalid( QStringLiteral( R"([/\\:*?"<>|])" ) );
+		pAccept->setEnabled( nType == NEW_FILE_BATCH || ( ( !bRequired || !szName.isEmpty() ) && !invalid.match( szName ).hasMatch() ) );
+	};
+	connect( pType, &QComboBox::currentIndexChanged, &dialog, update );
+	connect( pName, &QLineEdit::textChanged, &dialog, update );
+	connect( pButtons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept );
+	connect( pButtons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject );
+	auto *pLayout = new QVBoxLayout( &dialog );
+	pLayout->addLayout( pForm );
+	pLayout->addWidget( pButtons );
+	update();
+	if ( dialog.exec() != QDialog::Accepted )
+		return;
+	const QString szName = pName->text().trimmed();
+	switch ( pType->currentData().toInt() )
+	{
+		case NEW_FILE_MAP: NewMap( szName ); break;
+		case NEW_FILE_PARTICLES: NewParticleFile( szName.toLower() ); break;
+		case NEW_FILE_SKY:
+		{
+			auto *pDocument = new CSkyDocument;
+			pDocument->SetName( szName );
+			NewSky( pDocument );
+			break;
+		}
+		case NEW_FILE_DETAILS: NewDetailFile( szName ); break;
+		case NEW_FILE_SOUNDSCAPE: NewSoundFile( FileKind_t::FILE_KIND_SOUNDSCAPE, szName.toLower() ); break;
+		case NEW_FILE_SOUNDSCRIPT: NewSoundFile( FileKind_t::FILE_KIND_SOUNDSCRIPT, szName.toLower() ); break;
+		case NEW_FILE_TEXTURE: ChooseNewTexture( szName ); break;
+		case NEW_FILE_BATCH: ChooseBatchConvert(); break;
+	}
+}
+
+//-----------------------------------------------------------------------------
 // Purpose:
 //-----------------------------------------------------------------------------
 void CMainWindow::ChooseFiles()
 {
-	const QString szStart = LastFolderOr( m_pFolders->GetFolder().isEmpty() && m_Game ? ToQString( m_Game->m_GameDir ) : m_pFolders->GetFolder() );
-	const QStringList files = AskOpenFiles( this, tr( "Open File" ), szStart,
-		tr( "Soundscapes and soundscripts (*.txt);;Detail files (*.vbsp);;Sounds (*.wav *.mp3);;Textures (*.vtf);;Models (*.mdl *.vvd *.vtx *.phy *.ani);;Sky faces and textures (*.vmt *.vtf *.png *.tga *.jpg *.jpeg *.bmp *.psd *.hdr);;Particles (*.pcf *.dmx);;"
-			"KeyValues (*.txt *.vmt *.vdf *.res);;Hammer maps (*.vmf *.vmm);;Archives and maps (*.vpk *.bsp *.gcf *.gma *.pak *.wad *.xzp *.zip);;Stripper configs (*.cfg);;Source demos (*.dem);;Game info (gameinfo.txt);;All files (*)" ) );
+	QSettings settings;
+	FileDialog_t dialog;
+	dialog.m_nMode = FILE_DIALOG_MODE_OPEN_MANY;
+	dialog.m_szTitle = tr( "Open File" );
+	dialog.m_szStart = LastFolderOr( m_pFolders->GetFolder().isEmpty() && m_Game ? ToQString( m_Game->m_GameDir ) : m_pFolders->GetFolder() );
+	dialog.m_szFilters = tr( "Soundscapes and soundscripts (*.txt);;Detail files (*.vbsp);;Sounds (*.wav *.mp3);;Textures (*.vtf);;Models (*.mdl *.vvd *.vtx *.phy *.ani);;Sky faces and textures (*.vmt *.vtf *.png *.tga *.jpg *.jpeg *.bmp *.psd *.hdr);;Particles (*.pcf *.dmx);;"
+							 "KeyValues (*.txt *.vmt *.vdf *.res);;Hammer maps (*.vmf *.vmm);;Archives and maps (*.vpk *.bsp *.gcf *.gma *.pak *.wad *.xzp *.zip);;Stripper configs (*.cfg);;Source demos (*.dem);;Game info (gameinfo.txt);;All files (*)" );
+	const QStringList filters = dialog.m_szFilters.split( QStringLiteral( ";;" ) );
+	const QString szLastPattern = settings.value( OPEN_FILTER_KEY ).toString();
+	for ( const QString &szFilter : filters )
+	{
+		if ( szFilter.section( u'(', -1 ) == szLastPattern )
+		{
+			dialog.m_szFilter = szFilter;
+			break;
+		}
+	}
+	const QStringList files = AskForFiles( this, dialog );
+	if ( files.isEmpty() )
+		return;
+	if ( filters.contains( dialog.m_szFilter ) )
+		settings.setValue( OPEN_FILTER_KEY, dialog.m_szFilter.section( u'(', -1 ) );
 	OpenPaths( files );
 }
 
@@ -1315,7 +1453,9 @@ CVpkEditor *CMainWindow::OpenPackage( const QString &szPath )
 {
 	DebugLog() << "opening archive" << szPath;
 	std::string szError;
+	CWaitCursor wait( m_pEditorLoading, tr( "Opening the archive…" ) );
 	auto pPackage = xv::vfs::CPackage::Open( ToPath( szPath ), &szError );
+	wait.Finish();
 	if ( !pPackage )
 	{
 		QMessageBox::warning( this, tr( "Cannot open" ), QString::fromStdString( szError ) );
@@ -1583,15 +1723,18 @@ QWidget *CMainWindow::OpenArchiveFile( CVpkEditor *pArchive, const QString &szPa
 	{
 		return OpenArchiveFile( pArchive, szMdl );
 	}
+	CWaitCursor wait( m_pEditorLoading, tr( "Reading the packed file…" ) );
 	const auto bytes = pArchive->GetPackage().Read( szPath.toStdString() );
 	if ( !bytes )
 	{
+		wait.Finish();
 		QMessageBox::warning( this, tr( "Cannot open" ), tr( "Could not read %1 from %2." ).arg( szPath, pArchive->GetFileName() ) );
 		return nullptr;
 	}
 	if ( szPath.endsWith( u".mdl", Qt::CaseInsensitive ) )
 	{
 		const QPointer<CVpkEditor> pSource = pArchive;
+		wait.Finish();
 		return AddModelEditor( szPath, [ this, pSource ]( std::string_view szFile ) -> std::optional<std::vector<std::byte>> {if(pSource)return pSource->GetReader()(szFile);return m_Game?m_pFileSystem->Read(szFile):std::nullopt; } );
 	}
 	const std::string szGamePath = xv::vfs::NormalizePath( szPath.toStdString() );
@@ -1641,6 +1784,7 @@ QWidget *CMainWindow::OpenArchiveFile( CVpkEditor *pArchive, const QString &szPa
 		SetUpMaterial( pEditor );
 		return AddMaterialEditor( pEditor );
 	}
+	wait.Finish();
 	QMessageBox::warning( this, tr( "Cannot open" ), tr( "%1 has no editor in this version." ).arg( szPath ) );
 	return nullptr;
 }
@@ -1654,7 +1798,7 @@ void CMainWindow::OpenPath( const QString &szPath )
 	const QFileInfo info{ szPath };
 	if ( !info.exists() )
 	{
-		QMessageBox::warning( this, tr( "Not found" ), tr( "%1 does not exist." ).arg( QDir::toNativeSeparators( szPath ) ) );
+		QMessageBox::warning( this, tr( "Not found" ), tr( "%1 does not exist." ).arg( QDir::fromNativeSeparators( szPath ) ) );
 		return;
 	}
 	if ( info.isDir() )
@@ -1707,7 +1851,7 @@ void CMainWindow::AutoMountFor( const QString &szPath )
 	const QString szGameInfo = FindGameInfo( szPath );
 	if ( !szGameInfo.isEmpty() && OpenGame( szGameInfo ) )
 	{
-		statusBar()->showMessage( tr( "Mounted %1 from %2" ).arg( QString::fromStdString( m_Game->m_szGame ), QDir::toNativeSeparators( szGameInfo ) ), 8000 );
+		statusBar()->showMessage( tr( "Mounted %1 from %2" ).arg( QString::fromStdString( m_Game->m_szGame ), QDir::fromNativeSeparators( szGameInfo ) ), 8000 );
 	}
 }
 
@@ -1766,8 +1910,8 @@ bool CMainWindow::OpenGame( const QString &szGameInfoPath )
 	m_Game = std::move( info );
 	QSettings{}.setValue( LAST_GAME_KEY, szGameInfoPath );
 	AddRecent( szGameInfoPath );
-	Remount();
 	m_pSides->setCurrentWidget( m_pGameBrowser );
+	Remount();
 	return true;
 }
 
@@ -1782,22 +1926,26 @@ void CMainWindow::Remount()
 	}
 	const QString szSelected = m_pFilter->mapToSource( m_pTree->currentIndex() ).data( CVfsModel::ROLE_PATH_ROLE ).toString();
 
-	QApplication::setOverrideCursor( Qt::WaitCursor );
+	CWaitCursor wait( m_pGameLoading, tr( "Mounting the game…" ) );
 	DebugLog() << "mounting" << ToQString( m_Game->m_File ) << "again, all of it";
 	{
 		CDebugTimer timer( QStringLiteral( "mounting the search paths" ) );
 		m_pFileSystem->Mount( *m_Game );
 	}
 	{
+		m_pGameLoading->SetProgress( tr( "Listing game files…" ) );
+		m_pGameLoading->repaint();
 		CDebugTimer timer( QStringLiteral( "building the Game tree" ) );
 		m_pModel->Rebuild( *m_pFileSystem );
 	}
 	DebugLog() << m_pModel->GetFileCount() << "files in the game," << m_pFileSystem->GetRecords().size() << "search paths";
 	{
+		m_pGameLoading->SetProgress( tr( "Indexing sounds…" ) );
+		m_pGameLoading->repaint();
 		CDebugTimer timer( QStringLiteral( "indexing the sounds" ) );
 		m_SoundIndex.Rebuild( *m_pFileSystem );
 	}
-	QApplication::restoreOverrideCursor();
+	wait.Finish();
 	CDebugTimer timer( QStringLiteral( "updating the open tabs for the game" ) );
 
 	m_ParticleGame.reset();
@@ -1907,18 +2055,29 @@ void CMainWindow::UpdateGameLabel()
 {
 	if ( !m_Game )
 	{
+		m_pGameIcon->hide();
 		m_pGameLabel->setText( tr( "No game mounted" ) );
-		m_pGameLabel->setToolTip( tr( "Files open without a game too; open a game for sound lookups, linting against it and manifests" ) );
+		m_pGameLabel->setToolTip( {} );
 		return;
 	}
-	// The write folder is usually inside the game's own folder: custom/vomit-tools.
-	const fs::path inGame = GetWriteFolder().lexically_normal().lexically_relative( m_Game->m_GameDir.lexically_normal() );
-	const bool bInside = !inGame.empty() && *inGame.begin() != "..";
-	m_pGameLabel->setText( tr( "%1 · %2 files · writing to %3" )
-			.arg( QString::fromStdString( m_Game->m_szGame ) )
-			.arg( m_pModel->GetFileCount() )
-			.arg( bInside ? ToQString( inGame ) : ToQString( GetWriteFolder() ) ) );
-	m_pGameLabel->setToolTip( tr( "%1\nWriting to %2" ).arg( ToQString( m_Game->m_File ), ToQString( GetWriteFolder() ) ) );
+	QIcon icon;
+	for ( const fs::path &file : { m_Game->m_GameDir / "resource/game.ico", m_Game->m_GameDir / "game.ico" } )
+	{
+		if ( QFileInfo::exists( ToQString( file ) ) )
+		{
+			icon = QIcon( ToQString( file ) );
+			break;
+		}
+	}
+	if ( icon.isNull() )
+		icon = QIcon::fromTheme( QStringLiteral( "applications-games" ), style()->standardIcon( QStyle::SP_DriveHDIcon ) );
+	const QString szGame = QString::fromStdString( m_Game->m_szGame );
+	m_pGameIcon->setPixmap( icon.pixmap( QSize( 16, 16 ), devicePixelRatioF() ) );
+	m_pGameIcon->setToolTip( szGame );
+	m_pGameIcon->setAccessibleName( szGame );
+	m_pGameIcon->show();
+	m_pGameLabel->setText( tr( "%L1 files" ).arg( m_pModel->GetFileCount() ) );
+	m_pGameLabel->setToolTip( ToQString( m_Game->m_File ) );
 }
 
 //-----------------------------------------------------------------------------
@@ -2028,6 +2187,7 @@ void CMainWindow::PreviewGameFile( const QString &szPath, const QString &szSourc
 		PreviewDiskFile( szDisk );
 		return;
 	}
+	CWaitCursor wait( m_pEditorLoading, tr( "Reading the preview…" ) );
 	const auto bytes = m_pFileSystem->Read( szPath.toStdString() );
 	if ( !bytes )
 	{
@@ -2142,20 +2302,21 @@ void CMainWindow::PreviewDiskFile( const QString &szPath )
 	if ( xv::vfs::CPackage::IsPackageFile( ToPath( szPath ) ) )
 	{
 		const QFileInfo info{ szPath };
-		SetPreview( WithEditButton( new CFileInfoView( info.fileName(), QDir::toNativeSeparators( info.absolutePath() ), static_cast<std::size_t>( info.size() ) ),
+		SetPreview( WithEditButton( new CFileInfoView( info.fileName(), QDir::fromNativeSeparators( info.absolutePath() ), static_cast<std::size_t>( info.size() ) ),
 			szPath.endsWith( u".bsp", Qt::CaseInsensitive ) ? tr( "This is a map." ) : tr( "This is an archive." ), tr( "Open" ), [ this, szPath ] { OpenPackage( szPath ); } ) );
 		m_pTabs->setCurrentWidget( m_pPreviewHost );
 		return;
 	}
+	CWaitCursor wait( m_pEditorLoading, tr( "Reading the preview…" ) );
 	const auto data = ReadDiskFile( szPath );
 	if ( !data )
 	{
-		SetPreview( Placeholder( tr( "Could not read %1" ).arg( QDir::toNativeSeparators( szPath ) ) ) );
+		SetPreview( Placeholder( tr( "Could not read %1" ).arg( QDir::fromNativeSeparators( szPath ) ) ) );
 		return;
 	}
 	const QFileInfo info{ szPath };
 	const xv::material::Reader_t pfnRead = xv::material::DiskReader( ToPath( szPath ), m_Game ? m_pFileSystem.get() : nullptr );
-	QWidget *pView = CreateFileView( info.fileName(), QDir::toNativeSeparators( info.absolutePath() ), AsBytes( *data ), m_pPlayer, nullptr, pfnRead );
+	QWidget *pView = CreateFileView( info.fileName(), QDir::fromNativeSeparators( info.absolutePath() ), AsBytes( *data ), m_pPlayer, nullptr, pfnRead );
 	LinkMaterial( pView, pfnRead, info.fileName(), [ this, szPath ] { PreviewDiskFile( szPath ); } );
 	if ( CStripperEditor::IsStripperConfig( ToPath( szPath ), std::string_view{ data->constData(), static_cast<std::size_t>( data->size() ) } ) )
 	{
@@ -2351,24 +2512,29 @@ void CMainWindow::OpenDiskFileAs( const QString &szPath, bool bSkies )
 		ShowMaterialEditor( pEditor );
 		return;
 	}
+	CWaitCursor wait( m_pEditorLoading, tr( "Reading the file…" ) );
 	const auto data = ReadDiskFile( szPath );
 	if ( !data )
 	{
-		QMessageBox::warning( this, tr( "Cannot open" ), tr( "Could not read %1." ).arg( QDir::toNativeSeparators( szPath ) ) );
+		wait.Finish();
+		QMessageBox::warning( this, tr( "Cannot open" ), tr( "Could not read %1." ).arg( QDir::fromNativeSeparators( szPath ) ) );
 		return;
 	}
 	if ( CStripperEditor::IsStripperConfig( file, std::string_view{ data->constData(), static_cast<std::size_t>( data->size() ) } ) )
 	{
+		wait.Finish();
 		OpenStripperFile( info.absoluteFilePath() );
 		return;
 	}
 	if ( CSchemeEditor::IsSchemeFile( file, std::string_view{ data->constData(), static_cast<std::size_t>( data->size() ) } ) )
 	{
+		wait.Finish();
 		OpenSchemeFile( info.absoluteFilePath() );
 		return;
 	}
 	if ( CHudEditor::IsHudLayout( file, std::string_view{ data->constData(), static_cast<std::size_t>( data->size() ) } ) )
 	{
+		wait.Finish();
 		OpenHudFile( info.absoluteFilePath() );
 		return;
 	}
@@ -2418,6 +2584,7 @@ void CMainWindow::OpenDiskFileAs( const QString &szPath, bool bSkies )
 		PlaceMaterial( pEditor );
 		return;
 	}
+	wait.Finish();
 	PreviewDiskFile( szPath );
 }
 
@@ -2600,9 +2767,9 @@ CSkyEditor *CMainWindow::OpenSky( const QString &szName )
 			return pSky;
 		}
 	}
-	QApplication::setOverrideCursor( Qt::WaitCursor );
+	CWaitCursor wait( m_pEditorLoading, tr( "Reading the skybox…" ) );
 	const auto loaded = xv::sky::LoadSky( *m_pFileSystem, szName.toStdString() );
-	QApplication::restoreOverrideCursor();
+	wait.Finish();
 	if ( std::ranges::all_of( loaded.m_Cube.m_Faces, &xv::texture::CImage::Empty ) )
 	{
 		QStringList problems;
@@ -2652,9 +2819,9 @@ CSkyEditor *CMainWindow::OpenSkyFiles( const xv::sky::CSkyFiles &files )
 			return pSky;
 		}
 	}
-	QApplication::setOverrideCursor( Qt::WaitCursor );
+	CWaitCursor wait( m_pEditorLoading, tr( "Reading the skybox…" ) );
 	const auto loaded = xv::sky::LoadSkyFiles( files, m_Game ? m_pFileSystem.get() : nullptr );
-	QApplication::restoreOverrideCursor();
+	wait.Finish();
 	if ( std::ranges::all_of( loaded.m_Cube.m_Faces, &xv::texture::CImage::Empty ) )
 	{
 		QMessageBox::warning( this, tr( "Open Sky" ), tr( "None of the faces of %1 could be read:\n\n%2" ).arg( QString::fromStdString( files.m_szName ), QString::fromStdString( loaded.m_Problems.empty() ? std::string{} : loaded.m_Problems.front() ) ) );
@@ -2847,9 +3014,11 @@ CSoundEditor *CMainWindow::OpenSoundFile( const QString &szGamePath )
 	}
 	const std::string szPath = xv::vfs::NormalizePath( szGamePath.toStdString() );
 	const FileKind_t nKind = xv::sound::FileKindForPath( szPath );
+	CWaitCursor wait( m_pEditorLoading, tr( "Reading the sound script…" ) );
 	const auto text = m_pFileSystem->ReadText( szPath );
 	if ( nKind == FileKind_t::FILE_KIND_UNKNOWN || !text )
 	{
+		wait.Finish();
 		QMessageBox::warning( this, tr( "Cannot edit" ), tr( "%1 is not a soundscape or soundscript file in the mounted game." ).arg( szGamePath ) );
 		return nullptr;
 	}
@@ -2892,18 +3061,9 @@ CSoundEditor *CMainWindow::AddEditor( CSoundDocument *pDocument )
 //-----------------------------------------------------------------------------
 // Purpose:
 //-----------------------------------------------------------------------------
-void CMainWindow::NewSoundFile( FileKind_t nKind )
+void CMainWindow::NewSoundFile( FileKind_t nKind, const QString &szName )
 {
 	const QString szPrefix = nKind == FileKind_t::FILE_KIND_SOUNDSCAPE ? QStringLiteral( "soundscapes_" ) : QStringLiteral( "game_sounds_" );
-	bool bOk = false;
-	const QString szName = QInputDialog::getText( this, tr( "New %1 File" ).arg( KindName( nKind ) ),
-		tr( "File name (scripts/%1<name>.txt), e.g. your map's name:" ).arg( szPrefix ), QLineEdit::Normal, {}, &bOk )
-							   .trimmed()
-							   .toLower();
-	if ( !bOk )
-	{
-		return;
-	}
 	// The prefix goes on by itself; typed anyway, it isn't doubled.
 	QString szBare = szName;
 	if ( szBare.startsWith( szPrefix ) )
@@ -2956,7 +3116,7 @@ const ParticleGame_t &CMainWindow::ParticleGame()
 	if ( m_Game )
 	{
 		CDebugTimer timer( QStringLiteral( "reading the game's particle files" ) );
-		QApplication::setOverrideCursor( Qt::WaitCursor );
+		CWaitCursor wait;
 		auto pSchema = std::make_shared<xv::particles::CSchema>();
 		for ( const std::string &szPath : m_pFileSystem->Find( "particles", ".pcf", true ) )
 		{
@@ -2991,7 +3151,6 @@ const ParticleGame_t &CMainWindow::ParticleGame()
 				game.m_Models << QString::fromStdString( path );
 			}
 		}
-		QApplication::restoreOverrideCursor();
 	}
 	m_ParticleGame = std::move( game );
 	return *m_ParticleGame;
@@ -3080,10 +3239,12 @@ CParticleEditor *CMainWindow::OpenParticleFile( const QString &szGamePath )
 		return pEditor;
 	}
 	const std::string szPath = xv::vfs::NormalizePath( szGamePath.toStdString() );
+	CWaitCursor wait( m_pEditorLoading, tr( "Reading the particle file…" ) );
 	const auto bytes = m_pFileSystem->Read( szPath );
 	auto document = bytes ? ReadParticleFile( *bytes ) : std::nullopt;
 	if ( !document )
 	{
+		wait.Finish();
 		QMessageBox::warning( this, tr( "Cannot edit" ), tr( "%1 is not a particle file this version can read." ).arg( szGamePath ) );
 		return nullptr;
 	}
@@ -3126,15 +3287,13 @@ CParticleEditor *CMainWindow::AddParticleEditor( CParticleDocument *pDocument, s
 //-----------------------------------------------------------------------------
 // Purpose:
 //-----------------------------------------------------------------------------
-void CMainWindow::NewParticleFile()
+void CMainWindow::NewParticleFile( QString szName )
 {
-	bool bOk = false;
-	const QString szName = QInputDialog::getText( this, tr( "New Particle File" ),
-		tr( "File name (particles/<name>.pcf), e.g. your map's or mod's name:" ), QLineEdit::Normal, {}, &bOk )
-							   .trimmed()
-							   .toLower();
-	if ( !bOk || szName.isEmpty() )
+	if ( szName.endsWith( QStringLiteral( ".pcf" ) ) )
+		szName.chop( 4 );
+	if ( szName.isEmpty() )
 	{
+		QMessageBox::warning( this, tr( "No name" ), tr( "Give the particle file a name." ) );
 		return;
 	}
 	if ( !QRegularExpression( QStringLiteral( "^[a-z0-9_.-]+$" ) ).match( szName ).hasMatch() )
@@ -3243,7 +3402,7 @@ bool CMainWindow::SaveAs( CParticleEditor *pEditor )
 			QMessageBox::critical( this, tr( "Save failed" ), tr( "Could not write %1:\n%2" ).arg( szFile, out.errorString() ) );
 			return false;
 		}
-		statusBar()->showMessage( tr( "Wrote %1 as keyvalues2 text; the editor keeps the binary file" ).arg( QDir::toNativeSeparators( szFile ) ), 8000 );
+		statusBar()->showMessage( tr( "Wrote %1 as keyvalues2 text; the editor keeps the binary file" ).arg( QDir::fromNativeSeparators( szFile ) ), 8000 );
 		return true;
 	}
 	const int nEncoding = szFilter == szBinary1 ? 1 : 2;
@@ -4040,7 +4199,7 @@ void CMainWindow::dropEvent( QDropEvent *pEvent )
 //-----------------------------------------------------------------------------
 void CMainWindow::UpdateTitle()
 {
-	QString szTitle = QStringLiteral( "vomit-tools" );
+	QString szTitle = tr( "Vomit Tools" );
 	if ( m_Game )
 	{
 		szTitle.prepend( QString::fromStdString( m_Game->m_szGame ) + QStringLiteral( " — " ) );
@@ -4154,11 +4313,13 @@ CTextureEditor *CMainWindow::OpenTextureFile( const QString &szGamePath, bool bF
 		m_pTabs->setCurrentWidget( pEditor );
 		return pEditor;
 	}
+	CWaitCursor wait( m_pEditorLoading, tr( "Reading the texture…" ) );
 	const auto bytes = m_pFileSystem->Read( szPath );
 	auto *pDocument = new CTextureDocument( QString::fromStdString( szPath ), bytes ? std::vector<std::byte>( bytes->begin(), bytes->end() ) : std::vector<std::byte>{} );
 	if ( !pDocument->IsValid() )
 	{
 		delete pDocument;
+		wait.Finish();
 		QMessageBox::warning( this, tr( "Cannot edit" ), tr( "%1 is not a texture this version can read." ).arg( szGamePath ) );
 		return nullptr;
 	}
@@ -4485,33 +4646,36 @@ QStringList CMainWindow::TextureNames() const
 //-----------------------------------------------------------------------------
 // Purpose:
 //-----------------------------------------------------------------------------
-void CMainWindow::ChooseNewTexture()
+void CMainWindow::ChooseNewTexture( const QString &szName )
 {
 	const QString szStart = LastFolderOr( m_pFolders->GetFolder().isEmpty() && m_Game ? ToQString( m_Game->m_GameDir ) : m_pFolders->GetFolder() );
 	const QStringList files = AskOpenFiles( this, tr( "Create VTF from Pictures" ), szStart,
 		PictureFilter( true ) );
 	if ( !files.isEmpty() )
 	{
-		NewTextureFromFiles( files );
+		NewTextureFromFiles( files, szName );
 	}
 }
 
 //-----------------------------------------------------------------------------
-// Purpose: Makes a new texture from pictures on disk, after asking how. It is named after the
-//          first picture and saves next to it unless Save As says otherwise.
+// Purpose: Makes a new texture from pictures on disk, after asking how. It saves beside the
+//          first picture by default, taking its name if none was given.
 //-----------------------------------------------------------------------------
-CTextureEditor *CMainWindow::NewTextureFromFiles( const QStringList &files )
+CTextureEditor *CMainWindow::NewTextureFromFiles( const QStringList &files, const QString &szName )
 {
 	if ( files.isEmpty() )
 	{
 		return nullptr;
 	}
 	const QFileInfo first{ files.front() };
-	const fs::path target = ToPath( first.absolutePath() ) / xv::vfs::FromUtf8( ( first.completeBaseName() + QStringLiteral( ".vtf" ) ).toStdString() );
+	QString szFile = szName.isEmpty() ? first.completeBaseName() : szName;
+	if ( !szFile.endsWith( u".vtf", Qt::CaseInsensitive ) )
+		szFile += QStringLiteral( ".vtf" );
+	const fs::path target = ToPath( first.absolutePath() ) / ToPath( szFile );
 	QString szGamePath = GamePathForDisk( target );
 	if ( szGamePath.isEmpty() || !szGamePath.contains( u'/' ) )
 	{
-		szGamePath = QStringLiteral( "materials/%1.vtf" ).arg( first.completeBaseName().toLower() );
+		szGamePath = QStringLiteral( "materials/%1" ).arg( szFile.toLower() );
 	}
 	// An empty 1×1 texture to import into, so the editor's own import does the work.
 	const xv::texture::CImage blank{ 1, 1 };
@@ -4820,9 +4984,11 @@ CMaterialEditor *CMainWindow::OpenMaterialFile( const QString &szGamePath )
 		ShowMaterialEditor( pEditor );
 		return pEditor;
 	}
+	CWaitCursor wait( m_pEditorLoading, tr( "Reading the material…" ) );
 	const auto text = m_pFileSystem->ReadText( szPath );
 	if ( !text )
 	{
+		wait.Finish();
 		QMessageBox::warning( this, tr( "Cannot edit" ), tr( "Could not read %1." ).arg( szGamePath ) );
 		return nullptr;
 	}
@@ -5025,7 +5191,7 @@ void CMainWindow::ChooseBatchConvert()
 		return !progress.wasCanceled();
 	} );
 	progress.close();
-	QString szReport = tr( "Converted %n file(s) into %1.", nullptr, result.m_nDone ).arg( QDir::toNativeSeparators( job.m_szOutput ) );
+	QString szReport = tr( "Converted %n file(s) into %1.", nullptr, result.m_nDone ).arg( QDir::fromNativeSeparators( job.m_szOutput ) );
 	if ( !result.m_Failures.isEmpty() )
 	{
 		szReport += u'\n' + tr( "%n couldn't be:", nullptr, static_cast<int>( result.m_Failures.size() ) ) + u'\n' + result.m_Failures.mid( 0, 15 ).join( u'\n' );
@@ -5084,9 +5250,11 @@ CDetailEditor *CMainWindow::OpenDetailFile( const QString &szGamePath )
 		m_pTabs->setCurrentWidget( pEditor );
 		return pEditor;
 	}
+	CWaitCursor wait( m_pEditorLoading, tr( "Reading detail props…" ) );
 	const auto text = m_pFileSystem->ReadText( szPath );
 	if ( !text )
 	{
+		wait.Finish();
 		QMessageBox::warning( this, tr( "Cannot open" ), tr( "Could not read %1." ).arg( szGamePath ) );
 		return nullptr;
 	}
@@ -5097,9 +5265,13 @@ CDetailEditor *CMainWindow::OpenDetailFile( const QString &szGamePath )
 //-----------------------------------------------------------------------------
 // Purpose: Start a new detail file without writing until the user saves it.
 //-----------------------------------------------------------------------------
-CDetailEditor *CMainWindow::NewDetailFile()
+CDetailEditor *CMainWindow::NewDetailFile( QString szName )
 {
-	auto *pDocument = new CDetailDocument( QStringLiteral( "detail.vbsp" ), xv::kv1::Parse( "detail\n{\n}\n" ) );
+	if ( szName.isEmpty() )
+		szName = QStringLiteral( "detail" );
+	if ( !szName.endsWith( u".vbsp", Qt::CaseInsensitive ) )
+		szName += QStringLiteral( ".vbsp" );
+	auto *pDocument = new CDetailDocument( szName, xv::kv1::Parse( "detail\n{\n}\n" ) );
 	pDocument->MarkUnsaved();
 	return AddDetailEditor( pDocument );
 }
@@ -5273,7 +5445,9 @@ bool CMainWindow::ConfirmClose( CDetailEditor *pEditor )
 //-----------------------------------------------------------------------------
 CModelEditor *CMainWindow::AddModelEditor( const QString &szPath, xv::material::Reader_t pfnRead, const QString &szOrigin )
 {
+	CWaitCursor wait( m_pEditorLoading, tr( "Reading the model…" ) );
 	auto *pEditor = new CModelEditor( szPath, std::move( pfnRead ) );
+	wait.Finish();
 	if ( !pEditor->IsValid() )
 	{
 		QMessageBox::warning( this, tr( "Cannot open model" ), pEditor->GetError() );
@@ -5557,6 +5731,7 @@ CMapEditor *CMainWindow::OpenMapFile( const QString &szPath )
 			return pMap;
 		}
 	}
+	CWaitCursor wait( m_pEditorLoading, tr( "Opening the map…" ) );
 	CMapDocument::Source_t source;
 	source.m_szName = QFileInfo( szOrigin ).fileName();
 	if ( bDisk )
@@ -5564,7 +5739,8 @@ CMapEditor *CMainWindow::OpenMapFile( const QString &szPath )
 		const auto data = ReadDiskFile( szOrigin );
 		if ( !data )
 		{
-			QMessageBox::warning( this, tr( "Cannot open" ), tr( "Could not read %1." ).arg( QDir::toNativeSeparators( szOrigin ) ) );
+			wait.Finish();
+			QMessageBox::warning( this, tr( "Cannot open" ), tr( "Could not read %1." ).arg( QDir::fromNativeSeparators( szOrigin ) ) );
 			return nullptr;
 		}
 		source.m_Text.assign( data->begin(), data->end() );
@@ -5576,7 +5752,8 @@ CMapEditor *CMainWindow::OpenMapFile( const QString &szPath )
 			const auto maps = xv::map::ReadManifest( std::string_view{ source.m_Text.data(), source.m_Text.size() }, source.m_DiskPath, &problems );
 			if ( std::ranges::none_of( maps, []( const auto &map ) { return !map.m_Path.empty(); } ) )
 			{
-				QMessageBox::warning( this, tr( "Cannot open" ), tr( "%1 names no submap that is there.\n%2" ).arg( QDir::toNativeSeparators( szOrigin ), QString::fromStdString( problems.empty() ? std::string{} : problems.front() ) ) );
+				wait.Finish();
+				QMessageBox::warning( this, tr( "Cannot open" ), tr( "%1 names no submap that is there.\n%2" ).arg( QDir::fromNativeSeparators( szOrigin ), QString::fromStdString( problems.empty() ? std::string{} : problems.front() ) ) );
 				return nullptr;
 			}
 			const std::string szComposed = xv::map::ManifestToVmf( maps, source.m_DiskPath );
@@ -5590,6 +5767,7 @@ CMapEditor *CMainWindow::OpenMapFile( const QString &szPath )
 		const auto bytes = m_Game ? m_pFileSystem->Read( szOrigin.toStdString() ) : std::nullopt;
 		if ( !bytes )
 		{
+			wait.Finish();
 			QMessageBox::warning( this, tr( "Cannot open" ), tr( "Could not read %1." ).arg( szOrigin ) );
 			return nullptr;
 		}
@@ -5606,7 +5784,8 @@ CMapEditor *CMainWindow::OpenMapFile( const QString &szPath )
 		auto text = xv::bsp::DecompileToVmf( std::as_bytes( std::span( source.m_Text ) ), &report, &szError );
 		if ( !text )
 		{
-			QMessageBox::warning( this, tr( "Cannot open" ), tr( "Could not read %1: %2." ).arg( QDir::toNativeSeparators( szOrigin ), QString::fromStdString( szError ) ) );
+			wait.Finish();
+			QMessageBox::warning( this, tr( "Cannot open" ), tr( "Could not read %1: %2." ).arg( QDir::fromNativeSeparators( szOrigin ), QString::fromStdString( szError ) ) );
 			return nullptr;
 		}
 		// Shown as compiled: its own faces and light (bsp/Faces.h), drawn over what is read back.
@@ -5638,6 +5817,7 @@ CMapEditor *CMainWindow::OpenMapFile( const QString &szPath )
 	auto *pEditor = new CMapEditor( szOrigin, !bDisk );
 	pEditor->SetCompiled( std::move( pCompiled ) );
 	AddMapTab( pEditor );
+	wait.Finish();
 	pEditor->Load( std::move( source ) );
 	return pEditor;
 }
@@ -5663,6 +5843,7 @@ CStripperEditor *CMainWindow::OpenStripperFile( const QString &szPath )
 			return pOpen;
 		}
 	}
+	CWaitCursor wait( m_pEditorLoading, tr( "Reading the Stripper config…" ) );
 	fs::path map;
 	if ( const std::vector<fs::path> maps = xv::bsp::FindStripperMaps( config ); !maps.empty() )
 		map = maps.front();
@@ -5676,7 +5857,7 @@ CStripperEditor *CMainWindow::OpenStripperFile( const QString &szPath )
 		UpdateTitle();
 	} );
 	const int nIndex = m_pTabs->addTab( pEditor, pEditor->GetTabTitle() );
-	m_pTabs->setTabToolTip( nIndex, QDir::toNativeSeparators( ToQString( config ) ) );
+	m_pTabs->setTabToolTip( nIndex, ToQString( config ) );
 	m_pTabs->setCurrentIndex( nIndex );
 	return pEditor;
 }
@@ -5694,7 +5875,7 @@ CHudEditor *CMainWindow::OpenHudFile( const QString &szPath, const QString &szHu
 		return OpenHudFile( szDisk, szHudFolder );
 	const QFileInfo info( szPath );
 	const bool bDisk = info.isAbsolute();
-	const QString szName = bDisk ? QDir::toNativeSeparators( info.absoluteFilePath() ) : QString::fromStdString( xv::vfs::NormalizePath( szPath.toStdString() ) );
+	const QString szName = bDisk ? QDir::fromNativeSeparators( info.absoluteFilePath() ) : QString::fromStdString( xv::vfs::NormalizePath( szPath.toStdString() ) );
 	for ( int i = 0; i < m_pTabs->count(); i++ )
 	{
 		auto *pOpen = qobject_cast<CHudEditor *>( m_pTabs->widget( i ) );
@@ -5704,6 +5885,7 @@ CHudEditor *CMainWindow::OpenHudFile( const QString &szPath, const QString &szHu
 			return pOpen;
 		}
 	}
+	CWaitCursor wait( m_pEditorLoading, tr( "Reading the HUD layout…" ) );
 	std::optional<std::string> text;
 	if ( bDisk )
 	{
@@ -5716,6 +5898,7 @@ CHudEditor *CMainWindow::OpenHudFile( const QString &szPath, const QString &szHu
 	}
 	if ( !text )
 	{
+		wait.Finish();
 		QMessageBox::warning( this, tr( "Cannot open" ), tr( "Could not read %1." ).arg( szName ) );
 		return nullptr;
 	}
@@ -5744,7 +5927,7 @@ CHudEditor *CMainWindow::OpenHudFile( const QString &szPath, const QString &szHu
 		if ( const auto data = ReadDiskFile( szOwn ) )
 		{
 			scheme = data->toStdString();
-			szSchemeSource = QDir::toNativeSeparators( szOwn );
+			szSchemeSource = QDir::fromNativeSeparators( szOwn );
 		}
 	}
 	if ( !scheme && m_Game )
@@ -5753,7 +5936,7 @@ CHudEditor *CMainWindow::OpenHudFile( const QString &szPath, const QString &szHu
 		// Scheme opens that very file.
 		scheme = m_pFileSystem->ReadText( szSchemeFile.toStdString() );
 		const QString szDisk = DiskPathForGame( szSchemeFile );
-		szSchemeSource = !szDisk.isEmpty() && QFileInfo( szDisk ).isFile() ? QDir::toNativeSeparators( QFileInfo( szDisk ).absoluteFilePath() ) : szSchemeFile;
+		szSchemeSource = !szDisk.isEmpty() && QFileInfo( szDisk ).isFile() ? QDir::fromNativeSeparators( QFileInfo( szDisk ).absoluteFilePath() ) : szSchemeFile;
 	}
 	if ( scheme )
 		pEditor->SetScheme( xv::hud::CScheme::FromDocument( xv::kv1::Parse( *scheme ).m_Document ), szSchemeSource );
@@ -5778,7 +5961,7 @@ CHudEditor *CMainWindow::OpenHudFile( const QString &szPath, const QString &szHu
 		UpdateTitle();
 	} );
 	const int nIndex = m_pTabs->addTab( pEditor, pEditor->GetTabTitle() );
-	m_pTabs->setTabToolTip( nIndex, szHud.isEmpty() || bDisk ? szName : tr( "%1, with the HUD in %2" ).arg( szName, QDir::toNativeSeparators( szHud ) ) );
+	m_pTabs->setTabToolTip( nIndex, szHud.isEmpty() || bDisk ? szName : tr( "%1, with the HUD in %2" ).arg( szName, QDir::fromNativeSeparators( szHud ) ) );
 	m_pTabs->setCurrentIndex( nIndex );
 	return pEditor;
 }
@@ -5817,7 +6000,7 @@ CHudEditor *CMainWindow::OpenHudFolder( const QString &szFolder )
 		}
 		else
 		{
-			QMessageBox::warning( this, tr( "Not a HUD folder" ), tr( "%1 has no scripts/HudLayout.res, resource/ClientScheme.res or resource/ui folder, and no folder in it has." ).arg( QDir::toNativeSeparators( szHud ) ) );
+			QMessageBox::warning( this, tr( "Not a HUD folder" ), tr( "%1 has no scripts/HudLayout.res, resource/ClientScheme.res or resource/ui folder, and no folder in it has." ).arg( QDir::fromNativeSeparators( szHud ) ) );
 			return nullptr;
 		}
 	}
@@ -5843,7 +6026,7 @@ CSchemeEditor *CMainWindow::OpenSchemeFile( const QString &szPath )
 		return OpenSchemeFile( szDisk );
 	const QFileInfo info( szPath );
 	const bool bDisk = info.isAbsolute();
-	const QString szName = bDisk ? QDir::toNativeSeparators( info.absoluteFilePath() ) : QString::fromStdString( xv::vfs::NormalizePath( szPath.toStdString() ) );
+	const QString szName = bDisk ? QDir::fromNativeSeparators( info.absoluteFilePath() ) : QString::fromStdString( xv::vfs::NormalizePath( szPath.toStdString() ) );
 	for ( int i = 0; i < m_pTabs->count(); i++ )
 	{
 		auto *pOpen = qobject_cast<CSchemeEditor *>( m_pTabs->widget( i ) );
@@ -5853,6 +6036,7 @@ CSchemeEditor *CMainWindow::OpenSchemeFile( const QString &szPath )
 			return pOpen;
 		}
 	}
+	CWaitCursor wait( m_pEditorLoading, tr( "Reading the scheme…" ) );
 	std::optional<std::string> text;
 	if ( bDisk )
 	{
@@ -5865,6 +6049,7 @@ CSchemeEditor *CMainWindow::OpenSchemeFile( const QString &szPath )
 	}
 	if ( !text )
 	{
+		wait.Finish();
 		QMessageBox::warning( this, tr( "Cannot open" ), tr( "Could not read %1." ).arg( szName ) );
 		return nullptr;
 	}
@@ -5899,7 +6084,7 @@ CDemoViewer *CMainWindow::OpenDemoFile( const QString &szPath )
 		return OpenDemoFile( szDisk );
 	const QFileInfo info( szPath );
 	const bool bDisk = info.isAbsolute();
-	const QString szName = bDisk ? QDir::toNativeSeparators( info.absoluteFilePath() ) : QString::fromStdString( xv::vfs::NormalizePath( szPath.toStdString() ) );
+	const QString szName = bDisk ? QDir::fromNativeSeparators( info.absoluteFilePath() ) : QString::fromStdString( xv::vfs::NormalizePath( szPath.toStdString() ) );
 	for ( int i = 0; i < m_pTabs->count(); i++ )
 	{
 		auto *pOpen = qobject_cast<CDemoViewer *>( m_pTabs->widget( i ) );
@@ -5909,6 +6094,7 @@ CDemoViewer *CMainWindow::OpenDemoFile( const QString &szPath )
 			return pOpen;
 		}
 	}
+	CWaitCursor wait( m_pEditorLoading, tr( "Reading the demo…" ) );
 	std::optional<xv::demo::CDemo> demo;
 	xv::demo::CPlayers players;
 	std::shared_ptr<const xv::demo::CContents> pContents;
@@ -5939,6 +6125,7 @@ CDemoViewer *CMainWindow::OpenDemoFile( const QString &szPath )
 		if ( const auto bytes = m_pFileSystem->Read( szName.toStdString() ) )
 			read( *bytes );
 	}
+	wait.Finish();
 	if ( !demo )
 	{
 		QMessageBox::warning( this, tr( "Cannot open" ), tr( "Could not open %1: %2." ).arg( szName, QString::fromStdString( szError ) ) );
@@ -5973,6 +6160,7 @@ void CMainWindow::LoadDemoMap( CDemoViewer &viewer, const QString &szMap, const 
 		viewer.GetWorld().SetNoMap( tr( "The demo doesn't name its map." ) );
 		return;
 	}
+	CWaitCursor wait( m_pEditorLoading, tr( "Finding the demo’s map…" ) );
 	const QString szGamePath = QStringLiteral( "maps/%1.bsp" ).arg( szMap );
 	struct Candidate_t
 	{
@@ -5995,7 +6183,7 @@ void CMainWindow::LoadDemoMap( CDemoViewer &viewer, const QString &szMap, const 
 			return;
 		std::vector<std::byte> bytes( static_cast<std::size_t>( file.size() ) );
 		if ( file.read( reinterpret_cast<char *>( bytes.data() ), file.size() ) == file.size() )
-			candidates.push_back( { std::move( bytes ), szPath, QDir::toNativeSeparators( szPath ) } );
+			candidates.push_back( { std::move( bytes ), szPath, QDir::fromNativeSeparators( szPath ) } );
 	};
 	if ( m_Game )
 	{
@@ -6005,9 +6193,9 @@ void CMainWindow::LoadDemoMap( CDemoViewer &viewer, const QString &szMap, const 
 			if ( !record.m_pMount || !record.m_pMount->Contains( szPath ) )
 				continue;
 			if ( const auto disk = record.m_pMount->DiskPath( szPath ) )
-				addDisk( QString::fromStdString( xv::vfs::ToUtf8( *disk ) ) );
+				addDisk( ToQString( *disk ) );
 			else if ( auto bytes = record.m_pMount->Read( szPath ) )
-				candidates.push_back( { std::move( *bytes ), {}, QString::fromStdString( xv::vfs::ToUtf8( record.m_pMount->GetLocation() ) ) } );
+				candidates.push_back( { std::move( *bytes ), {}, ToQString( record.m_pMount->GetLocation() ) } );
 		}
 	}
 	if ( !szDemoFolder.isEmpty() )
@@ -6051,7 +6239,7 @@ void CMainWindow::LoadDemoMap( CDemoViewer &viewer, const QString &szMap, const 
 // Purpose: File > New > Map: a map with nothing in it yet, for the mounted game, in a tab of its
 //          own; saving it asks where it goes.
 //-----------------------------------------------------------------------------
-CMapEditor *CMainWindow::NewMap()
+CMapEditor *CMainWindow::NewMap( const QString &szName )
 {
 	CMapDocument::Source_t source;
 	const std::string szText = xv::map::NewVmf();
@@ -6062,6 +6250,8 @@ CMapEditor *CMainWindow::NewMap()
 		source.m_Fgds.push_back( ToPath( szFgd ) );
 	}
 	auto *pEditor = new CMapEditor( QString{}, false );
+	if ( !szName.isEmpty() )
+		pEditor->SetUnsavedName( szName.endsWith( u".vmf", Qt::CaseInsensitive ) ? szName : szName + QStringLiteral( ".vmf" ) );
 	source.m_szName = pEditor->GetTabTitle();
 	AddMapTab( pEditor );
 	pEditor->Load( std::move( source ) );
@@ -6083,7 +6273,7 @@ void CMainWindow::OfferNewMapAutosaves()
 	QStringList details;
 	for ( const OrphanAutosave_t &orphan : orphans )
 	{
-		details << QStringLiteral( "%1 (%2)" ).arg( QDir::toNativeSeparators( orphan.m_szPath ), QLocale{}.toString( orphan.m_Modified, QLocale::ShortFormat ) );
+		details << QStringLiteral( "%1 (%2)" ).arg( QDir::fromNativeSeparators( orphan.m_szPath ), QLocale{}.toString( orphan.m_Modified, QLocale::ShortFormat ) );
 	}
 	box.setDetailedText( details.join( QLatin1Char( '\n' ) ) );
 	QPushButton *pOpen = box.addButton( tr( "Open" ), QMessageBox::AcceptRole );
@@ -6141,16 +6331,6 @@ void CMainWindow::UpdateMapMenu()
 	{
 		m_pMapMenu->menuAction()->setVisible( bMap );
 	}
-	// A map's own status bar says what it needs; the sound controls (while nothing plays) and
-	// the game's file count would only crowd it.
-	if ( m_pPlaybackBar )
-	{
-		m_pPlaybackBar->setVisible( !bMap || !m_pNowPlaying->text().isEmpty() );
-	}
-	if ( m_pGameLabel )
-	{
-		m_pGameLabel->setVisible( !bMap );
-	}
 }
 
 //-----------------------------------------------------------------------------
@@ -6158,6 +6338,8 @@ void CMainWindow::UpdateMapMenu()
 //-----------------------------------------------------------------------------
 void CMainWindow::AddMapTab( CMapEditor *pEditor )
 {
+	pEditor->SetAudioOutput( m_nAudio );
+	connect( pEditor, &CMapEditor::OpenModelMaterialRequested, this, &CMainWindow::OpenMaterialFile );
 	if ( !m_MapSideState.isEmpty() )
 		pEditor->SetSideState( m_MapSideState );
 	connect( pEditor, &CMapEditor::SideStateChanged, this, [ this, pEditor ] {
@@ -6178,11 +6360,11 @@ void CMainWindow::AddMapTab( CMapEditor *pEditor )
 	connect( pEditor, &CMapEditor::TitleChanged, this, [ this, pEditor ] {
 		const int nTab = m_pTabs->indexOf( pEditor );
 		m_pTabs->setTabText( nTab, pEditor->GetTabTitle() );
-		m_pTabs->setTabToolTip( nTab, pEditor->IsFromGame() ? pEditor->GetPath() : QDir::toNativeSeparators( pEditor->GetPath() ) );
+		m_pTabs->setTabToolTip( nTab, pEditor->IsFromGame() ? pEditor->GetPath() : QDir::fromNativeSeparators( pEditor->GetPath() ) );
 		UpdateTitle();
 		SaveSession();
 	} );
 	const int nIndex = m_pTabs->addTab( pEditor, pEditor->GetTabTitle() );
-	m_pTabs->setTabToolTip( nIndex, pEditor->IsFromGame() ? pEditor->GetPath() : QDir::toNativeSeparators( pEditor->GetPath() ) );
+	m_pTabs->setTabToolTip( nIndex, pEditor->IsFromGame() ? pEditor->GetPath() : QDir::fromNativeSeparators( pEditor->GetPath() ) );
 	m_pTabs->setCurrentIndex( nIndex );
 }

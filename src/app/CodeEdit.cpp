@@ -146,7 +146,7 @@ QString CodeSchemeName( CodeScheme_t nScheme )
 		case CodeScheme_t::CODE_SCHEME_GRUVBOX_DARK: return QStringLiteral( "Gruvbox Dark" );
 		case CodeScheme_t::CODE_SCHEME_GRUVBOX_DARK_HARD: return QStringLiteral( "Gruvbox Dark (hard)" );
 		case CodeScheme_t::CODE_SCHEME_GRUVBOX_LIGHT: return QStringLiteral( "Gruvbox Light" );
-		default: return QCoreApplication::translate( "CodeEdit", "Desktop colours" );
+		default: return QCoreApplication::translate( "CodeEdit", "System" );
 	}
 }
 

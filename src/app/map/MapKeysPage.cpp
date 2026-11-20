@@ -67,7 +67,7 @@ CMapKeysPage::CMapKeysPage( QWidget *pParent )
 	m_pPreset->setObjectName( QStringLiteral( "preferencesKeyPreset" ) );
 	for ( int i = 0; i < static_cast<int>( MapKeyPreset_t::MAP_KEY_PRESET_COUNT ); i++ )
 		m_pPreset->addItem( MapKeyPresetName( static_cast<MapKeyPreset_t>( i ) ), i );
-	m_pCopy = new QPushButton( tr( "Copy to My Own" ) );
+	m_pCopy = new QPushButton( tr( "Copy to Custom" ) );
 	m_pCopy->setObjectName( QStringLiteral( "preferencesKeyCopy" ) );
 	m_pCopy->setToolTip( tr( "Start your own keys from this preset" ) );
 	auto *pTop = new QHBoxLayout;

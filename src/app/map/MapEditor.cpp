@@ -5,10 +5,13 @@
 //
 //===========================================================================//
 #include "MapEditor.h"
+
+#include "LoadingView.h"
 #include "MapBrushEdit.h"
 #include "map/BrushOperations.h"
 
 #include "kv1/Kv1.h"
+#include "SoundPlayer.h"
 #include "map/Check.h"
 #include "map/VoidFaces.h"
 #include "map/Cordon.h"
@@ -20,6 +23,7 @@
 #include "map/MapReports.h"
 #include "map/Write.h"
 #include "map/MapPhysics.h"
+#include "map/MapModelProperties.h"
 #include "map/MapSplineTool.h"
 #include "map/MapSprinkle.h"
 #include "map/MapBuilding.h"
@@ -158,11 +162,17 @@ CMapEditor::CMapEditor( const QString &szPath, bool bFromGame, QWidget *pParent 
 	m_pResources = new CMapResources( this );
 	m_pRenderData->SetResources( m_pResources );
 	connect( m_pResources, &CMapResources::Arrived, this, &CMapEditor::ResourcesArrived );
-	connect( m_pResources, &CMapResources::Finished, this, [ this ] { m_pRenderData->CompactEntityBoxes(); } );
+	connect( m_pResources, &CMapResources::Finished, this, [ this ] {
+		unsetCursor();
+		m_pRenderData->CompactEntityBoxes();
+		if ( m_pProperties && m_pProperties->GetModelProperties().isVisible() )
+			RepaintViews();
+	} );
 	connect( m_pResources, &CMapResources::Finished, this, &CMapEditor::UpdateGameStatus );
 	m_pParticles = new CMapParticles( this );
 	m_pRenderData->SetParticles( m_pParticles );
 	connect( m_pParticles, &CMapParticles::Ready, this, [ this ] {
+		m_pProperties->GetModelProperties().SetFiles( m_pParticles->GetFileSystem() );
 		if ( m_pParticles->IsPlaying() && !m_pAnimationTimer->isActive() )
 			m_pAnimationTimer->start();
 		RepaintViews();
@@ -237,10 +247,8 @@ CMapEditor::CMapEditor( const QString &szPath, bool bFromGame, QWidget *pParent 
 	};
 	m_pSplitter = new CMapQuadSplitter( m_Panes );
 	m_pSplitter->setObjectName( QStringLiteral( "mapPanes" ) );
-	m_pLoading = new QLabel( tr( "Reading the map…" ), m_pSplitter );
+	m_pLoading = new CLoadingView( m_pSplitter, LoadingLayout_t::LOADING_LAYOUT_PANES );
 	m_pLoading->setObjectName( QStringLiteral( "mapLoading" ) );
-	m_pLoading->setAlignment( Qt::AlignCenter );
-	m_pLoading->setStyleSheet( QStringLiteral( "QLabel { color: white; background: rgba(0, 0, 0, 160); padding: 12px; border-radius: 4px; }" ) );
 
 	// Hammer docks the Filter Control at the side and opens Object Properties as a window of
 	// its own. Here the side is laid out as Blender's: the Filter Control on top where its
@@ -271,6 +279,12 @@ CMapEditor::CMapEditor( const QString &szPath, bool bFromGame, QWidget *pParent 
 	} );
 	connect( m_pFilter, &CMapFilterControl::CordonEditWanted, this, [ this ] { SetTool( MapTool_t::MAP_TOOL_CORDON ); } );
 	m_pProperties = new CMapProperties( *m_pDocument );
+	connect( &m_pProperties->GetModelProperties(), &CMapModelProperties::OpenMaterialRequested, this, &CMapEditor::OpenModelMaterialRequested );
+	connect( &m_pProperties->GetModelProperties(), &CMapModelProperties::PreviewChanged, this, [ this ] {
+		for ( CMapView *pView : GetViews() )
+			if ( auto *p3D = qobject_cast<CMapView3D *>( pView ); p3D && p3D->isVisible() )
+				p3D->Redraw();
+	} );
 	connect( m_pProperties, &CMapProperties::FacePickRequested, this, &CMapEditor::SetFacePickKey );
 	connect( m_pProperties, &CMapProperties::FacesHighlighted, this, &CMapEditor::HighlightSides );
 	connect( this, &CMapEditor::FacePickChanged, m_pProperties, &CMapProperties::SetFacePickKey );
@@ -334,6 +348,7 @@ CMapEditor::CMapEditor( const QString &szPath, bool bFromGame, QWidget *pParent 
 	for ( CMapProperties *pSheet : { m_pProperties, m_pWorldProperties } )
 	{
 		pSheet->SetNameSource( [ this ]( const std::string &szType ) { return KeyNames( szType ); } );
+		pSheet->SetSoundPreview( [ this ]( const QString &szName, std::optional<double> pitch, std::optional<double> volume ) { PlayPropertySound( szName, pitch, volume ); }, [ this ] { StopPropertySound(); } );
 		pSheet->SetPicker( [ this ]( const std::string &szType, const QString &szCurrent ) -> std::optional<QString> {
 			if ( szType == "particlesystem" )
 				return CParticleBrowser::Pick( this, *m_pParticles, szCurrent );
@@ -699,15 +714,11 @@ CMapEditor::CMapEditor( const QString &szPath, bool bFromGame, QWidget *pParent 
 	pLayout->addWidget( pStatus );
 
 	connect( m_pDocument, &CMapDocument::LoadProgress, this, [ this ]( int nPercent, const QString &szStage ) {
-		m_pLoading->setText( tr( "Reading the map… %1% (%2)" ).arg( nPercent ).arg( szStage ) );
-		m_pLoading->adjustSize();
-		m_pLoading->move( ( m_pSplitter->width() - m_pLoading->width() ) / 2, ( m_pSplitter->height() - m_pLoading->height() ) / 2 );
+		m_pLoading->SetProgress( tr( "Reading the map… %1% (%2)" ).arg( nPercent ).arg( szStage ), nPercent );
 	} );
 	connect( m_pDocument, &CMapDocument::Loaded, this, &CMapEditor::Loaded );
 	connect( m_pDocument, &CMapDocument::LoadFailed, this, [ this ]( const QString &szError ) {
-		m_pLoading->setText( tr( "This map can't be read:\n%1" ).arg( szError ) );
-		m_pLoading->adjustSize();
-		m_pLoading->move( ( m_pSplitter->width() - m_pLoading->width() ) / 2, ( m_pSplitter->height() - m_pLoading->height() ) / 2 );
+		m_pLoading->Fail( tr( "This map can't be read:\n%1" ).arg( szError ) );
 	} );
 	auto repaint = [ this ] {
 		RepaintViews();
@@ -744,6 +755,7 @@ CMapEditor::CMapEditor( const QString &szPath, bool bFromGame, QWidget *pParent 
 	} );
 	connect( m_pDocument, &CMapDocument::ModifiedChanged, this, &CMapEditor::TitleChanged );
 	connect( m_pDocument, &CMapDocument::PointfileChanged, this, &CMapEditor::RepaintTools );
+	connect( m_pDocument, &CMapDocument::PortalsChanged, this, &CMapEditor::RepaintTools );
 	UpdateStatus();
 }
 
@@ -1273,14 +1285,14 @@ void CMapEditor::BuildToolBars()
 //-----------------------------------------------------------------------------
 void CMapEditor::Load( CMapDocument::Source_t source )
 {
+	StopPropertySound();
 	// Reload metadata needs no copy of the VMF; clear() would retain its full allocation.
 	std::vector<char> text;
 	text.swap( source.m_Text );
 	m_LastSource = source;
 	source.m_Text.swap( text );
 	m_LastSource.m_bRecovered = false;
-	m_pLoading->show();
-	m_pLoading->raise();
+	m_pLoading->Begin( tr( "Reading the map…" ) );
 	m_pDocument->Load( std::move( source ) );
 }
 
@@ -1322,7 +1334,7 @@ void CMapEditor::Loaded()
 		m_Settings.m_WorldGrid = bOk ? plane : MapGridPlane_t{};
 	}
 	m_Settings.m_bSnapToGrid = scene.m_Map.m_ViewSettings.m_bSnapToGrid;
-	m_pLoading->hide();
+	m_pLoading->End();
 	OfferRecovery();
 	m_pParticles->Start( m_pDocument->GetGame(), QFileInfo{ m_szPath }.completeBaseName().toStdString() );
 	m_pParticles->SetScene( m_pDocument->GetSharedScene() );
@@ -1489,6 +1501,15 @@ void CMapEditor::showEvent( QShowEvent *pEvent )
 	if ( !m_SideState.isEmpty() )
 		SetSideState( m_SideState );
 	PlaceFaceEdit();
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Stop a looping preview when the user leaves the map tab.
+//-----------------------------------------------------------------------------
+void CMapEditor::hideEvent( QHideEvent *pEvent )
+{
+	StopPropertySound();
+	QWidget::hideEvent( pEvent );
 }
 
 //-----------------------------------------------------------------------------
@@ -1806,7 +1827,7 @@ bool CMapEditor::Autosave()
 	QString szError;
 	if ( !WriteMapAutosave( GetAutosavePath(), szText, &szError ) )
 	{
-		emit StatusMessage( tr( "Could not autosave %1: %2" ).arg( QDir::toNativeSeparators( GetAutosavePath() ), szError ) );
+		emit StatusMessage( tr( "Could not autosave %1: %2" ).arg( QDir::fromNativeSeparators( GetAutosavePath() ), szError ) );
 		return false;
 	}
 	m_bAutosaveOurs = true;
@@ -1873,7 +1894,7 @@ void CMapEditor::RecoverAutosave()
 	QFile file( m_szOfferedAutosave );
 	if ( !file.open( QIODevice::ReadOnly ) )
 	{
-		QMessageBox::warning( this, tr( "Recover" ), tr( "Could not read %1:\n%2" ).arg( QDir::toNativeSeparators( m_szOfferedAutosave ), file.errorString() ) );
+		QMessageBox::warning( this, tr( "Recover" ), tr( "Could not read %1:\n%2" ).arg( QDir::fromNativeSeparators( m_szOfferedAutosave ), file.errorString() ) );
 		return;
 	}
 	const QByteArray bytes = file.readAll();
@@ -1977,7 +1998,7 @@ bool CMapEditor::ImportStripperFiles( QStringList files, QString *pMessage )
 		QFile file( szFile );
 		if ( !file.open( QIODevice::ReadOnly ) )
 		{
-			say( tr( "Could not read %1: %2" ).arg( QDir::toNativeSeparators( szFile ), file.errorString() ) );
+			say( tr( "Could not read %1: %2" ).arg( QDir::fromNativeSeparators( szFile ), file.errorString() ) );
 			return false;
 		}
 		const QByteArray bytes = file.readAll();
@@ -2330,13 +2351,13 @@ void CMapEditor::LoadPointfile()
 	QFile file( szFile );
 	if ( !file.open( QIODevice::ReadOnly ) )
 	{
-		emit StatusMessage( tr( "Could not read %1" ).arg( QDir::toNativeSeparators( szFile ) ) );
+		emit StatusMessage( tr( "Could not read %1" ).arg( QDir::fromNativeSeparators( szFile ) ) );
 		return;
 	}
 	const std::vector<xv::map::Point_t> points = xv::map::ReadPointfile( file.readAll().toStdString() );
 	if ( points.size() < 2 )
 	{
-		emit StatusMessage( tr( "%1 holds no line" ).arg( QDir::toNativeSeparators( szFile ) ) );
+		emit StatusMessage( tr( "%1 holds no line" ).arg( QDir::fromNativeSeparators( szFile ) ) );
 		return;
 	}
 	m_pDocument->SetPointfile( points );
@@ -2349,6 +2370,51 @@ void CMapEditor::LoadPointfile()
 void CMapEditor::UnloadPointfile()
 {
 	m_pDocument->SetPointfile( std::nullopt );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Offer the portal file beside the map or let the user pick another.
+//-----------------------------------------------------------------------------
+void CMapEditor::LoadPortalFile()
+{
+	const QFileInfo map( m_szPath );
+	const QString szDefault = m_szPath.isEmpty() || m_bFromGame ? QString{} : map.absoluteDir().filePath( map.completeBaseName() + QStringLiteral( ".prt" ) );
+	const QString szFile = AskOpenFile( this, tr( "Load Portal File" ), szDefault, tr( "Portal files (*.prt);;All files (*)" ) );
+	if ( !szFile.isEmpty() )
+		LoadPortalFile( szFile );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Read portals from disk for inspection, without modifying the VMF.
+//-----------------------------------------------------------------------------
+bool CMapEditor::LoadPortalFile( const QString &szFile )
+{
+	QFile file( szFile );
+	if ( !file.open( QIODevice::ReadOnly ) )
+	{
+		emit StatusMessage( tr( "Could not read %1" ).arg( QDir::fromNativeSeparators( szFile ) ) );
+		return false;
+	}
+	auto portals = xv::map::ReadPortalFile( file.readAll().toStdString() );
+	if ( portals.empty() )
+	{
+		emit StatusMessage( tr( "No portals found in %1" ).arg( QDir::fromNativeSeparators( szFile ) ) );
+		return false;
+	}
+	m_szPortalPath = QFileInfo( szFile ).absoluteFilePath();
+	const int nPortals = static_cast<int>( portals.size() );
+	m_pDocument->SetPortals( std::move( portals ) );
+	emit StatusMessage( tr( "%n portal(s) loaded. Double-click an outline to inspect its leaves.", nullptr, nPortals ) );
+	return true;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Clear the portal overlay and its file association.
+//-----------------------------------------------------------------------------
+void CMapEditor::UnloadPortalFile()
+{
+	m_szPortalPath.clear();
+	m_pDocument->SetPortals( {} );
 }
 
 //-----------------------------------------------------------------------------
@@ -2470,27 +2536,108 @@ QStringList CMapEditor::KeyNames( const std::string &szType )
 	else if ( pFileSystem && szType == "sound" )
 	{
 		QApplication::setOverrideCursor( Qt::WaitCursor );
-		if ( const std::optional<std::string> manifest = pFileSystem->ReadText( "scripts/game_sounds_manifest.txt" ) )
-		{
-			for ( const xv::kv1::CNode &root : xv::kv1::Parse( *manifest ).m_Document.m_Roots )
-			{
-				for ( const xv::kv1::CNode &file : root.IsBlock() ? root.GetChildren() : std::vector<xv::kv1::CNode>{} )
-				{
-					const std::optional<std::string> script = file.IsPair() ? pFileSystem->ReadText( file.GetValue() ) : std::nullopt;
-					for ( const xv::kv1::CNode &entry : script ? xv::kv1::Parse( *script ).m_Document.m_Roots : std::vector<xv::kv1::CNode>{} )
-					{
-						if ( entry.IsBlock() )
-							names << QString::fromStdString( std::string{ entry.GetKey() } );
-					}
-				}
-			}
-		}
+		LoadPropertySounds( pFileSystem );
+		for ( const auto &[ szName, node ] : m_SoundScripts )
+			names << QString::fromStdString( node.GetKey() );
 		for ( const char *pszExtension : { ".wav", ".mp3" } )
 			add( pFileSystem->Find( "sound", pszExtension, true ), static_cast<int>( std::string_view{ "sound/" }.size() ) );
 		QApplication::restoreOverrideCursor();
 	}
 	m_KeyNames[ szType ] = names;
 	return names;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Index mounted soundscripts once for both preview and the sound picker.
+//-----------------------------------------------------------------------------
+void CMapEditor::LoadPropertySounds( std::shared_ptr<const xv::vfs::CFileSystem> pFiles )
+{
+	if ( pFiles == m_pSoundFiles )
+		return;
+	StopPropertySound();
+	m_pPropertySound.reset();
+	m_pSoundFiles = std::move( pFiles );
+	m_SoundScripts.clear();
+	if ( !m_pSoundFiles )
+		return;
+	const auto readScript = [ this ]( const std::string &szPath ) {
+		if ( const auto text = m_pSoundFiles->ReadText( szPath ) )
+			for ( auto &node : xv::kv1::Parse( *text ).m_Document.m_Roots )
+				if ( node.IsBlock() )
+				{
+					const std::string szName = xv::vfs::NormalizePath( node.GetKey() );
+					m_SoundScripts.insert_or_assign( szName, std::move( node ) );
+				}
+	};
+	if ( const auto manifest = m_pSoundFiles->ReadText( "scripts/game_sounds_manifest.txt" ) )
+		for ( const auto &root : xv::kv1::Parse( *manifest ).m_Document.m_Roots )
+			if ( root.IsBlock() )
+				for ( const auto &file : root.GetChildren() )
+					if ( file.IsPair() )
+						readScript( file.GetValue() );
+	const QString szMap = QFileInfo( m_szPath ).completeBaseName();
+	if ( !szMap.isEmpty() )
+		readScript( "maps/" + szMap.toStdString() + "_level_sounds.txt" );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Preview a wave or soundscript with the entity's overrides and the wave's loop points.
+//-----------------------------------------------------------------------------
+void CMapEditor::PlayPropertySound( const QString &szSound, std::optional<double> pitch, std::optional<double> volume )
+{
+	LoadPropertySounds( m_pParticles->GetFileSystem() );
+	if ( !m_pSoundFiles )
+	{
+		emit StatusMessage( tr( "Open the map's game to preview its sounds." ) );
+		return;
+	}
+	xv::sound::PlayRequest_t request;
+	request.m_szWave = szSound.trimmed().toStdString();
+	const std::string szKey = xv::vfs::NormalizePath( request.m_szWave );
+	if ( const auto found = m_SoundScripts.find( szKey ); found != m_SoundScripts.end() )
+	{
+		std::mt19937 random( std::random_device{}() );
+		auto play = xv::sound::PlayBlock( xv::sound::FileKind_t::FILE_KIND_SOUNDSCRIPT, found->second, nullptr, random );
+		if ( !play )
+		{
+			emit StatusMessage( tr( "%1 has no wave to play." ).arg( szSound ) );
+			return;
+		}
+		request = std::move( *play );
+	}
+	else
+	{
+		if ( szKey.starts_with( "sound/" ) )
+			request.m_szWave = szKey.substr( 6 );
+		request.m_szGamePath = xv::sound::WaveGamePath( request.m_szWave );
+	}
+	if ( pitch && std::isfinite( *pitch ) && *pitch > 0.0 )
+		request.m_flPitch = std::clamp( *pitch, 1.0, 255.0 );
+	if ( volume && std::isfinite( *volume ) )
+		request.m_flVolume = std::clamp( *volume, 0.0, 1.0 );
+	if ( !m_pPropertySound )
+	{
+		m_pPropertySound = std::make_unique<CSoundPlayer>( *m_pSoundFiles, this, m_nAudioOutput );
+		connect( m_pPropertySound.get(), &CSoundPlayer::Stopped, this, [ this ] {
+			m_pProperties->SetSoundPlaying( false );
+			m_pWorldProperties->SetSoundPlaying( false );
+		} );
+		connect( m_pPropertySound.get(), &CSoundPlayer::Failed, this, &CMapEditor::StatusMessage );
+	}
+	if ( m_pPropertySound->Play( std::move( request ), {}, true ) )
+	{
+		m_pProperties->SetSoundPlaying( true );
+		m_pWorldProperties->SetSoundPlaying( true );
+	}
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Stop the Object Properties preview, including any file loop.
+//-----------------------------------------------------------------------------
+void CMapEditor::StopPropertySound()
+{
+	if ( m_pPropertySound )
+		m_pPropertySound->Stop();
 }
 
 //-----------------------------------------------------------------------------
@@ -3443,7 +3590,7 @@ void CMapEditor::CreatePrefab()
 		return;
 	}
 	FillPrefabs();
-	emit StatusMessage( tr( "Prefab saved to %1" ).arg( QDir::toNativeSeparators( szFile ) ) );
+	emit StatusMessage( tr( "Prefab saved to %1" ).arg( QDir::fromNativeSeparators( szFile ) ) );
 }
 
 //-----------------------------------------------------------------------------
@@ -4579,7 +4726,9 @@ QString CMapEditor::GetTabTitle() const
 //-----------------------------------------------------------------------------
 QString CMapEditor::GetFileName() const
 {
-	return m_szPath.isEmpty() ? tr( "Untitled" ) : QFileInfo{ m_szPath }.fileName();
+	if ( !m_szPath.isEmpty() )
+		return QFileInfo{ m_szPath }.fileName();
+	return m_szUnsavedName.isEmpty() ? tr( "Untitled" ) : m_szUnsavedName;
 }
 
 //-----------------------------------------------------------------------------
@@ -4624,11 +4773,11 @@ bool CMapEditor::Save()
 	QString szError;
 	if ( !m_pDocument->Save( std::filesystem::path{ m_szPath.toStdString() }, &szError ) )
 	{
-		QMessageBox::critical( this, tr( "Save failed" ), tr( "Could not write %1:\n%2" ).arg( QDir::toNativeSeparators( m_szPath ), szError ) );
+		QMessageBox::critical( this, tr( "Save failed" ), tr( "Could not write %1:\n%2" ).arg( QDir::fromNativeSeparators( m_szPath ), szError ) );
 		return false;
 	}
 	RemoveAutosave();
-	emit StatusMessage( tr( "Saved %1" ).arg( QDir::toNativeSeparators( m_szPath ) ) );
+	emit StatusMessage( tr( "Saved %1" ).arg( QDir::fromNativeSeparators( m_szPath ) ) );
 	return true;
 }
 
@@ -4647,8 +4796,8 @@ bool CMapEditor::SaveAs()
 		return false;
 	}
 	// A bare name starts in the folder the last file window finished in.
-	QString szStart = m_szPath.isEmpty() ? QStringLiteral( "untitled.vmf" ) : m_bFromGame ? QFileInfo{ m_szPath }.fileName()
-																						  : m_szPath;
+	QString szStart = m_szPath.isEmpty() ? ( m_szUnsavedName.isEmpty() ? QStringLiteral( "untitled.vmf" ) : m_szUnsavedName ) : m_bFromGame ? QFileInfo{ m_szPath }.fileName()
+																																			: m_szPath;
 	if ( IsManifest() )
 		szStart = szStart.chopped( 4 ) + QStringLiteral( ".vmf" );
 	const QString szFile = AskSaveFile( this, tr( "Save Map As" ), szStart, tr( "Hammer maps (*.vmf)" ) );
@@ -4671,7 +4820,7 @@ bool CMapEditor::SaveAs()
 	QString szError;
 	if ( !m_pDocument->Save( std::filesystem::path{ szFile.toStdString() }, &szError ) )
 	{
-		QMessageBox::critical( this, tr( "Save failed" ), tr( "Could not write %1:\n%2" ).arg( QDir::toNativeSeparators( szFile ), szError ) );
+		QMessageBox::critical( this, tr( "Save failed" ), tr( "Could not write %1:\n%2" ).arg( QDir::fromNativeSeparators( szFile ), szError ) );
 		return false;
 	}
 	RemoveAutosave();
@@ -4682,7 +4831,7 @@ bool CMapEditor::SaveAs()
 		recent << m_pRecentMaterials->itemText( i );
 	QSettings{}.setValue( QStringLiteral( "mapTextures/" ) + GetCameraKey(), recent );
 	emit TitleChanged();
-	emit StatusMessage( tr( "Saved %1" ).arg( QDir::toNativeSeparators( m_szPath ) ) );
+	emit StatusMessage( tr( "Saved %1" ).arg( QDir::fromNativeSeparators( m_szPath ) ) );
 	return true;
 }
 
@@ -4764,6 +4913,9 @@ QString CMapEditor::GetSessionEntry() const
 //-----------------------------------------------------------------------------
 void CMapEditor::StopWork()
 {
+	m_pLoading->End();
+	unsetCursor();
+	StopPropertySound();
 	RememberCamera();
 	m_pDocument->Stop();
 	m_pResources->Stop();
@@ -4775,15 +4927,29 @@ void CMapEditor::StopWork()
 //-----------------------------------------------------------------------------
 void CMapEditor::GameChanged( const xv::vfs::CGameInfo *pGame )
 {
+	LoadPropertySounds( {} );
+	m_pProperties->GetModelProperties().SetFiles( {} );
+	m_KeyNames.clear();
 	m_pDocument->SetGame( pGame ? std::optional<xv::vfs::CGameInfo>{ *pGame } : std::nullopt );
 	m_pLighting->SetRadSources( m_pDocument->GetGame(), m_szPath.toStdString() );
 	if ( m_pDocument->IsLoaded() )
 	{
 		StartResources();
+		m_pParticles->Start( m_pDocument->GetGame(), QFileInfo( m_szPath ).completeBaseName().toStdString() );
+		m_pParticles->SetScene( m_pDocument->GetSharedScene() );
 		m_pFaceEdit->Refresh();
 	}
 	LoadSprinkleTypes();
 	emit TextureGameChanged();
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Add the Model tab's pose to this 3D frame only.
+//-----------------------------------------------------------------------------
+void CMapEditor::ApplyModelPreview( MapFrame_t &frame )
+{
+	if ( m_pProperties )
+		m_pProperties->GetModelProperties().ApplyPreview( frame, *m_pResources );
 }
 
 //-----------------------------------------------------------------------------
@@ -4821,7 +4987,7 @@ void CMapEditor::ResourcesArrived()
 }
 
 //-----------------------------------------------------------------------------
-// Purpose: Only textured 3D views on screen show what moves; 2D views draw no materials' motion.
+// Purpose: Animate visible textured 3D views and the selected sprites pictured in 2D.
 //-----------------------------------------------------------------------------
 void CMapEditor::AnimateMaterials()
 {
@@ -4843,11 +5009,21 @@ void CMapEditor::AnimateMaterials()
 		if ( p3D && p3D->isVisible() && ( bEffect || ( p3D->GetType() != MapViewType_t::MAP_VIEW_TYPE_3D_WIREFRAME && p3D->GetType() != MapViewType_t::MAP_VIEW_TYPE_3D_FLAT ) ) )
 			shown.push_back( p3D );
 	}
-	if ( shown.empty() )
-	{
+	const auto &pSprites = m_pRenderData->GetSprites();
+	const auto pMaterials = m_pResources->GetMaterials();
+	const bool bSelectedSprites = pMaterials && pSprites && !m_pDocument->GetSelection().empty() &&
+		std::ranges::any_of( *pSprites, [ & ]( const auto &sprite ) {
+			return sprite.m_nMaterial < pMaterials->size() && ( *pMaterials )[ sprite.m_nMaterial ].m_bAnimated &&
+				m_pDocument->IsSelected( sprite.m_nObject ) && m_pDocument->IsShown( sprite.m_nObject );
+		} );
+	std::vector<CMapView *> shown2D;
+	if ( bSelectedSprites )
+		for ( CMapView *pView : GetViews() )
+			if ( qobject_cast<CMapView2D *>( pView ) && pView->isVisible() )
+				shown2D.push_back( pView );
+	if ( shown.empty() && shown2D.empty() )
 		return;
-	}
-	if ( bParticles )
+	if ( bParticles && !shown.empty() )
 	{
 		m_pParticles->Advance( flStep );
 	}
@@ -4860,6 +5036,8 @@ void CMapEditor::AnimateMaterials()
 	{
 		m_pRenderData->SetMaterials( m_pResources->GetMaterials(), m_pResources->GetTextures(), m_pResources->GetEntityMaterial() );
 		m_pRenderData->SetSky( m_pResources->GetSky(), m_pResources->GetSkyTransforms() );
+		for ( CMapView *pView : shown2D )
+			pView->update();
 	}
 	for ( CMapView3D *p3D : shown )
 	{
@@ -5408,6 +5586,7 @@ void CMapEditor::StartResources()
 	}
 	const xv::map::CScene *pScene = m_pDocument->GetScene();
 	m_nMaterialsRead = pScene ? static_cast<std::uint32_t>( pScene->m_Materials.size() ) : 0;
+	setCursor( Qt::BusyCursor );
 	m_pResources->Start( m_pDocument->GetSharedScene(), m_pDocument->GetGame(), m_nTextureSize, NeedsDecodedTextures() );
 }
 

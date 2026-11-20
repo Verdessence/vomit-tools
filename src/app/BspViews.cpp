@@ -507,7 +507,7 @@ CEntityView::CEntityView( const xv::bsp::CBsp &bsp, const std::filesystem::path 
 	m_pEdit->setCheckable( true );
 	m_pEdit->setEnabled( !m_ConfigPath.empty() );
 	m_pEdit->setToolTip( m_ConfigPath.empty() ? tr( "This map isn't in a game folder, so there's nowhere for its Stripper config" )
-											  : tr( "Edit %1, seeing the changes in the list as you type" ).arg( QString::fromStdU16String( m_ConfigPath.u16string() ) ) );
+											  : tr( "Edit %1, seeing the changes in the list as you type" ).arg( QString::fromStdU16String( m_ConfigPath.generic_u16string() ) ) );
 	connect( m_pEdit, &QPushButton::toggled, this, &CEntityView::ShowConfigEditor );
 	auto *pStripperBar = new QHBoxLayout;
 	pStripperBar->addWidget( m_pStripper );
@@ -689,7 +689,7 @@ void CEntityView::SetStripperConfigs( std::vector<std::filesystem::path> configs
 			bDiagnosed = true;
 		}
 		names.push_back( QString::fromStdString( szName ) );
-		const QString szPath = QString::fromStdU16String( file.u16string() );
+		const QString szPath = QString::fromStdU16String( file.generic_u16string() );
 		if ( QFileInfo::exists( szPath ) && !m_pWatcher->files().contains( szPath ) )
 		{
 			m_pWatcher->addPath( szPath );
@@ -704,7 +704,7 @@ void CEntityView::SetStripperConfigs( std::vector<std::filesystem::path> configs
 		QStringList paths;
 		for ( const auto &file : m_Configs )
 		{
-			paths.push_back( QString::fromStdU16String( file.u16string() ) );
+			paths.push_back( QString::fromStdU16String( file.generic_u16string() ) );
 		}
 		return paths.join( u'\n' );
 	}() );
@@ -805,7 +805,7 @@ void CEntityView::Rebuild()
 	for ( std::size_t nConfig = 0; nConfig < m_Parsed.size() && nConfig < m_Configs.size(); nConfig++ )
 	{
 		const xv::bsp::StripperConfig_t &config = m_Parsed[ nConfig ];
-		const QString szPath = QString::fromStdU16String( m_Configs[ nConfig ].u16string() );
+		const QString szPath = QString::fromStdU16String( m_Configs[ nConfig ].generic_u16string() );
 		for ( std::size_t i = 0; i < config.m_Problems.size(); i++ )
 		{
 			const int nLine = i < config.m_ProblemLines.size() ? config.m_ProblemLines[ i ] : 0;
@@ -847,7 +847,7 @@ void CEntityView::Rebuild()
 void CEntityView::GoToProblem( QTreeWidgetItem *pItem )
 {
 	const int nLine = pItem ? pItem->data( 0, Qt::UserRole + 1 ).toInt() : 0;
-	if ( nLine <= 0 || m_ConfigPath.empty() || pItem->data( 0, Qt::UserRole ).toString() != QString::fromStdU16String( m_ConfigPath.u16string() ) )
+	if ( nLine <= 0 || m_ConfigPath.empty() || pItem->data( 0, Qt::UserRole ).toString() != QString::fromStdU16String( m_ConfigPath.generic_u16string() ) )
 	{
 		return;
 	}
@@ -913,7 +913,7 @@ void CEntityView::EditConfig( const std::filesystem::path &config )
 		configs = { config };
 	}
 	m_pEdit->setEnabled( true );
-	m_pEdit->setToolTip( tr( "Edit %1, seeing the changes in the list as you type" ).arg( QString::fromStdU16String( config.u16string() ) ) );
+	m_pEdit->setToolTip( tr( "Edit %1, seeing the changes in the list as you type" ).arg( QString::fromStdU16String( config.generic_u16string() ) ) );
 	SetStripperConfigs( std::move( configs ) );
 	m_pStripper->setChecked( true );
 	ShowConfigEditor( true );
@@ -947,7 +947,7 @@ void CEntityView::AppendToConfig( const std::string &szText )
 void CEntityView::LoadConfigText()
 {
 	QString szText = m_bConfigReadOnly ? m_szConfigData : QString{};
-	QFile file( QString::fromStdU16String( m_ConfigPath.u16string() ) );
+	QFile file( QString::fromStdU16String( m_ConfigPath.generic_u16string() ) );
 	if ( !m_bConfigReadOnly && !m_ConfigPath.empty() && file.open( QIODevice::ReadOnly ) )
 	{
 		szText = QString::fromUtf8( file.readAll() );
@@ -957,7 +957,7 @@ void CEntityView::LoadConfigText()
 	m_bLoadingText = false;
 	const QString szState = m_bConfigReadOnly ? tr( " (archive; read-only)" ) : file.exists() ? QString{}
 																							  : tr( " (new; made when saved)" );
-	m_pConfigPath->setText( m_ConfigPath.empty() ? QString{} : QDir::toNativeSeparators( QString::fromStdU16String( m_ConfigPath.u16string() ) ) + szState );
+	m_pConfigPath->setText( m_ConfigPath.empty() ? QString{} : QString::fromStdU16String( m_ConfigPath.generic_u16string() ) + szState );
 }
 
 //-----------------------------------------------------------------------------
@@ -983,17 +983,17 @@ bool CEntityView::SaveConfig()
 	{
 		return false;
 	}
-	const QString szPath = QString::fromStdU16String( m_ConfigPath.u16string() );
+	const QString szPath = QString::fromStdU16String( m_ConfigPath.generic_u16string() );
 	QDir{}.mkpath( QFileInfo{ szPath }.absolutePath() );
 	QSaveFile file( szPath );
 	const QByteArray bytes = m_pConfigText->toPlainText().toUtf8();
 	if ( !file.open( QIODevice::WriteOnly ) || file.write( bytes ) != bytes.size() || !file.commit() )
 	{
-		QMessageBox::critical( this, tr( "Stripper Config" ), tr( "Could not write %1:\n%2" ).arg( QDir::toNativeSeparators( szPath ), file.errorString() ) );
+		QMessageBox::critical( this, tr( "Stripper Config" ), tr( "Could not write %1:\n%2" ).arg( QDir::fromNativeSeparators( szPath ), file.errorString() ) );
 		return false;
 	}
 	SetConfigModified( false );
-	m_pConfigPath->setText( QDir::toNativeSeparators( szPath ) );
+	m_pConfigPath->setText( QDir::fromNativeSeparators( szPath ) );
 	// A new file joins the configs as Stripper would find it.
 	auto configs = m_Configs;
 	if ( std::ranges::find( configs, m_ConfigPath ) == configs.end() )

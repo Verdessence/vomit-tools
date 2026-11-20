@@ -421,7 +421,7 @@ QString MapKeyPresetName( MapKeyPreset_t nPreset )
 		case MapKeyPreset_t::MAP_KEY_PRESET_HAMMER_PLUS_PLUS: return QCoreApplication::translate( "MapKeys", "Hammer++" );
 		case MapKeyPreset_t::MAP_KEY_PRESET_HAMMER: return QCoreApplication::translate( "MapKeys", "Hammer" );
 		case MapKeyPreset_t::MAP_KEY_PRESET_BLENDER: return QCoreApplication::translate( "MapKeys", "Blender" );
-		default: return QCoreApplication::translate( "MapKeys", "My own" );
+		default: return QCoreApplication::translate( "MapKeys", "Custom" );
 	}
 }
 

@@ -231,7 +231,7 @@ bool CSourceToolRunner::Start( const QString &szProgram, const QStringList &argu
 	m_bReported = false;
 	if ( !QFileInfo( szProgram ).isFile() || !QFileInfo( szProgram ).isExecutable() )
 	{
-		Append( tr( "%1 isn't an executable file. Choose the tool in Preferences > Source Tools.\n" ).arg( szProgram.isEmpty() ? tr( "(nothing)" ) : szProgram ) );
+		Append( tr( "%1 isn't an executable file. Choose the tool in Preferences > Maps > Source Tools.\n" ).arg( szProgram.isEmpty() ? tr( "(nothing)" ) : szProgram ) );
 		m_bReported = true;
 		emit Finished( false );
 		return false;

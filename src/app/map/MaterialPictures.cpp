@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <QCryptographicHash>
 #include <QDir>
+#include <QFile>
 #include <QPainter>
 #include <QStandardPaths>
 #include "ImageFiles.h"
@@ -78,14 +79,20 @@ MaterialPicture_t LoadMaterialPicture( const xv::vfs::CFileSystem &fileSystem, c
 	const QString szFile = szFolder + QLatin1Char( '/' ) + QString::fromLatin1( hash );
 	MaterialPicture_t result;
 	result.m_Image = ReadCachedPicture( szFile, &result.m_Size );
-	if ( !result.m_Image.isNull() )
+	if ( !result.m_Image.isNull() && !result.m_Size.isEmpty() )
 		return result;
 	const xv::material::Reader_t read = [ &fileSystem ]( std::string_view szPath ) { return fileSystem.Read( szPath ); };
 	const auto info = xv::map::ReadMaterialInfo( szName.toStdString(), read );
-	if ( const auto bytes = info.m_szTexture.empty() ? std::nullopt : fileSystem.Read( "materials/" + info.m_szTexture + ".vtf" ) )
+	if ( const auto bytes = info.m_szTexture.empty() ? std::nullopt : fileSystem.Read( xv::material::TexturePath( info.m_szTexture ) ) )
 	{
 		if ( const auto vtf = xv::texture::ReadVtf( *bytes ) )
 			result.m_Size = QSize( vtf->m_Info.m_nWidth, vtf->m_Info.m_nHeight );
+		if ( !result.m_Image.isNull() )
+		{
+			if ( !result.m_Size.isEmpty() && WriteCachedPicture( szFile, result.m_Image, result.m_Size ) )
+				QFile::remove( szFile + QStringLiteral( ".png" ) );
+			return result;
+		}
 		if ( const auto pTexture = ReadMapTexture( *bytes, nPictureSize, true ); pTexture && !pTexture->m_Mips.empty() )
 		{
 			result.m_Image = Composed( ToQImage( pTexture->m_Mips.front() ).copy(), info.IsSeeThrough() || info.m_bAlphaTest, nPictureSize );

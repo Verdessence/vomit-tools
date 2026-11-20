@@ -1,12 +1,15 @@
 //===========================================================================//
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
-// Purpose: See FileIcons.h. Icons come from the desktop's icon theme, each with fallbacks down
+// Purpose: See FileIcons.h. File icons come from the desktop's icon theme, with fallbacks down
 //          to the style's own, so a theme without one name still shows something.
 //
 //===========================================================================//
 #include "FileIcons.h"
 
+#include <utility>
+
+#include <algorithm>
 #include <array>
 #include <initializer_list>
 
@@ -14,6 +17,9 @@
 #include <QCoreApplication>
 #include <QFileInfo>
 #include <QHash>
+#include <QIconEngine>
+#include <QPainter>
+#include <QPainterPath>
 #include <QMimeDatabase>
 #include <QStyle>
 
@@ -129,6 +135,123 @@ const Cached_t &Lookup( QStringView szName )
 	return *cache.insert( szExtension, entry );
 }
 
+class CPaletteIconEngine : public QIconEngine
+{
+public:
+	[[nodiscard]] QPixmap pixmap( const QSize &size, QIcon::Mode nMode, QIcon::State nState ) override;
+};
+
+//-----------------------------------------------------------------------------
+// Purpose: Leave the area outside the icon transparent when Qt requests a pixmap.
+//-----------------------------------------------------------------------------
+QPixmap CPaletteIconEngine::pixmap( const QSize &size, QIcon::Mode nMode, QIcon::State nState )
+{
+	QPixmap picture( size );
+	picture.fill( Qt::transparent );
+	{
+		QPainter painter( &picture );
+		paint( &painter, QRect( QPoint{}, size ), nMode, nState );
+	}
+	return picture;
+}
+
+class CFolderIconEngine final : public CPaletteIconEngine
+{
+public:
+	[[nodiscard]] QIconEngine *clone() const override;
+	void paint( QPainter *pPainter, const QRect &rect, QIcon::Mode nMode, QIcon::State nState ) override;
+};
+
+//-----------------------------------------------------------------------------
+// Purpose: Qt copies icon engines when an icon is changed.
+//-----------------------------------------------------------------------------
+QIconEngine *CFolderIconEngine::clone() const
+{
+	return new CFolderIconEngine;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: An outline that stays readable even when the icon theme and palette disagree.
+//-----------------------------------------------------------------------------
+void CFolderIconEngine::paint( QPainter *pPainter, const QRect &rect, QIcon::Mode nMode, QIcon::State nState )
+{
+	const QPalette palette = QApplication::palette( "QTreeView" );
+	const QPalette::ColorGroup nGroup = nMode == QIcon::Disabled ? QPalette::Disabled : QPalette::Active;
+	const QColor foreground = palette.color( nGroup, nMode == QIcon::Selected ? QPalette::HighlightedText : QPalette::Text );
+	const qreal flSize = std::min( rect.width(), rect.height() );
+	pPainter->save();
+	pPainter->setRenderHint( QPainter::Antialiasing );
+	pPainter->translate( rect.x() + ( rect.width() - flSize ) / 2, rect.y() + ( rect.height() - flSize ) / 2 );
+	pPainter->scale( flSize / 16, flSize / 16 );
+	pPainter->setPen( QPen( foreground, 1.2, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin ) );
+	QPainterPath folder;
+	folder.moveTo( 1.5, 13 );
+	folder.lineTo( 1.5, 3.5 );
+	folder.lineTo( 6, 3.5 );
+	folder.lineTo( 7.5, 5 );
+	folder.lineTo( 13, 5 );
+	if ( nState == QIcon::On )
+	{
+		folder.lineTo( 13, 7 );
+		folder.moveTo( 1.5, 13 );
+		folder.lineTo( 4, 7 );
+		folder.lineTo( 14.5, 7 );
+		folder.lineTo( 12.5, 13 );
+	}
+	else
+	{
+		folder.lineTo( 13, 13 );
+	}
+	folder.lineTo( 1.5, 13 );
+	pPainter->drawPath( folder );
+	pPainter->restore();
+}
+
+class CForegroundIconEngine final : public CPaletteIconEngine
+{
+public:
+	explicit CForegroundIconEngine( QIcon icon );
+	[[nodiscard]] QIconEngine *clone() const override;
+	void paint( QPainter *pPainter, const QRect &rect, QIcon::Mode nMode, QIcon::State nState ) override;
+
+private:
+	QIcon m_Icon;
+};
+
+//-----------------------------------------------------------------------------
+// Purpose: Use the desktop icon's shape with the application's foreground colour.
+//-----------------------------------------------------------------------------
+CForegroundIconEngine::CForegroundIconEngine( QIcon icon )
+	: m_Icon( std::move( icon ) )
+{}
+
+//-----------------------------------------------------------------------------
+// Purpose: Qt copies icon engines when an icon is changed.
+//-----------------------------------------------------------------------------
+QIconEngine *CForegroundIconEngine::clone() const
+{
+	return new CForegroundIconEngine( m_Icon );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Match the workspace header even with a desktop icon theme of the opposite tone.
+//-----------------------------------------------------------------------------
+void CForegroundIconEngine::paint( QPainter *pPainter, const QRect &rect, QIcon::Mode nMode, QIcon::State nState )
+{
+	const qreal flRatio = pPainter->device()->devicePixelRatioF();
+	QPixmap pixmap = m_Icon.pixmap( rect.size(), flRatio, QIcon::Normal, nState );
+	if ( pixmap.isNull() )
+		return;
+	const auto nGroup = nMode == QIcon::Disabled ? QPalette::Disabled : QPalette::Active;
+	const QColor color = QApplication::palette().color( nGroup, QPalette::WindowText );
+	{
+		QPainter tint( &pixmap );
+		tint.setCompositionMode( QPainter::CompositionMode_SourceIn );
+		tint.fillRect( QRectF( QPointF{}, pixmap.deviceIndependentSize() ), color );
+	}
+	pPainter->drawPixmap( rect.topLeft() + QPointF( ( rect.width() - pixmap.deviceIndependentSize().width() ) / 2, ( rect.height() - pixmap.deviceIndependentSize().height() ) / 2 ), pixmap );
+}
+
 } // namespace
 
 //-----------------------------------------------------------------------------
@@ -136,17 +259,7 @@ const Cached_t &Lookup( QStringView szName )
 //-----------------------------------------------------------------------------
 QIcon FolderIcon()
 {
-	static const QIcon icon = [] {
-		QIcon folder = ThemeIcon( { "folder" }, QStyle::SP_DirClosedIcon );
-		const QIcon open = ThemeIcon( { "folder-open", "folder" }, QStyle::SP_DirOpenIcon );
-		QIcon both;
-		for ( const int nSize : { 16, 22, 24, 32, 48 } )
-		{
-			both.addPixmap( folder.pixmap( nSize ), QIcon::Normal, QIcon::Off );
-			both.addPixmap( open.pixmap( nSize ), QIcon::Normal, QIcon::On );
-		}
-		return both;
-	}();
+	static const QIcon icon( new CFolderIconEngine );
 	return icon;
 }
 
@@ -172,6 +285,14 @@ QString FileKind( QStringView szName )
 QString FolderKind()
 {
 	return QCoreApplication::translate( "FileIcons", "Folder" );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Palette-aware decoration for monochrome navigation controls.
+//-----------------------------------------------------------------------------
+QIcon ForegroundIcon( QIcon icon )
+{
+	return QIcon( new CForegroundIconEngine( std::move( icon ) ) );
 }
 
 //-----------------------------------------------------------------------------

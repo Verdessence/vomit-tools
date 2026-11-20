@@ -48,6 +48,13 @@ enum class ThemeScheme_t
 	THEME_SCHEME_DARK,
 };
 
+enum class FooterInfo_t
+{
+	FOOTER_INFO_FULL,
+	FOOTER_INFO_VERSION,
+	FOOTER_INFO_HIDDEN,
+};
+
 // Settings that aren't the map viewer's. The defaults are what a new install starts with.
 struct GeneralPreferences_t
 {
@@ -60,6 +67,7 @@ struct GeneralPreferences_t
 	bool m_bDesktopFileChooser = true;
 	bool m_bDebugLog = false;
 	bool m_bSimpleInterface = false;
+	FooterInfo_t m_nFooterInfo = FooterInfo_t::FOOTER_INFO_FULL;
 	double m_flUiScale = 1.0; // the whole interface's size, from the next start
 	ThemeScheme_t m_nThemeScheme = ThemeScheme_t::THEME_SCHEME_SYSTEM;
 	QColor m_ThemeAccent;  // invalid: the desktop's
@@ -185,6 +193,8 @@ struct MapColors_t
 // The map viewer's settings (Preferences > Maps). The defaults are Hammer++'s own.
 struct MapPreferences_t
 {
+	QString m_szDefaultPointEntity;
+	QString m_szDefaultBrushEntity;
 	QStringList m_Fgds; // game data, in order; empty: the game's Hammer configuration's
 	int m_nTextureSize = 1024; // a texture's largest side, as read
 
@@ -363,6 +373,9 @@ public:
 	void SetUiScale( double flScale );
 	void SetTabGroups( bool bGroups );
 
+	[[nodiscard]] FooterInfo_t GetFooterInfo() const { return m_General.m_nFooterInfo; }
+	void SetFooterInfo( FooterInfo_t nInfo );
+
 	// Whether open and save windows are the desktop's own file chooser (the XDG portal's, on
 	// Linux) rather than Qt's.
 	[[nodiscard]] bool IsDesktopFileChooser() const { return m_General.m_bDesktopFileChooser; }
@@ -412,6 +425,7 @@ signals:
 	void CodeEditorChanged();
 	void ThemeChanged();
 	void SimpleInterfaceChanged( bool bSimple );
+	void FooterInfoChanged( FooterInfo_t nInfo );
 	void RulesChanged();
 	void ConfigProblemsChanged();
 

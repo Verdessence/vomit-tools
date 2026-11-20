@@ -1022,6 +1022,9 @@ void CMapView2D::PaintModels( QPainter &painter ) const
 	key.m_pMesh = frame.m_pPropMesh.get();
 	key.m_nMaterials = m_Editor.GetRenderData().GetPropMaterialsRevision();
 	key.m_pSprites = selected.empty() ? nullptr : pSprites.get();
+	for ( const auto &sprite : selected )
+		if ( sprite.m_nMaterial < frame.m_pMaterials->size() )
+			key.m_SpriteMaterials.push_back( ( *frame.m_pMaterials )[ sprite.m_nMaterial ] );
 	key.m_pColors = frame.m_pFlatColors;
 	key.m_Center = m_Center;
 	key.m_flZoom = m_flZoom;
@@ -1402,6 +1405,16 @@ void CMapView2D::PaintSelection( QPainter &painter ) const
 		dotted( box );
 		PaintHandles( painter, box );
 	}
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Project portal edges the same way for drawing and picking.
+//-----------------------------------------------------------------------------
+CMapView::PortalProjection_t CMapView2D::PortalProjection() const
+{
+	return [ this ]( const xv::map::Point_t &a, const xv::map::Point_t &b ) -> std::optional<QLineF> {
+		return QLineF( ToWidget( Flatten( a ) ), ToWidget( Flatten( b ) ) );
+	};
 }
 
 //-----------------------------------------------------------------------------
@@ -1907,6 +1920,7 @@ void CMapView2D::paintEvent( QPaintEvent * )
 				}
 	}
 	PaintTools( painter );
+	PaintPortals( painter );
 	if ( hasFocus() )
 	{
 		// The view keys go to: Hammer marks it with its caption, a thin frame here.

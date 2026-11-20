@@ -24,6 +24,7 @@
 #include "map/Properties.h"
 
 class CMapProperties;
+class CMapModelProperties;
 class QLabel;
 class QLineEdit;
 class QPlainTextEdit;
@@ -72,6 +73,7 @@ public:
 	[[nodiscard]] const xv::map::PropertySheet_t &GetSheet() const { return m_Sheet; }
 	[[nodiscard]] QTreeWidget *GetKeys() const { return m_pKeys; }
 	[[nodiscard]] QTreeWidget *GetOutputs() const { return m_pOutputs; }
+	[[nodiscard]] CMapModelProperties &GetModelProperties() const { return *m_pModel; }
 
 	// The edits the lists make (and tests): a key's value on every selected entity, a key
 	// renamed (SmartEdit off), the selected entities' class, an output's column, the comments.
@@ -102,6 +104,9 @@ public:
 	// Browse for material, decal, sprite and model keys: the texture or model browser, given
 	// the key's type.
 	void SetPicker( std::function<std::optional<QString>( const std::string &szType, const QString &szCurrent )> pfnPick ) { m_pfnPick = std::move( pfnPick ); }
+	using SoundPreview_t = std::function<void( const QString &, std::optional<double>, std::optional<double> )>;
+	void SetSoundPreview( SoundPreview_t pfnPlay, std::function<void()> pfnStop );
+	void SetSoundPlaying( bool bPlaying );
 	void BrowseKey( std::size_t nRow );
 	[[nodiscard]] static bool IsBrowsable( const std::string &szType );
 
@@ -114,6 +119,8 @@ protected:
 
 private:
 	void ShowHelp();
+	[[nodiscard]] bool IsSoundKey( const xv::map::PropertyRow_t &row ) const;
+	void PreviewSound( const QString &szName );
 	void Mark( const QTreeWidget *pList );
 	void FlagChanged( QTreeWidgetItem *pItem );
 	// An edit of the selected entities, made after the list that asked for it is done with
@@ -131,10 +138,15 @@ private:
 	QLineEdit *m_pClass = nullptr;
 	QToolButton *m_pSmartEdit = nullptr;
 	QTabWidget *m_pTabs = nullptr;
+	CMapModelProperties *m_pModel = nullptr;
 	QTreeWidget *m_pKeys = nullptr;
 	QPushButton *m_pBrowseInstance = nullptr;
 	QPushButton *m_pPickFaces = nullptr;
 	QPushButton *m_pBrowseKey = nullptr;
+	QPushButton *m_pPlaySound = nullptr;
+	SoundPreview_t m_pfnPlaySound;
+	std::function<void()> m_pfnStopSound;
+	bool m_bSoundPlaying = false;
 	std::function<QStringList( const std::string &szType )> m_pfnNames;
 	std::function<std::optional<QString>( const std::string &szType, const QString &szCurrent )> m_pfnPick;
 	QString m_szFacePickKey;

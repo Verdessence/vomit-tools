@@ -6,7 +6,9 @@
 //===========================================================================//
 #include "SheetDialog.h"
 
+#include <cmath>
 #include <cstring>
+#include <limits>
 
 #include <QCheckBox>
 #include <QDialogButtonBox>
@@ -23,6 +25,9 @@
 #include <QSpinBox>
 #include <QSplitter>
 #include <QTreeWidget>
+#include <QTabWidget>
+#include <QTimer>
+#include <QPainter>
 #include <QVBoxLayout>
 
 #include "FileDialogs.h"
@@ -42,6 +47,14 @@ namespace
 QString Qs( const std::string &szText )
 {
 	return QString::fromStdString( szText );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Keep playback moving if an imported frame has an invalid duration.
+//-----------------------------------------------------------------------------
+double PreviewDuration( const MksFrame_t &frame )
+{
+	return std::isfinite( frame.m_flDuration ) && frame.m_flDuration > 0.0f ? frame.m_flDuration : 1.0;
 }
 
 } // namespace
@@ -133,7 +146,57 @@ CSheetDialog::CSheetDialog( const CVtf *pVtf, QWidget *pParent )
 	pSettingsRow->addWidget( pSettingsButton );
 	auto *pRight = new QWidget;
 	auto *pRightLayout = new QVBoxLayout( pRight );
-	pRightLayout->addWidget( m_pPreview, 1 );
+	auto *pPreviews = new QTabWidget;
+	pPreviews->addTab( m_pPreview, tr( "Atlas" ) );
+	auto *pSequencePage = new QWidget;
+	auto *pSequenceLayout = new QVBoxLayout( pSequencePage );
+	m_pSequencePicture = new QLabel;
+	m_pSequencePicture->setObjectName( QStringLiteral( "sheetSequencePicture" ) );
+	m_pSequencePicture->setAlignment( Qt::AlignCenter );
+	m_pSequencePicture->setMinimumSize( 245, 205 );
+	m_pSequencePicture->setSizePolicy( QSizePolicy::Ignored, QSizePolicy::Ignored );
+	pSequenceLayout->addWidget( m_pSequencePicture, 1 );
+	auto *pPlayback = new QHBoxLayout;
+	m_pSequencePlay = new QPushButton( tr( "Play" ) );
+	m_pSequencePlay->setObjectName( QStringLiteral( "sheetSequencePlay" ) );
+	m_pSequencePlay->setCheckable( true );
+	m_pSequenceRate = new QSpinBox;
+	m_pSequenceRate->setRange( 1, 60 );
+	m_pSequenceRate->setValue( 10 );
+	m_pSequenceRate->setSuffix( tr( " fps" ) );
+	m_pSequenceRate->setToolTip( tr( "Preview rate for frames with a duration of 1" ) );
+	m_pSequenceFrame = new QLabel;
+	pPlayback->addWidget( m_pSequencePlay );
+	pPlayback->addWidget( m_pSequenceRate );
+	pPlayback->addWidget( m_pSequenceFrame, 1 );
+	pSequenceLayout->addLayout( pPlayback );
+	pPreviews->addTab( pSequencePage, tr( "Sequence" ) );
+	pRightLayout->addWidget( pPreviews, 1 );
+	m_pSequenceTimer = new QTimer( this );
+	m_pSequenceTimer->setInterval( 16 );
+	connect( m_pSequenceTimer, &QTimer::timeout, this, [ this ] {
+		m_flSequenceTime += m_SequenceClock.restart() * ( m_pSequenceRate->value() / 1000.0 );
+		UpdateSequencePreview();
+	} );
+	connect( m_pSequencePlay, &QPushButton::toggled, this, [ this ]( bool bPlaying ) {
+		m_pSequencePlay->setText( bPlaying ? tr( "Pause" ) : tr( "Play" ) );
+		if ( bPlaying )
+		{
+			if ( !std::isfinite( m_flSequenceTime ) )
+				m_flSequenceTime = 0.0;
+			m_SequenceClock.start();
+			m_pSequenceTimer->start();
+			UpdateSequencePreview();
+		}
+		else
+			m_pSequenceTimer->stop();
+	} );
+	connect( pPreviews, &QTabWidget::currentChanged, this, [ this ]( int nTab ) {
+		if ( nTab != 1 )
+			m_pSequencePlay->setChecked( false );
+		m_nPreviewFrame = -1;
+		UpdateSequencePreview();
+	} );
 	pRightLayout->addLayout( pSettingsRow );
 
 	auto *pSplitter = new QSplitter;
@@ -265,6 +328,7 @@ CSheetDialog::CSheetDialog( const CVtf *pVtf, QWidget *pParent )
 			}
 		}
 		m_bFilling = false;
+		ResetSequencePreview();
 	} );
 	connect( m_pNumber, &QSpinBox::valueChanged, this, &CSheetDialog::EditPicked );
 	connect( m_pLoop, &QCheckBox::toggled, this, &CSheetDialog::EditPicked );
@@ -343,6 +407,7 @@ void CSheetDialog::FillTree()
 	}
 	m_pTree->resizeColumnToContents( 0 );
 	UpdatePreview();
+	ResetSequencePreview();
 }
 
 //-----------------------------------------------------------------------------
@@ -368,6 +433,79 @@ void CSheetDialog::UpdatePreview()
 	}
 	m_pNotes->setText( notes.join( u'\n' ) );
 	m_pSettings->setText( tr( "%1, version 7.%2" ).arg( QString::fromUtf8( FormatName( m_Options.m_Write.m_nFormat ).data() ) ).arg( std::max( 3, m_Options.m_Write.m_nVersionMinor ) ) );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Start from the selected frame, or the beginning of the selected sequence.
+//-----------------------------------------------------------------------------
+void CSheetDialog::ResetSequencePreview()
+{
+	m_pSequencePlay->setChecked( false );
+	m_flSequenceTime = 0.0;
+	m_nPreviewFrame = -1;
+	const auto [ nSequence, nFrame ] = Picked();
+	if ( nSequence >= 0 )
+	{
+		const auto &frames = m_Mks.m_Sequences[ nSequence ].m_Frames;
+		for ( int i = 0; i < nFrame; i++ )
+			m_flSequenceTime += PreviewDuration( frames[ i ] );
+	}
+	UpdateSequencePreview();
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Show the sequence at its authored timing, with both layers on dual-texture frames.
+//-----------------------------------------------------------------------------
+void CSheetDialog::UpdateSequencePreview()
+{
+	const int nSequence = Picked().first;
+	const auto *pSequence = nSequence >= 0 ? &m_Mks.m_Sequences[ nSequence ] : nullptr;
+	m_pSequencePlay->setEnabled( pSequence && pSequence->m_Frames.size() > 1 );
+	if ( !pSequence || pSequence->m_Frames.empty() )
+	{
+		m_pSequencePicture->setText( tr( "Select a sequence or frame." ) );
+		m_pSequenceFrame->clear();
+		return;
+	}
+	const auto &frames = pSequence->m_Frames;
+	double flLength = 0.0;
+	for ( const auto &frame : frames )
+		flLength += PreviewDuration( frame );
+	if ( pSequence->m_bLoop && flLength > 0 && m_flSequenceTime >= flLength )
+		m_flSequenceTime = std::fmod( m_flSequenceTime, flLength );
+	double flTime = m_flSequenceTime;
+	std::size_t nFrame = 0;
+	while ( nFrame + 1 < frames.size() && flTime >= PreviewDuration( frames[ nFrame ] ) )
+		flTime -= PreviewDuration( frames[ nFrame++ ] );
+	if ( !pSequence->m_bLoop && m_flSequenceTime >= flLength && m_pSequenceTimer->isActive() )
+	{
+		m_flSequenceTime = std::numeric_limits<double>::infinity();
+		m_pSequencePlay->setChecked( false );
+	}
+	if ( m_nPreviewFrame == static_cast<int>( nFrame ) )
+		return;
+	m_nPreviewFrame = static_cast<int>( nFrame );
+	m_pSequenceFrame->setText( tr( "Frame %1 of %2" ).arg( nFrame + 1 ).arg( frames.size() ) );
+	const auto &files = frames[ nFrame ].m_Files;
+	QList<QImage> images;
+	const QSize limit( files.size() == 2 ? 115 : 225, 190 );
+	for ( const auto &szFile : files )
+	{
+		if ( const auto found = m_Pictures.find( szFile ); found != m_Pictures.end() )
+			images.push_back( ToQImage( found->second ).scaled( limit, Qt::KeepAspectRatio, Qt::FastTransformation ) );
+	}
+	if ( images.isEmpty() )
+	{
+		m_pSequencePicture->setText( tr( "Frame image missing." ) );
+		return;
+	}
+	QImage picture( limit.width() * static_cast<int>( images.size() ), limit.height(), QImage::Format_ARGB32_Premultiplied );
+	picture.fill( Qt::transparent );
+	QPainter painter( &picture );
+	for ( qsizetype i = 0; i < images.size(); ++i )
+		painter.drawImage( static_cast<int>( i ) * limit.width() + ( limit.width() - images[ i ].width() ) / 2, ( limit.height() - images[ i ].height() ) / 2, images[ i ] );
+	painter.end();
+	m_pSequencePicture->setPixmap( QPixmap::fromImage( picture ) );
 }
 
 //-----------------------------------------------------------------------------

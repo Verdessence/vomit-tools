@@ -54,6 +54,7 @@ struct Bodygroup_t
 {
 	std::string m_szName;
 	std::vector<std::string> m_Models;
+	int m_nBase = 0;
 };
 struct HitboxSet_t
 {

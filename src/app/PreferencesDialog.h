@@ -14,6 +14,7 @@
 
 class QListWidget;
 class QStackedWidget;
+class QTabWidget;
 
 // Adds a page to Preferences from code a local build brings in (a folder kept out of the
 // repository); pfnMake gives the page, or null to leave it out.
@@ -33,14 +34,17 @@ private:
 	void AddPage( const QString &szTitle, QWidget *pPage );
 	[[nodiscard]] QWidget *BuildInterfacePage();
 	[[nodiscard]] QWidget *BuildGraphicsPage();
-	[[nodiscard]] QWidget *BuildParticlesPage();
 	[[nodiscard]] QWidget *BuildMaterialsPage();
 	[[nodiscard]] QWidget *BuildTextEditorPage();
 	[[nodiscard]] QWidget *BuildMapsPage();
 	[[nodiscard]] QWidget *BuildAdvancedPage();
-	QWidget *BuildSourceToolsPage();
+	[[nodiscard]] QWidget *BuildSourceToolsPage();
+	void BuildMapSections();
+	void ResetMapSettings();
 
 	QListWidget *m_pPages = nullptr;
-	QWidget *m_pMapsPage = nullptr; // made again when its settings are restored
+	QTabWidget *m_pInterfaceTabs = nullptr;
+	QTabWidget *m_pGraphicsTabs = nullptr;
+	QTabWidget *m_pMapTabs = nullptr;
 	QStackedWidget *m_pStack = nullptr;
 };

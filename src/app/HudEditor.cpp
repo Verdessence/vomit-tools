@@ -2017,7 +2017,7 @@ QString CHudEditor::GetSessionEntry() const
 		return QStringLiteral( "hud\tgame\t%1" ).arg( m_szName );
 	if ( m_Disk.empty() )
 		return {};
-	return QStringLiteral( "hud\tdisk\t%1" ).arg( QString::fromStdU16String( m_Disk.u16string() ) );
+	return QStringLiteral( "hud\tdisk\t%1" ).arg( QString::fromStdU16String( m_Disk.generic_u16string() ) );
 }
 
 //-----------------------------------------------------------------------------
@@ -2048,7 +2048,7 @@ bool CHudEditor::Save()
 //-----------------------------------------------------------------------------
 bool CHudEditor::SaveAs()
 {
-	const QString szStart = m_Disk.empty() ? m_szName.section( u'/', -1 ) : QString::fromStdU16String( m_Disk.u16string() );
+	const QString szStart = m_Disk.empty() ? m_szName.section( u'/', -1 ) : QString::fromStdU16String( m_Disk.generic_u16string() );
 	const QString szFile = AskSaveFile( this, tr( "Save HUD Layout" ), szStart, tr( "Resource files (*.res);;All files (*)" ) );
 	if ( szFile.isEmpty() )
 		return false;
@@ -2064,7 +2064,7 @@ bool CHudEditor::WriteTo( const std::filesystem::path &file )
 	std::ofstream stream( file, std::ios::binary | std::ios::trunc );
 	if ( !stream || !stream.write( szText.data(), static_cast<std::streamsize>( szText.size() ) ) )
 	{
-		QMessageBox::warning( this, tr( "Cannot save" ), tr( "Could not write %1." ).arg( QString::fromStdU16String( file.u16string() ) ) );
+		QMessageBox::warning( this, tr( "Cannot save" ), tr( "Could not write %1." ).arg( QString::fromStdU16String( file.generic_u16string() ) ) );
 		return false;
 	}
 	m_Disk = file;

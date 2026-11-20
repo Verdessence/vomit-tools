@@ -6,6 +6,9 @@
 //===========================================================================//
 #pragma once
 
+class CLoadingView;
+
+#include <QSet>
 #include <QWidget>
 
 class QFileSystemModel;
@@ -33,7 +36,9 @@ signals:
 private:
 	QFileSystemModel *m_pModel = nullptr;
 	QTreeView *m_pView = nullptr;
+	CLoadingView *m_pLoading = nullptr;
 	QLabel *m_pPath = nullptr;
 	QWidget *m_pEmpty = nullptr;
 	QString m_szFolder;
+	QSet<QString> m_LoadedFolders;
 };

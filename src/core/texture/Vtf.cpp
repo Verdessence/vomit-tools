@@ -570,35 +570,46 @@ std::optional<CVtf> ReadVtf( std::span<const std::byte> data, std::string *pErro
 		info.m_nFaces = info.m_nVersionMinor < 5 && info.m_nFirstFrame != 0xFFFF ? 7 : 6;
 	}
 
+	// Some tools name a thumbnail format but give it a 0x0 size.
+	const bool bHasLowRes = info.m_nLowResFormat != VtfFormat_t::VTF_FORMAT_NONE && info.m_nLowResWidth > 0 && info.m_nLowResHeight > 0;
+	const std::size_t nLowRes = bHasLowRes ? ImageSize( info.m_nLowResFormat, info.m_nLowResWidth, info.m_nLowResHeight ) : 0;
+	bool bImplicitImageLayout = false;
 	if ( info.m_nVersionMinor >= 3 )
 	{
-		const std::uint32_t nCount = ReadAt<std::uint32_t>( data, 68 );
-		if ( nCount > 32 || RESOURCES_OFFSET + nCount * 8 > nHeaderSize )
-		{
+		if ( nHeaderSize < RESOURCES_OFFSET )
 			return fail( "the resource list is cut off" );
-		}
+		const std::uint32_t nCount = ReadAt<std::uint32_t>( data, 68 );
+		const std::size_t nTableBytes = nHeaderSize - RESOURCES_OFFSET;
+		// Some 7.3 files count one more entry than their header actually contains.
+		const bool bExtraCount = info.m_nVersionMinor == 3 && nCount == nTableBytes / 8 + 1 && nTableBytes % 8 == 0;
+		if ( nCount > 32 || ( nCount * 8 > nTableBytes && !bExtraCount ) )
+			return fail( "the resource list is cut off" );
 		std::optional<std::uint32_t> imageData;
-		for ( std::uint32_t i = 0; i < nCount; i++ )
+		for ( std::size_t i = 0; i < std::min<std::size_t>( nCount, nTableBytes / 8 ); i++ )
 		{
 			const std::size_t nEntry = RESOURCES_OFFSET + i * 8;
 			const VtfResource_t resource{ { At( data, nEntry ), At( data, nEntry + 1 ), At( data, nEntry + 2 ) }, At( data, nEntry + 3 ), ReadAt<std::uint32_t>( data, nEntry + 4 ) };
-			if ( resource.m_Tag == std::array<std::uint8_t, 3>{ 0x30, 0, 0 } )
-			{
+			if ( resource.m_Tag == IMAGE_RESOURCE )
 				imageData = resource.m_nValue;
-			}
 			vtf.m_Resources.push_back( resource );
 		}
-		if ( !imageData )
+		if ( imageData )
 		{
-			return fail( "the file has no image data" );
+			vtf.m_nImageOffset = *imageData;
 		}
-		vtf.m_nImageOffset = *imageData;
+		else
+		{
+			// Some writers leave an empty table and put the pixels after the header as in 7.2.
+			bImplicitImageLayout = nCount == 0 && std::ranges::all_of( data.subspan( RESOURCES_OFFSET, nTableBytes ), []( std::byte value ) { return value == std::byte{}; } );
+			if ( !bImplicitImageLayout )
+				return fail( "the file has no image data" );
+			vtf.m_nImageOffset = nHeaderSize + nLowRes;
+			if ( nLowRes > 0 )
+				vtf.m_Resources.push_back( { LOW_RES_RESOURCE, 0, nHeaderSize } );
+		}
 	}
 	else
 	{
-		// Some tools name a low-res format but give it a 0x0 size: then it takes no space.
-		const bool bHasLowRes = info.m_nLowResFormat != VtfFormat_t::VTF_FORMAT_NONE && info.m_nLowResWidth > 0 && info.m_nLowResHeight > 0;
-		const std::size_t nLowRes = bHasLowRes ? ImageSize( info.m_nLowResFormat, info.m_nLowResWidth, info.m_nLowResHeight ) : 0;
 		vtf.m_nImageOffset = nHeaderSize + nLowRes;
 	}
 
@@ -615,10 +626,12 @@ std::optional<CVtf> ReadVtf( std::span<const std::byte> data, std::string *pErro
 	{
 		info.m_nFaces = 6; // a cube map written without the sphere map
 	}
-	if ( vtf.m_nImageOffset > data.size() || vtf.m_nImageOffset + totalSize() > data.size() )
+	if ( vtf.m_nImageOffset < nHeaderSize || vtf.m_nImageOffset > data.size() || totalSize() > data.size() - vtf.m_nImageOffset )
 	{
 		return fail( "the image data is cut off" );
 	}
+	if ( bImplicitImageLayout && totalSize() != data.size() - vtf.m_nImageOffset )
+		return fail( "the file has no image data" );
 	vtf.m_Data.assign( data.begin(), data.end() );
 	return vtf;
 }

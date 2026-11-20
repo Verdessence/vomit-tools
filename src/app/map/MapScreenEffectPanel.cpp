@@ -5,6 +5,7 @@
 //
 //===========================================================================//
 #include "MapScreenEffectPanel.h"
+#include "LoadingView.h"
 
 #include <algorithm>
 #include <chrono>
@@ -146,6 +147,7 @@ CMapScreenEffectPanel::CMapScreenEffectPanel( CMapEditor &editor, QWidget *pPare
 	m_pShaders->setUniformRowHeights( true );
 	m_pShaders->setColumnWidth( 0, 220 );
 	m_pShaders->setMinimumHeight( 160 );
+	m_pLoading = new CLoadingView( m_pShaders->viewport(), LoadingLayout_t::LOADING_LAYOUT_ROWS );
 	m_pTabs->addTab( m_pMaterials, tr( "Materials" ) );
 	m_pTabs->addTab( m_pShaders, tr( "Shaders" ) );
 	pPickLayout->addWidget( m_pTabs );
@@ -240,6 +242,7 @@ void CMapScreenEffectPanel::RequestCatalog()
 		return;
 	}
 	m_bCatalogAsked = true;
+	m_pLoading->Begin( tr( "Listing shaders…" ) );
 	FillLists();
 	RequestScreenCatalog( *game, this, [ this ]( std::shared_ptr<const ScreenCatalog_t> pCatalog ) { SetCatalog( std::move( pCatalog ) ); } );
 }
@@ -250,6 +253,7 @@ void CMapScreenEffectPanel::RequestCatalog()
 void CMapScreenEffectPanel::SetCatalog( std::shared_ptr<const ScreenCatalog_t> pCatalog )
 {
 	m_pCatalog = std::move( pCatalog );
+	m_pLoading->End();
 	FillLists();
 }
 
@@ -302,7 +306,8 @@ void CMapScreenEffectPanel::FillLists()
 			addMaterial( pMap, szName, pEntry );
 	}
 	pMap->setText( 0, tr( "This map's (%1)" ).arg( pMap->childCount() ) );
-	auto *pGame = new QTreeWidgetItem( m_pMaterials, { m_pCatalog ? QString{} : tr( "The game's: reading its materials..." ) } );
+	const QString szGame = m_bCatalogAsked && !m_pCatalog ? tr( "The game's: reading its materials…" ) : tr( "The game's" );
+	auto *pGame = new QTreeWidgetItem( m_pMaterials, { szGame } );
 	pGame->setFlags( Qt::ItemIsEnabled );
 	m_pShaders->clear();
 	if ( m_pCatalog )

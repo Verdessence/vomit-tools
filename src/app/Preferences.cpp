@@ -71,6 +71,15 @@ std::span<const char *const> NamesOf( ThemeScheme_t )
 {
 	return THEME_SCHEMES;
 }
+
+//-----------------------------------------------------------------------------
+// Purpose: The three amounts of information the status-bar footer can show.
+//-----------------------------------------------------------------------------
+std::span<const char *const> NamesOf( FooterInfo_t )
+{
+	static constexpr const char *names[] = { "full", "version", "hidden" };
+	return names;
+}
 std::span<const char *const> NamesOf( MapTextureFilter_t )
 {
 	return TEXTURE_FILTERS;
@@ -102,6 +111,8 @@ template <class Visit_t, class... Preferences_t>
 void ForEachMapPreference( Visit_t &&pfnVisit, Preferences_t &...maps )
 {
 	pfnVisit( "maps/fgds", maps.m_Fgds... );
+	pfnVisit( "maps/defaultPointEntity", maps.m_szDefaultPointEntity... );
+	pfnVisit( "maps/defaultBrushEntity", maps.m_szDefaultBrushEntity... );
 	pfnVisit( "maps/textureSize", maps.m_nTextureSize... );
 	pfnVisit( "maps/fov", maps.m_flFov... );
 	pfnVisit( "maps/sensitivity", maps.m_flSensitivity... );
@@ -295,6 +306,7 @@ void ForEachGeneralPreference( Visit_t &&pfnVisit, General_t &...generals )
 	pfnVisit( "general:desktop_file_chooser", "desktopFileChooser", "the desktop's own open and save windows", generals.m_bDesktopFileChooser... );
 	pfnVisit( "general:debug_log", "debugLog", "log what goes on in the background", generals.m_bDebugLog... );
 	pfnVisit( "general:simple_interface", "simpleInterface", "fewer, plainer controls", generals.m_bSimpleInterface... );
+	pfnVisit( "general:footer_info", nullptr, "what to show in the bottom-right corner", generals.m_nFooterInfo... );
 	pfnVisit( "general:ui_scale", nullptr, "the interface's size (1.25: a quarter bigger), from the next start", generals.m_flUiScale... );
 	pfnVisit( "theme:color_scheme", nullptr, "light or dark, else the desktop's", generals.m_nThemeScheme... );
 	pfnVisit( "theme:accent", nullptr, "#rrggbb for selections and highlights; empty: the desktop's", generals.m_ThemeAccent... );
@@ -1142,6 +1154,10 @@ void CPreferences::ApplyConfig()
 	{
 		emit SimpleInterfaceChanged( general.m_bSimpleInterface );
 	}
+	if ( old.m_nFooterInfo != general.m_nFooterInfo )
+	{
+		emit FooterInfoChanged( general.m_nFooterInfo );
+	}
 	if ( old.m_MutedDemoPlayers != general.m_MutedDemoPlayers )
 		emit MutedDemoPlayersChanged();
 	if ( bCode )
@@ -1558,6 +1574,18 @@ void CPreferences::SetTabGroups( bool bGroups )
 	m_General.m_bTabGroups = bGroups;
 	Store( "general:tab_groups", bGroups );
 	emit TabGroupsChanged( bGroups );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Saves the footer display choice and applies it to open windows.
+//-----------------------------------------------------------------------------
+void CPreferences::SetFooterInfo( FooterInfo_t nInfo )
+{
+	if ( m_General.m_nFooterInfo == nInfo )
+		return;
+	m_General.m_nFooterInfo = nInfo;
+	Store( "general:footer_info", nInfo );
+	emit FooterInfoChanged( nInfo );
 }
 
 //-----------------------------------------------------------------------------

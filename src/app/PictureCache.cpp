@@ -94,14 +94,18 @@ QImage ReadJxl( const QString &szFile, QSize *pSourceSize )
 QImage ReadCachedPicture( const QString &szStem, QSize *pSourceSize )
 {
 	const QImage picture = ReadJxl( szStem + QStringLiteral( ".jxl" ), pSourceSize );
-	if ( !picture.isNull() && ( !pSourceSize || pSourceSize->isValid() ) )
+	if ( !picture.isNull() && ( !pSourceSize || !pSourceSize->isEmpty() ) )
 		return picture;
 	const QString szOld = szStem + QStringLiteral( ".png" );
 	const QImage legacy( szOld );
 	if ( legacy.isNull() )
 		return {};
 	if ( pSourceSize )
+	{
 		*pSourceSize = QSize( legacy.text( QStringLiteral( "source-width" ) ).toInt(), legacy.text( QStringLiteral( "source-height" ) ).toInt() );
+		if ( pSourceSize->isEmpty() )
+			return legacy; // The material loader can recover the dimensions from the VTF.
+	}
 	if ( WriteCachedPicture( szStem, legacy, pSourceSize ? *pSourceSize : QSize{} ) )
 		QFile::remove( szOld );
 	return legacy;
@@ -134,7 +138,7 @@ bool WriteCachedPicture( const QString &szStem, const QImage &picture, QSize sou
 		JxlEncoderSetColorEncoding( pEncoder.get(), &color ) != JXL_ENC_SUCCESS )
 		return false;
 
-	if ( sourceSize.isValid() )
+	if ( !sourceSize.isEmpty() )
 	{
 		std::array<std::uint8_t, 8> source;
 		qToBigEndian<qint32>( sourceSize.width(), source.data() );

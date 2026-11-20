@@ -145,15 +145,15 @@ CBatchConvertDialog::CBatchConvertDialog( const QString &szStart, QWidget *pPare
 			const QString szFolder = AskFolder( this, szTitle, pEdit->text() );
 			if ( !szFolder.isEmpty() )
 			{
-				pEdit->setText( QDir::toNativeSeparators( szFolder ) );
+				pEdit->setText( QDir::fromNativeSeparators( szFolder ) );
 			}
 		} );
 		pRow->addWidget( pEdit, 1 );
 		pRow->addWidget( pBrowse );
 		return pRow;
 	};
-	m_pInput = new QLineEdit( QDir::toNativeSeparators( szStart ) );
-	m_pOutput = new QLineEdit( QDir::toNativeSeparators( szStart ) );
+	m_pInput = new QLineEdit( QDir::fromNativeSeparators( szStart ) );
+	m_pOutput = new QLineEdit( QDir::fromNativeSeparators( szStart ) );
 	m_pOutput->setToolTip( tr( "Sub-folders are kept; files of the same name are replaced" ) );
 	pForm->addRow( tr( "From folder" ), folderRow( m_pInput, tr( "Convert From" ) ) );
 	pForm->addRow( tr( "Into folder" ), folderRow( m_pOutput, tr( "Convert Into" ) ) );

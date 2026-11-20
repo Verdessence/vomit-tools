@@ -53,7 +53,7 @@ constexpr PathField_t PATH_FIELDS[] = {
 //-----------------------------------------------------------------------------
 QString ToQString( const std::filesystem::path &path )
 {
-	return QString::fromStdString( xv::vfs::ToUtf8( path ) );
+	return QString::fromStdU16String( path.generic_u16string() );
 }
 
 //-----------------------------------------------------------------------------

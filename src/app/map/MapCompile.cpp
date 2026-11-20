@@ -128,7 +128,7 @@ void CCompileRunner::RunNext()
 		const QString szProgram = QString::fromStdString( command.m_szProgram );
 		if ( !QFileInfo( szProgram ).isFile() )
 		{
-			Append( tr( "%1 isn't there: the game wasn't started. Choose it in Preferences > Source Tools.\n" ).arg( szProgram ) );
+			Append( tr( "%1 isn't there: the game wasn't started. Choose it in Preferences > Maps > Source Tools.\n" ).arg( szProgram ) );
 			CommandDone( false );
 			return;
 		}

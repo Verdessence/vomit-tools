@@ -312,7 +312,7 @@ bool CApplication::notify( QObject *pReceiver, QEvent *pEvent )
 	DebugLog() << "caught" << szReason << "from an event; log at" << szLog;
 	QTimer::singleShot( 0, [ szReason, szLog ] {
 		QMessageBox::critical( QApplication::activeWindow(), QApplication::translate( "CApplication", "Something Went Wrong" ),
-			QApplication::translate( "CApplication", "vomit-tools ran into an error and stopped what it was doing:\n\n%1\n\nIt's still running, but save your work. A log is at %2." ).arg( szReason, QDir::toNativeSeparators( szLog ) ) );
+			QApplication::translate( "CApplication", "vomit-tools ran into an error and stopped what it was doing:\n\n%1\n\nIt's still running, but save your work. A log is at %2." ).arg( szReason, QDir::fromNativeSeparators( szLog ) ) );
 	} );
 	return false;
 }

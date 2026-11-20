@@ -23,6 +23,7 @@ struct PackageEntry_t;
 } // namespace xv::vfs
 
 class CEntityView;
+class CLoadingView;
 class CPackageFilter;
 class CPackageModel;
 class CSoundPlayer;
@@ -99,6 +100,7 @@ private:
 	QTimer *m_pSearchDelay = nullptr;
 	QLabel *m_pCount = nullptr;
 	QWidget *m_pPreviewHost = nullptr;
+	CLoadingView *m_pLoading = nullptr;
 	CEntityView *m_pEntities = nullptr;
 	QString m_szPreviewed;
 	int m_nMatches = 0;

@@ -144,6 +144,7 @@ public:
 	[[nodiscard]] xv::map::CViewCamera GetSizedCamera() const;
 
 protected:
+	[[nodiscard]] PortalProjection_t PortalProjection() const override;
 	void paintEvent( QPaintEvent *pEvent ) override;
 	void resizeEvent( QResizeEvent *pEvent ) override;
 	void mousePressEvent( QMouseEvent *pEvent ) override;

@@ -23,7 +23,7 @@ namespace
 //          pfnTexel( x, y ) gives a texel's RGBA.
 //-----------------------------------------------------------------------------
 template <class Texel_t>
-std::array<float, 4> SampleMip( int nWidth, int nHeight, float u, float v, bool bClampS, bool bClampT, Texel_t &&pfnTexel )
+std::array<float, 4> SampleMip( int nWidth, int nHeight, float u, float v, bool bClampS, bool bClampT, bool bPoint, Texel_t &&pfnTexel )
 {
 	const float flX = u * static_cast<float>( nWidth ) - 0.5f;
 	const float flY = v * static_cast<float>( nHeight ) - 0.5f;
@@ -39,6 +39,13 @@ std::array<float, 4> SampleMip( int nWidth, int nHeight, float u, float v, bool 
 		const int m = n % nSize;
 		return m < 0 ? m + nSize : m;
 	};
+	if ( bPoint )
+	{
+		const int x = wrap( static_cast<int>( std::floor( flX + 0.5f ) ), nWidth, bClampS );
+		const int y = wrap( static_cast<int>( std::floor( flY + 0.5f ) ), nHeight, bClampT );
+		const auto color = pfnTexel( x, y );
+		return { color[ 0 ] / 255.0f, color[ 1 ] / 255.0f, color[ 2 ] / 255.0f, color[ 3 ] / 255.0f };
+	}
 	const int x0 = wrap( static_cast<int>( flX0 ), nWidth, bClampS );
 	const int x1 = wrap( static_cast<int>( flX0 ) + 1, nWidth, bClampS );
 	const int y0 = wrap( static_cast<int>( flY0 ), nHeight, bClampT );
@@ -148,13 +155,13 @@ std::array<float, 4> SampleLevel( const RasterTexture_t &texture, std::size_t nL
 	if ( !texture.m_Mips.empty() )
 	{
 		const texture::CImage &image = texture.m_Mips[ nLevel ];
-		return SampleMip( image.m_nWidth, image.m_nHeight, u, v, texture.m_bClampS, texture.m_bClampT, [ & ]( int x, int y ) {
+		return SampleMip( image.m_nWidth, image.m_nHeight, u, v, texture.m_bClampS, texture.m_bClampT, texture.m_bPoint, [ & ]( int x, int y ) {
 			const std::uint8_t *p = image.Pixel( x, y );
 			return std::array<std::uint8_t, 4>{ p[ 0 ], p[ 1 ], p[ 2 ], p[ 3 ] };
 		} );
 	}
 	const CompressedMip_t &mip = texture.m_Compressed[ nLevel ];
-	return SampleMip( mip.m_nWidth, mip.m_nHeight, u, v, texture.m_bClampS, texture.m_bClampT, [ & ]( int x, int y ) { return CompressedTexel( mip, texture.m_nCompressedFormat, x, y ); } );
+	return SampleMip( mip.m_nWidth, mip.m_nHeight, u, v, texture.m_bClampS, texture.m_bClampT, texture.m_bPoint, [ & ]( int x, int y ) { return CompressedTexel( mip, texture.m_nCompressedFormat, x, y ); } );
 }
 
 //-----------------------------------------------------------------------------
@@ -199,7 +206,7 @@ std::array<float, 4> SampleTexture( const RasterTexture_t &texture, float u, flo
 	// The mips kept may start below the texture's own size; lod 0 is the full size.
 	const float flSkipped = std::log2( static_cast<float>( std::max( texture.m_nWidth, 1 ) ) / static_cast<float>( std::max( texture.GetTopWidth(), 1 ) ) );
 	float flLevel = HasMipChain( texture ) ? std::clamp( flLod - flSkipped, 0.0f, static_cast<float>( nLevels - 1 ) ) : 0.0f;
-	if ( !bMipBlend )
+	if ( !bMipBlend || texture.m_bPoint )
 	{
 		flLevel = std::floor( flLevel + 0.5f );
 	}
@@ -228,7 +235,7 @@ std::array<float, 4> SampleFiltered( const RasterTexture_t &texture, std::array<
 {
 	const float flWidth = static_cast<float>( std::max( texture.m_nWidth, 1 ) );
 	const float flHeight = static_cast<float>( std::max( texture.m_nHeight, 1 ) );
-	if ( options.m_nAnisotropy <= 1 )
+	if ( texture.m_bPoint || options.m_nAnisotropy <= 1 )
 	{
 		return SampleTexture( texture, texel[ 0 ] / flWidth, texel[ 1 ] / flHeight, input.m_flLod, options.m_bMipBlend );
 	}

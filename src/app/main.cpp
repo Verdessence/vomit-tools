@@ -38,7 +38,7 @@ int main( int nArgc, char *argv[] )
 	// Qt's own settings as Squirrel tables (vomit-tools.state.nut), beside the settings in
 	// vomit-tools.nut: before anything reads a setting.
 	QSettings::setDefaultFormat( NutSettingsFormat() );
-	// Preferences > General's interface scale: Qt takes it only before the application is made.
+	// Preferences > Interface's UI scale: Qt takes it only before the application is made.
 	// QT_SCALE_FACTOR set by hand wins.
 	if ( qEnvironmentVariableIsEmpty( "QT_SCALE_FACTOR" ) )
 	{
@@ -47,6 +47,7 @@ int main( int nArgc, char *argv[] )
 			qputenv( "QT_SCALE_FACTOR", QByteArray::number( flScale ) );
 	}
 	CApplication app{ nArgc, argv };
+	QApplication::setApplicationDisplayName( QStringLiteral( "Vomit Tools" ) );
 	MigrateSettingsToNut();
 	QApplication::setApplicationVersion( CAboutDialog::VersionText() );
 	QApplication::setWindowIcon( QIcon( QStringLiteral( ":/assets/vomit-tools.png" ) ) );
@@ -55,7 +56,7 @@ int main( int nArgc, char *argv[] )
 	InstallPopupBlurWorkaround( app );
 
 	QCommandLineParser parser;
-	parser.setApplicationDescription( QStringLiteral( "Soundscape, skybox and particle editors for Source engine games" ) );
+	parser.setApplicationDescription( QStringLiteral( "All in one IDE for Source engine games." ) );
 	parser.addHelpOption();
 	parser.addVersionOption();
 	parser.addPositionalArgument( QStringLiteral( "paths" ), QStringLiteral( "Files, folders or a game's gameinfo.txt to open" ), QStringLiteral( "[paths...]" ) );
@@ -138,6 +139,7 @@ int main( int nArgc, char *argv[] )
 		splash.SetStep( QFileInfo{ szFile }.fileName() );
 		window.OpenSoundFile( szFile );
 	}
+	splash.Complete();
 	window.show();
 	splash.finish( &window );
 	// What a crash last time wrote, then the new maps it left unsaved, once the window is up
@@ -146,8 +148,8 @@ int main( int nArgc, char *argv[] )
 		ShowCrashLogs( &window, crashes );
 		window.OfferNewMapAutosaves();
 	} );
-	// The first start says hello.
-	if ( !CPremiumDialog::HasBeenShown() )
+	// Keep offering the dialog at startup until it has been accepted.
+	if ( !CPremiumDialog::HasCompleted() )
 	{
 		QTimer::singleShot( 600, &window, [ &window ] { CPremiumDialog{ &window }.exec(); } );
 	}

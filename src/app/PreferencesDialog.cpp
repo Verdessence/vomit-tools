@@ -20,7 +20,9 @@
 #include <QComboBox>
 #include <QDialogButtonBox>
 #include <QPushButton>
+#include <QDesktopServices>
 #include <QDir>
+#include <QGroupBox>
 #include <QFontComboBox>
 #include <QFormLayout>
 #include <QHBoxLayout>
@@ -68,6 +70,30 @@ QVBoxLayout *PageLayout( QWidget *pPage )
 }
 
 //-----------------------------------------------------------------------------
+// Purpose: Keeps long settings pages usable when the window or screen is short.
+//-----------------------------------------------------------------------------
+QWidget *Scrollable( QWidget *pPage )
+{
+	auto *pScroll = new QScrollArea;
+	pScroll->setWidgetResizable( true );
+	pScroll->setFrameShape( QFrame::NoFrame );
+	pScroll->setWidget( pPage );
+	return pScroll;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: A scrollable section within a preferences page.
+//-----------------------------------------------------------------------------
+QVBoxLayout *Section( QTabWidget *pTabs, const QString &szTitle, int nIndex = -1 )
+{
+	auto *pInside = new QWidget;
+	pTabs->insertTab( nIndex, Scrollable( pInside ), szTitle );
+	auto *pLayout = new QVBoxLayout( pInside );
+	pLayout->setContentsMargins( 8, 8, 8, 8 );
+	return pLayout;
+}
+
+//-----------------------------------------------------------------------------
 // Purpose: Pages a local build adds.
 //-----------------------------------------------------------------------------
 std::vector<std::pair<QString, std::function<QWidget *()>>> &LocalPages()
@@ -92,14 +118,21 @@ CPreferencesDialog::CPreferencesDialog( QWidget *pParent )
 	m_pStack = new QStackedWidget;
 	connect( m_pPages, &QListWidget::currentRowChanged, m_pStack, &QStackedWidget::setCurrentIndex );
 
-	AddPage( tr( "Interface" ), BuildInterfacePage() );
-	AddPage( tr( "Graphics" ), BuildGraphicsPage() );
-	AddPage( tr( "Particles" ), BuildParticlesPage() );
-	AddPage( tr( "Materials" ), BuildMaterialsPage() );
-	AddPage( tr( "Text Editor" ), BuildTextEditorPage() );
+	m_pInterfaceTabs = new QTabWidget;
+	m_pInterfaceTabs->setObjectName( QStringLiteral( "preferencesInterfaceTabs" ) );
+	m_pInterfaceTabs->addTab( Scrollable( BuildInterfacePage() ), tr( "General" ) );
+	m_pInterfaceTabs->addTab( Scrollable( BuildTextEditorPage() ), tr( "Text Editor" ) );
+	m_pGraphicsTabs = new QTabWidget;
+	m_pGraphicsTabs->setObjectName( QStringLiteral( "preferencesGraphicsTabs" ) );
+	m_pGraphicsTabs->addTab( Scrollable( BuildGraphicsPage() ), tr( "General" ) );
+	m_pMapTabs = new QTabWidget;
+	m_pMapTabs->setObjectName( QStringLiteral( "preferencesMapTabs" ) );
+	BuildMapSections();
+	AddPage( tr( "Interface" ), m_pInterfaceTabs );
+	AddPage( tr( "Graphics" ), m_pGraphicsTabs );
+	AddPage( tr( "Materials" ), Scrollable( BuildMaterialsPage() ) );
 	AddPage( tr( "Maps" ), BuildMapsPage() );
-	AddPage( tr( "Keys" ), new CMapKeysPage );
-	AddPage( tr( "Source Tools" ), BuildSourceToolsPage() );
+	AddPage( tr( "Keybinds" ), new CMapKeysPage );
 	AddPage( tr( "Advanced" ), BuildAdvancedPage() );
 	for ( const auto &[ szTitle, pfnMake ] : LocalPages() )
 	{
@@ -165,9 +198,7 @@ QWidget *CPreferencesDialog::BuildInterfacePage()
 	connect( &CInterfaceMode::Instance(), &CInterfaceMode::Changed, pSimple, &QCheckBox::setChecked );
 	QVBoxLayout *pLayout = PageLayout( pPage );
 	pLayout->addWidget( pSimple );
-	pLayout->addWidget( Hint( tr( "Plain names with a line on what each setting does, easier ways to type values, and advanced "
-								  "settings tucked away while they have their usual value. Off: the files' own names and every "
-								  "setting. Either way the files are edited the same. View → Simple Interface switches it too." ) ) );
+	pSimple->setToolTip( tr( "Use plain labels and hide advanced settings at their defaults." ) );
 	auto *pScale = new QSpinBox;
 	pScale->setObjectName( QStringLiteral( "preferencesUiScale" ) );
 	pScale->setRange( 50, 400 );
@@ -177,62 +208,64 @@ QWidget *CPreferencesDialog::BuildInterfacePage()
 	connect( pScale, &QSpinBox::valueChanged, this, []( int nPercent ) { CPreferences::Instance().SetUiScale( nPercent / 100.0 ); } );
 	auto *pScaleRow = new QFormLayout;
 	pScaleRow->setContentsMargins( 0, 0, 0, 0 );
-	pScaleRow->addRow( tr( "Interface scale" ), pScale );
-	pLayout->addSpacing( 12 );
+	pScaleRow->addRow( tr( "UI scale" ), pScale );
 	pLayout->addLayout( pScaleRow );
-	pLayout->addWidget( Hint( tr( "The size of everything: text, buttons, panels and the views' labels, over the desktop's own "
-								  "scale. Takes effect the next time vomit-tools starts." ) ) );
+	pScale->setToolTip( tr( "Scales the interface on top of the desktop scale. Takes effect after restarting." ) );
 	auto *pSingle = new QCheckBox( tr( "Open files in the window already open" ) );
 	pSingle->setObjectName( QStringLiteral( "preferencesSingleWindow" ) );
 	pSingle->setChecked( CPreferences::Instance().IsSingleWindow() );
 	connect( pSingle, &QCheckBox::toggled, this, []( bool bOn ) { CPreferences::Instance().SetSingleWindow( bOn ); } );
-	pLayout->addSpacing( 12 );
 	pLayout->addWidget( pSingle );
-	pLayout->addWidget( Hint( tr( "Files opened from a file manager or the command line become tabs in the running window "
-								  "instead of starting another. Takes effect from the next start." ) ) );
+	pSingle->setToolTip( tr( "Send files opened from outside the app to the running window. Takes effect after restarting." ) );
 	auto *pManifest = new QCheckBox( tr( "Offer to add saved files to the game's manifest" ) );
 	pManifest->setObjectName( QStringLiteral( "preferencesManifestReminder" ) );
 	pManifest->setChecked( CPreferences::Instance().IsManifestReminder() );
 	connect( pManifest, &QCheckBox::toggled, this, []( bool bOn ) { CPreferences::Instance().SetManifestReminder( bOn ); } );
-	pLayout->addSpacing( 12 );
 	pLayout->addWidget( pManifest );
-	pLayout->addWidget( Hint( tr( "When a soundscape, soundscript or particle file is saved and its manifest doesn't list it, ask "
-								  "whether to add it. \"Don't remind me again\" in that question turns this off." ) ) );
-	auto *pReopen = new QCheckBox( tr( "Reopen the files that were open at closing" ) );
+	pManifest->setToolTip( tr( "Ask when a saved soundscape, soundscript or particle file is missing from its manifest." ) );
+	auto *pReopen = new QCheckBox( tr( "Continue where you left off" ) );
 	pReopen->setObjectName( QStringLiteral( "preferencesReopenSession" ) );
 	pReopen->setChecked( CPreferences::Instance().IsReopenSession() );
 	connect( pReopen, &QCheckBox::toggled, this, []( bool bOn ) { CPreferences::Instance().SetReopenSession( bOn ); } );
-	pLayout->addSpacing( 12 );
 	pLayout->addWidget( pReopen );
-	pLayout->addWidget( Hint( tr( "At the next start, the tabs come back as they were left, with the folder browser's folder. "
-								  "Files opened from the command line or a file manager open instead." ) ) );
+	pReopen->setToolTip( tr( "Restore the last session when starting without files." ) );
 	auto *pWindows = new QCheckBox( tr( "Each kind of editor in a window of its own" ) );
 	pWindows->setObjectName( QStringLiteral( "preferencesEditorWindows" ) );
 	pWindows->setChecked( CPreferences::Instance().IsEditorWindows() );
 	connect( pWindows, &QCheckBox::toggled, this, []( bool bOn ) { CPreferences::Instance().SetEditorWindows( bOn ); } );
-	pLayout->addSpacing( 12 );
 	pLayout->addWidget( pWindows );
-	pLayout->addWidget( Hint( tr( "Maps open in a Maps window, particle files in a Particles window and so on, each with its "
-								  "tabs and the whole menu bar; the main window keeps the game's files and the preview. Closing "
-								  "a window closes its tabs. Tab groups are off meanwhile: the windows are the groups." ) ) );
-	auto *pGroups = new QCheckBox( tr( "Group the tabs" ) );
+	pWindows->setToolTip( tr( "Open each kind of editor in a separate window with its own tabs." ) );
+	auto *pGroups = new QCheckBox( tr( "Tab groups" ) );
 	pGroups->setObjectName( QStringLiteral( "preferencesTabGroups" ) );
 	pGroups->setChecked( CPreferences::Instance().IsTabGroups() );
 	connect( pGroups, &QCheckBox::toggled, this, []( bool bOn ) { CPreferences::Instance().SetTabGroups( bOn ); } );
-	pLayout->addSpacing( 12 );
 	pLayout->addWidget( pGroups );
-	pLayout->addWidget( Hint( tr( "A strip over the tabs shows one group at a time: maps, textures, sounds and so on, or groups "
-								  "of your own (right-click a tab: Move to Group)." ) ) );
+	pGroups->setToolTip( tr( "Filter tabs by group from the header. Right-click an editor tab to move it." ) );
+
+	auto *pFooter = new QComboBox;
+	pFooter->setObjectName( QStringLiteral( "preferencesFooterInfo" ) );
+	pFooter->addItem( tr( "Full details" ) );
+	pFooter->addItem( tr( "Version only" ) );
+	pFooter->addItem( tr( "Hidden" ) );
+	pFooter->setCurrentIndex( static_cast<int>( CPreferences::Instance().GetFooterInfo() ) );
+	connect( pFooter, &QComboBox::currentIndexChanged, this, []( int nIndex ) {
+		if ( nIndex >= 0 )
+			CPreferences::Instance().SetFooterInfo( static_cast<FooterInfo_t>( nIndex ) );
+	} );
+	connect( &CPreferences::Instance(), &CPreferences::FooterInfoChanged, pFooter, [ pFooter ]( FooterInfo_t nInfo ) {
+		pFooter->setCurrentIndex( static_cast<int>( nInfo ) );
+	} );
+	auto *pFooterRow = new QFormLayout;
+	pFooterRow->setFieldGrowthPolicy( QFormLayout::FieldsStayAtSizeHint );
+	pFooterRow->addRow( tr( "Bottom-right info" ), pFooter );
+	pLayout->addLayout( pFooterRow );
 #ifdef VOMIT_TOOLS_PORTAL
 	auto *pChooser = new QCheckBox( tr( "Use the desktop's file chooser" ) );
 	pChooser->setObjectName( QStringLiteral( "preferencesDesktopFileChooser" ) );
 	pChooser->setChecked( CPreferences::Instance().IsDesktopFileChooser() );
 	connect( pChooser, &QCheckBox::toggled, this, []( bool bOn ) { CPreferences::Instance().SetDesktopFileChooser( bOn ); } );
-	pLayout->addSpacing( 12 );
 	pLayout->addWidget( pChooser );
-	pLayout->addWidget( Hint( tr( "Open and save windows are the file chooser your desktop is set up with (KDE's, GNOME's, a "
-								  "terminal file manager's...), asked for through the XDG desktop portal. Off, or with no portal "
-								  "running: Qt's own window. Either way it starts in the folder the last one finished in." ) ) );
+	pChooser->setToolTip( tr( "Use the system file chooser through the desktop portal." ) );
 #endif
 	pLayout->addStretch();
 	return pPage;
@@ -279,27 +312,16 @@ QWidget *CPreferencesDialog::BuildGraphicsPage()
 	pForm->addRow( tr( "Graphics Backend" ), pApis );
 	QVBoxLayout *pLayout = PageLayout( pPage );
 	pLayout->addLayout( pForm );
-	pLayout->addWidget( Hint( tr( "The sky, material and particle previews and the particle grid draw on the graphics card "
-								  "through the API picked here. Automatic tries Vulkan first, then the platform's usual one. "
-								  "Software draws on the CPU: slower, but it works anywhere." ) ) );
 	pLayout->addWidget( pNow );
 	pLayout->addWidget( pRestart );
-	pLayout->addStretch();
-	return pPage;
-}
-
-//-----------------------------------------------------------------------------
-// Purpose: The particle editor.
-//-----------------------------------------------------------------------------
-QWidget *CPreferencesDialog::BuildParticlesPage()
-{
-	auto *pPage = new QWidget;
+	auto *pParticles = new QGroupBox( tr( "Particles" ) );
+	auto *pParticleLayout = new QVBoxLayout( pParticles );
 	auto *pAll = new QCheckBox( tr( "Animate every system in the grid preview" ) );
 	pAll->setObjectName( QStringLiteral( "preferencesGridAnimation" ) );
 	pAll->setChecked( CPreferences::Instance().IsGridAnimatingAll() );
 	connect( pAll, &QCheckBox::toggled, this, []( bool bOn ) { CPreferences::Instance().SetGridAnimatingAll( bOn ); } );
-	QVBoxLayout *pLayout = PageLayout( pPage );
-	pLayout->addWidget( pAll );
+	pParticleLayout->addWidget( pAll );
+	pLayout->addWidget( pParticles );
 	pLayout->addStretch();
 	return pPage;
 }
@@ -327,13 +349,8 @@ QWidget *CPreferencesDialog::BuildMaterialsPage()
 	QVBoxLayout *pLayout = PageLayout( pPage );
 	pLayout->addWidget( pVisual );
 	pLayout->addWidget( pText );
-	pLayout->addWidget( Hint( tr( "The list gives each parameter a box that suits it and adds more from a right-click; the text "
-								  "is the file as it is, coloured. Either way the same file is edited, and the switch above the "
-								  "material changes it too." ) ) );
 	pLayout->addSpacing( 12 );
 	pLayout->addWidget( pLive );
-	pLayout->addWidget( Hint( tr( "Off: the preview waits for Refresh, for heavy materials. Typing in the text always redraws "
-								  "it after a pause." ) ) );
 	pLayout->addStretch();
 	return pPage;
 }
@@ -393,25 +410,17 @@ QWidget *CPreferencesDialog::BuildTextEditorPage()
 
 	QVBoxLayout *pLayout = PageLayout( pPage );
 	pLayout->addLayout( pForm );
-	pLayout->addWidget( Hint( tr( "For the Stripper config editor and materials' text. Desktop colours follow your desktop's theme; "
-								  "the others keep their own whatever the theme is." ) ) );
 	pLayout->addSpacing( 12 );
 	pLayout->addWidget( pCompletion );
-	pLayout->addWidget( Hint( tr( "In a Stripper config: section words, the map's keys, and each key's values in the map "
-								  "(names, then inputs, for outputs). Off, Ctrl+Space still shows them." ) ) );
 	pLayout->addStretch();
 	return pPage;
 }
 
 //-----------------------------------------------------------------------------
-// Purpose: The map viewer, in tabs: where entities' game data comes from and how textures are
-//          read, the 3D views' camera and drawing, the 2D views', and the colours. Every change
-//          applies at once; the defaults are Hammer++'s.
+// Purpose: Map settings shown alongside the other controls they affect.
 //-----------------------------------------------------------------------------
-QWidget *CPreferencesDialog::BuildMapsPage()
+void CPreferencesDialog::BuildMapSections()
 {
-	auto *pPage = new QWidget;
-	pPage->setObjectName( QStringLiteral( "preferencesMaps" ) );
 	const MapPreferences_t &current = CPreferences::Instance().GetMapPreferences();
 	auto change = []( auto pfnEdit ) {
 		MapPreferences_t preferences = CPreferences::Instance().GetMapPreferences();
@@ -478,23 +487,9 @@ QWidget *CPreferencesDialog::BuildMapsPage()
 		} );
 		return pButton;
 	};
-	auto tab = []( QTabWidget *pTabs, const QString &szTitle ) {
-		auto *pScroll = new QScrollArea;
-		pScroll->setWidgetResizable( true );
-		pScroll->setFrameShape( QFrame::NoFrame );
-		auto *pInside = new QWidget;
-		pScroll->setWidget( pInside );
-		pTabs->addTab( pScroll, szTitle );
-		auto *pLayout = new QVBoxLayout( pInside );
-		pLayout->setContentsMargins( 8, 8, 8, 8 );
-		return pLayout;
-	};
-	auto *pTabs = new QTabWidget;
-	pTabs->setObjectName( QStringLiteral( "preferencesMapTabs" ) );
-
 	// General: game data, a list of FGDs in the order they are read, and textures.
 	{
-		QVBoxLayout *pLayout = tab( pTabs, tr( "General" ) );
+		QVBoxLayout *pLayout = Section( m_pMapTabs, tr( "General" ), 0 );
 		auto *pFgds = new QListWidget;
 		pFgds->setObjectName( QStringLiteral( "preferencesMapFgds" ) );
 		pFgds->addItems( current.m_Fgds );
@@ -516,7 +511,7 @@ QWidget *CPreferencesDialog::BuildMapsPage()
 		connect( pAdd, &QPushButton::clicked, this, [ this, pFgds, storeFgds ] {
 			for ( const QString &szFile : AskOpenFiles( this, tr( "Add Game Data" ), {}, tr( "Game data (*.fgd)" ) ) )
 			{
-				pFgds->addItem( QDir::toNativeSeparators( szFile ) );
+				pFgds->addItem( QDir::fromNativeSeparators( szFile ) );
 			}
 			storeFgds();
 		} );
@@ -546,15 +541,24 @@ QWidget *CPreferencesDialog::BuildMapsPage()
 		pLayout->addWidget( new QLabel( tr( "Game data (FGD files), read in this order:" ) ) );
 		pLayout->addWidget( pFgds );
 		pLayout->addLayout( pFgdButtons );
-		pLayout->addWidget( Hint( tr( "Empty: the files the game's Hammer or Hammer++ configuration names. They are read again when a "
-									  "map is opened." ) ) );
-		pLayout->addSpacing( 12 );
 		auto *pForm = new QFormLayout;
 		std::vector<std::pair<QString, int>> sizes;
 		for ( const int nSize : { 256, 512, 1024, 2048, 4096 } )
 		{
 			sizes.emplace_back( QString::number( nSize ), nSize );
 		}
+		const auto entity = [ this, change ]( const QString &szName, const QString &szValue, QString MapPreferences_t::*pMember ) {
+			auto *pEdit = new QLineEdit( szValue );
+			pEdit->setObjectName( szName );
+			pEdit->setPlaceholderText( tr( "From game configuration" ) );
+			pEdit->setToolTip( tr( "Applies when a map opens." ) );
+			connect( pEdit, &QLineEdit::editingFinished, this, [ pEdit, change, pMember ] {
+				change( [ & ]( MapPreferences_t &preferences ) { preferences.*pMember = pEdit->text().trimmed(); } );
+			} );
+			return pEdit;
+		};
+		pForm->addRow( tr( "Default point entity" ), entity( QStringLiteral( "preferencesMapDefaultPointEntity" ), current.m_szDefaultPointEntity, &MapPreferences_t::m_szDefaultPointEntity ) );
+		pForm->addRow( tr( "Default brush entity" ), entity( QStringLiteral( "preferencesMapDefaultBrushEntity" ), current.m_szDefaultBrushEntity, &MapPreferences_t::m_szDefaultBrushEntity ) );
 		pForm->addRow( tr( "Largest texture size" ), choice( QStringLiteral( "preferencesMapTextureSize" ), sizes, current.m_nTextureSize, []( MapPreferences_t &p, int n ) { p.m_nTextureSize = n; } ) );
 		pLayout->addLayout( pForm );
 		pLayout->addStretch();
@@ -562,7 +566,7 @@ QWidget *CPreferencesDialog::BuildMapsPage()
 
 	// The 3D views.
 	{
-		QVBoxLayout *pLayout = tab( pTabs, tr( "3D View" ) );
+		QVBoxLayout *pLayout = Section( m_pGraphicsTabs, tr( "3D View" ) );
 		auto *pForm = new QFormLayout;
 		pForm->addRow( tr( "Field of view" ), spin( QStringLiteral( "preferencesMapFov" ), current.m_flFov, 30, 150, 5, 0, []( MapPreferences_t &p, double fl ) { p.m_flFov = fl; } ) );
 		pForm->addRow( tr( "Mouse look speed" ), spin( QStringLiteral( "preferencesMapSensitivity" ), current.m_flSensitivity, 0.05, 5, 0.05, 2, []( MapPreferences_t &p, double fl ) { p.m_flSensitivity = fl; } ) );
@@ -596,7 +600,12 @@ QWidget *CPreferencesDialog::BuildMapsPage()
 		pLayout->addWidget( check( QStringLiteral( "preferencesMapFog" ), tr( "Draw the map's fog (env_fog_controller)" ), current.m_bFog, []( MapPreferences_t &p, bool b ) { p.m_bFog = b; } ) );
 		pLayout->addWidget( check( QStringLiteral( "preferencesMapSprites" ), tr( "Draw sprites (else entities' boxes)" ), current.m_bSprites, []( MapPreferences_t &p, bool b ) { p.m_bSprites = b; } ) );
 		pLayout->addWidget( check( QStringLiteral( "preferencesMapWireframeModels" ), tr( "Draw models' edges in the wireframe view" ), current.m_bWireframeModels, []( MapPreferences_t &p, bool b ) { p.m_bWireframeModels = b; } ) );
-		pLayout->addSpacing( 12 );
+		pLayout->addStretch();
+	}
+
+	// Map editing defaults.
+	{
+		QVBoxLayout *pLayout = Section( m_pMapTabs, tr( "Editing" ), 1 );
 		pLayout->addWidget( check( QStringLiteral( "preferencesMapArrowsNudge" ), tr( "Arrow keys move the selection (in the 2D views)" ), current.m_bArrowsNudge, []( MapPreferences_t &p, bool b ) { p.m_bArrowsNudge = b; } ) );
 		pLayout->addWidget( check( QStringLiteral( "preferencesMapTextureLock" ), tr( "Texture lock on when a map opens" ), current.m_bTextureLock, []( MapPreferences_t &p, bool b ) { p.m_bTextureLock = b; } ) );
 		pLayout->addWidget( check( QStringLiteral( "preferencesMapScaleLock" ), tr( "Texture scale lock on when a map opens (textures stretch with resized faces)" ), current.m_bScaleLock, []( MapPreferences_t &p, bool b ) { p.m_bScaleLock = b; } ) );
@@ -616,7 +625,7 @@ QWidget *CPreferencesDialog::BuildMapsPage()
 
 	// The 2D views.
 	{
-		QVBoxLayout *pLayout = tab( pTabs, tr( "2D Views" ) );
+		QVBoxLayout *pLayout = Section( m_pGraphicsTabs, tr( "2D Views" ) );
 		const QString szPixels = tr( " px" );
 		auto *pForm = new QFormLayout;
 		pForm->addRow( tr( "Brighter grid line every" ), whole( QStringLiteral( "preferencesMapHighlight" ), current.m_nHighlightEvery, 2, 64, QString{}, []( MapPreferences_t &p, int n ) { p.m_nHighlightEvery = n; } ) );
@@ -625,7 +634,6 @@ QWidget *CPreferencesDialog::BuildMapsPage()
 		pForm->addRow( tr( "Corners on brushes from" ), whole( QStringLiteral( "preferencesMapVerticesFrom" ), current.m_nVerticesFromPixels, 0, 256, szPixels, []( MapPreferences_t &p, int n ) { p.m_nVerticesFromPixels = n; } ) );
 		pForm->addRow( tr( "Handles' size" ), whole( QStringLiteral( "preferencesMapHandleSize" ), current.m_nHandleSize, 3, 32, szPixels, []( MapPreferences_t &p, int n ) { p.m_nHandleSize = n; } ) );
 		pForm->addRow( tr( "Handles take the mouse within" ), whole( QStringLiteral( "preferencesMapHandleReach" ), current.m_nHandleReach, 0, 16, szPixels, []( MapPreferences_t &p, int n ) { p.m_nHandleReach = n; } ) );
-		pForm->addRow( tr( "Handles' colour" ), colour( QStringLiteral( "preferencesMapHandleColor" ), current.m_Colors.m_ToolHandle, false, []( MapPreferences_t &p, const QColor &color ) { p.m_Colors.m_ToolHandle = color; } ) );
 		pForm->addRow( tr( "Centre handles on objects from" ), whole( QStringLiteral( "preferencesMapCenterHandlesFrom" ), current.m_nCenterHandlesFromPixels, 0, 256, szPixels, []( MapPreferences_t &p, int n ) { p.m_nCenterHandlesFromPixels = n; } ) );
 		pForm->addRow( tr( "Models drawn from" ), whole( QStringLiteral( "preferencesMapModelsFrom" ), current.m_nModelsFromPixels, 0, 512, szPixels, []( MapPreferences_t &p, int n ) { p.m_nModelsFromPixels = n; } ) );
 		pForm->addRow( tr( "Names shown once 16 units are" ), whole( QStringLiteral( "preferencesMapNamesFrom" ), current.m_nNamesFromPixels, 1, 512, szPixels, []( MapPreferences_t &p, int n ) { p.m_nNamesFromPixels = n; } ) );
@@ -638,19 +646,19 @@ QWidget *CPreferencesDialog::BuildMapsPage()
 		pForm->addRow( tr( "Closest zoom (pixels a unit)" ), spin( QStringLiteral( "preferencesMapZoomLargest" ), current.m_flZoomLargest, 1, 1024, 8, 0, []( MapPreferences_t &p, double fl ) { p.m_flZoomLargest = fl; } ) );
 		pLayout->addLayout( pForm );
 		pLayout->addWidget( check( QStringLiteral( "preferencesMapHideSmallGrid" ), tr( "Hide grid lines that come too close together" ), current.m_bHideSmallGrid, []( MapPreferences_t &p, bool b ) { p.m_bHideSmallGrid = b; } ) );
-		pLayout->addWidget( check( QStringLiteral( "preferencesMapGridBeyond" ), tr( "Draw the grid past the map's size too, in its own colour (Colours)" ), current.m_bGridBeyond, []( MapPreferences_t &p, bool b ) { p.m_bGridBeyond = b; } ) );
+		pLayout->addWidget( check( QStringLiteral( "preferencesMapGridBeyond" ), tr( "Draw the grid past the map's size too, in its own colour (Interface → Map Colours)" ), current.m_bGridBeyond, []( MapPreferences_t &p, bool b ) { p.m_bGridBeyond = b; } ) );
 		pLayout->addWidget( check( QStringLiteral( "preferencesMapVertices" ), tr( "Draw brushes' corners" ), current.m_bDrawVertices, []( MapPreferences_t &p, bool b ) { p.m_bDrawVertices = b; } ) );
 		pLayout->addWidget( check( QStringLiteral( "preferencesMapCenterHandles" ), tr( "Draw centre handles" ), current.m_bCenterHandles, []( MapPreferences_t &p, bool b ) { p.m_bCenterHandles = b; } ) );
 		pLayout->addWidget( check( QStringLiteral( "preferencesMapModels2D" ), tr( "Draw models" ), current.m_bModels2D, []( MapPreferences_t &p, bool b ) { p.m_bModels2D = b; } ) );
 		pLayout->addWidget( check( QStringLiteral( "preferencesMapTexturedModels2D" ), tr( "Draw models textured (else their edges)" ), current.m_bTexturedModels2D, []( MapPreferences_t &p, bool b ) { p.m_bTexturedModels2D = b; } ) );
 		pLayout->addWidget( check( QStringLiteral( "preferencesMapGroupColors" ), tr( "Draw objects in their visgroup's and group's colour" ), current.m_bGroupColors, []( MapPreferences_t &p, bool b ) { p.m_bGroupColors = b; } ) );
-		pLayout->addWidget( check( QStringLiteral( "preferencesMapInstanceColor2D" ), tr( "Draw instances' contents in the instance colour (Colours), not the func_instance's" ), current.m_bInstanceColor2D, []( MapPreferences_t &p, bool b ) { p.m_bInstanceColor2D = b; } ) );
+		pLayout->addWidget( check( QStringLiteral( "preferencesMapInstanceColor2D" ), tr( "Draw instances' contents in the instance colour (Interface → Map Colours), not the func_instance's" ), current.m_bInstanceColor2D, []( MapPreferences_t &p, bool b ) { p.m_bInstanceColor2D = b; } ) );
 		pLayout->addStretch();
 	}
 
 	// Colours.
 	{
-		QVBoxLayout *pLayout = tab( pTabs, tr( "Colours" ) );
+		QVBoxLayout *pLayout = Section( m_pInterfaceTabs, tr( "Map Colours" ) );
 		auto *pForm = new QFormLayout;
 		struct Colour_t
 		{
@@ -692,37 +700,52 @@ QWidget *CPreferencesDialog::BuildMapsPage()
 			pButton->setToolTip( entry.m_szLabel );
 			pForm->addRow( entry.m_szLabel, pButton );
 		}
+		pForm->addRow( tr( "Handles' colour" ), colour( QStringLiteral( "preferencesMapHandleColor" ), current.m_Colors.m_ToolHandle, false, []( MapPreferences_t &p, const QColor &color ) { p.m_Colors.m_ToolHandle = color; } ) );
 		pLayout->addLayout( pForm );
 		pLayout->addStretch();
 	}
+}
 
-	// Back to Hammer++'s settings, keeping the game data.
-	auto *pReset = new QPushButton( tr( "Restore Hammer++'s Settings" ) );
+//-----------------------------------------------------------------------------
+// Purpose: Restore the map controls across the pages that share them.
+//-----------------------------------------------------------------------------
+void CPreferencesDialog::ResetMapSettings()
+{
+	MapPreferences_t preferences;
+	preferences.m_Fgds = CPreferences::Instance().GetMapPreferences().m_Fgds;
+	CPreferences::Instance().SetMapPreferences( preferences );
+	const int nMapTab = m_pMapTabs->currentIndex();
+	for ( QTabWidget *pTabs : { m_pInterfaceTabs, m_pGraphicsTabs, m_pMapTabs } )
+	{
+		const int nKeep = pTabs == m_pInterfaceTabs ? 2 : pTabs == m_pGraphicsTabs ? 1
+																				   : 0;
+		const int nEnd = pTabs->count() - ( pTabs == m_pMapTabs ? 1 : 0 );
+		for ( int i = nEnd - 1; i >= nKeep; i-- )
+		{
+			QWidget *pSection = pTabs->widget( i );
+			pTabs->removeTab( i );
+			pSection->deleteLater();
+		}
+	}
+	BuildMapSections();
+	m_pMapTabs->setCurrentIndex( nMapTab );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Map game data, editing defaults and compiler paths.
+//-----------------------------------------------------------------------------
+QWidget *CPreferencesDialog::BuildMapsPage()
+{
+	auto *pPage = new QWidget;
+	pPage->setObjectName( QStringLiteral( "preferencesMaps" ) );
+	m_pMapTabs->addTab( Scrollable( BuildSourceToolsPage() ), tr( "Source Tools" ) );
+	auto *pReset = new QPushButton( tr( "Restore Hammer++ Settings" ) );
 	pReset->setObjectName( QStringLiteral( "preferencesMapReset" ) );
-	connect( pReset, &QPushButton::clicked, this, [ this ] {
-		MapPreferences_t preferences;
-		preferences.m_Fgds = CPreferences::Instance().GetMapPreferences().m_Fgds;
-		CPreferences::Instance().SetMapPreferences( preferences );
-		const int nTab = m_pMapsPage ? m_pMapsPage->findChild<QTabWidget *>()->currentIndex() : 0;
-		QWidget *pOld = m_pMapsPage;
-		m_pMapsPage = BuildMapsPage();
-		const int nIndex = m_pStack->indexOf( pOld );
-		m_pStack->insertWidget( nIndex, m_pMapsPage );
-		m_pStack->setCurrentWidget( m_pMapsPage );
-		m_pStack->removeWidget( pOld );
-		pOld->deleteLater();
-		m_pMapsPage->findChild<QTabWidget *>()->setCurrentIndex( nTab );
-	} );
+	connect( pReset, &QPushButton::clicked, this, &CPreferencesDialog::ResetMapSettings );
 	auto *pLayout = new QVBoxLayout( pPage );
 	pLayout->setContentsMargins( 0, 0, 0, 0 );
-	pLayout->addWidget( pTabs, 1 );
-	auto *pRow = new QHBoxLayout;
-	pRow->addWidget( Hint( tr( "Hammer++'s own settings are the defaults. The views' toolbar buttons change some of these for one map "
-							   "until this page changes again." ) ),
-		1 );
-	pRow->addWidget( pReset );
-	pLayout->addLayout( pRow );
-	m_pMapsPage = pPage;
+	pLayout->addWidget( m_pMapTabs, 1 );
+	pLayout->addWidget( pReset, 0, Qt::AlignRight );
 	return pPage;
 }
 
@@ -741,12 +764,12 @@ QWidget *CPreferencesDialog::BuildAdvancedPage()
 	connect( pShow, &QPushButton::clicked, this, [] { RevealInFileManager( DebugLogPath() ); } );
 	QVBoxLayout *pLayout = PageLayout( pPage );
 	pLayout->addWidget( pLog );
-	pLayout->addWidget( Hint( tr( "Prints what goes on in the background (mounting the game, opening and saving files, "
-								  "drawing previews, with how long each took) to the terminal, and writes it to %1, which "
-								  "starts afresh at each run." )
-			.arg( QDir::toNativeSeparators( DebugLogPath() ) ) ) );
 	auto *pRow = new QHBoxLayout;
 	pRow->addWidget( pShow );
+	auto *pOpen = new QPushButton( tr( "Open Settings File" ) );
+	pOpen->setToolTip( tr( "Open vomit-tools.nut in your text editor." ) );
+	connect( pOpen, &QPushButton::clicked, this, [] { QDesktopServices::openUrl( QUrl::fromLocalFile( CPreferences::Instance().GetConfigPath() ) ); } );
+	pRow->addWidget( pOpen );
 	pRow->addStretch();
 	pLayout->addLayout( pRow );
 	pLayout->addStretch();
@@ -760,7 +783,6 @@ QWidget *CPreferencesDialog::BuildSourceToolsPage()
 {
 	auto *pPage = new QWidget;
 	auto *pLayout = PageLayout( pPage );
-	pLayout->addWidget( Hint( tr( "Leave a path empty to discover tools beside the current game and in PATH. Tool folders named by gameinfo.txt are checked too. Use native executables for your operating system." ) ) );
 	for ( auto nTool : SOURCE_TOOLS )
 	{
 		pLayout->addWidget( new QLabel( SourceToolLabel( nTool ) ) );
@@ -768,12 +790,17 @@ QWidget *CPreferencesDialog::BuildSourceToolsPage()
 		auto *pPath = new QLineEdit( CPreferences::Instance().GetSourceToolPath( nTool ) );
 		pPath->setObjectName( SourceToolBaseName( nTool ) + QStringLiteral( "Path" ) );
 		pPath->setPlaceholderText( tr( "Automatic discovery" ) );
+		pPath->setToolTip( tr( "When empty, searches beside the game, in its configured tool folders and in PATH." ) );
 		auto *pBrowse = new QPushButton( tr( "Browse…" ) );
 		pRow->addWidget( pPath, 1 );
 		pRow->addWidget( pBrowse );
 		pLayout->addLayout( pRow );
 		connect( pPath, &QLineEdit::textChanged, pPage, [ nTool ]( const QString &szPath ) { CPreferences::Instance().SetSourceToolPath( nTool, szPath ); } );
-		connect( pBrowse, &QPushButton::clicked, pPage, [ this, pPath ] {const auto szFile=AskOpenFile(this,tr("Select Source Tool"),pPath->text());if(!szFile.isEmpty())pPath->setText(szFile); } );
+		connect( pBrowse, &QPushButton::clicked, pPage, [ this, pPath ] {
+			const QString szFile = AskOpenFile( this, tr( "Select Source Tool" ), pPath->text() );
+			if ( !szFile.isEmpty() )
+				pPath->setText( szFile );
+		} );
 	}
 	{
 		// Hammer's $bspdir: where Run Map copies the compiled map.
@@ -795,7 +822,6 @@ QWidget *CPreferencesDialog::BuildSourceToolsPage()
 			}
 		} );
 	}
-	pLayout->addWidget( Hint( tr( "Model builds run in a temporary game directory. The compilers and the game are supplied by you; this application does not include or download Valve or community compilers. The native VBSP++, VVIS++ and VRAD++ builds can live anywhere: point to them here." ) ) );
 	pLayout->addStretch();
 	return pPage;
 }

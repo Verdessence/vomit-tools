@@ -141,6 +141,8 @@ add_library(vomit_tools_ui STATIC
         SingleInstance.h
         Splash.cpp
         Splash.h
+        LoadingView.cpp
+        LoadingView.h
         SkyDocument.cpp
         SkyDocument.h
         SkyEditor.cpp
@@ -226,6 +228,8 @@ add_library(vomit_tools_ui STATIC
         map/MapParticles.cpp
         map/MapParticles.h
         map/MapPanes.h
+        map/MapModelProperties.cpp
+        map/MapModelProperties.h
         map/MapProperties.cpp
         map/MapRecent.cpp
         map/MapRecent.h
@@ -330,7 +334,7 @@ qt_add_resources(vomit_tools_ui "vomit_tools_data"
 qt_add_resources(vomit_tools_ui "vomit_tools_assets"
         PREFIX "/assets"
         BASE ../assets
-        FILES ../assets/logo_wide.png ../assets/premium_character.gif ../assets/vomit-tools.png)
+        FILES ../assets/logo_wide.png ../assets/premium_character.gif ../assets/vomit-tools.png ../assets/flag-ph.png)
 # Our license and the third-party notices, for Help > About > Licenses.
 set_source_files_properties("${CMAKE_SOURCE_DIR}/LICENSE" PROPERTIES QT_RESOURCE_ALIAS LICENSE.txt)
 set_source_files_properties("${VOMIT_TOOLS_NOTICES}" PROPERTIES QT_RESOURCE_ALIAS THIRD-PARTY-NOTICES.txt)

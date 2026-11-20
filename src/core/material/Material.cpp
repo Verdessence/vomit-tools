@@ -761,14 +761,14 @@ CProxies::CProxies( const CMaterial &material )
 			m_Skipped.push_back( proxy.m_szName );
 			continue;
 		}
-		const auto rate = [ & ]( std::string_view szKey ) {
+		const auto rate = [ & ]( std::string_view szKey, float flDefault = 0.0f ) {
 			const std::string *pValue = Setting( proxy, szKey );
-			return pValue ? ReadVariable( material, *pValue ).front() : 0.0f;
+			return pValue ? ReadVariable( material, *pValue ).front() : flDefault;
 		};
 		const std::string szName = Lower( proxy.m_szName );
 		if ( szName == "animatedtexture" )
 		{
-			m_bAnimated |= rate( "animatedtextureframerate" ) != 0.0f;
+			m_bAnimated |= rate( "animatedtextureframerate", 15.0f ) != 0.0f;
 		}
 		else if ( szName == "texturescroll" )
 		{

@@ -6,10 +6,14 @@
 //===========================================================================//
 #include "MapView.h"
 
+#include <algorithm>
+
 #include <QAbstractSpinBox>
 #include <QApplication>
 #include <QKeyEvent>
 #include <QLineEdit>
+#include <QMouseEvent>
+#include <QPainter>
 #include <QPlainTextEdit>
 #include <QTextEdit>
 
@@ -107,9 +111,81 @@ void CMapView::keyPressEvent( QKeyEvent *pEvent )
 //-----------------------------------------------------------------------------
 void CMapView::mouseDoubleClickEvent( QMouseEvent *pEvent )
 {
+	if ( pEvent->button() == Qt::LeftButton && pEvent->modifiers() == Qt::NoModifier && m_Editor.GetTool() == MapTool_t::MAP_TOOL_SELECT && PickPortal( pEvent->position() ) )
+	{
+		pEvent->accept();
+		return;
+	}
 	QWidget::mouseDoubleClickEvent( pEvent );
 	if ( pEvent->button() == Qt::LeftButton && pEvent->modifiers() == Qt::NoModifier && m_Editor.GetTool() == MapTool_t::MAP_TOOL_SELECT && !GetDocument().GetSelection().empty() )
 		m_Editor.RunAction( MapAction_t::MAP_ACTION_PROPERTIES, this );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: The portals are inspection guides, drawn above the map in both renderers.
+//-----------------------------------------------------------------------------
+void CMapView::PaintPortals( QPainter &painter ) const
+{
+	const auto &portals = GetDocument().GetPortals();
+	if ( portals.empty() )
+		return;
+	const auto pfnProject = PortalProjection();
+	const auto selected = GetDocument().GetSelectedPortal();
+	std::vector<QLineF> lines, highlighted;
+	for ( std::size_t n = 0; n < portals.size(); ++n )
+	{
+		const auto &points = portals[ n ].m_Points;
+		auto &edges = selected == n ? highlighted : lines;
+		for ( std::size_t i = 0; i < points.size(); ++i )
+			if ( const auto line = pfnProject( points[ i ], points[ ( i + 1 ) % points.size() ] ) )
+				edges.push_back( *line );
+	}
+	painter.save();
+	painter.setPen( QPen( QColor( 65, 150, 255 ), 1.0 ) );
+	painter.drawLines( lines.data(), static_cast<int>( lines.size() ) );
+	painter.setPen( QPen( QColor( 135, 225, 255 ), 2.0 ) );
+	painter.drawLines( highlighted.data(), static_cast<int>( highlighted.size() ) );
+	painter.restore();
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Inspect the leaves of the closest portal outline within a few pixels.
+//-----------------------------------------------------------------------------
+bool CMapView::PickPortal( QPointF at )
+{
+	auto &document = GetDocument();
+	const auto &portals = document.GetPortals();
+	if ( portals.empty() )
+		return false;
+	const auto pfnProject = PortalProjection();
+	std::optional<std::size_t> picked;
+	double flBest = 5.0 * 5.0;
+	for ( std::size_t n = 0; n < portals.size(); ++n )
+	{
+		const auto &points = portals[ n ].m_Points;
+		for ( std::size_t i = 0; i < points.size(); ++i )
+		{
+			const auto line = pfnProject( points[ i ], points[ ( i + 1 ) % points.size() ] );
+			if ( !line )
+				continue;
+			const QPointF delta = line->p2() - line->p1();
+			const QPointF offset = at - line->p1();
+			const double flLength = QPointF::dotProduct( delta, delta );
+			const double flAlong = flLength > 0.0 ? std::clamp( QPointF::dotProduct( offset, delta ) / flLength, 0.0, 1.0 ) : 0.0;
+			const QPointF gap = offset - delta * flAlong;
+			if ( const double flDistance = QPointF::dotProduct( gap, gap ); flDistance < flBest )
+			{
+				flBest = flDistance;
+				picked = n;
+			}
+		}
+	}
+	if ( !picked )
+		return false;
+	document.SelectPortal( *picked );
+	const auto &portal = portals[ *picked ];
+	emit m_Editor.StatusMessage( tr( "Portal %1 of %2 connects leaves %3 and %4." ).arg( *picked + 1 ).arg( portals.size() ).arg( portal.m_nLeafA ).arg( portal.m_nLeafB ) );
+	return true;
 }
 
 //-----------------------------------------------------------------------------

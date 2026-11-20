@@ -3,6 +3,8 @@
 // Purpose: Debounced, read-only model browser details with a private loading thread and live view.
 //===========================================================================//
 #pragma once
+
+class CLoadingView;
 #include <atomic>
 #include <condition_variable>
 #include <memory>
@@ -64,6 +66,7 @@ private:
 	Location_t m_pfnWhere;
 	QString m_szPath;
 	CModelView *m_pView = nullptr;
+	CLoadingView *m_pLoading = nullptr;
 	QLabel *m_pWarning = nullptr, *m_pName = nullptr;
 	QComboBox *m_pSkin = nullptr;
 	QLabel *m_pSkinLabel = nullptr;

@@ -56,6 +56,7 @@ layout(std140, binding = 1) uniform Material {
 	vec4 detail;          // $detailblendmode (below 0: no detail), $detailblendfactor, $detailscale u v
 	vec4 detailTransform; // $detailtexturetransform: a b c d
 	vec4 detailOffset;    // tx ty, and the detail texture's size
+	vec4 pointSampling;   // base, base2, detail
 } material;
 
 layout(binding = 2) uniform sampler2D base;
@@ -172,10 +173,10 @@ vec3 envColour(vec3 d) {
 // A texture at a texel position (in its full-size texels) as xv::map::SampleFiltered samples it:
 // once at the gradient's mip level, or with anisotropy up to that many times along the pixel's
 // footprint at a finer level, averaged.
-vec4 sampleFiltered(sampler2D tex, vec2 texel, vec2 size, vec2 across, vec2 down) {
+vec4 sampleFiltered(sampler2D tex, vec2 texel, vec2 size, vec2 across, vec2 down, bool pointSample) {
 	vec2 full = max(size, vec2(1.0));
 	float most = frame.state.y;
-	if (most <= 1.0) {
+	if (pointSample || most <= 1.0) {
 		return texture(tex, texel / full);
 	}
 	float lengthAcross = length(across);
@@ -207,7 +208,7 @@ vec4 sampleDetail(vec2 uv, vec2 across, vec2 down) {
 	vec2 texel = (turn * uv + material.detailOffset.xy) * scale;
 	vec2 detailAcross = (turn * (across / full)) * scale;
 	vec2 detailDown = (turn * (down / full)) * scale;
-	return sampleFiltered(detailTexture, texel, size, detailAcross, detailDown);
+	return sampleFiltered(detailTexture, texel, size, detailAcross, detailDown, material.pointSampling.z > 0.5);
 }
 
 // $detailblendmode's combinations before light, as xv::map::CombineDetail.
@@ -239,7 +240,7 @@ vec4 shadeRefract(vec2 across, vec2 down, vec3 face) {
 	if (material.kind.y > 0.5) {
 		mat2 turn = mat2(material.uvTransform.x, material.uvTransform.z, material.uvTransform.y, material.uvTransform.w);
 		vec2 movedTexel = (turn * uv + material.uvOffset.xy) * full;
-		vec4 bump = sampleFiltered(base, movedTexel, material.size.xy, across, down);
+		vec4 bump = sampleFiltered(base, movedTexel, material.size.xy, across, down, material.pointSampling.x > 0.5);
 		vec3 side = abs(face.z) < 0.9 ? vec3(0.0, 0.0, 1.0) : vec3(1.0, 0.0, 0.0);
 		vec3 tangentU = normalize(cross(face, side));
 		vec3 tangentV = cross(face, tangentU);
@@ -247,7 +248,7 @@ vec4 shadeRefract(vec2 across, vec2 down, vec3 face) {
 	}
 	vec3 tint = material.refractTint.rgb;
 	if (material.kind.z > 0.5) {
-		tint *= sampleFiltered(base2, uv * max(material.size.zw, vec2(1.0)), material.size.zw, across, down).rgb;
+		tint *= sampleFiltered(base2, uv * max(material.size.zw, vec2(1.0)), material.size.zw, across, down, material.pointSampling.y > 0.5).rgb;
 	}
 	vec3 reflection = vec3(0.0);
 	vec3 dir = v_world - frame.eye.xyz;
@@ -307,9 +308,9 @@ void main() {
 			ivec2 square = ivec2(floor(uv * 4.0));
 			color = ((square.x + square.y) & 1) == 0 ? vec4(1.0, 0.0, 1.0, 1.0) : vec4(0.0, 0.0, 0.0, 1.0);
 		} else if (material.kind.y > 0.5) {
-			color = sampleFiltered(base, movedTexel, material.size.xy, movedAcross, movedDown);
+			color = sampleFiltered(base, movedTexel, material.size.xy, movedAcross, movedDown, material.pointSampling.x > 0.5);
 			if (material.options.z > 0.5 && material.kind.z > 0.5) {
-				vec4 second = sampleFiltered(base2, v_texel, material.size.zw, across, down);
+				vec4 second = sampleFiltered(base2, v_texel, material.size.zw, across, down, material.pointSampling.y > 0.5);
 				color = mix(color, second, v_blend);
 			}
 		} else {

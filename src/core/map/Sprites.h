@@ -26,12 +26,13 @@ struct SpritePlacement_t
 	double m_flHalfHeight = 8.0;
 	std::array<int, 2> m_TextureSize{ 64, 64 };
 	std::array<std::uint8_t, 3> m_Tint{ 255, 255, 255 }; // a light's colour; white otherwise
+	bool m_bUpright = false;
 	friend bool operator==( const SpritePlacement_t &, const SpritePlacement_t & ) = default;
 };
 
 // Each sprite as a square in the plane of the camera's right and up directions, wound as
 // brush faces are (clockwise seen from the camera), with its outline as lines.
-[[nodiscard]] CMapMesh BuildSpriteMesh( std::span<const SpritePlacement_t> sprites, Point_t right, Point_t up );
+[[nodiscard]] CMapMesh BuildSpriteMesh( std::span<const SpritePlacement_t> sprites, Point_t right, Point_t up, bool bUseOrientation = false );
 
 // A particle as the map draws it: its corners in the world (the texture's top-left, top-right,
 // bottom-right, bottom-left), the part of its texture, its colour and alpha, its material and that

@@ -6,6 +6,8 @@
 //===========================================================================//
 #include "ModelBrowser.h"
 
+#include "LoadingView.h"
+
 #include <cstring>
 #include <map>
 #include <memory>
@@ -106,9 +108,11 @@ private:
 // Purpose: The model in its default body and skin, from the side the viewer starts at, filling
 //          the picture. Null when it has no mesh to draw.
 //-----------------------------------------------------------------------------
-QImage DrawModel( const std::string &szPath, const xv::model::Reader_t &pfnRead, CSpriteCache &sprites, int &nTriangles, std::string &szProblem )
+QImage DrawModel( const std::string &szPath, const xv::model::Reader_t &pfnRead, CSpriteCache &sprites, int &nTriangles, std::string &szProblem, int nSkin = 0 )
 {
-	auto model = xv::model::LoadModel( szPath, pfnRead, &szProblem );
+	xv::model::Selection_t selection;
+	selection.m_nSkin = nSkin;
+	auto model = xv::model::LoadModel( szPath, pfnRead, &szProblem, selection );
 	if ( !model || model->m_Vertices.empty() )
 	{
 		if ( szProblem.empty() )
@@ -145,6 +149,27 @@ QStringList Words( const QString &szText )
 } // namespace
 
 //-----------------------------------------------------------------------------
+// Purpose: Share the model browser picture cache, with one image for each skin.
+//-----------------------------------------------------------------------------
+QImage CModelBrowser::SkinPicture( const QString &szModel, int nChecksum, int nSkin, const xv::model::Reader_t &pfnRead )
+{
+	const bool bDefaultSkin = nSkin == 0;
+	const QString szStem = PicturePath( szModel, nChecksum ) + ( bDefaultSkin ? QString{} : QStringLiteral( "_skin_%1" ).arg( nSkin ) );
+	QImage picture = ReadCachedPicture( szStem );
+	if ( picture.isNull() )
+	{
+		QDir().mkpath( CacheFolder() );
+		int nTriangles = 0;
+		std::string szProblem;
+		CSpriteCache sprites;
+		picture = DrawModel( szModel.toStdString(), pfnRead, sprites, nTriangles, szProblem, nSkin );
+		if ( !picture.isNull() )
+			(void)WriteCachedPicture( szStem, picture );
+	}
+	return picture;
+}
+
+//-----------------------------------------------------------------------------
 // Purpose: The models, with a picture each once it is drawn.
 //-----------------------------------------------------------------------------
 class CModelList : public QAbstractListModel
@@ -170,6 +195,8 @@ public:
 				return QFileInfo( model.m_szPath ).completeBaseName();
 			case Qt::DecorationRole:
 				// An icon, not a pixmap: the view scales icons to its icon size, pixmaps it only crops.
+				if ( !model.m_bPictured )
+					return LoadingThumbnail();
 				return m_Icons[ static_cast<std::size_t>( index.row() ) ].isNull() ? Placeholder() : m_Icons[ static_cast<std::size_t>( index.row() ) ];
 			case Qt::ToolTipRole:
 				return ToolTip( model );
@@ -354,6 +381,7 @@ CModelBrowser::CModelBrowser( const xv::vfs::CGameInfo &game, QWidget *pParent )
 
 	m_pView = new QListView;
 	m_pView->setObjectName( QStringLiteral( "modelBrowserView" ) );
+	m_pLoading = new CLoadingView( m_pView->viewport(), LoadingLayout_t::LOADING_LAYOUT_GRID );
 	m_pView->setModel( m_pFilter );
 	m_pView->setViewMode( QListView::IconMode );
 	m_pView->setResizeMode( QListView::Adjust );
@@ -589,6 +617,7 @@ void CModelBrowser::Start( const xv::vfs::CGameInfo &game )
 	m_pList->SetPaths( {} );
 	m_bStop = false;
 	m_bFinished = false;
+	m_pLoading->Begin( tr( "Listing models…" ) );
 	{
 		const std::lock_guard lock( m_Mutex );
 		m_Wanted.clear();
@@ -626,6 +655,7 @@ void CModelBrowser::Run( xv::vfs::CGameInfo game )
 		names << QString::fromStdString( szPath );
 	post( [ this, names ] {
 		m_pList->SetPaths( names );
+		m_pLoading->End();
 		if ( !m_szStart.isEmpty() )
 			SelectPath( m_szStart );
 		emit Progress();

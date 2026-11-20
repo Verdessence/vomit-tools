@@ -37,13 +37,14 @@ class CModelEditor;
 class CDetailDocument;
 class CDetailEditor;
 class CFolderBrowser;
+class CLoadingView;
 class CParticleDocument;
 class CParticleSearch;
 class CPreferencesDialog;
 class QLabel;
 class QMenu;
 class QSortFilterProxyModel;
-class QTabWidget;
+class QStackedWidget;
 class QTableWidget;
 class QTreeView;
 class QUndoGroup;
@@ -114,13 +115,13 @@ public:
 	// the demo is on disk (empty for a game file), which is looked in after the game.
 	void LoadDemoMap( CDemoViewer &viewer, const QString &szMap, const QString &szDemoFolder );
 	// File > New > Map.
-	CMapEditor *NewMap();
+	CMapEditor *NewMap( const QString &szName = {} );
 	[[nodiscard]] CMapEditor *GetCurrentMap() const;
 	// The tab of every model in the game; null without a game.
 	CModelBrowser *OpenModelBrowser();
 	// Opens a soundscape or soundscript from the mounted game in an editor tab.
 	CDetailEditor *OpenDetailFile( const QString &szGamePath );
-	CDetailEditor *NewDetailFile();
+	CDetailEditor *NewDetailFile( QString szName = {} );
 	CSoundEditor *OpenSoundFile( const QString &szGamePath );
 	// A new, empty skybox editor tab (or one for the given document).
 	CSkyEditor *NewSky( CSkyDocument *pDocument = nullptr );
@@ -134,7 +135,7 @@ public:
 	// material of the same name beside it unless bFindMaterial is false.
 	CTextureEditor *OpenTextureFile( const QString &szGamePath, bool bFindMaterial = true );
 	// Makes a new texture from pictures on disk, after asking how (File > Create VTF).
-	CTextureEditor *NewTextureFromFiles( const QStringList &files );
+	CTextureEditor *NewTextureFromFiles( const QStringList &files, const QString &szName = {} );
 	// Opens a material from the mounted game ("materials/x.vmt"): in the tab of the texture it
 	// uses when that is found, else in a tab of its own.
 	CMaterialEditor *OpenMaterialFile( const QString &szGamePath );
@@ -199,9 +200,9 @@ private:
 	bool WriteDetail( CDetailEditor *pEditor, const std::filesystem::path &target );
 	bool ConfirmClose( CDetailEditor *pEditor );
 	void BuildMenus( QAction *pSearchPathsToggle );
-	void BuildPlaybackBar();
+	void ConnectPlaybackStatus();
 	// "VOMIT TOOLS - FREE EDITION - <version> - <OS> - MADE IN THE PHILIPPINES", bottom right.
-	[[nodiscard]] QLabel *BuildFooter();
+	[[nodiscard]] QWidget *BuildFooter();
 	void FillGameMenu( QMenu *pMenu );
 	void FillRecentMenu( QMenu *pMenu );
 	void AddMapTab( CMapEditor *pEditor );
@@ -216,6 +217,7 @@ private:
 	void AddRecent( const QString &szPath, bool bSaved = false );
 	void ChooseGameInfo();
 	void ChooseFiles();
+	void ChooseNewFile();
 	void ChooseFolder();
 	// Asks which map, then generates its <map>_particles.txt.
 	void ChooseMapParticles();
@@ -230,7 +232,7 @@ private:
 	[[nodiscard]] QWidget *WithEditButton( QWidget *pView, const QString &szText, const QString &szButton, const std::function<void()> &pfnOpen, const QString &szSecond = {}, const std::function<void()> &pfnSecond = {} );
 	// OpenDiskFile, with a sky's face files opened as a sky (or as what they are).
 	void OpenDiskFileAs( const QString &szPath, bool bSkies );
-	void NewSoundFile( xv::sound::FileKind_t nKind );
+	void NewSoundFile( xv::sound::FileKind_t nKind, const QString &szName );
 	bool AskAddToManifest( const QString &szText );
 	bool Save( CSoundEditor *pEditor );
 	bool SaveAs( CSoundEditor *pEditor );
@@ -258,7 +260,7 @@ private:
 	// open folder and extra (the pictures' folder...) in its side list. Empty when cancelled;
 	// pFilter in: the type picked first, out: the type picked.
 	[[nodiscard]] QString AskSavePath( const std::filesystem::path &start, const QString &szFilters, QString *pFilter = nullptr, const std::filesystem::path &extra = {} );
-	void ChooseNewTexture();
+	void ChooseNewTexture( const QString &szName );
 	void ChooseBatchConvert();
 	CMaterialEditor *AddMaterialEditor( CMaterialEditor *pEditor );
 	bool Save( CMaterialEditor *pEditor );
@@ -279,7 +281,7 @@ private:
 	[[nodiscard]] std::vector<Choice_t> SurfaceProps() const;
 	// The textures the game has, as materials name them (no materials/, no .vtf).
 	[[nodiscard]] QStringList TextureNames() const;
-	void NewParticleFile();
+	void NewParticleFile( QString szName );
 	CParticleEditor *AddParticleEditor( CParticleDocument *pDocument, std::shared_ptr<const xv::vfs::CPackage> pPackage = {} );
 	bool Save( CParticleEditor *pEditor );
 	// Save As also converts: binary 1 or 2, or keyvalues2 text for reading.
@@ -331,7 +333,9 @@ private:
 	CVfsModel *m_pModel = nullptr;
 	QSortFilterProxyModel *m_pFilter = nullptr;
 	QTreeView *m_pTree = nullptr;
-	QTabWidget *m_pSides = nullptr;
+	QStackedWidget *m_pSides = nullptr;
+	CLoadingView *m_pGameLoading = nullptr;
+	CLoadingView *m_pEditorLoading = nullptr;
 	QPointer<QWidget> m_pRestoredCurrent; // the tab to show once the last session is reopened
 	QWidget *m_pGameBrowser = nullptr;
 	CFolderBrowser *m_pFolders = nullptr;
@@ -341,9 +345,8 @@ private:
 	qint64 m_nStartedAt = 0; // for Discord's timer
 	QWidget *m_pPreviewHost = nullptr;
 	QTableWidget *m_pMounts = nullptr;
+	QLabel *m_pGameIcon = nullptr;
 	QLabel *m_pGameLabel = nullptr;
-	QLabel *m_pNowPlaying = nullptr;
-	QWidget *m_pPlaybackBar = nullptr; // Stop, the volume and what plays
 	QUndoGroup *m_pUndoGroup = nullptr;
 	std::optional<std::vector<xv::vfs::SteamGame_t>> m_SteamGames;
 	std::optional<ParticleGame_t> m_ParticleGame;

@@ -83,6 +83,8 @@ struct MaterialInfo_t
 	float m_flDetailBlend = 1.0f;
 	std::array<float, 2> m_DetailScale{ 4.0f, 4.0f };
 	std::array<float, 6> m_DetailTransform{ 1, 0, 0, 1, 0, 0 };
+	bool m_bSpriteUpright = false;
+	bool m_bProxyBaseFrame = false;
 	// Its proxies that change it over time (AnimatedTexture, TextureScroll, Sine...); null when
 	// none does.
 	std::shared_ptr<const material::CProxies> m_pProxies;

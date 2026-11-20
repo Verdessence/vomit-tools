@@ -1,7 +1,7 @@
 //===========================================================================//
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
-// Purpose: The main window's tabs in groups: a strip over the tabs picks a group (maps,
+// Purpose: The main window's tabs in groups: the header picks a group (maps,
 //          textures, sounds... by default, or groups of the user's own), and the tabs show only
 //          that group's. A tab moved into a group of the user's stays there across starts.
 //          With editor windows on (Preferences), each kind of editor is a window of its own
@@ -136,7 +136,7 @@ public:
 	// The first tab (the preview) belongs to every group.
 	explicit CTabGroups( CEditorTabWidget *pTabs );
 
-	// The strip of groups, to place above the tabs; hidden while there is one group or grouping is off.
+	// The group picker in the window header, hidden when grouping is off.
 	[[nodiscard]] QTabBar *GetBar() const { return m_pBar; }
 	// A tab's kind ("Maps", "Textures"...), from its editor's class.
 	[[nodiscard]] static QString KindOf( const QWidget *pTab );

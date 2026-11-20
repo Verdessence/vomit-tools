@@ -424,6 +424,8 @@ MapFrame_t CMapView3D::MakeFrame( QSize size )
 		m_Editor.WantLighting();
 	}
 	MapFrame_t frame = m_Editor.GetRenderData().Snapshot( camera, options, m_Editor.GetSettings() );
+	if ( !pCompiled )
+		m_Editor.ApplyModelPreview( frame );
 	if ( pCompiled )
 	{
 		pCompiled->Apply( frame, pCompiled->GetLumpPlacements() );
@@ -721,6 +723,7 @@ void CMapView3D::PaintLabels( QPainter &painter )
 	PaintGameTexts( painter );
 	PaintOriginAxes( painter );
 	PaintTools( painter );
+	PaintPortals( painter );
 	// The axes as the camera sees them, in the bottom left corner: which way is which.
 	{
 		const xv::map::Point_t right = m_Camera.GetRight();
@@ -2662,6 +2665,18 @@ void CMapView3D::UpdateCollapsibleVertices()
 			m_CollapsibleVertices[ f ] = xv::map::CollapsibleVertices( *disp, *mesh, neighbours );
 		}
 	}
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Project portal edges the same way for drawing and picking.
+//-----------------------------------------------------------------------------
+CMapView::PortalProjection_t CMapView3D::PortalProjection() const
+{
+	return [ camera = GetSizedCamera() ]( const xv::map::Point_t &a, const xv::map::Point_t &b ) -> std::optional<QLineF> {
+		if ( const auto segment = camera.ProjectLine( a, b ) )
+			return QLineF( QPointF( segment->first[ 0 ], segment->first[ 1 ] ), QPointF( segment->second[ 0 ], segment->second[ 1 ] ) );
+		return std::nullopt;
+	};
 }
 
 //-----------------------------------------------------------------------------

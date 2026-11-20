@@ -6,17 +6,25 @@
 //===========================================================================//
 #include "TabGroups.h"
 
+#include "FileIcons.h"
 #include "Preferences.h"
+#include "map/MapToolBars.h"
 
+#include <algorithm>
 #include <iterator>
 
 #include <QApplication>
 #include <QCloseEvent>
+#include <QPainter>
+#include <QRegion>
+#include <QStyleOptionTab>
+#include <QToolButton>
 #include <QGuiApplication>
 #include <QInputDialog>
 #include <QLineEdit>
 #include <QMenu>
 #include <QMenuBar>
+#include <QStyle>
 #include <QSettings>
 #include <QStatusBar>
 #include <QTabBar>
@@ -24,6 +32,95 @@
 
 namespace
 {
+
+class CWorkspaceTabs final : public QTabBar
+{
+public:
+	QSize tabSizeHint( int nIndex ) const override;
+	QSize minimumTabSizeHint( int nIndex ) const override;
+	QSize minimumSizeHint() const override;
+	void paintEvent( QPaintEvent *pEvent ) override;
+};
+
+//-----------------------------------------------------------------------------
+// Purpose: Give each circle room for its count badge, including multi-digit counts.
+//-----------------------------------------------------------------------------
+QSize CWorkspaceTabs::tabSizeHint( int nIndex ) const
+{
+	const QFontMetrics metrics = fontMetrics();
+	const int nBadgeSize = std::max( metrics.height(), metrics.horizontalAdvance( tabText( nIndex ) ) + 4 );
+	const int nDiameter = std::max( iconSize().height() + 9, metrics.height() + 8 );
+	return { nDiameter + std::max( 4, nBadgeSize / 2 ), nDiameter };
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Use the scroll buttons when the icons and counts no longer fit.
+//-----------------------------------------------------------------------------
+QSize CWorkspaceTabs::minimumTabSizeHint( int nIndex ) const
+{
+	return tabSizeHint( nIndex );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: A short row needs less space than Qt reserves for a scrollable tab bar.
+//-----------------------------------------------------------------------------
+QSize CWorkspaceTabs::minimumSizeHint() const
+{
+	QSize minimum = QTabBar::minimumSizeHint();
+	minimum.setWidth( std::min( minimum.width(), sizeHint().width() ) );
+	return minimum;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Draw circular workspace buttons with tab selection and a smaller count circle.
+//-----------------------------------------------------------------------------
+void CWorkspaceTabs::paintEvent( QPaintEvent * )
+{
+	QRegion available( rect() );
+	for ( const auto *pButton : findChildren<QToolButton *>( QString{}, Qt::FindDirectChildrenOnly ) )
+	{
+		if ( pButton->isVisible() )
+			available -= pButton->geometry();
+	}
+	QPainter painter( this );
+	painter.setClipRegion( available );
+	painter.setRenderHint( QPainter::Antialiasing );
+	const QPalette colors = palette();
+	const QFontMetrics metrics = fontMetrics();
+	for ( int i = 0; i < count(); i++ )
+	{
+		const QRect tab = tabRect( i );
+		if ( !available.intersects( tab ) )
+			continue;
+
+		QStyleOptionTab option;
+		initStyleOption( &option, i );
+		const bool bSelected = option.state.testFlag( QStyle::State_Selected );
+		const bool bHovered = option.state.testFlag( QStyle::State_MouseOver );
+		const QRect circle = QStyle::visualRect( layoutDirection(), tab, QRect( tab.topLeft() + QPoint( 1, 1 ), QSize( tab.height() - 2, tab.height() - 2 ) ) );
+		painter.setPen( colors.color( bSelected ? QPalette::Highlight : QPalette::Mid ) );
+		painter.setBrush( colors.brush( bHovered || bSelected ? QPalette::AlternateBase : QPalette::Button ) );
+		painter.drawEllipse( QRectF( circle ) );
+		if ( bSelected && option.state.testFlag( QStyle::State_HasFocus ) )
+		{
+			painter.setPen( QPen( colors.color( QPalette::Highlight ), 1, Qt::DotLine ) );
+			painter.setBrush( Qt::NoBrush );
+			painter.drawEllipse( QRectF( circle.adjusted( 2, 2, -2, -2 ) ) );
+		}
+
+		QRect icon( QPoint{}, iconSize() );
+		icon.moveCenter( circle.center() );
+		tabIcon( i ).paint( &painter, icon, Qt::AlignCenter, isTabEnabled( i ) ? QIcon::Normal : QIcon::Disabled );
+		const QString szCount = tabText( i );
+		const int nBadgeSize = std::max( metrics.height(), metrics.horizontalAdvance( szCount ) + 4 );
+		const QRect badge = QStyle::visualRect( layoutDirection(), tab, QRect( tab.right() - nBadgeSize, tab.bottom() - nBadgeSize, nBadgeSize, nBadgeSize ) );
+		painter.setPen( colors.color( bSelected ? QPalette::Base : QPalette::Mid ) );
+		painter.setBrush( colors.brush( bSelected ? QPalette::Highlight : QPalette::Button ) );
+		painter.drawEllipse( QRectF( badge ) );
+		painter.setPen( colors.color( bSelected ? QPalette::HighlightedText : QPalette::ButtonText ) );
+		painter.drawText( badge, Qt::AlignCenter, szCount );
+	}
+}
 
 // The user's groups: tab key to group.
 constexpr char USER_GROUPS_SETTING[] = "tabGroups/user";
@@ -66,25 +163,40 @@ struct Kind_t
 {
 	const char *m_pszClass;
 	const char *m_pszKind;
+	MapIcon_t m_nIcon;
 };
 
 // Editors by class, and the kinds in the strip's order.
 constexpr Kind_t KINDS[] = {
-	{ "CMapEditor", QT_TRANSLATE_NOOP( "CTabGroups", "Maps" ) },
-	{ "CModelEditor", QT_TRANSLATE_NOOP( "CTabGroups", "Models" ) },
-	{ "CModelBrowser", QT_TRANSLATE_NOOP( "CTabGroups", "Models" ) },
-	{ "CTextureEditor", QT_TRANSLATE_NOOP( "CTabGroups", "Textures" ) },
-	{ "CMaterialEditor", QT_TRANSLATE_NOOP( "CTabGroups", "Textures" ) },
-	{ "CParticleEditor", QT_TRANSLATE_NOOP( "CTabGroups", "Particles" ) },
-	{ "CSoundEditor", QT_TRANSLATE_NOOP( "CTabGroups", "Sounds" ) },
-	{ "CSkyEditor", QT_TRANSLATE_NOOP( "CTabGroups", "Skies" ) },
-	{ "CDetailEditor", QT_TRANSLATE_NOOP( "CTabGroups", "Details" ) },
-	{ "CVpkEditor", QT_TRANSLATE_NOOP( "CTabGroups", "Archives" ) },
-	{ "CStripperEditor", QT_TRANSLATE_NOOP( "CTabGroups", "Stripper" ) },
-	{ "CHudEditor", QT_TRANSLATE_NOOP( "CTabGroups", "HUD" ) },
-	{ "CSchemeEditor", QT_TRANSLATE_NOOP( "CTabGroups", "HUD" ) },
+	{ "CMapEditor", QT_TRANSLATE_NOOP( "CTabGroups", "Maps" ), MapIcon_t::MAP_ICON_MAP_PROPERTIES },
+	{ "CDemoViewer", QT_TRANSLATE_NOOP( "CTabGroups", "Demos" ), MapIcon_t::MAP_ICON_RUN_MAP },
+	{ "CModelEditor", QT_TRANSLATE_NOOP( "CTabGroups", "Models" ), MapIcon_t::MAP_ICON_BLOCK },
+	{ "CModelBrowser", QT_TRANSLATE_NOOP( "CTabGroups", "Models" ), MapIcon_t::MAP_ICON_BLOCK },
+	{ "CTextureEditor", QT_TRANSLATE_NOOP( "CTabGroups", "Textures" ), MapIcon_t::MAP_ICON_MATERIAL },
+	{ "CMaterialEditor", QT_TRANSLATE_NOOP( "CTabGroups", "Textures" ), MapIcon_t::MAP_ICON_MATERIAL },
+	{ "CParticleEditor", QT_TRANSLATE_NOOP( "CTabGroups", "Particles" ), MapIcon_t::MAP_ICON_PARTICLES },
+	{ "CSoundEditor", QT_TRANSLATE_NOOP( "CTabGroups", "Sounds" ), MapIcon_t::MAP_ICON_SOUND },
+	{ "CSkyEditor", QT_TRANSLATE_NOOP( "CTabGroups", "Skies" ), MapIcon_t::MAP_ICON_SKY_2D },
+	{ "CDetailEditor", QT_TRANSLATE_NOOP( "CTabGroups", "Details" ), MapIcon_t::MAP_ICON_DETAIL_PROPS },
+	{ "CVpkEditor", QT_TRANSLATE_NOOP( "CTabGroups", "Archives" ), MapIcon_t::MAP_ICON_ARCHIVE },
+	{ "CStripperEditor", QT_TRANSLATE_NOOP( "CTabGroups", "Stripper" ), MapIcon_t::MAP_ICON_STRIPPER },
+	{ "CHudEditor", QT_TRANSLATE_NOOP( "CTabGroups", "HUD" ), MapIcon_t::MAP_ICON_SCREEN_EFFECT },
+	{ "CSchemeEditor", QT_TRANSLATE_NOOP( "CTabGroups", "HUD" ), MapIcon_t::MAP_ICON_SCREEN_EFFECT },
 };
 constexpr char OTHER[] = QT_TRANSLATE_NOOP( "CTabGroups", "Other" );
+
+//-----------------------------------------------------------------------------
+// Purpose: Use the map toolbar's glyphs for built-in groups and a folder for custom groups.
+//-----------------------------------------------------------------------------
+QIcon GroupIcon( const QString &szGroup )
+{
+	if ( szGroup == QLatin1String( CTabGroups::ALL ) )
+		return ForegroundIcon( MakeMapIcon( MapIcon_t::MAP_ICON_AUTOSIZE, Qt::white ) );
+	for ( const Kind_t &kind : KINDS )
+		if ( szGroup == QCoreApplication::translate( "CTabGroups", kind.m_pszKind ) )
+			return ForegroundIcon( MakeMapIcon( kind.m_nIcon, Qt::white ) );
+	return FolderIcon();
+}
 
 } // namespace
 
@@ -572,6 +684,7 @@ void CEditorWindow::TakeMenus( QMenuBar *pMenus )
 {
 	if ( !pMenus )
 		return;
+	menuBar()->setStyleSheet( pMenus->styleSheet() );
 	for ( QAction *pAction : pMenus->actions() )
 		menuBar()->addAction( pAction );
 }
@@ -617,12 +730,18 @@ CTabGroups::CTabGroups( CEditorTabWidget *pTabs )
 	: QObject( pTabs ),
 	  m_pTabs( pTabs )
 {
-	m_pBar = new QTabBar;
+	m_pBar = new CWorkspaceTabs;
 	m_pBar->setObjectName( QStringLiteral( "tabGroups" ) );
+	m_pBar->setIconSize( QSize( 17, 17 ) );
 	connect( &CPreferences::Instance(), &CPreferences::RulesChanged, this, &CTabGroups::Refresh );
 	m_pBar->setDocumentMode( true );
 	m_pBar->setDrawBase( false );
 	m_pBar->setExpanding( false );
+	m_pBar->setUsesScrollButtons( true );
+	QFont font = m_pBar->font();
+	if ( font.pointSizeF() > 0 )
+		font.setPointSizeF( font.pointSizeF() * 0.85 );
+	m_pBar->setFont( font );
 	m_pBar->setContextMenuPolicy( Qt::CustomContextMenu );
 	m_pBar->hide();
 	connect( m_pBar, &QTabBar::currentChanged, this, [ this ]( int nIndex ) {
@@ -902,13 +1021,13 @@ void CTabGroups::CurrentChanged()
 }
 
 //-----------------------------------------------------------------------------
-// Purpose: The strip's tabs ("All", then each group with its count) and which tabs show.
+// Purpose: Update the header counts and apply the group filter to the editor tabs.
 //-----------------------------------------------------------------------------
 void CTabGroups::Refresh()
 {
 	m_bRefreshing = true;
 	const QStringList groups = GetGroups();
-	const bool bStrip = m_bEnabled && groups.size() > 1;
+	const bool bStrip = m_bEnabled;
 	if ( !bStrip || ( m_szCurrent != QLatin1String( ALL ) && !groups.contains( m_szCurrent ) ) )
 	{
 		// A group emptied (or grouping off): the current tab's, else all.
@@ -921,12 +1040,18 @@ void CTabGroups::Refresh()
 		m_pBar->removeTab( m_pBar->count() - 1 );
 	while ( m_pBar->count() < wanted.size() )
 		m_pBar->addTab( QString{} );
+	QHash<QString, int> counts;
+	for ( int i = 1; i < m_pTabs->count(); i++ )
+		counts[ GroupOf( m_pTabs->widget( i ) ) ]++;
 	for ( int i = 0; i < wanted.size(); i++ )
 	{
-		int nCount = 0;
-		for ( int j = 1; j < m_pTabs->count(); j++ )
-			nCount += i == 0 || GroupOf( m_pTabs->widget( j ) ) == wanted[ i ] ? 1 : 0;
-		m_pBar->setTabText( i, QStringLiteral( "%1 (%2)" ).arg( i == 0 ? tr( ALL ) : wanted[ i ] ).arg( nCount ) );
+		const int nCount = i == 0 ? m_pTabs->count() - 1 : counts.value( wanted[ i ] );
+		const QString szName = i == 0 ? tr( ALL ) : wanted[ i ];
+		const QString szLabel = tr( "%1 (%2)" ).arg( szName ).arg( nCount );
+		m_pBar->setTabText( i, QString::number( nCount ) );
+		m_pBar->setTabIcon( i, GroupIcon( wanted[ i ] ) );
+		m_pBar->setTabToolTip( i, szLabel );
+		m_pBar->setAccessibleTabName( i, szLabel );
 		m_pBar->setTabData( i, wanted[ i ] );
 		if ( wanted[ i ] == m_szCurrent )
 			m_pBar->setCurrentIndex( i );

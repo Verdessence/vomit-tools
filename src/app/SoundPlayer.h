@@ -53,7 +53,7 @@ public:
 	// A game sound ("sound/ambient/wind.wav") as it is, from the game or a mod folder on disk.
 	bool PlayGameSound( const std::string &szGamePath, const std::filesystem::path &localRoot = {} );
 	// A sound with its volume, pitch, looping and delay applied.
-	bool Play( const xv::sound::PlayRequest_t &request, const std::filesystem::path &localRoot = {} );
+	bool Play( xv::sound::PlayRequest_t request, const std::filesystem::path &localRoot = {}, bool bUseLoopPoints = false );
 	// Plays a soundscape until stopped: loops now, random sounds at their intervals.
 	bool PlaySoundscape( const xv::sound::SoundscapePlan_t &plan, const QString &szName, const std::filesystem::path &localRoot = {} );
 

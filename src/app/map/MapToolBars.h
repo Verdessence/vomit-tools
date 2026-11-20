@@ -108,6 +108,9 @@ enum class MapIcon_t
 	MAP_ICON_STRIPPER,
 	MAP_ICON_PARTICLES,
 	MAP_ICON_PARTICLES_SELECTED,
+	MAP_ICON_HOME,
+	MAP_ICON_SOUND,
+	MAP_ICON_ARCHIVE,
 };
 
 // Our own pictures (Hammer's are Valve's to keep), drawn in color.

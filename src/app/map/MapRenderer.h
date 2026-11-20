@@ -143,6 +143,8 @@ private:
 	std::shared_ptr<const xv::map::CLighting> m_pLightmapFor; // held, so its address stays its own
 	std::unique_ptr<QRhiSampler> m_pLightSampler;
 	std::array<std::unique_ptr<QRhiSampler>, 4> m_Samplers; // repeat or clamp in s and t
+	std::array<std::unique_ptr<QRhiSampler>, 4> m_PointSamplers;
+	std::array<std::unique_ptr<QRhiSampler>, 4> m_PointTopSamplers;
 	std::array<std::unique_ptr<QRhiSampler>, 4> m_TopSamplers; // the same, top level only: OpenGL reads a texture without mips as black through a mip filter
 	std::array<std::unique_ptr<QRhiSampler>, 4> m_NearestMipSamplers; // the same, from the nearest mip (bilinear filtering)
 	bool m_bMipBlend = true; // trilinear, else bilinear: the materials' bindings follow it

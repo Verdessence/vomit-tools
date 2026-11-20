@@ -10,6 +10,8 @@
 //===========================================================================//
 #pragma once
 
+class CLoadingView;
+
 #include <atomic>
 #include <condition_variable>
 #include <memory>
@@ -109,6 +111,7 @@ private:
 	std::shared_ptr<const Loaded_t> m_pLoaded;
 	QImage m_Picture;
 	QLabel *m_pPicture = nullptr;
+	CLoadingView *m_pLoading = nullptr;
 	QLabel *m_pName = nullptr;
 	QLabel *m_pAbout = nullptr;
 	QComboBox *m_pShape = nullptr;
@@ -167,6 +170,7 @@ private:
 	CMaterialList *m_pList = nullptr;
 	QSortFilterProxyModel *m_pFilter = nullptr;
 	QListView *m_pView = nullptr;
+	CLoadingView *m_pLoading = nullptr;
 	QLineEdit *m_pWords = nullptr;
 	QComboBox *m_pSize = nullptr;
 	QCheckBox *m_pOnlyUsed = nullptr;

@@ -74,7 +74,7 @@ create:
   --no-recurse          don't look in sub-folders
 
 edit (pictures untouched unless a format or mipmaps are asked for):
-  --set-version 7.N  --set-flag NAME  --clear-flag NAME  --first-frame N  --bump-scale X
+  --set-version 7.N  --set-flag NAME (--flag is an alias)  --clear-flag NAME  --first-frame N  --bump-scale X
   --reflectivity auto  --thumbnail keep|remove|make  --remove-resource TAG  --kvd FILE
   --set-format F        write it again in another format
   --recompute-mips [F]  make the mipmaps again (with filter F)
@@ -286,7 +286,12 @@ Arguments_t Parse( int argc, char **argv )
 		}
 		else if ( std::ranges::find( VALUED, szArgument ) != VALUED.end() && i + 1 < argc )
 		{
-			arguments.m_Options[ szArgument == "--output" ? "-o" : szArgument ].push_back( argv[ ++i ] );
+			const std::string szOption = szArgument == "--output" ? "-o" : arguments.m_szMode == "edit" && szArgument == "--flag" ? "--set-flag"
+																																  : szArgument;
+			if ( arguments.m_szMode == "edit" && std::string_view( argv[ i + 1 ] ).starts_with( "--" ) )
+				arguments.m_Switches.push_back( szOption );
+			else
+				arguments.m_Options[ szOption ].push_back( argv[ ++i ] );
 		}
 		else if ( szArgument == "--recompute-mips" )
 		{
@@ -583,6 +588,21 @@ int Create( const Arguments_t &arguments )
 //-----------------------------------------------------------------------------
 int Edit( const Arguments_t &arguments )
 {
+	for ( const auto &szSwitch : arguments.m_Switches )
+		if ( szSwitch != "--recompute-mips" )
+		{
+			std::fprintf( stderr, "edit: unknown option or missing value: %s\n", szSwitch.c_str() );
+			return 1;
+		}
+	constexpr std::string_view OPTIONS[]{ "-o", "--set-version", "--set-flag", "--clear-flag", "--first-frame", "--bump-scale",
+		"--reflectivity", "--thumbnail", "--remove-resource", "--kvd", "--set-format", "--recompute-mips" };
+	for ( const auto &[ szOption, values ] : arguments.m_Options )
+		if ( std::ranges::find( OPTIONS, szOption ) == std::end( OPTIONS ) )
+		{
+			std::fprintf( stderr, "edit: unknown option %s\n", szOption.c_str() );
+			return 1;
+		}
+
 	if ( arguments.m_Inputs.size() != 1 )
 	{
 		std::fprintf( stderr, "edit takes one VTF\n" );

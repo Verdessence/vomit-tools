@@ -23,6 +23,7 @@
 #include "model/Model.h"
 #include "texture/Vtf.h"
 #include "util/Parallel.h"
+#include "util/Numbers.h"
 
 namespace
 {
@@ -88,48 +89,48 @@ xv::map::CMapMesh ObjectMesh( const xv::map::CMapMesh &source, std::uint32_t nOb
 	return mesh;
 }
 
-} // namespace
-
 //-----------------------------------------------------------------------------
-// Purpose:
+// Purpose: Keep the available mips and sample flags of one frame from an already parsed VTF.
 //-----------------------------------------------------------------------------
-int MapTextureFrames( std::span<const std::byte> vtf )
+std::shared_ptr<xv::map::RasterTexture_t> ReadTextureFrame( const xv::texture::CVtf &file, int nMaxSize, bool bDecode, int nFrame )
 {
-	const auto file = xv::texture::ReadVtf( vtf );
-	return file ? std::max( 1, file->m_Info.m_nFrames ) : 0;
-}
-
-//-----------------------------------------------------------------------------
-// Purpose:
-//-----------------------------------------------------------------------------
-std::shared_ptr<xv::map::RasterTexture_t> ReadMapTexture( std::span<const std::byte> vtf, int nMaxSize, bool bDecode, int nFrame )
-{
-	const auto file = xv::texture::ReadVtf( vtf );
-	if ( !file || file->m_Info.m_nWidth <= 0 || file->m_Info.m_nHeight <= 0 )
-	{
+	if ( file.m_Info.m_nWidth <= 0 || file.m_Info.m_nHeight <= 0 )
 		return nullptr;
-	}
 	auto pTexture = std::make_shared<xv::map::RasterTexture_t>();
-	pTexture->m_nWidth = file->m_Info.m_nWidth;
-	pTexture->m_nHeight = file->m_Info.m_nHeight;
-	pTexture->m_bClampS = ( file->m_Info.m_nFlags & xv::texture::vtf_flag::CLAMPS ) != 0;
-	pTexture->m_bClampT = ( file->m_Info.m_nFlags & xv::texture::vtf_flag::CLAMPT ) != 0;
-	pTexture->m_Reflectivity = file->m_Info.m_vecReflectivity;
+	pTexture->m_nWidth = file.m_Info.m_nWidth;
+	pTexture->m_nHeight = file.m_Info.m_nHeight;
+	pTexture->m_bPoint = ( file.m_Info.m_nFlags & xv::texture::vtf_flag::POINTSAMPLE ) != 0;
+	pTexture->m_bClampS = ( file.m_Info.m_nFlags & xv::texture::vtf_flag::CLAMPS ) != 0;
+	pTexture->m_bClampT = ( file.m_Info.m_nFlags & xv::texture::vtf_flag::CLAMPT ) != 0;
+	pTexture->m_Reflectivity = file.m_Info.m_vecReflectivity;
 	// The first mip that fits, then every smaller one the file has.
 	int nFirst = 0;
-	while ( nFirst + 1 < file->m_Info.m_nMipCount && std::max( file->m_Info.m_nWidth >> nFirst, file->m_Info.m_nHeight >> nFirst ) > nMaxSize )
+	while ( nFirst + 1 < file.m_Info.m_nMipCount && std::max( file.m_Info.m_nWidth >> nFirst, file.m_Info.m_nHeight >> nFirst ) > nMaxSize )
 	{
 		nFirst++;
 	}
-	const xv::texture::VtfFormat_t nFormat = file->m_Info.m_nFormat;
-	const bool bCompressed = nFormat == xv::texture::VtfFormat_t::DXT1 || nFormat == xv::texture::VtfFormat_t::DXT1_ONEBITALPHA || nFormat == xv::texture::VtfFormat_t::DXT3 || nFormat == xv::texture::VtfFormat_t::DXT5;
-	for ( int nMip = nFirst; nMip < file->m_Info.m_nMipCount; nMip++ )
+	const int nLargest = std::max( file.m_Info.m_nWidth >> nFirst, file.m_Info.m_nHeight >> nFirst );
+	if ( nMaxSize > 0 && nLargest > nMaxSize )
 	{
-		const int nWidth = std::max( 1, file->m_Info.m_nWidth >> nMip );
-		const int nHeight = std::max( 1, file->m_Info.m_nHeight >> nMip );
+		// A texture without a small enough mip needs one resized image for the texture budget.
+		const auto image = file.Decode( nFirst, nFrame );
+		if ( !image )
+			return nullptr;
+		const double flScale = static_cast<double>( nMaxSize ) / nLargest;
+		pTexture->m_Mips.push_back( xv::texture::Resize( *image,
+			std::max( 1, static_cast<int>( std::lround( image->m_nWidth * flScale ) ) ),
+			std::max( 1, static_cast<int>( std::lround( image->m_nHeight * flScale ) ) ) ) );
+		return pTexture;
+	}
+	const xv::texture::VtfFormat_t nFormat = file.m_Info.m_nFormat;
+	const bool bCompressed = nFormat == xv::texture::VtfFormat_t::DXT1 || nFormat == xv::texture::VtfFormat_t::DXT1_ONEBITALPHA || nFormat == xv::texture::VtfFormat_t::DXT3 || nFormat == xv::texture::VtfFormat_t::DXT5;
+	for ( int nMip = nFirst; nMip < file.m_Info.m_nMipCount; nMip++ )
+	{
+		const int nWidth = std::max( 1, file.m_Info.m_nWidth >> nMip );
+		const int nHeight = std::max( 1, file.m_Info.m_nHeight >> nMip );
 		if ( bCompressed )
 		{
-			const std::span<const std::byte> data = file->Image( nMip, nFrame );
+			const std::span<const std::byte> data = file.Image( nMip, nFrame );
 			if ( data.size() < xv::texture::ImageSize( nFormat, nWidth, nHeight ) )
 			{
 				break;
@@ -139,7 +140,7 @@ std::shared_ptr<xv::map::RasterTexture_t> ReadMapTexture( std::span<const std::b
 		}
 		if ( bDecode || !bCompressed )
 		{
-			std::optional<xv::texture::CImage> image = file->Decode( nMip, nFrame );
+			std::optional<xv::texture::CImage> image = file.Decode( nMip, nFrame );
 			if ( !image || image->Empty() )
 			{
 				break;
@@ -154,6 +155,38 @@ std::shared_ptr<xv::map::RasterTexture_t> ReadMapTexture( std::span<const std::b
 		pTexture->m_Mips.resize( pTexture->m_Compressed.size() );
 	}
 	return pTexture->GetMipCount() == 0 ? nullptr : pTexture;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Read one texture and reuse its header and bytes while decoding its frames.
+//-----------------------------------------------------------------------------
+std::shared_ptr<xv::map::RasterTexture_t> ReadTextureFrames( std::span<const std::byte> bytes, int nMaxSize, bool bDecode, std::vector<std::shared_ptr<xv::map::RasterTexture_t>> *pFrames )
+{
+	const auto file = xv::texture::ReadVtf( bytes );
+	if ( !file )
+		return nullptr;
+	auto pBase = ReadTextureFrame( *file, nMaxSize, bDecode, 0 );
+	if ( pBase && pFrames )
+	{
+		pFrames->push_back( pBase );
+		const int nFrames = std::min( file->m_Info.m_nFrames, MAX_ANIMATED_FRAMES );
+		for ( int nFrame = 1; nFrame < nFrames; nFrame++ )
+		{
+			auto pFrame = ReadTextureFrame( *file, nMaxSize, bDecode, nFrame );
+			pFrames->push_back( pFrame ? std::move( pFrame ) : pBase );
+		}
+	}
+	return pBase;
+}
+} // namespace
+
+//-----------------------------------------------------------------------------
+// Purpose: One frame of a VTF for the map's views and thumbnails.
+//-----------------------------------------------------------------------------
+std::shared_ptr<xv::map::RasterTexture_t> ReadMapTexture( std::span<const std::byte> vtf, int nMaxSize, bool bDecode, int nFrame )
+{
+	const auto file = xv::texture::ReadVtf( vtf );
+	return file ? ReadTextureFrame( *file, nMaxSize, bDecode, nFrame ) : nullptr;
 }
 
 //-----------------------------------------------------------------------------
@@ -297,11 +330,13 @@ void CMapResources::Run( std::shared_ptr<const xv::map::CScene> pScene, xv::vfs:
 	std::vector<bool> drawable( nTable, false );
 	std::vector<bool> additive( nTable, false ); // sprites' materials that add
 	std::vector<double> decalScales( nTable, 1.0 );
+	std::vector<bool> upright;
+	std::vector<float> spriteRates;
 	auto load = [ & ]( const std::vector<std::pair<std::uint32_t, std::string>> &todo, MaterialUse_t nUse ) {
 		for ( std::size_t nStart = 0; nStart < todo.size() && !m_bStop; nStart += BATCH )
 		{
 			const std::vector<std::pair<std::uint32_t, std::string>> part( todo.begin() + static_cast<std::ptrdiff_t>( nStart ), todo.begin() + static_cast<std::ptrdiff_t>( std::min( todo.size(), nStart + BATCH ) ) );
-			std::vector<Loaded_t> batch = ReadMaterials( part, nUse, read, nMaxSize, bDecoded, additive );
+			std::vector<Loaded_t> batch = ReadMaterials( part, nUse, read, nMaxSize, bDecoded, additive, spriteRates );
 			for ( const Loaded_t &loaded : batch )
 			{
 				if ( loaded.m_pBase && loaded.m_nMaterial < sizes.size() )
@@ -309,6 +344,8 @@ void CMapResources::Run( std::shared_ptr<const xv::map::CScene> pScene, xv::vfs:
 					sizes[ loaded.m_nMaterial ] = { loaded.m_pBase->m_nWidth, loaded.m_pBase->m_nHeight };
 					drawable[ loaded.m_nMaterial ] = !loaded.m_bMissing;
 				}
+				if ( loaded.m_nMaterial < upright.size() )
+					upright[ loaded.m_nMaterial ] = loaded.m_Info.m_bSpriteUpright;
 				if ( loaded.m_nMaterial < decalScales.size() )
 				{
 					decalScales[ loaded.m_nMaterial ] = loaded.m_Info.m_flDecalScale;
@@ -359,10 +396,13 @@ void CMapResources::Run( std::shared_ptr<const xv::map::CScene> pScene, xv::vfs:
 		sizes = placing.m_Sizes;
 		drawable = placing.m_Drawable;
 		additive = placing.m_Additive;
+		upright = placing.m_Upright;
+		spriteRates = placing.m_SpriteRates;
 		load( todo, nUse );
 		placing.m_Sizes = sizes;
 		placing.m_Drawable = drawable;
 		placing.m_DecalScales = decalScales;
+		placing.m_Upright = upright;
 	};
 	PlaceEntities( *pScene, placing, readMaterials, readModel, [ & ]( auto pfnCall ) { post( std::move( pfnCall ) ); } );
 	PlaceOverlays( *pScene, placing, readMaterials, post );
@@ -404,6 +444,8 @@ void CMapResources::PlaceEntities( const xv::map::CScene &scene, Placing_t &plac
 		placing.m_Sizes.resize( std::max<std::size_t>( placing.m_Sizes.size(), nPlace + 1 ), { 128, 128 } );
 		placing.m_Drawable.resize( std::max<std::size_t>( placing.m_Drawable.size(), nPlace + 1 ), false );
 		placing.m_Additive.resize( std::max<std::size_t>( placing.m_Additive.size(), nPlace + 1 ), false );
+		placing.m_Upright.resize( std::max<std::size_t>( placing.m_Upright.size(), nPlace + 1 ), false );
+		placing.m_SpriteRates.resize( std::max<std::size_t>( placing.m_SpriteRates.size(), nPlace + 1 ), 0.0f );
 	};
 	std::vector<xv::map::SpritePlacement_t> sprites;
 	std::vector<double> scales;
@@ -416,13 +458,19 @@ void CMapResources::PlaceEntities( const xv::map::CScene &scene, Placing_t &plac
 			{
 				continue;
 			}
-			// A sprite that adds and one that blends need materials of their own.
+			// A sprite's animation rate and blend mode come from the entity.
+			const auto &entity = inner.m_Map.m_Entities[ e ];
+			const bool bEnvSprite = xv::kv1::EqualsIgnoreCase( entity.GetClassname(), "env_sprite" ) ||
+				xv::kv1::EqualsIgnoreCase( entity.GetClassname(), "env_sprite_oriented" );
+			const float flRateValue = bEnvSprite ? xv::ParseNumber<float>( entity.GetValue( "framerate" ) ).value_or( 10.0f ) : 0.0f;
+			const float flRate = std::isfinite( flRateValue ) ? std::clamp( flRateValue, 0.0f, 1000.0f ) : 0.0f;
 			const std::string szMaterial = xv::map::NormalizeMaterial( visual.m_szSprite );
-			const auto [ it, bAdded ] = placing.m_Places.try_emplace( szMaterial + ( visual.m_bSpriteAdditive ? "+" : "" ), placing.m_nNext );
+			const auto [ it, bAdded ] = placing.m_SpritePlaces.try_emplace( std::tuple{ szMaterial, visual.m_bSpriteAdditive, flRate }, placing.m_nNext );
 			if ( bAdded )
 			{
 				grow( placing.m_nNext );
 				placing.m_Additive[ placing.m_nNext ] = visual.m_bSpriteAdditive;
+				placing.m_SpriteRates[ placing.m_nNext ] = flRate;
 				todo.emplace_back( placing.m_nNext++, szMaterial );
 			}
 			xv::map::SpritePlacement_t sprite;
@@ -446,6 +494,7 @@ void CMapResources::PlaceEntities( const xv::map::CScene &scene, Placing_t &plac
 	{
 		xv::map::SpritePlacement_t &sprite = sprites[ i ];
 		sprite.m_TextureSize = placing.m_Sizes[ sprite.m_nMaterial ];
+		sprite.m_bUpright = placing.m_Upright[ sprite.m_nMaterial ];
 		sprite.m_flHalfWidth = sprite.m_TextureSize[ 0 ] * scales[ i ] * 0.5;
 		sprite.m_flHalfHeight = sprite.m_TextureSize[ 1 ] * scales[ i ] * 0.5;
 	}
@@ -504,6 +553,7 @@ void CMapResources::PlaceEntities( const xv::map::CScene &scene, Placing_t &plac
 		xv::map::PropModel_t &prop = placing.m_Models[ use.m_Key ];
 		xv::model::Selection_t selection;
 		selection.m_nSkin = use.m_Key.m_nSkin;
+		selection.m_nBody = use.m_Key.m_nBody;
 		std::optional<xv::model::CModel> model = xv::model::LoadModel( use.m_Key.m_szModel, readModel, nullptr, selection );
 		if ( !model )
 		{
@@ -703,7 +753,7 @@ xv::map::CMapMesh CMapResources::BuildEntityPreview( const xv::map::CScene &scen
 				auto sprites = found->second;
 				for ( auto &sprite : sprites )
 					sprite.m_Origin = transform.Apply( sprite.m_Origin );
-				xv::map::AppendPlaced( mesh, xv::map::BuildSpriteMesh( sprites, right, up ), xv::map::Transform_t{}, std::nullopt );
+				xv::map::AppendPlaced( mesh, xv::map::BuildSpriteMesh( sprites, right, up, true ), xv::map::Transform_t{}, std::nullopt );
 			}
 			continue;
 		}
@@ -712,7 +762,7 @@ xv::map::CMapMesh CMapResources::BuildEntityPreview( const xv::map::CScene &scen
 			projected.push_back( nObject );
 		if ( !visual.m_szModel.empty() )
 		{
-			xv::map::PropKey_t key{ visual.m_szModel, visual.m_nSkin };
+			xv::map::PropKey_t key{ visual.m_szModel, visual.m_nSkin, visual.m_nBody };
 			std::ranges::transform( key.m_szModel, key.m_szModel.begin(), []( unsigned char ch ) { return static_cast<char>( std::tolower( ch ) ); } );
 			if ( const auto found = m_Placing.m_Models.find( key ); found != m_Placing.m_Models.end() && found->second.m_pModel )
 			{
@@ -728,7 +778,7 @@ xv::map::CMapMesh CMapResources::BuildEntityPreview( const xv::map::CScene &scen
 				auto sprites = found->second;
 				for ( auto &sprite : sprites )
 					sprite.m_Origin = visual.m_Origin;
-				xv::map::AppendPlaced( mesh, xv::map::BuildSpriteMesh( sprites, right, up ), xv::map::Transform_t{}, std::nullopt );
+				xv::map::AppendPlaced( mesh, xv::map::BuildSpriteMesh( sprites, right, up, true ), xv::map::Transform_t{}, std::nullopt );
 			}
 	}
 	if ( !projected.empty() )
@@ -807,10 +857,12 @@ void CMapResources::Refresh( std::shared_ptr<const xv::map::CScene> pScene, std:
 		};
 		const xv::material::Reader_t read = [ & ]( std::string_view szPath ) { return fileSystem().Read( szPath ); };
 		auto readMaterials = [ & ]( const std::vector<std::pair<std::uint32_t, std::string>> &todo, MaterialUse_t nUse ) {
-			std::vector<Loaded_t> batch = ReadMaterials( todo, nUse, read, nMaxSize, bDecoded, placing.m_Additive );
+			std::vector<Loaded_t> batch = ReadMaterials( todo, nUse, read, nMaxSize, bDecoded, placing.m_Additive, placing.m_SpriteRates );
 			placing.m_DecalScales.resize( placing.m_nNext, 1.0 );
 			for ( const Loaded_t &loaded : batch )
 			{
+				if ( loaded.m_nMaterial < placing.m_Upright.size() )
+					placing.m_Upright[ loaded.m_nMaterial ] = loaded.m_Info.m_bSpriteUpright;
 				placing.m_DecalScales[ loaded.m_nMaterial ] = loaded.m_Info.m_flDecalScale;
 				if ( loaded.m_pBase && loaded.m_nMaterial < placing.m_Sizes.size() )
 				{
@@ -843,7 +895,7 @@ void CMapResources::Refresh( std::shared_ptr<const xv::map::CScene> pScene, std:
 // Purpose: Each material's VMT and textures, the files read one by one, the textures decoded on
 //          every core.
 //-----------------------------------------------------------------------------
-std::vector<CMapResources::Loaded_t> CMapResources::ReadMaterials( const std::vector<std::pair<std::uint32_t, std::string>> &todo, MaterialUse_t nUse, const xv::material::Reader_t &read, int nMaxSize, bool bDecoded, const std::vector<bool> &additive )
+std::vector<CMapResources::Loaded_t> CMapResources::ReadMaterials( const std::vector<std::pair<std::uint32_t, std::string>> &todo, MaterialUse_t nUse, const xv::material::Reader_t &read, int nMaxSize, bool bDecoded, const std::vector<bool> &additive, const std::vector<float> &spriteRates )
 {
 	const bool bSprites = nUse == MaterialUse_t::MATERIAL_USE_SPRITES;
 	std::vector<Loaded_t> batch( todo.size() );
@@ -859,6 +911,8 @@ std::vector<CMapResources::Loaded_t> CMapResources::ReadMaterials( const std::ve
 		loaded.m_bOverlay = nUse == MaterialUse_t::MATERIAL_USE_OVERLAYS;
 		loaded.m_bAdditive = bSprites && nMaterial < additive.size() && additive[ nMaterial ];
 		loaded.m_Info = xv::map::ReadMaterialInfo( szName, read );
+		if ( bSprites && nMaterial < spriteRates.size() && !loaded.m_Info.m_bProxyBaseFrame )
+			loaded.m_flSpriteRate = spriteRates[ nMaterial ];
 		loaded.m_bNodraw = IsNodrawMaterial( szName );
 		loaded.m_bTool = !loaded.m_bNodraw && IsToolMaterial( loaded.m_Info, szName );
 		if ( !loaded.m_Info.m_szTexture.empty() )
@@ -877,35 +931,13 @@ std::vector<CMapResources::Loaded_t> CMapResources::ReadMaterials( const std::ve
 	xv::ParallelFor( batch.size(), 1, [ & ]( std::size_t nBegin, std::size_t nFinish ) {
 		for ( std::size_t i = nBegin; i < nFinish; i++ )
 		{
+			Loaded_t &loaded = batch[ i ];
 			if ( base[ i ] )
-			{
-				batch[ i ].m_pBase = ReadMapTexture( *base[ i ], nMaxSize, bDecoded );
-				// An animated material's every frame, for its proxies to pick from.
-				if ( batch[ i ].m_pBase && batch[ i ].m_Info.m_pProxies )
-				{
-					const int nFrames = std::min( MapTextureFrames( *base[ i ] ), MAX_ANIMATED_FRAMES );
-					batch[ i ].m_Frames.push_back( batch[ i ].m_pBase );
-					for ( int nFrame = 1; nFrame < nFrames; nFrame++ )
-						if ( auto pFrame = ReadMapTexture( *base[ i ], nMaxSize, bDecoded, nFrame ) )
-							batch[ i ].m_Frames.push_back( std::move( pFrame ) );
-				}
-			}
+				loaded.m_pBase = ReadTextureFrames( *base[ i ], nMaxSize, bDecoded, loaded.m_Info.m_pProxies || loaded.m_flSpriteRate > 0.0f ? &loaded.m_Frames : nullptr );
 			if ( base2[ i ] )
-			{
-				batch[ i ].m_pBase2 = ReadMapTexture( *base2[ i ], nMaxSize, bDecoded );
-			}
+				loaded.m_pBase2 = ReadMapTexture( *base2[ i ], nMaxSize, bDecoded );
 			if ( details[ i ] )
-			{
-				batch[ i ].m_pDetail = ReadMapTexture( *details[ i ], nMaxSize, bDecoded );
-				if ( batch[ i ].m_pDetail && batch[ i ].m_Info.m_pProxies )
-				{
-					const int nFrames = std::min( MapTextureFrames( *details[ i ] ), MAX_ANIMATED_FRAMES );
-					batch[ i ].m_DetailFrames.push_back( batch[ i ].m_pDetail );
-					for ( int nFrame = 1; nFrame < nFrames; nFrame++ )
-						if ( auto pFrame = ReadMapTexture( *details[ i ], nMaxSize, bDecoded, nFrame ) )
-							batch[ i ].m_DetailFrames.push_back( std::move( pFrame ) );
-				}
-			}
+				loaded.m_pDetail = ReadTextureFrames( *details[ i ], nMaxSize, bDecoded, loaded.m_Info.m_pProxies ? &loaded.m_DetailFrames : nullptr );
 			// Source draws its checker for a material, or a texture, it can't find.
 			batch[ i ].m_bMissing = !batch[ i ].m_Info.m_bFound || ( !batch[ i ].m_Info.m_szTexture.empty() && !batch[ i ].m_pBase );
 		}
@@ -965,18 +997,25 @@ bool CMapResources::Animate( float flTime )
 	{
 		if ( animated.m_nMaterial >= m_Current.size() )
 			continue;
-		const xv::map::MaterialMotion_t motion = xv::map::MoveMaterial( *animated.m_pProxies, flTime, static_cast<int>( animated.m_Frames.size() ), static_cast<int>( animated.m_DetailFrames.size() ) );
+		xv::map::MaterialMotion_t motion;
+		if ( animated.m_pProxies )
+			motion = xv::map::MoveMaterial( *animated.m_pProxies, flTime, static_cast<int>( animated.m_Frames.size() ), static_cast<int>( animated.m_DetailFrames.size() ) );
+		if ( animated.m_flSpriteRate > 0.0f && !animated.m_Frames.empty() && std::isfinite( flTime ) )
+			motion.m_nFrame = static_cast<int>( std::fmod( std::floor( static_cast<double>( std::max( flTime, 0.0f ) ) * animated.m_flSpriteRate ), static_cast<double>( animated.m_Frames.size() ) ) );
 		xv::map::RasterMaterial_t material = animated.m_Still;
 		xv::map::ShadeMaterial_t &shade = material.m_Shade;
 		if ( !animated.m_Frames.empty() )
 			shade.m_pBase = animated.m_Frames[ static_cast<std::size_t>( motion.m_nFrame ) % animated.m_Frames.size() ].get();
 		if ( !animated.m_DetailFrames.empty() )
 			shade.m_pDetail = animated.m_DetailFrames[ static_cast<std::size_t>( motion.m_nDetailFrame ) % animated.m_DetailFrames.size() ].get();
-		shade.m_UvTransform = motion.m_UvTransform;
-		if ( shade.m_pDetail )
-			shade.m_DetailTransform = motion.m_DetailTransform;
-		shade.m_vecColor = motion.m_vecColor;
-		shade.m_flAlpha = motion.m_flAlpha;
+		if ( animated.m_pProxies )
+		{
+			shade.m_UvTransform = motion.m_UvTransform;
+			if ( shade.m_pDetail )
+				shade.m_DetailTransform = motion.m_DetailTransform;
+			shade.m_vecColor = motion.m_vecColor;
+			shade.m_flAlpha = motion.m_flAlpha;
+		}
 		if ( m_Current[ animated.m_nMaterial ] != material )
 		{
 			m_Current[ animated.m_nMaterial ] = material;
@@ -1058,12 +1097,12 @@ void CMapResources::Take( std::vector<Loaded_t> batch )
 		material.m_bTool = loaded.m_bTool;
 		material.m_bNodraw = loaded.m_bNodraw;
 		std::erase_if( m_Animated, [ & ]( const Animated_t &animated ) { return animated.m_nMaterial == loaded.m_nMaterial; } );
-		if ( info.m_pProxies )
+		if ( info.m_pProxies || ( loaded.m_flSpriteRate > 0.0f && loaded.m_Frames.size() > 1 ) )
 		{
 			material.m_bAnimated = true;
 			material.m_pFrames = !loaded.m_Frames.empty() ? static_cast<const void *>( loaded.m_Frames.front().get() ) : !loaded.m_DetailFrames.empty() ? loaded.m_DetailFrames.front().get()
 																																						: nullptr;
-			m_Animated.push_back( { loaded.m_nMaterial, info.m_pProxies, loaded.m_Frames, loaded.m_DetailFrames, material } );
+			m_Animated.push_back( { loaded.m_nMaterial, info.m_pProxies, loaded.m_Frames, loaded.m_DetailFrames, material, loaded.m_flSpriteRate } );
 			for ( std::size_t nFrame = 1; nFrame < loaded.m_Frames.size(); nFrame++ )
 				m_Keep.push_back( loaded.m_Frames[ nFrame ] );
 			for ( std::size_t nFrame = 1; nFrame < loaded.m_DetailFrames.size(); nFrame++ )

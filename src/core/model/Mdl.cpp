@@ -168,6 +168,7 @@ std::optional<CStudioFile> ReadStudio( std::string_view szPath, const Reader_t &
 		each( 232, 16, [ & ]( std::size_t n ) {
 			Bodygroup_t group;
 			group.m_szName = r.Name( n, n );
+			group.m_nBase = r.Int( n + 8 );
 			const auto nModels = r.Relative( n, n + 12 );
 			const int nCount = r.Array( nModels, r.Int( n + 4 ), 148 );
 			for ( int i = 0; i < nCount; i++ )

@@ -304,7 +304,7 @@ bool CSoundPlayer::PlayGameSound( const std::string &szGamePath, const std::file
 //-----------------------------------------------------------------------------
 // Purpose: A sound with its volume, pitch, looping and delay applied.
 //-----------------------------------------------------------------------------
-bool CSoundPlayer::Play( const PlayRequest_t &request, const std::filesystem::path &localRoot )
+bool CSoundPlayer::Play( PlayRequest_t request, const std::filesystem::path &localRoot, bool bUseLoopPoints )
 {
 	if ( !Available() )
 	{
@@ -316,7 +316,10 @@ bool CSoundPlayer::Play( const PlayRequest_t &request, const std::filesystem::pa
 		return false;
 	}
 	Stop();
-	m_nLastVoice = Start( Load( request.m_szGamePath, localRoot ), request );
+	auto pClip = Load( request.m_szGamePath, localRoot );
+	if ( bUseLoopPoints && pClip && pClip->m_LoopStart )
+		request.m_bLoop = true;
+	m_nLastVoice = Start( std::move( pClip ), request );
 	if ( m_nLastVoice == 0 )
 	{
 		return false;

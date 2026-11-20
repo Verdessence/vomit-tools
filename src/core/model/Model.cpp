@@ -563,7 +563,9 @@ std::optional<CModel> LoadModel( std::string_view szMdlPath, const Reader_t &pfn
 		// Bodygroup choices select a model independently in each part.
 		const std::size_t nPartAt = nBodyPartIndex + static_cast<std::size_t>( nPart ) * BODY_PART_SIZE;
 		const int nModels = mdl.Read<std::int32_t>( nPartAt + 4 );
-		const int nChoice = nPart < static_cast<int>( selection.m_Bodygroups.size() ) ? selection.m_Bodygroups[ nPart ] : 0;
+		const int nBase = mdl.Read<std::int32_t>( nPartAt + 8 );
+		const int nBodyModel = nBase > 0 && nModels > 0 ? std::max( 0, selection.m_nBody ) / nBase % nModels : 0;
+		const int nChoice = nPart < static_cast<int>( selection.m_Bodygroups.size() ) ? selection.m_Bodygroups[ nPart ] : nBodyModel;
 		if ( nChoice < 0 || nChoice >= nModels )
 		{
 			return Fail( pError, "Invalid bodygroup selection" );

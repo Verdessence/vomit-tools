@@ -6,9 +6,10 @@
 //===========================================================================//
 #include "Splash.h"
 
+#include <algorithm>
+
 #include <QApplication>
 #include <QPainter>
-#include <QPainterPath>
 #include <QScreen>
 
 namespace
@@ -18,9 +19,17 @@ namespace
 constexpr int WIDTH = 640;
 
 //-----------------------------------------------------------------------------
+// Purpose: Reserve room for the progress bar even with a large desktop font.
+//-----------------------------------------------------------------------------
+int FooterHeight()
+{
+	return std::max( 58, QFontMetrics( QApplication::font() ).height() + 35 );
+}
+
+//-----------------------------------------------------------------------------
 // Purpose: The wide logo at the splash's size, sharp on high-density screens.
 //-----------------------------------------------------------------------------
-QPixmap Logo()
+QPixmap SplashPicture()
 {
 	const qreal flRatio = QGuiApplication::primaryScreen() ? QGuiApplication::primaryScreen()->devicePixelRatio() : 1.0;
 	QPixmap logo( QStringLiteral( ":/assets/logo_wide.png" ) );
@@ -29,9 +38,16 @@ QPixmap Logo()
 		logo = QPixmap( 2 * WIDTH, WIDTH );
 		logo.fill( Qt::transparent );
 	}
-	logo = logo.scaledToWidth( static_cast<int>( WIDTH * flRatio ), Qt::SmoothTransformation );
+	logo = logo.scaledToWidth( qRound( WIDTH * flRatio ), Qt::SmoothTransformation );
 	logo.setDevicePixelRatio( flRatio );
-	return logo;
+	QPixmap picture( logo.width(), logo.height() + qRound( FooterHeight() * flRatio ) );
+	picture.setDevicePixelRatio( flRatio );
+	picture.fill( Qt::transparent );
+	{
+		QPainter painter( &picture );
+		painter.drawPixmap( 0, 0, logo );
+	}
+	return picture;
 }
 
 } // namespace
@@ -40,12 +56,13 @@ QPixmap Logo()
 // Purpose:
 //-----------------------------------------------------------------------------
 CSplash::CSplash( int nSteps )
-	: QSplashScreen( Logo() ),
+	: QSplashScreen( SplashPicture() ),
 	  m_nSteps( std::max( 1, nSteps ) )
 {
 	setObjectName( QStringLiteral( "splash" ) );
-	// Only the logo shows; around it, whatever is behind.
+	// The logo and progress panel float over the desktop.
 	setAttribute( Qt::WA_TranslucentBackground );
+	setCursor( Qt::WaitCursor );
 }
 
 //-----------------------------------------------------------------------------
@@ -55,12 +72,24 @@ void CSplash::SetStep( const QString &szWhat )
 {
 	m_nStep = std::min( m_nStep + 1, m_nSteps );
 	m_szText = tr( "Loading %1 [%2/%3]" ).arg( szWhat ).arg( m_nStep ).arg( m_nSteps );
+	setAccessibleName( m_szText );
 	repaint();
 	QApplication::processEvents();
 }
 
 //-----------------------------------------------------------------------------
-// Purpose: The step, centred under the logo: white with a dark edge, readable on any desktop.
+// Purpose: Fill the bar once the last startup step has finished.
+//-----------------------------------------------------------------------------
+void CSplash::Complete()
+{
+	m_bComplete = true;
+	m_szText = tr( "Ready" );
+	setAccessibleName( m_szText );
+	repaint();
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: The status and progress have their own space below the bottom of the image.
 //-----------------------------------------------------------------------------
 void CSplash::drawContents( QPainter *pPainter )
 {
@@ -68,16 +97,23 @@ void CSplash::drawContents( QPainter *pPainter )
 	{
 		return;
 	}
-	QFont font = QApplication::font();
-	font.setPixelSize( 17 );
-	font.setBold( true );
-	QPainterPath path;
-	path.addText( 0, 0, font, m_szText );
-	const QRectF bounds = path.boundingRect();
-	const QSizeF size = QSizeF( pixmap().size() ) / pixmap().devicePixelRatio();
-	// Below the lettering, which ends about two thirds of the way down.
-	path.translate( ( size.width() - bounds.width() ) / 2.0 - bounds.left(), size.height() * 0.8 - bounds.top() );
 	pPainter->setRenderHint( QPainter::Antialiasing );
-	pPainter->strokePath( path, QPen( QColor( 20, 30, 20, 220 ), 4.0, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin ) );
-	pPainter->fillPath( path, Qt::white );
+	const QPalette colors = palette();
+	const int nFooterHeight = FooterHeight();
+	const QRect panel( 8, height() - nFooterHeight + 4, width() - 16, nFooterHeight - 10 );
+	pPainter->setPen( colors.color( QPalette::Mid ) );
+	pPainter->setBrush( colors.brush( QPalette::Window ) );
+	pPainter->drawRoundedRect( QRectF( panel ), 8, 8 );
+
+	const QRect text = panel.adjusted( 16, 5, -16, -18 );
+	pPainter->setPen( colors.color( QPalette::WindowText ) );
+	pPainter->drawText( text, Qt::AlignCenter, fontMetrics().elidedText( m_szText, Qt::ElideMiddle, text.width() ) );
+
+	const QRectF track( text.left(), panel.bottom() - 12, text.width(), 5 );
+	pPainter->setPen( Qt::NoPen );
+	pPainter->setBrush( colors.brush( QPalette::Mid ) );
+	pPainter->drawRoundedRect( track, 2.5, 2.5 );
+	const int nDone = m_bComplete ? m_nSteps : m_nStep - 1;
+	pPainter->setBrush( colors.brush( QPalette::Highlight ) );
+	pPainter->drawRoundedRect( QRectF( track.topLeft(), QSizeF( track.width() * nDone / m_nSteps, track.height() ) ), 2.5, 2.5 );
 }

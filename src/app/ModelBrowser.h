@@ -11,6 +11,10 @@
 //===========================================================================//
 #pragma once
 
+class CLoadingView;
+
+#include "model/Model.h"
+
 #include <atomic>
 #include <deque>
 #include <mutex>
@@ -92,6 +96,7 @@ public:
 	[[nodiscard]] bool IsFinished() const;
 	// The folder the pictures are kept in.
 	[[nodiscard]] static QString CacheFolder();
+	[[nodiscard]] static QImage SkinPicture( const QString &szModel, int nChecksum, int nSkin, const xv::model::Reader_t &pfnRead );
 
 signals:
 	void ModelPicked( const QString &szPath );
@@ -117,6 +122,7 @@ private:
 	CModelList *m_pList = nullptr;
 	CModelFilter *m_pFilter = nullptr;
 	QListView *m_pView = nullptr;
+	CLoadingView *m_pLoading = nullptr;
 	QLineEdit *m_pSearch = nullptr;
 	QComboBox *m_pWhere = nullptr;
 	QCheckBox *m_pWithoutMesh = nullptr;

@@ -31,6 +31,7 @@
 
 #include "kv1/Kv1.h"
 #include "map/MapNamePicker.h"
+#include "map/MapModelProperties.h"
 #include "map/DispEdit.h"
 #include "map/Instance.h"
 #include "FileDialogs.h"
@@ -220,6 +221,7 @@ CMapProperties::CMapProperties( CMapDocument &document, QWidget *pParent )
 
 	m_pTabs = new QTabWidget;
 	m_pTabs->setObjectName( QStringLiteral( "mapPropertiesTabs" ) );
+	m_pTabs->setObjectName( QStringLiteral( "mapPropertiesTabs" ) );
 	auto *pInfo = new QWidget;
 	auto *pInfoLayout = new QVBoxLayout( pInfo );
 	pInfoLayout->setContentsMargins( 2, 2, 2, 2 );
@@ -242,6 +244,23 @@ CMapProperties::CMapProperties( CMapDocument &document, QWidget *pParent )
 	connect( m_pBrowseKey, &QPushButton::clicked, this, [ this ] {
 		if ( const QTreeWidgetItem *pItem = m_pKeys->currentItem() )
 			BrowseKey( pItem->data( 0, ROLE_ROW ).toULongLong() );
+	} );
+	m_pPlaySound = new QPushButton( tr( "Play Sound" ) );
+	m_pPlaySound->setObjectName( QStringLiteral( "mapPropertiesPlaySound" ) );
+	m_pPlaySound->hide();
+	pKeyButtons->addWidget( m_pPlaySound );
+	connect( m_pPlaySound, &QPushButton::clicked, this, [ this ] {
+		if ( m_bSoundPlaying )
+		{
+			m_pfnStopSound();
+			return;
+		}
+		if ( const auto *pItem = m_pKeys->currentItem() )
+		{
+			const auto nRow = pItem->data( 0, ROLE_ROW ).toULongLong();
+			if ( nRow < m_Sheet.m_Rows.size() )
+				PreviewSound( FromStd( m_Sheet.m_Rows[ nRow ].m_szValue ) );
+		}
 	} );
 	m_pPickFaces = new QPushButton( tr( "Pick..." ) );
 	m_pPickFaces->setObjectName( QStringLiteral( "mapPropertiesPickFaces" ) );
@@ -299,6 +318,9 @@ CMapProperties::CMapProperties( CMapDocument &document, QWidget *pParent )
 	pMarkSources->setObjectName( QStringLiteral( "mapPropertiesMarkSource" ) );
 	pMarkSources->setToolTip( tr( "Select the entity the output comes from" ) );
 	m_pTabs->addTab( WithButtons( m_pInputs, { pMarkSources } ), tr( "Inputs" ) );
+	m_pModel = new CMapModelProperties( m_Document, m_pTabs );
+	m_pTabs->addTab( m_pModel, tr( "Model" ) );
+	m_pTabs->setTabEnabled( m_pTabs->indexOf( m_pModel ), false );
 	pLayout->addWidget( m_pTabs, 1 );
 
 	connect( m_pSmartEdit, &QToolButton::toggled, this, &CMapProperties::Refresh );
@@ -348,6 +370,7 @@ void CMapProperties::SetWorld( bool bWorld )
 	m_bWorld = bWorld;
 	m_pClass->setEnabled( !bWorld );
 	m_pTabs->setTabVisible( 3, !bWorld );
+	m_pTabs->setTabVisible( m_pTabs->indexOf( m_pModel ), !bWorld );
 	Refresh();
 }
 
@@ -491,6 +514,8 @@ void CMapProperties::Refresh()
 	fill( m_pInputs, m_Sheet.m_Inputs, true );
 	m_pComments->setPlainText( FromStd( m_Sheet.m_szComments ) );
 	m_pComments->setReadOnly( m_Sheet.m_nEntities != 1 );
+	if ( !m_bWorld )
+		m_pTabs->setTabEnabled( m_pTabs->indexOf( m_pModel ), m_pModel->RefreshSelection() );
 	m_bFilling = false;
 	ShowHelp();
 }
@@ -520,12 +545,71 @@ void CMapProperties::BrowseKey( std::size_t nRow )
 		if ( m_pfnPick )
 			picked = m_pfnPick( row.m_szType, szCurrent );
 	}
+	else if ( m_pfnNames && IsSoundKey( row ) )
+	{
+		CMapNamePicker picker( tr( "Sounds" ), m_pfnNames( "sound" ), szCurrent, this );
+		if ( m_pfnPlaySound )
+			picker.AddPreviewButtons( [ this ]( const QString &szName ) { PreviewSound( szName ); }, m_pfnStopSound );
+		if ( picker.exec() == QDialog::Accepted && !picker.GetPicked().isEmpty() )
+			picked = picker.GetPicked();
+	}
 	else if ( m_pfnNames )
 	{
-		picked = CMapNamePicker::Pick( this, row.m_szType == "sound" ? tr( "Sounds" ) : tr( "Particle Systems" ), m_pfnNames( row.m_szType ), szCurrent );
+		picked = CMapNamePicker::Pick( this, tr( "Particle Systems" ), m_pfnNames( row.m_szType ), szCurrent );
 	}
 	if ( picked && *picked != szCurrent )
 		CommitKey( nRow, picked->toStdString() );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Connect the sheet and its picker to the map tab's shared sound player.
+//-----------------------------------------------------------------------------
+void CMapProperties::SetSoundPreview( SoundPreview_t pfnPlay, std::function<void()> pfnStop )
+{
+	m_pfnPlaySound = std::move( pfnPlay );
+	m_pfnStopSound = std::move( pfnStop );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Refresh the play button when its sound starts, stops or finishes.
+//-----------------------------------------------------------------------------
+void CMapProperties::SetSoundPlaying( bool bPlaying )
+{
+	m_bSoundPlaying = bPlaying;
+	ShowHelp();
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Some FGDs describe ambient_generic's message as a string.
+//-----------------------------------------------------------------------------
+bool CMapProperties::IsSoundKey( const xv::map::PropertyRow_t &row ) const
+{
+	return row.m_szType == "sound" || ( xv::kv1::EqualsIgnoreCase( row.m_szKey, "message" ) && xv::kv1::EqualsIgnoreCase( m_Sheet.m_szClass, "ambient_generic" ) );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Apply an ambient_generic's own pitch and volume to the preview.
+//-----------------------------------------------------------------------------
+void CMapProperties::PreviewSound( const QString &szName )
+{
+	if ( !m_pfnPlaySound || szName.isEmpty() )
+		return;
+	std::optional<double> pitch, volume;
+	if ( xv::kv1::EqualsIgnoreCase( m_Sheet.m_szClass, "ambient_generic" ) )
+	{
+		for ( const auto &row : m_Sheet.m_Rows )
+		{
+			if ( row.m_bDiffers )
+				continue;
+			if ( xv::kv1::EqualsIgnoreCase( row.m_szKey, "pitch" ) )
+				pitch = xv::ParseNumber<double>( row.m_szValue );
+			else if ( xv::kv1::EqualsIgnoreCase( row.m_szKey, "health" ) )
+				volume = xv::ParseNumber<double>( row.m_szValue );
+		}
+		if ( volume )
+			volume = *volume / 10.0;
+	}
+	m_pfnPlaySound( szName, pitch, volume );
 }
 
 //-----------------------------------------------------------------------------
@@ -537,11 +621,18 @@ void CMapProperties::ShowHelp()
 		return;
 	const QTreeWidgetItem *pItem = m_pKeys->currentItem();
 	const std::size_t i = pItem ? pItem->data( 0, ROLE_ROW ).toULongLong() : m_Sheet.m_Rows.size();
+	const bool bPlaying = m_bSoundPlaying;
+	m_pPlaySound->setVisible( bPlaying );
+	m_pPlaySound->setEnabled( bPlaying );
+	m_pPlaySound->setText( bPlaying ? tr( "Stop Sound" ) : tr( "Play Sound" ) );
 	if ( i < m_Sheet.m_Rows.size() )
 	{
 		const xv::map::PropertyRow_t &row = m_Sheet.m_Rows[ i ];
 		m_pBrowseInstance->setVisible( row.m_szKey == "file" && m_Sheet.m_szClass == "func_instance" );
-		m_pBrowseKey->setVisible( IsBrowsable( row.m_szType ) && ( m_pfnNames || m_pfnPick ) );
+		const bool bSound = IsSoundKey( row );
+		m_pBrowseKey->setVisible( ( bSound || IsBrowsable( row.m_szType ) ) && ( m_pfnNames || m_pfnPick ) );
+		m_pPlaySound->setVisible( bPlaying || ( bSound && static_cast<bool>( m_pfnPlaySound ) ) );
+		m_pPlaySound->setEnabled( bPlaying || ( !row.m_bDiffers && !row.m_szValue.empty() ) );
 		const bool bSides = ( row.m_szKey == "sides" || row.m_szKey == "sides2" ) && ( m_Sheet.m_szClass == "info_overlay" || m_Sheet.m_szClass == "info_overlay_transition" );
 		m_pPickFaces->setVisible( bSides );
 		PreviewSides( i, FromStd( row.m_szValue ) );

@@ -5,6 +5,8 @@
 //
 //===========================================================================//
 #include "FolderBrowser.h"
+
+#include "LoadingView.h"
 #include "StickyTreeParents.h"
 
 #include <QDir>
@@ -85,6 +87,13 @@ CFolderBrowser::CFolderBrowser( QWidget *pParent )
 
 	m_pView = new QTreeView;
 	m_pView->setModel( m_pModel );
+	m_pLoading = new CLoadingView( m_pView->viewport(), LoadingLayout_t::LOADING_LAYOUT_ROWS );
+	connect( m_pModel, &QFileSystemModel::directoryLoaded, this, [ this ]( const QString &szPath ) {
+		const QString szLoaded = QDir::cleanPath( szPath );
+		m_LoadedFolders.insert( szLoaded );
+		if ( szLoaded == m_szFolder )
+			m_pLoading->End();
+	} );
 	m_pView->setUniformRowHeights( true );
 	new CStickyTreeParents( m_pView ); // the open folders over the rows they hold
 	m_pView->setSortingEnabled( true );
@@ -93,6 +102,7 @@ CFolderBrowser::CFolderBrowser( QWidget *pParent )
 	m_pView->header()->setSectionResizeMode( QHeaderView::Interactive );
 	m_pView->header()->setStretchLastSection( false );
 	m_pView->setColumnWidth( 0, 220 );
+	m_pView->setColumnWidth( 1, 76 );
 	m_pView->setColumnWidth( 2, 110 );
 	m_pView->header()->restoreState( QSettings{}.value( HEADER_KEY ).toByteArray() );
 	// Shown, as in the other trees (layouts saved before hid it).
@@ -118,7 +128,6 @@ CFolderBrowser::CFolderBrowser( QWidget *pParent )
 			}
 		} );
 	} );
-	m_pView->setToolTip( tr( "Double-click a file to open it; soundscapes and soundscripts open in the editor" ) );
 	connect( m_pView->selectionModel(), &QItemSelectionModel::currentChanged, this, [ this ]( const QModelIndex &index ) {
 		if ( index.isValid() && !m_pModel->isDir( index ) )
 		{
@@ -154,10 +163,14 @@ void CFolderBrowser::SetFolder( const QString &szFolder )
 	m_szFolder = QDir::cleanPath( QFileInfo{ szFolder }.absoluteFilePath() );
 	m_pModel->setRootPath( m_szFolder );
 	m_pView->setRootIndex( m_pModel->index( m_szFolder ) );
-	m_pPath->setText( QDir::toNativeSeparators( m_szFolder ) );
+	m_pPath->setText( QDir::fromNativeSeparators( m_szFolder ) );
 	m_pPath->setToolTip( m_pPath->text() );
 	m_pView->show();
 	m_pEmpty->hide();
+	if ( m_pView->rootIndex().isValid() && !m_LoadedFolders.contains( m_szFolder ) )
+		m_pLoading->Begin( tr( "Reading the folder…" ) );
+	else
+		m_pLoading->End();
 }
 
 //-----------------------------------------------------------------------------

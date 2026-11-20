@@ -181,7 +181,7 @@ CMapCompileDialog::CMapCompileDialog( CMapEditor &editor )
 	auto *pEnsureRow = new QHBoxLayout;
 	m_pEnsure = new QCheckBox( tr( "Ensure file exists afterwards" ) );
 	m_pEnsureFile = new QLineEdit;
-	m_pEnsureFile->setPlaceholderText( QStringLiteral( "$path\\$file.bsp" ) );
+	m_pEnsureFile->setPlaceholderText( QStringLiteral( "$path/$file.bsp" ) );
 	pEnsureRow->addWidget( m_pEnsure );
 	pEnsureRow->addWidget( m_pEnsureFile, 1 );
 	pCommandForm->addRow( QString{}, pEnsureRow );
@@ -207,6 +207,11 @@ CMapCompileDialog::CMapCompileDialog( CMapEditor &editor )
 	m_pStatus = new QLabel;
 	m_pStatus->setObjectName( QStringLiteral( "compileStatus" ) );
 	pBottom->addWidget( m_pStatus, 1 );
+	m_pPortal = new QPushButton( tr( "Load Portal File" ) );
+	m_pPortal->setObjectName( QStringLiteral( "compileLoadPortal" ) );
+	m_pPortal->hide();
+	pBottom->addWidget( m_pPortal );
+	connect( m_pPortal, &QPushButton::clicked, this, [ this ] { m_Editor.LoadPortalFile( m_szCompiledPortal ); } );
 	m_pGo = new QPushButton( tr( "Go!" ) );
 	m_pGo->setObjectName( QStringLiteral( "compileGo" ) );
 	m_pGo->setDefault( true );
@@ -597,6 +602,7 @@ bool CMapCompileDialog::Run()
 	}
 	m_pLog->clear();
 	m_pProblems->clear();
+	m_pPortal->hide();
 	if ( !m_Editor.GetDocument().GetGame() )
 	{
 		m_pLog->appendPlainText( tr( "Open the game the map is for first (File > Open > Game): the compilers need its folders." ) );
@@ -677,6 +683,11 @@ bool CMapCompileDialog::Run()
 			m_pLog->appendPlainText( tr( "No native server library in %1: %2 will fall back to %3%4." ).arg( game.path(), launcher.fileName(), szBinary, QFile::exists( szBinary ) ? QString{} : tr( " (missing)" ) ) );
 		}
 	}
+	const QFileInfo map( m_Editor.GetPath() );
+	m_szCompiledPortal = map.absoluteDir().filePath( map.completeBaseName() + QStringLiteral( ".prt" ) );
+	const QFileInfo portal( m_szCompiledPortal );
+	m_PreviousPortalTime = portal.lastModified();
+	m_nPreviousPortalSize = portal.size();
 	m_Editor.GetDocument().SetPointfile( std::nullopt );
 	m_Clock.start();
 	m_pGo->setEnabled( false );
@@ -693,7 +704,18 @@ void CMapCompileDialog::Finished( bool bSuccess, const xv::map::CompileReport_t 
 	m_Report = report;
 	m_pGo->setEnabled( true );
 	m_pCancel->setEnabled( false );
+	const bool bCopied = m_pCordonFolder && QFile::exists( QDir( m_pCordonFolder->path() ).filePath( QFileInfo( m_szCompiledPortal ).fileName() ) );
 	BringBackCompiled();
+	const QFileInfo portal( m_szCompiledPortal );
+	const bool bNewPortal = !report.m_bLeaked && portal.exists() && ( bCopied || portal.lastModified() != m_PreviousPortalTime || portal.size() != m_nPreviousPortalSize );
+	m_pPortal->setVisible( bNewPortal );
+	if ( m_Editor.GetPortalPath() == m_szCompiledPortal )
+	{
+		if ( bNewPortal )
+			m_Editor.LoadPortalFile( m_szCompiledPortal );
+		else if ( report.m_bLeaked || !portal.exists() )
+			m_Editor.UnloadPortalFile();
+	}
 	const double flSeconds = m_Clock.elapsed() / 1000.0;
 	for ( const xv::map::CompileProblem_t &problem : report.m_Problems )
 	{

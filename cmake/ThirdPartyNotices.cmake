@@ -1,4 +1,4 @@
-# Writes THIRD-PARTY-NOTICES.txt into the build folder: every library built into vomit-tools or
+# Writes THIRD-PARTY-NOTICES.txt into the build folder: third-party code and art built into vomit-tools or
 # shipped with it, where its source is (the exact commit fetched, when it was fetched from git),
 # and its license text as that source has it. The app shows the file under Help > About >
 # Licenses and the packages carry it beside LICENSE, so the notices always match what was built.
@@ -21,14 +21,14 @@ function(vomit_tools_notice_source NAME OUT)
     set(${OUT} "${dir}" PARENT_SCOPE)
 endfunction()
 
-set(notices "Third-party software in vomit-tools
-===================================
+set(notices "Third-party software and artwork in vomit-tools
+===============================================
 
 vomit-tools is free software under the GNU General Public License, version 3 or later (the
 LICENSE file beside this one, or Help > About > Licenses). Its source is at
 https://github.com/Verdessence/vomit-tools; the source of a release is the tag of that version.
 
-The libraries below are built into vomit-tools or shipped with it. Each comes with where its
+The components below are built into vomit-tools or shipped with it. Each comes with where its
 source is and its license, exactly as its source has it. Where a library was fetched from git,
 the commit given is the one this build used.
 ")
@@ -78,6 +78,13 @@ at https://doc.qt.io/qt-6/licenses-used-in-qt.html and in Help > About Qt.")
 vomit_tools_add_notice(NAME "wayland-protocols (pointer constraints and relative pointer, for the map's mouselook on Wayland)"
         FILE "${CMAKE_SOURCE_DIR}/LICENSES/wayland-protocols-MIT.txt"
         URL "https://gitlab.freedesktop.org/wayland/wayland-protocols" LICENSE "MIT")
+vomit_tools_add_notice(NAME "Twemoji (Philippine flag artwork)"
+        FILE "${CMAKE_SOURCE_DIR}/LICENSES/Twemoji-CC-BY-4.0.txt"
+        URL "https://github.com/jdecked/twemoji/blob/main/assets/svg/1f1f5-1f1ed.svg"
+        LICENSE "CC-BY-4.0"
+        NOTE "Artwork by Twitter and the Twemoji contributors. The original SVG is in src/assets/flag-ph.svg.
+The app uses a PNG rendered from it with the surrounding transparent margin cropped.
+https://creativecommons.org/licenses/by/4.0/")
 vomit_tools_add_notice(NAME "sourcepp (vpkpp, kvpp and their support code)" FETCH sourcepp FILE ./LICENSE
         URL "https://github.com/craftablescience/sourcepp/archive/5dcbbe8ac556b1c833cccf31a2b016e114dbc3f0.tar.gz" LICENSE "MIT")
 vomit_tools_add_notice(NAME "BufferStream" FETCH bufferstream FILE ./LICENSE

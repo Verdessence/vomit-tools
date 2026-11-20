@@ -68,6 +68,7 @@ struct MaterialUniforms_t
 	float m_Detail[ 4 ];          // $detailblendmode (-1: no detail), $detailblendfactor, $detailscale u v
 	float m_DetailTransform[ 4 ]; // a b c d
 	float m_DetailOffset[ 4 ];    // tx ty, and the detail texture's size
+	float m_PointSampling[ 4 ]; // base, base2, detail
 };
 
 // map.frag's sky block, as sky.frag's.
@@ -140,6 +141,9 @@ MaterialUniforms_t MaterialUniforms( const xv::map::RasterMaterial_t *pMaterial,
 	u.m_EnvTint[ 1 ] = shade.m_vecEnvTint.m_flY;
 	u.m_EnvTint[ 2 ] = shade.m_vecEnvTint.m_flZ;
 	u.m_EnvTint[ 3 ] = shade.m_flAddSelf;
+	u.m_PointSampling[ 0 ] = shade.m_pBase && shade.m_pBase->m_bPoint ? 1.0f : 0.0f;
+	u.m_PointSampling[ 1 ] = shade.m_pBase2 && shade.m_pBase2->m_bPoint ? 1.0f : 0.0f;
+	u.m_PointSampling[ 2 ] = shade.m_pDetail && shade.m_pDetail->m_bPoint ? 1.0f : 0.0f;
 	const bool bDetail = shade.m_pDetail && shade.m_pDetail->GetMipCount() > 0 && !shade.m_bMissing;
 	u.m_Detail[ 0 ] = bDetail ? static_cast<float>( shade.m_nDetailMode ) : -1.0f;
 	u.m_Detail[ 1 ] = shade.m_flDetailBlend;
@@ -251,6 +255,9 @@ void CMapRenderer::Release()
 	m_pLightmap.reset();
 	m_pLightmapFor.reset();
 	m_pLightSampler.reset();
+	for ( auto *pSamplers : { &m_PointSamplers, &m_PointTopSamplers } )
+		for ( auto &pSampler : *pSamplers )
+			pSampler.reset();
 	for ( auto &pSampler : m_TopSamplers )
 	{
 		pSampler.reset();
@@ -308,6 +315,10 @@ void CMapRenderer::Initialize( QRhi *pRhi, QRhiRenderTarget * )
 			m_TopSamplers[ i ]->create();
 			m_NearestMipSamplers[ i ].reset( m_pRhi->newSampler( QRhiSampler::Linear, QRhiSampler::Linear, QRhiSampler::Nearest, s, t ) );
 			m_NearestMipSamplers[ i ]->create();
+			m_PointSamplers[ i ].reset( m_pRhi->newSampler( QRhiSampler::Nearest, QRhiSampler::Nearest, QRhiSampler::Nearest, s, t ) );
+			m_PointSamplers[ i ]->create();
+			m_PointTopSamplers[ i ].reset( m_pRhi->newSampler( QRhiSampler::Nearest, QRhiSampler::Nearest, QRhiSampler::None, s, t ) );
+			m_PointTopSamplers[ i ]->create();
 		}
 		m_pNearest.reset( m_pRhi->newSampler( QRhiSampler::Nearest, QRhiSampler::Nearest, QRhiSampler::None, QRhiSampler::ClampToEdge, QRhiSampler::ClampToEdge ) );
 		m_pNearest->create();
@@ -558,6 +569,8 @@ QRhiTexture *CMapRenderer::Upload( const xv::map::RasterTexture_t &texture, std:
 QRhiSampler *CMapRenderer::SamplerFor( const xv::map::RasterTexture_t *pTexture ) const
 {
 	const std::size_t nIndex = pTexture ? ( pTexture->m_bClampS ? 1u : 0u ) + ( pTexture->m_bClampT ? 2u : 0u ) : 0u;
+	if ( pTexture && pTexture->m_bPoint )
+		return ( xv::map::HasMipChain( *pTexture ) ? m_PointSamplers : m_PointTopSamplers )[ nIndex ].get();
 	if ( pTexture && !xv::map::HasMipChain( *pTexture ) )
 	{
 		return m_TopSamplers[ nIndex ].get();

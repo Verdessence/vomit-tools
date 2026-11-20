@@ -121,18 +121,27 @@ you know who it is
 - import strippers as user group
 
 ### HUD Editor
-> [!NOTE]
-> hi i need an image/video/jxl for preview (We do not say gif in this household.)
+<div align="center">
+	<img src=src/assets/previews/hud.png alt="Showcase of the HUD Editor in Vomit Editor" />
+</div>
 
 Configure `client/sourcescheme.res` and other resource files for your custom huds
 - Preview window
 - Easily trace which element is using which property in the scheme
 
 ### Demo Viewer
-> [!NOTE]
-> hi i need an image/video/jxl for preview (We do not say gif in this household.)
+<div align="center">
+	<img src=src/assets/previews/demo.png alt="Showcase of the Demo Viewer in Vomit Editor" />
+</div>
 
-Planned
+> [!WARNING]
+> May not look 1:1 to demos played in-game, but that's what you really get from extracting .dem data
+
+Preview demos easily
+- doesn't FUCKING crash or reload demos when moving the ticks around
+- More granular controls for easier viewing
+- Camera paths to see map hotspots and common paths
+- Extract voice chat snippets
 
 ## Credits/Licenses
 - [craftablescience](https://github.com/craftablescience): MareTF, VPKEdit inspirations
@@ -272,7 +281,7 @@ graphics API, which waits for the next start.
 - **Lossless saving:** saving changes only what you edited; comments, spacing and line endings
   are kept byte for byte. Undo and redo work the same way.
 - **Where files go:** loose files are saved in place. Files that came from a VPK, and new files
-  (**File → New Soundscape/Soundscript File**), go to the game's write folder, `custom/vomit-tools/` by
+  (**File → New… → Soundscape / Soundscript**), go to the game's write folder, `custom/vomit-tools/` by
   default (**Game → Set Write Folder**). The game scans `custom/` at startup.
 - **Manifest:** **Add to Manifest** lists a file in `soundscapes_manifest.txt` or
   `game_sounds_manifest.txt`. It edits the manifest the game uses, or writes an overriding copy
@@ -284,8 +293,8 @@ To hear a soundscape in game: restart the game, load a map, then `sv_cheats 1` a
 ## Skybox creator
 
 - **Starting:**
-  - **File → New Skybox** for a new sky.
-  - **File → Open Sky from Game** for any sky the game has. Double-clicking a `materials/skybox/` file
+  - **File → New… → Skybox** for a new sky.
+  - **Tools → Open Sky** for any sky the game has. Double-clicking a `materials/skybox/` file
     in the **Game** tab opens its sky too.
   - **Opening one face file** opens its whole sky. That's any of `sky_x_rt.vtf`, `.vmt` or an image,
     whether dropped, opened from **File → Open File**, or double-clicked in the **Folder** tab. The
@@ -348,7 +357,8 @@ texture asks where to save.
 - **Viewing:** every mipmap (optionally blown up to full size), frame (played at a set rate), cube
   face (or all six unwrapped as a cross) and volume slice; R, G, B and A on their own; zoom, pan
   and 3×3 tiling. Beside it: the header, thumbnail and resources, the sprite sheet in full, and the
-  flags to tick.
+  flags to tick. **Simple Interface** gives mip levels and preview controls plain names and
+  groups less common, unchecked texture flags under **More Flags**.
 - **Import:** pictures as one image, animation frames (a GIF's or APNG's frames too), a cube map
   (faces named `…rt`, `…lf`… sort themselves), a cube map from a panorama/HDRI, or a volume.
   Every format but P8, versions 7.1–7.5, presets (diffuse, normal map, decal, particle, UI, sky
@@ -359,7 +369,8 @@ texture asks where to save.
   bump scale, reflectivity, thumbnail and resources (KVD text, LOD, sheets) without touching the
   pictures.
 - **Sprite Sheet** packs frames into a particle sheet like mksheet, reading and writing `.mks`,
-  and can cut an existing sheet back into its frames to change it.
+  and can cut an existing sheet back into its frames to change it. In **Sequence**, select a
+  sequence or frame to play it at a preview rate, with the sheet’s frame durations and loop setting.
 - **Export** saves the picture shown, or every frame, face and slice; **File → Convert a Folder of
   Textures** converts whole folders either way.
 - **Sprays:** the side panel says whether the game would take it as a spray, and why not; **Make
@@ -377,8 +388,27 @@ texture asks where to save.
 
 `vomit-tools-cli` does the same from the command line (`create`, `edit`, `extract`, `info`,
 `thumbnail`, with `--watch` to rebuild when the pictures change); `vomit-tools-cli --help` lists the
-options. On Linux it also provides VTF thumbnails for GNOME Files, Thunar, Nemo and Caja, and a
-plugin draws them in Dolphin when KDE Frameworks 6 is found at build time.
+options.
+
+### VTF thumbnails in Linux file managers
+
+The AppImage runs as a standalone application. Install a system package that ships the thumbnailers,
+or install them from a local build. For a per-user install:
+
+```sh
+cmake --install build --prefix ~/.local
+update-mime-database ~/.local/share/mime
+```
+
+- For **GNOME Files, Thunar, Nemo and Caja**, install with the CLI enabled. Make sure `~/.local/bin` is on
+  the graphical session's `PATH` so the file manager can find `vomit-tools-cli`.
+- For **Dolphin**, build with KDE Frameworks 6 KIO and CoreAddons available. Add the directory that
+  contains `kf6/thumbcreator` (for example, `~/.local/lib/qt6/plugins`) to `QT_PLUGIN_PATH` when
+  starting Dolphin. For a system install, use a prefix and Qt plugin directory already used by
+  the distribution's Dolphin. In **Configure Dolphin → Interface → Previews**, enable
+  **Valve textures (vomit-tools)**.
+
+Restart the file manager after installing, then enable previews in the folder view.
 
 ## Detail props editor
 
@@ -391,7 +421,7 @@ materials use each type. **Pack pictures…** builds a new sheet; undo covers ev
 ## Particle editor
 
 - **Opening:** double-click a `.pcf` in the **Game** or **Folder** tab, open one from **File → Open
-  File**, or start one with **File → New Particle File**.
+  File**, or start one with **File → New… → Particle file**.
 - **Systems:** the file's systems are listed on the left, with child systems under the systems that
   spawn them, or (**Grid**) as pictures of each effect. The selected system's picture plays;
   **Preferences** can make every system in view play. **New System** starts one with a basic set of
@@ -441,7 +471,7 @@ materials use each type. **Pack pictures…** builds a new sheet; undo covers ev
   (only the kind the setting takes) and child systems each get a fitting field. Names in bold
   differ from the game's default, and right-clicking one resets it. Settings the game doesn't read
   are listed apart.
-- **Search:** **Edit → Find Particle System** (Ctrl+Shift+F, or **Search All Files**) looks through
+- **Search:** **Search All Files** in the particle editor looks through
   every particle file the game has, by system name, material, operator or child system, and opens
   the one picked.
 - **Copy and paste:** copied systems bring the systems they spawn along, and paste into any particle
@@ -520,10 +550,7 @@ at local copies.
 use `FETCHCONTENT_SOURCE_DIR_COACD`, `FETCHCONTENT_SOURCE_DIR_COACD_CDT`,
 `FETCHCONTENT_SOURCE_DIR_COACD_SPDLOG` and `FETCHCONTENT_SOURCE_DIR_VHACD` for offline copies.
 The demo viewer's voice chat fetches [libopus](https://opus-codec.org) (`FETCHCONTENT_SOURCE_DIR_OPUS`)
-and CELT 0.11.3 (`FETCHCONTENT_SOURCE_DIR_CELT`); its transcripts fetch
-[whisper.cpp](https://github.com/ggml-org/whisper.cpp) (`FETCHCONTENT_SOURCE_DIR_WHISPER`; turn them off with
-`-DVOMIT_TOOLS_WHISPER=OFF`). Transcribing needs a whisper model file (a ggml `.bin`), picked in the
-Voice tab; none is bundled.
+and CELT 0.11.3 (`FETCHCONTENT_SOURCE_DIR_CELT`).
 Picture caches use [libjxl](https://github.com/libjxl/libjxl). The app uses an installed version
 0.12 or newer where available, or fetches 0.12.0 with its pinned submodules.
 `FETCHCONTENT_SOURCE_DIR_JPEGXL` can point at a local checkout with those submodules for offline builds.

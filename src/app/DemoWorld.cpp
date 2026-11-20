@@ -6,6 +6,8 @@
 //===========================================================================//
 #include "DemoWorld.h"
 
+#include "LoadingView.h"
+
 #include <QFile>
 #include <QFileInfo>
 
@@ -571,8 +573,14 @@ CDemoWorld::CDemoWorld( CDemoViewer &viewer, QWidget *pParent )
 	m_pParticles = new CMapParticles( this );
 	connect( m_pParticles, &CMapParticles::Ready, this, &CDemoWorld::Redraw );
 	connect( m_pDocument, &CMapDocument::Loaded, this, &CDemoWorld::MapLoaded );
-	connect( m_pDocument, &CMapDocument::LoadFailed, this, [ this ]( const QString &szError ) { SetStatus( tr( "The map couldn't be read: %1" ).arg( szError ) ); } );
-	connect( m_pDocument, &CMapDocument::LoadProgress, this, [ this ]( int nPercent, const QString &szStage ) { SetStatus( tr( "Reading the map: %1 (%2%)" ).arg( szStage ).arg( nPercent ) ); } );
+	connect( m_pDocument, &CMapDocument::LoadFailed, this, [ this ]( const QString &szError ) {
+		m_pLoading->End();
+		SetStatus( tr( "The map couldn't be read: %1" ).arg( szError ) );
+	} );
+	connect( m_pDocument, &CMapDocument::LoadProgress, this, [ this ]( int nPercent, const QString &szStage ) {
+		SetStatus( tr( "Reading the map: %1 (%2%)" ).arg( szStage ).arg( nPercent ) );
+		m_pLoading->SetProgress( m_szStatus, nPercent );
+	} );
 	connect( m_pResources, &CMapResources::Arrived, this, &CDemoWorld::ResourcesArrived );
 	connect( m_pResources, &CMapResources::Finished, this, [ this ] {
 		m_pRenderData->CompactEntityBoxes();
@@ -585,6 +593,7 @@ CDemoWorld::CDemoWorld( CDemoViewer &viewer, QWidget *pParent )
 	m_nMode = m_Viewer.GetDemo().HasCamera() ? DemoCamera_t::DEMO_CAMERA_RECORDER : DemoCamera_t::DEMO_CAMERA_FREE;
 	m_Worker = std::thread( [ this ] { WorkerLoop(); } );
 	SetUseGpu( CGraphics::Instance().IsGpu() );
+	m_pLoading = new CLoadingView( this, LoadingLayout_t::LOADING_LAYOUT_PREVIEW );
 }
 
 //-----------------------------------------------------------------------------
@@ -632,6 +641,8 @@ void CDemoWorld::SetUseGpu( bool bOn )
 		m_pOverlay->setGeometry( rect() );
 		m_pOverlay->show();
 		m_pOverlay->raise();
+		if ( m_pLoading && !m_pLoading->isHidden() )
+			m_pLoading->raise();
 		return;
 	}
 #else
@@ -677,6 +688,7 @@ void CDemoWorld::LoadCompiledMap( std::vector<std::byte> bsp, std::optional<xv::
 	}
 	m_pMapSnapshot.reset();
 	SetStatus( tr( "Reading %1…" ).arg( szName ) );
+	m_pLoading->Begin( m_szStatus );
 	if ( game && !disk.empty() )
 	{
 		game->m_SearchPaths.insert( game->m_SearchPaths.begin(), { { "game" }, disk.generic_string() } );
@@ -778,6 +790,7 @@ void CDemoWorld::LoadCompiledMap( std::vector<std::byte> bsp, std::optional<xv::
 				}
 				if ( !text )
 				{
+					m_pLoading->End();
 					SetStatus( tr( "%1 couldn't be read: %2" ).arg( szName, QString::fromStdString( szError ) ) );
 					return;
 				}
@@ -818,6 +831,7 @@ void CDemoWorld::SetNoMap( const QString &szWhy )
 //-----------------------------------------------------------------------------
 void CDemoWorld::Stop()
 {
+	m_pLoading->End();
 	m_pLoad.reset();
 	if ( m_Decompiler.joinable() )
 	{
@@ -835,6 +849,7 @@ void CDemoWorld::Stop()
 void CDemoWorld::MapLoaded()
 {
 	BuildCompiledMeshes();
+	m_pLoading->End();
 	SetStatus( tr( "Reading the map's textures…" ) );
 	const bool bDecoded = !m_pGpu || qEnvironmentVariableIsSet( "VOMIT_TOOLS_DECODE_TEXTURES" );
 	m_pResources->Start( m_pDocument->GetSharedScene(), m_pDocument->GetGame(), CPreferences::Instance().GetMapPreferences().m_nTextureSize, bDecoded );
@@ -2410,6 +2425,8 @@ void CDemoWorld::resizeEvent( QResizeEvent * )
 		m_pOverlay->setGeometry( rect() );
 		m_pOverlay->raise();
 	}
+	if ( m_pLoading && !m_pLoading->isHidden() )
+		m_pLoading->raise();
 	Redraw();
 }
 

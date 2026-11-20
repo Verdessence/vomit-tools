@@ -25,6 +25,7 @@
 #include "map/Vertex.h"
 #include "map/MapView.h"
 #include "map/Mesh.h"
+#include "map/Raster.h"
 #include "map/Instance.h"
 #include "map/Scene.h"
 
@@ -115,6 +116,7 @@ public:
 	[[nodiscard]] QString DescribeLayerChanges( bool bAdvance = false );
 
 protected:
+	[[nodiscard]] PortalProjection_t PortalProjection() const override;
 	void paintEvent( QPaintEvent *pEvent ) override;
 	void resizeEvent( QResizeEvent *pEvent ) override;
 	void mousePressEvent( QMouseEvent *pEvent ) override;
@@ -321,6 +323,7 @@ private:
 		const void *m_pMesh = nullptr;
 		std::uint64_t m_nMaterials = 0; // the props' materials' revision, as the layer's
 		const void *m_pSprites = nullptr;
+		std::vector<xv::map::RasterMaterial_t> m_SpriteMaterials;
 		std::shared_ptr<const std::vector<std::array<std::uint8_t, 3>>> m_pColors; // made again by each edit: the same when they say the same
 		QPointF m_Center;
 		double m_flZoom = 0.0;
@@ -329,7 +332,7 @@ private:
 		friend bool operator==( const ModelsKey_t &a, const ModelsKey_t &b )
 		{
 			const bool bColors = a.m_pColors == b.m_pColors || ( a.m_pColors && b.m_pColors && *a.m_pColors == *b.m_pColors );
-			return bColors && a.m_Flags == b.m_Flags && a.m_pMesh == b.m_pMesh && a.m_nMaterials == b.m_nMaterials && a.m_pSprites == b.m_pSprites && a.m_Center == b.m_Center && a.m_flZoom == b.m_flZoom && a.m_Size == b.m_Size && a.m_flRatio == b.m_flRatio;
+			return bColors && a.m_Flags == b.m_Flags && a.m_pMesh == b.m_pMesh && a.m_nMaterials == b.m_nMaterials && a.m_pSprites == b.m_pSprites && a.m_SpriteMaterials == b.m_SpriteMaterials && a.m_Center == b.m_Center && a.m_flZoom == b.m_flZoom && a.m_Size == b.m_Size && a.m_flRatio == b.m_flRatio;
 		}
 	};
 	mutable ModelsKey_t m_ModelsKey;

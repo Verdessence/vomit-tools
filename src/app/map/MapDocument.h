@@ -21,6 +21,7 @@
 #include <QString>
 #include <QStringList>
 
+#include "map/Compile.h"
 #include "map/Edit.h"
 #include "map/GameConfig.h"
 #include "map/Helpers.h"
@@ -123,6 +124,10 @@ public:
 	// A leak's line (the .lin a compile left), drawn in every view until unloaded.
 	[[nodiscard]] const std::optional<std::vector<xv::map::Point_t>> &GetPointfile() const { return m_Pointfile; }
 	void SetPointfile( std::optional<std::vector<xv::map::Point_t>> points );
+	[[nodiscard]] const std::vector<xv::map::Portal_t> &GetPortals() const { return m_Portals; }
+	[[nodiscard]] std::optional<std::size_t> GetSelectedPortal() const { return m_SelectedPortal; }
+	void SetPortals( std::vector<xv::map::Portal_t> portals );
+	void SelectPortal( std::size_t nPortal );
 
 	// Visibility, per object: hidden by its visgroups (or Hammer's own flags in the file), by
 	// an automatic group, or quick-hidden.
@@ -171,6 +176,7 @@ signals:
 	void ScenePreviewed( const std::vector<std::uint32_t> &changed );
 	void ModifiedChanged( bool bModified );
 	void PointfileChanged();
+	void PortalsChanged();
 
 private:
 	void Run( Source_t source, int nGeneration );
@@ -215,6 +221,8 @@ private:
 	std::vector<std::uint8_t> m_CordonHidden; // outside the active cordon
 	std::vector<std::uint32_t> m_Selection;
 	std::optional<std::vector<xv::map::Point_t>> m_Pointfile;
+	std::vector<xv::map::Portal_t> m_Portals;
+	std::optional<std::size_t> m_SelectedPortal;
 	MapSelectMode_t m_nSelectMode = MapSelectMode_t::MAP_SELECT_MODE_GROUPS;
 	std::uint64_t m_nStateGeneration = 0;
 };

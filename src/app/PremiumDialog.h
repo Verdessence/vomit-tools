@@ -21,10 +21,10 @@ public:
 	explicit CPremiumDialog( QWidget *pParent = nullptr );
 
 	// Whether it has been shown before (the first start shows it).
-	[[nodiscard]] static bool HasBeenShown();
-	static void MarkShown();
+	[[nodiscard]] static bool HasCompleted();
 
 private:
+	static void MarkCompleted();
 	QLineEdit *m_pCard = nullptr;
 	QLineEdit *m_pExpiry = nullptr;
 	QLineEdit *m_pCode = nullptr;

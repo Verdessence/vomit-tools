@@ -1,8 +1,7 @@
 //===========================================================================//
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
-// Purpose: The splash screen while the app starts: the wide logo, see-through around it, and
-//          under it what is being loaded, "Loading graphics [2/5]".
+// Purpose: The startup logo, with the current step and its progress below it.
 //
 //===========================================================================//
 #pragma once
@@ -17,6 +16,7 @@ public:
 
 	// Shows the next step's name, and draws it at once (the event loop isn't running yet).
 	void SetStep( const QString &szWhat );
+	void Complete();
 	[[nodiscard]] QString GetText() const { return m_szText; }
 
 protected:
@@ -25,5 +25,6 @@ protected:
 private:
 	int m_nSteps;
 	int m_nStep = 0;
+	bool m_bComplete = false;
 	QString m_szText;
 };

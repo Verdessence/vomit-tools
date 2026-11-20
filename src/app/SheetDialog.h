@@ -14,6 +14,7 @@
 #include <vector>
 
 #include <QDialog>
+#include <QElapsedTimer>
 
 #include "texture/Build.h"
 #include "texture/Sheet.h"
@@ -22,6 +23,8 @@ class QCheckBox;
 class QDoubleSpinBox;
 class QLabel;
 class QSpinBox;
+class QPushButton;
+class QTimer;
 class QTreeWidget;
 
 class CSheetDialog : public QDialog
@@ -47,6 +50,8 @@ public:
 private:
 	void FillTree();
 	void UpdatePreview();
+	void ResetSequencePreview();
+	void UpdateSequencePreview();
 	// The sequence (and frame, or -1) the tree has picked.
 	[[nodiscard]] std::pair<int, int> Picked() const;
 	void EditPicked();
@@ -61,6 +66,14 @@ private:
 	QDoubleSpinBox *m_pDuration = nullptr;
 	QSpinBox *m_pPadding = nullptr;
 	QLabel *m_pPreview = nullptr;
+	QLabel *m_pSequencePicture = nullptr;
+	QLabel *m_pSequenceFrame = nullptr;
+	QPushButton *m_pSequencePlay = nullptr;
+	QSpinBox *m_pSequenceRate = nullptr;
+	QTimer *m_pSequenceTimer = nullptr;
+	QElapsedTimer m_SequenceClock;
+	double m_flSequenceTime = 0.0;
+	int m_nPreviewFrame = -1;
 	QLabel *m_pNotes = nullptr;
 	QLabel *m_pSettings = nullptr;
 	bool m_bFilling = false;
