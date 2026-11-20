@@ -25,7 +25,6 @@
 #include "demo/Feed.h"
 #include "demo/Logic.h"
 #include "demo/Players.h"
-#include "demo/Transcribe.h"
 #include "demo/Voice.h"
 #include "hud/Hud.h"
 #include "kv1/Kv1.h"
@@ -48,10 +47,9 @@ constexpr const char *DEMO_USAGE = "vomit-tools-cli demo info <file.dem>        
 								   "                                                       every sound it starts: how often, its file, and whether\n"
 								   "                                                       that is found (the game's search paths, then the map's\n"
 								   "                                                       packed files) and decodes; the game is the demo's folder\n"
-								   "vomit-tools-cli demo voice <file.dem> [--wav <folder>] [--transcribe <model.bin>] [--language <code>]\n"
+								   "vomit-tools-cli demo voice <file.dem> [--wav <folder>]\n"
 								   "                                                       every stretch of talking decoded (Steam voice, CELT): how long,\n"
-								   "                                                       what didn't decode; --wav writes each as a WAV there;\n"
-								   "                                                       --transcribe puts each in words with a whisper.cpp model\n"
+								   "                                                       what didn't decode; --wav writes each as a WAV there\n"
 								   "vomit-tools-cli demo logic <file.dem> <map.bsp>      the map's outputs that may have made what the demo shows\n"
 								   "                                                       happen (guesses, the likely first)\n"
 								   "vomit-tools-cli demo feed <file.dem>                 what it put on screens, in words (the game's language\n"
@@ -557,29 +555,10 @@ int PrintSounds( const CDemo &demo, const CContents &contents, const std::string
 
 //-----------------------------------------------------------------------------
 // Purpose: Every speech decoded: its talker, ticks and seconds of sound, and frames that
-//          didn't decode; with a folder, each written there as 16-bit WAV; with a model, what
-//          was said.
+//          didn't decode; with a folder, each written there as 16-bit WAV.
 //-----------------------------------------------------------------------------
-int PrintVoice( const CContents &contents, const std::string &szFolder, const std::string &szModel, const std::string &szLanguage )
+int PrintVoice( const CContents &contents, const std::string &szFolder )
 {
-	std::unique_ptr<CTranscriber> pTranscriber;
-	if ( !szModel.empty() )
-	{
-		pTranscriber = std::make_unique<CTranscriber>( szModel, szLanguage );
-		if ( !pTranscriber->IsOk() )
-		{
-			std::fprintf( stderr, "%s\n", pTranscriber->GetError().c_str() );
-			return 1;
-		}
-	}
-	std::map<std::size_t, Transcript_t> transcripts;
-	if ( pTranscriber )
-	{
-		std::vector<std::size_t> order( contents.GetSpeech().size() );
-		for ( std::size_t i = 0; i < order.size(); i++ )
-			order[ i ] = i;
-		TranscribeSpeech( contents, *pTranscriber, order, [ & ]( std::size_t i, const Transcript_t &transcript ) { transcripts[ i ] = transcript; } );
-	}
 	const VoiceCodec_t &codec = contents.GetVoiceCodec();
 	if ( !CVoiceDecoder( codec ).IsSupported() )
 	{
@@ -603,11 +582,6 @@ int PrintVoice( const CContents &contents, const std::string &szFolder, const st
 		flTotal += flSeconds;
 		nFailures += nFailed;
 		std::printf( "%7d %8.2f  entity %2d  %4d packets  %6.2f s of sound over %6.2f s%s\n", speech.m_nFrom, speech.m_nFrom * contents.GetTickInterval(), speech.m_nEntity, speech.m_nPackets, flSeconds, flSpan, nFailed ? ( "  " + std::to_string( nFailed ) + " failed" ).c_str() : "" );
-		if ( const auto said = transcripts.find( static_cast<std::size_t>( nIndex ) ); said != transcripts.end() )
-		{
-			const Transcript_t &transcript = said->second;
-			std::printf( "                 %s%s%s\n", transcript.m_szLanguage.empty() ? "" : ( "[" + transcript.m_szLanguage + "] " ).c_str(), transcript.m_szText.c_str(), transcript.m_szText.empty() ? "(nothing heard)" : "" );
-		}
 		if ( !szFolder.empty() && !samples.empty() )
 		{
 			char szName[ 64 ];
@@ -773,14 +747,13 @@ int DemoCommand( int argc, char **argv )
 	}
 	if ( szCommand == "voice" )
 	{
-		std::string szWav, szModel, szLanguage = "auto";
+		std::string szWav;
 		for ( int i = 2; i + 1 < argc; i += 2 )
 		{
-			const std::string_view szOption = argv[ i ];
-			( szOption == "--wav" ? szWav : szOption == "--transcribe" ? szModel
-																	   : szLanguage ) = argv[ i + 1 ];
+			if ( std::string_view( argv[ i ] ) == "--wav" )
+				szWav = argv[ i + 1 ];
 		}
-		return PrintVoice( contents, szWav, szModel, szLanguage );
+		return PrintVoice( contents, szWav );
 	}
 	if ( szCommand == "players" )
 	{

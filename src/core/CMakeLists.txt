@@ -28,8 +28,6 @@ add_library(vomit_tools_core STATIC
         demo/Sky.h
         demo/Sprays.cpp
         demo/Sprays.h
-        demo/Transcribe.cpp
-        demo/Transcribe.h
         demo/CeltNames.h
         demo/Voice.cpp
         demo/Voice.h
@@ -235,10 +233,6 @@ target_link_libraries(vomit_tools_core PRIVATE sourcepp::vpkpp MINIZIP::minizip 
 FetchContent_GetProperties(liblzma)
 target_include_directories(vomit_tools_core SYSTEM PRIVATE "${liblzma_SOURCE_DIR}/src/liblzma/api")
 target_link_libraries(vomit_tools_core PRIVATE vomit_tools_coacd)
-if(VOMIT_TOOLS_WHISPER)
-    target_link_libraries(vomit_tools_core PRIVATE whisper)
-    target_compile_definitions(vomit_tools_core PRIVATE VOMIT_TOOLS_HAS_WHISPER)
-endif()
 target_link_libraries(vomit_tools_core PRIVATE vomit_tools_vhacd box3d::box3d)
 vomit_tools_set_warnings(vomit_tools_core)
 

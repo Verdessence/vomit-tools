@@ -2860,7 +2860,6 @@ void CDemoViewer::StopWork()
 	SetPlaying( false );
 	m_pSound->StopAll();
 	m_pSound->StopSpeech();
-	m_pVoice->StopTranscribing();
 	m_pWorld->Stop();
 }
 

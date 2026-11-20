@@ -115,11 +115,6 @@ vomit_tools_add_notice(NAME "libopus (Opus, for demos' Steam voice)" FETCH opus 
 vomit_tools_add_notice(NAME "CELT 0.11.3 (for demos' vaudio_celt voice)" FETCH celt FILE COPYING
         URL "https://downloads.xiph.org/releases/celt/celt-0.11.3.tar.gz" LICENSE "BSD-2-Clause"
         NOTE "Only its library's sources (libcelt) are built, their global names prefixed with xv_celt011_.")
-if(VOMIT_TOOLS_WHISPER)
-    vomit_tools_add_notice(NAME "whisper.cpp and ggml (for transcripts of demos' voice)" FETCH whisper FILE LICENSE
-            URL "https://github.com/ggml-org/whisper.cpp/archive/refs/tags/v1.9.5.tar.gz" LICENSE "MIT"
-            NOTE "Built for the CPU only. Speech models are not included: the user picks a ggml model file.")
-endif()
 vomit_tools_add_notice(NAME "stb" FETCH stb FILE ./LICENSE
         URL "https://github.com/nothings/stb/archive/2c980bb59875b0d32144a71867fbdebb2f77cd20.tar.gz" LICENSE "MIT OR Unlicense")
 vomit_tools_add_notice(NAME "tinyexr" FETCH tinyexr FILE ./LICENSE

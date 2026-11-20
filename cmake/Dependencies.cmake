@@ -99,51 +99,6 @@ if(UNIX AND NOT APPLE)
     target_link_libraries(vomit_tools_celt PRIVATE m)
 endif()
 
-# whisper.cpp (MIT, with ggml): speech to text, for transcripts of demos' voice chat. Optional
-# (VOMIT_TOOLS_WHISPER); it runs on the machine, from a ggml model file the user picks. Built
-# static, on the CPU only, without OpenMP (ggml's own threads; no libgomp to ship), and for any
-# x86-64 with AVX2 rather than for the building machine (GGML_NATIVE off): release builds run on
-# other people's computers.
-if(VOMIT_TOOLS_WHISPER)
-    FetchContent_Declare(whisper
-            URL https://github.com/ggml-org/whisper.cpp/archive/refs/tags/v1.9.5.tar.gz
-            URL_HASH SHA256=ff1a9053feb509ff9d7729703355541ae9690073a6b1c40eb692c962e0dc1720
-            DOWNLOAD_EXTRACT_TIMESTAMP ON
-            EXCLUDE_FROM_ALL)
-    block(SCOPE_FOR VARIABLES)
-        # Its options otherwise clear what is set here (its CMake minimum predates CMP0077).
-        set(CMAKE_POLICY_DEFAULT_CMP0077 NEW)
-        set(BUILD_SHARED_LIBS OFF)
-        set(BUILD_TESTING OFF)
-        set(WHISPER_BUILD_TESTS OFF)
-        set(WHISPER_BUILD_EXAMPLES OFF)
-        set(WHISPER_BUILD_SERVER OFF)
-        set(WHISPER_ALL_WARNINGS OFF)
-        set(WHISPER_CURL OFF)
-        set(WHISPER_SDL2 OFF)
-        set(GGML_BUILD_TESTS OFF)
-        set(GGML_BUILD_EXAMPLES OFF)
-        set(GGML_NATIVE OFF)
-        set(GGML_OPENMP OFF)
-        set(GGML_CCACHE OFF)
-        if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|AMD64|amd64)$")
-            set(GGML_AVX ON)
-            set(GGML_AVX2 ON)
-            set(GGML_FMA ON)
-            set(GGML_F16C ON)
-            set(GGML_BMI2 ON)
-        endif()
-        FetchContent_MakeAvailable(whisper)
-    endblock()
-    # Its encoder is most of a transcription's time and runs twice as fast at -O3 as at
-    # RelWithDebInfo's -O2 (measured on the base model): optimised whatever the build type.
-    foreach(_target ggml-base ggml-cpu whisper)
-        if(TARGET ${_target})
-            target_compile_options(${_target} PRIVATE $<IF:$<C_COMPILER_ID:MSVC>,/O2,-O3>)
-        endif()
-    endforeach()
-endif()
-
 # stb (public domain / MIT): image loading (PNG, JPEG, TGA, BMP, PSD, HDR), resizing and DXT
 # compression, for the skybox editor. Pinned to the last commit before stb_image_resize2 moved to
 # its own repository. Its implementations are compiled in src/core (vomit_tools_stb).

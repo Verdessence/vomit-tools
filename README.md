@@ -155,7 +155,6 @@ vomit-tools is GPL-3.0-or-later; see [LICENSE](LICENSE). It's built with:
 | [miniaudio](https://github.com/mackron/miniaudio) | sound playback | Unlicense OR MIT-0 |
 | [libopus](https://opus-codec.org) | demos' Steam voice | BSD-3-Clause |
 | [CELT](https://downloads.xiph.org/releases/celt/) 0.11.3 | demos' vaudio_celt voice | BSD-2-Clause |
-| [whisper.cpp](https://github.com/ggml-org/whisper.cpp) (with ggml) | demos' voice transcripts (optional) | MIT |
 | [stb](https://github.com/nothings/stb) | reading, writing, resizing and DXT-compressing images | MIT OR Unlicense |
 | [CoACD](https://github.com/SarahWeiii/CoACD) | model to VMF: convex decomposition | MIT |
 | [CDT](https://github.com/artem-ogre/CDT) | CoACD's triangulation | MPL-2.0 |
