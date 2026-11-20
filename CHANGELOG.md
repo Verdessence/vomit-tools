@@ -1,864 +1,154 @@
 # Changelog
 
+## 0.99.0 — The Demo (2026-11-20)
+
+### Demo viewer (new)
+- Source demos (`.dem`) open in a tab: summary, timeline to scrub and play, the recorder's
+  camera path, console commands and frames.
+- The World page draws the demo's map from its own compiled faces and lightmaps, with the
+  players as their posed models holding their weapons, shots as tracers and deaths as marks.
+  Free, recorder, first-person and chase cameras.
+- Chat, kills, HUD messages, menus and rounds in side tabs and, through a player's eyes, in
+  the game's own HUD; Tab shows the scoreboard. Sounds, sprays, particles and the map's
+  logic guessed from its outputs.
+- Voice tab: every stretch of voice chat (Steam voice and CELT), played alone or saved as WAV.
+  Players can be muted.
+- `vomit-tools-cli demo info|dump|feed|voice|logic`.
+
+### Compiled maps
+- A `.bsp` opens in the map viewer, read back into a Hammer map: brushes, displacements,
+  entities, static props, overlays and the rest. It shows as compiled (its own faces and
+  lighting) and is read-only. `vomit-tools-cli map decompile` writes the VMF.
+
+### Hammer maps
+- Load Portal File (Map menu) draws a compile's `.prt` portals; double-click one for its leaves.
+- Object Properties shows and edits the selected props' model.
+- Loading shows progress, and a map that can't be read says why.
+
+### Also
+- File → New… is one window for every kind of new file.
+- Views that are loading show placeholders and what they are reading.
+- Texture editor: Simple Interface names; Sprite Sheet plays a sequence at its frame durations.
+- The material and model picture caches are JPEG XL, much smaller.
+- Opening a demo or map uses far less memory: pakfiles are read in place, only the needed
+  lumps are loaded.
+- README: how to install the VTF thumbnailers for file managers.
+
 ## 0.9.0 — The HUD (2026-11-15)
 
 ### HUD editor (new)
-- Tools > HUD Editor opens the game's HUD (`scripts/HudLayout.res`), a custom HUD's folder
-  (each HUD in the game's `custom/` is listed), or any layout file. The HUD's own scheme,
-  fonts, icons, language file and images come before the game's.
-- The elements are drawn as the game draws them, on any screen size: backgrounds, images,
-  labels in the scheme's fonts (its font files loaded), "#Tokens" from the language files,
-  the colours `scripts/hudanimations.txt` gives the panels, and sample values with their
-  icons for health, armour, ammo, the timer and money. Render Elements off shows boxes with
-  names instead. What only the game's code paints (radar, crosshair, weapon selection) is an
-  outline.
-- Drag elements, nudge them with the arrows, or edit their keys; "c", "r" and "f" anchors are
-  kept. Elements snap to each other and to the screen's edges and middle while dragged, with
-  guides (Snap on the bar; Alt drags freely). An element can be kept from being picked on the
-  screen. Lossless saving, undo.
-- Panel files (`resource/ui/*.res`: the team menu, the scoreboard…) open too, their controls
-  placed inside the panel, with the scheme's colours for each kind of control.
-- The main menu (`resource/GameMenu.res`) opens over the game's background, its items where
-  the game puts them; In Game shows the items a loaded map adds.
-- A scheme panel under the keys lists the scheme's colours, settings, fonts and borders, with
-  the ones the selected element uses marked; double-click puts a name into the selected key.
-- Lines with a condition (`[$WIN32]`, `[$POSIX]`…) apply by the system vomit-tools runs on, as
-  the game reads the file there.
+- Tools > HUD Editor opens the game's HUD, a custom HUD's folder or any layout file, drawn as
+  the game draws it (scheme fonts, colours, icons, "#Tokens", sample values) at any screen size.
+- Drag, nudge or edit elements, with snapping and guides; anchors kept, lossless, undo.
+- Panel files (`resource/ui/*.res`) and the main menu (`GameMenu.res`) open too.
+- A scheme panel lists the colours, fonts and borders the selected element uses.
 
 ### Scheme editor (new)
-- `ClientScheme.res`, `SourceScheme.res` and any other scheme file open in an editor of their
-  own: Colours, Settings, Fonts (the face each gets at a screen height, with a sample),
-  Borders, Font Files and the whole file. Names and values are edited in place; add,
-  duplicate and remove entries; a colour picker with alpha. Lossless, with undo.
-- A line's condition is in a column of its own, in words (Windows, Linux and macOS, not Xbox
-  360); lines not read on this system are greyed.
-- Open HUD editor tabs follow each change to their scheme, saved or not.
+- `ClientScheme.res`, `SourceScheme.res` and other schemes: colours, settings, fonts, borders
+  and font files edited in place, lossless with undo. Open HUD tabs follow each change.
 
 ### Hammer maps
-- World Grid (Shift+P): a grid in the 3D views on a plane of its own. Move or Turn puts the
-  gizmo on it (arrows, rings, G and R with X/Y/Z, typed numbers; a double-click lays it on the
-  surface there).
-- The block tool in 3D draws on the world grid's plane while it shows, else on the surface
-  pressed; a box on a turned plane is made turned. The box's handles are no longer hidden by
-  the gizmo, and G, R and E work on it as on a selection.
-- The lighting preview after an edit starts from the bake before and lights only what the
-  edit can have changed, nearest the camera first, showing what is done as it goes; a light
-  that moved or changed lights again only where its light lands. Earlier bakes are kept: an
-  undo or a setting put back shows its bake at once, and a map opened again starts from its
-  last one (Keep Bakes to Use Again in the Lighting panel).
-- Sky on Sky Faces (the Show bar, Preferences > Maps): off, sky faces draw their tool
-  texture, as Hammer shows them.
-- Face Edit is a tool panel in the side; Own Window in its menu takes it out. Any side panel
-  can be taken out into a window of its own, kept with the layout.
-- How far detail props are drawn is a setting (Preferences > Maps).
+- World Grid (Shift+P): a grid on a plane of its own for the gizmo and the block tool.
+- The lighting preview after an edit lights again only what changed, nearest the camera
+  first; earlier bakes are kept and reused.
+- Sky on Sky Faces toggle; detail prop draw distance setting.
+- Any side panel, Face Edit included, can be taken out into its own window.
 
 ### Interface
-- Preferences > Interface: each kind of editor in a window of its own (maps in a Maps window,
-  particle files in a Particles window…), each with its tabs and the whole menu bar.
-- Preferences > Interface: a scale for the whole interface, from the next start.
-- Help > About > Licenses lists the third-party libraries one by one (with a filter), each
-  with its source, license and text.
+- Each kind of editor can open in a window of its own; a scale for the whole interface.
+- Help > About > Licenses lists every third-party library with its license.
 
 ## 0.8.0 — The Hammer (2026-11-12)
 
 ### Hammer maps (new)
-- The Lighting panel's table of lights is a short list (picking one selects it for Object
-  Properties), folded under sections for the entities that set the map's look, each its keys as
-  fields typed by the FGD (colour buttons, choice lists), one undo step a change, and Add when
-  the map has none: Sun and Sky (light_environment), Shadows (shadow_control), Tone Map
-  (env_tonemap_controller: the exposure range, bloom scale and adapt rate a logic_auto sends it
-  as the map starts, the logic_auto made when there is none) and Colour Correction. The HDR
-  lighting preview's auto exposure keeps to the tone map's exposure range.
-- The Fog panel edits the picked env_fog_controller's values under its list (the views
-  following at once), and the 3D skybox's fog (sky_camera) when the map has one.
-- Right-click menus: in the 2D and 3D views (the object under the cursor, or the selection:
-  cut, copy, paste, delete, group, hide, carve, select all of a class, properties; in 3D, a
-  face's material), Object Properties' keys (reset to the FGD's default, copy and paste a
-  value), the Filter Control's visgroups (select, show, add and remove the selection, new,
-  rename, delete), the texture browser and the Lighting panel's lights. In 3D a right click on
-  the gizmo still goes round its modes.
-- Browse beside sound, particle system, model, sprite and material keys in Object Properties.
-- Materials draw their `$detail` texture: its blend mode, factor, scale and transform, scrolling
-  and animating with the material's proxies (the first 64 frames).
-- Refract and Water reflections of `env_cubemap` show the game's default cube map, as a map does
-  before buildcubemaps, rather than the map's sky; Water without `$envmap` still reflects the sky.
-- Detail props: the sprites vbsp would scatter from detail.vbsp over faces whose material has
-  a %detailtype show in the textured 3D views (Show bar: Detail Props), fading with distance as
-  the game's. Detail models aren't drawn yet.
-- func_dustmotes and func_dustcloud play in the 3D views with the particles (and their
-  toggles): motes of particle/sparkles drifting inside the brushes as the game's do, even when
-  they start disabled.
-- A Fog panel in the side lists the map's env_fog_controllers (those off at the start too)
-  and picks the one the 3D views show; Select picks its entity.
-- Fog has its own toggle on the Show bar and shows in the textured 3D views as well as the
-  lighting preview; Preferences → Maps says whether maps start with it.
-- A Nodraw toggle on the Show bar hides `tools/toolsnodraw` on its own; Tool Textures no longer
-  hides it.
-- Fixed: switching tab groups showed the tab nearest the old one instead of the group's last.
-- Entity drags preview without refreshing assets or property panels. Props, sprites, decals and
-  overlays retain independent meshes, so only changed entities need new GPU buffers; the 2D
-  backgrounds stay cached during drags. The event-loop timing includes handler work and reports
-  nested loops.
-- Selecting `sides` or `sides2` in Object Properties highlights its faces while the value is
-  edited, with missing IDs listed below. Transition overlays use a second colour for `sides2`.
-- A Texture section in the side panel shows the current material's picture and size, Browse,
-  Replace and Hide Mask, with ten recent materials remembered per map. It shares the current
-  material with Face Edit and the creation tools.
-- Brush corner dots in 2D are off by default; saved preferences are preserved.
-- Fixed: newly placed overlays and decals load their textures; moving, editing, deleting and
-  undoing them updates their projected picture. Projections follow edited receiving faces, and
-  new ones show a flat selection-coloured surface while their texture loads. Overlay-only edits
-  keep unchanged props and sprites.
-- **Map editor:** open Hammer maps (`.vmf`) in a tab laid out as Hammer++'s: a 3D view and the
-  Top, Front and Side views in four panes, its keys, colours, grid and camera (fly with WASD, look
-  with Z or the mouse), from Hammer++'s own settings.
-- **Editing:** move the selection by dragging it in a 2D view or with the arrows (Shift clones),
-  delete, cut, copy and paste (as VMF text, so between maps and to and from Hammer), select all,
-  snap to the grid (Ctrl+B), with texture lock (Shift+L). Every edit can be undone.
-- **Resize, rotate and shear** the selection by its handles in the 2D views: a click inside the
-  selection (or X) goes round Hammer's three modes. Rotation snaps to 15° (Preferences → Maps;
-  Alt frees it); a Scale Lock button (Hammer++'s texture scale lock, off by default) makes
-  textures stretch with resized faces rather than keep their size.
-- Fixed: Show All in the Filter Control crashed after the map had been edited (the automatic
-  visgroups' lists belonged to the scene before the edit).
-- **A gizmo in the 3D views:** solid move cones, rotation rings, scale cubes and shear
-  handles. All (T, or the toolbar) combines move, rotate and scale with plane squares and a
-  free-move circle. It can follow the 2D resize/rotate/shear mode; Preferences → Maps chooses
-  this and whether new maps start with Move or All. X hides it; J uses an entity's own axes.
-- **G, R and E in 3D** start a mouse-following move, rotate or scale. X/Y/Z cycles world-axis,
-  local-axis and free movement; Shift plus an axis constrains its other two axes. Type units,
-  degrees or a scale factor for an exact transform. Ctrl or Alt frees snapping, and holding
-  Shift gives finer mouse movement. Enter or a left click commits one undo step; Escape or a
-  right click cancels. WASD still flies during the transform.
-- Fixed: overlays and decals retain their entity model, sprite or box beside the projected
-  texture, including while dragged and after undo. The flat loading placeholder is removed
-  when the textured projection arrives.
-- Fixed: moving, turning or scaling brushes with the gizmo, G/R/E or the 2D handles redrew the
-  2D views and refreshed every panel on each mouse move; the drag now previews only what moves.
-- **Object Properties edits:** a key's value typed or picked (choices as their names, with
-  SmartEdit), the class retyped, flags ticked, outputs added, changed and deleted (the class's
-  outputs and the target's inputs offered; a target nothing answers to in red), comments, and
-  with SmartEdit off the raw keys added, renamed and removed. Each is one step to undo; typing
-  with several entities selected sets them all. **Map → Map Properties** does the same for the
-  world (the sky, the detail material…), and the sky is read again when it changes.
-- **Texture Application** (Shift+A): click faces in 3D (Ctrl adds, Shift takes the brush), and
-  the Face Edit sheet in the side panel sets their scale, shift, rotation and lightmap scale,
-  justifies (L, R, Fit, T, B, C; Treat as one), aligns to the world or the face, and applies the
-  current texture (Apply, the right button, or Shift+T on the selection). The **texture browser**
-  (Browse…) lists the game's materials with pictures from 32 to 512 pixels, see-through ones over
-  a checkerboard, filtered by words or to the map's own.
-- **Tie to Entity** (Ctrl+T), **Move to World** (Ctrl+Shift+W), **Group** and **Ungroup**
-  (Ctrl+G, Ctrl+U), group ignore (Ctrl+W).
-- **Clipping tool** (Shift+X): a line dragged in a 2D view cuts the selection on Enter, keeping
-  the front, the back or both (Shift+X again goes round them); the kept part is outlined in
-  white first. **Carve** (Ctrl+Shift+C) takes the selection's shape out of the brushes it
-  overlaps, in convex pieces, each brush's pieces grouped (Hammer++'s GroupCarve): a block
-  carves Hammer's slabs, any other shape a fan of pieces round itself, so a cylinder through a
-  wall leaves arch segments rather than cuts across the wall (Preferences → Maps picks the way). **Make Hollow** (Map menu) turns brushes into
-  grouped walls of a given width, inside or (negative) outside.
-- **Pivot** (Ctrl+P, Hammer++'s): the point the selection turns about, a ring dragged in the 2D
-  views (on the grid), where the 3D gizmo stands too; it stays where it was put as the selection
-  moves. The cursor over the selection's handles says what a drag would do, and Esc in a tool
-  with nothing drawn goes back to selecting without losing the selection.
-- **Transform** (Ctrl+M): turn, scale or move the selection by typed amounts about its centre
-  (or the pivot).
-  **Flip Horizontal** and **Flip Vertical** (Ctrl+L, Ctrl+I) mirror it across the active 2D
-  view's axes. **Paste Special** (Ctrl+Shift+V): several copies, each stepped and turned once
-  more than the last, starting where the original was or at the 2D view's centre, turned about
-  the pivot if asked, each copy grouped, with entity names made unique (their outputs follow).
-- **Replace Textures** (Ctrl+Shift+R): exact, partial or substituted names, in everything or the
-  selection (hidden too), rescaled for the new texture's size, or just marking the faces found
-  for the texture tool. **Find Entities** (Ctrl+Shift+F) selects and centres on a name. The
-  **Entity Report** (Map menu) lists the map's entities filtered by kind, class and key/value,
-  picking rows selects them, with Go to and Delete. **Check for Problems** (Alt+P) finds broken
-  brushes, empty brush entities, keys the game data doesn't know, unknown classes, point classes
-  with brushes, outputs to names nothing has and a missing player start, with Go to, Fix and Fix
-  all, over the visible parts only when asked.
-- **Cordon** (Map > Edit Cordon Bounds, Toggle Cordon State): a box dragged like a block's;
-  while it is on, what lies outside is hidden and left out of Run Map's compile, whose BSP is
-  still the map's own (a copy holding only what is inside, sealed with walls of
-  `TOOLS/TOOLSSKYBOX`, is compiled from a folder of its own). Hammer++'s several cordons, each
-  with its boxes, are listed in the Filter Control's **Cordons** tab: switched, renamed, added and
-  deleted there. Saved in Hammer++'s `cordons` block, read from Hammer's old `cordon` block too.
-- **Vertex tool** (Shift+V): the selected brushes' corners (white) and edges (yellow) as handles
-  in the 2D views; click or box them (Ctrl adds), drag them on the grid, each move one undo step;
-  Shift+V again shows vertices only, edges only, or both. A face bent out of flat makes Hammer's
-  "invalid solid structure", which Check for Problems reports. No face splitting (Ctrl+F) or
-  vertex scaling yet.
-- **Displacements** (the Displacement tab of Face Edit, with the texture tool): Create (power
-  2 to 4) on four-sided faces and Destroy; Paint Geometry and Paint Alpha in the 3D views with a
-  round brush (Raise/Lower, Raise To, Smooth, along the face's normal or an axis; the left
-  button raises, the right lowers; [ and ] size the brush; a drag keeps painting, one undo step
-  a stroke); Sew (edges meeting end to end, T-junctions, and onto plain faces); Subdivide (the
-  selected base surfaces rounded together, with painted heights preserved); Noise; Invert Alpha; the power (resampled) and
-  elevation. Triangle tags are written as Hammer's (9, 1, 0 by slope), and the Walkable button
-  tints the selected displacements' steep triangles. New and destroyed displacements, and
-  changed powers, are saved in place. As Hammer: a brush carrying a displacement is drawn as
-  the displacement alone; a selected displacement shows its triangles and grid (the Grid and
-  Select masks hide either); Soft or hard edge, Autosew, Alt+drag to size the brush and
-  Alt+right-click to take a face's normal; Scale and the no-collision flags under Attributes.
-  Painting defaults to **Selected only**, with an option to paint across all shown displacements.
-  Stroke previews keep the panels and 2D backgrounds cached until commit; Escape cancels a
-  stroke. Brush settings are remembered, and saved grid fields retain their full float precision. Fixed-vertex brushes, Subdiv Normal, collapsible
-  vertex markers, collision flags in Object Properties, and Sculpt's Push/Carve tools (editable
-  cross-section, absolute/adaptive offsets, falloff, smoothing and additive/attenuated bounds)
-  are available in the Displacement tab.
-- **Face Edit** opens as a window of its own, as Hammer's (Preferences → Maps puts it back in
-  the side panel); closing it goes back to the selection tool.
-- **Block tool** (Shift+B): drag a box in a 2D view, pull its handles in the others, Enter (or the
-  right button's Create Object) makes a block with the current texture; the New Objects panel's
-  Objects box picks a wedge, cylinder, spike or sphere instead, with its Faces count. **Entity tool** (Shift+E):
-  click in 2D (its marker in green, as Hammer++'s) and press Enter, or click a surface in 3D to
-  stand the entity on it, with the class picked under New Objects. New objects get the keys and
-  colours Hammer gives them (an entity's defaults but those that are 0 or empty), and the game's
-  Hammer configuration's default entity, texture scale and lightmap scale.
-- **Saving** writes the map back as it was read, changing only what was edited: untouched parts
-  stay byte for byte, so diffs against Hammer's saves stay small. The previous file is kept as a
-  `.vmx`, as Hammer does.
-- **Run Map** (F9, Map → Run Map…): Hammer's compile window. Normal: how much of BSP, VIS and
-  RAD to run, HDR, the game's parameters; Expert: named command sequences with Hammer's
-  $variables, seeded from Hammer++'s `hammerplusplus_sequences.cfg` or Hammer's `CmdSeq.wc`
-  beside the game, edited and kept in the settings. The compilers' output streams into the
-  window (the game's too, once it is started, with its exit), their problems are listed under it (a double click goes to the brush or point), a leak
-  stops the compile and its line is drawn red in every view (Map → Load Pointfile, Unload, Go to
-  Leak), and the game is started on the map. The compilers and the game's launcher are set in
-  Preferences → Source Tools (the native VBSP++, VVIS++ and VRAD++ can live anywhere).
-  `vomit-tools-cli map compile <map.vmf> --game <folder>` does the same from a script (the
-  compilers found beside the game or named, Hammer's choices as switches, or `--sequence` from a
-  sequence file; exit code 2 on a leak), and `map sequences` lists what a file holds.
-- **File → New → Map (VMF)** starts an empty map, as Hammer++ starts one; saving asks where it goes.
-- A selected prop shows its triangles; other entities drawn by a model (player starts, NPCs) show
-  their box instead of a mass of triangles over everything. Preferences → Maps → 3D View can show
-  every model's edges, or every model's box.
-- Brushes (with Hammer++'s exact vertices), displacements with their blended materials, entities
-  as their FGD draws them (boxes, models, sprites tinted by their light, helper spheres), overlays
-  and decals on their faces, `func_instance` contents tinted orange, the 2D sky on sky faces and
-  the 3D skybox behind the world. Textures stream in from the game. Drawn on the graphics card, or
-  in software without one.
-- Selection by Hammer's rules (groups, objects or solids; box selection with Enter), quick hide,
-  Go to Brush, Filter Control (the map's visgroups and the automatic ones) and a read-only Object
-  Properties with SmartEdit's names. Game data comes from Hammer++'s or Hammer's configuration for
-  the game, or from Preferences → Maps, which also holds the views' settings.
-- Large maps open in about a second: a 50 MB map reads in a quarter of a second.
-- The 2D views keep their picture between repaints, so turning or flying the camera no longer
-  redraws every brush three times over; on a 50 MB map a camera move went from about 50 ms of
-  main-thread work to under 1 ms. O in a 3D view shows where each frame's time goes.
-- Textures stay in the VTF's own DXT form for the graphics card and are only decoded when a
-  view draws in software, which cuts a big map's memory to a fraction.
-- Mouselook (Z) keeps the pointer where it is and puts the cursor back there when it ends: on
-  Wayland through the compositor's pointer constraints, elsewhere by warping it.
-- Checked against Hammer++ by hand, and changed to match: groups get a colour each, centre handles
-  are yellow, broken solids are tinted red with their edges drawn over everything, models show
-  textured in the 2D views (a selected one as its edges), the 3D camera shows in the 2D views as
-  a pyramid out to the view's shape, the camera starts where it was when the map was last closed
-  (or at the origin), and textures can be filtered bilinear, trilinear or anisotropically (2× to
-  16×; 4× by default).
-- Preferences → Maps is in tabs, and nearly every value the views draw with is there: colours,
-  sizes, zoom steps, the 3D camera's steps and the tints, with a button back to Hammer++'s.
-- Closing a map gives its memory back: a 50 MB map left about half of what it took with the app,
-  and now leaves little beyond what the graphics driver keeps. Building it allocates a fortieth as
-  often and is a quarter faster.
-- **Sprinkle tool** (Shift+F, Hammer++'s): paint entities from the sprinkle definitions (the
-  game's `scripts/hammer/sprinkle`, Hammer++'s `scripts/sprinkle`) onto the surfaces under a
-  brush in the 3D view, one a grid cell, with random yaw and the Additive, Subtractive, Replace
-  and Overwrite modes. Ctrl takes away, the right button or `[` `]` sizes the brush, and a stroke
-  is one undo step.
-- **Building generator** (Tools): stairs, spiral stairs, Hammer's arch, a room with doorways, a
-  wall with rows of windows or a railing, filling the block tool's box, with a preview; added as
-  one group.
-- **Helpers:** a selected entity shows its FGD helpers in the 2D and 3D views: lines to the
-  entities it targets, a spot light's cones, boxes, arrows, a projected texture's frustum, the
-  faces a cubemap lists, and its radii (a sound's reach, a light's falloff) in 3D too.
-- **Set Up Hammer** (Tools): writes the open game's entry into Hammer++'s (or Hammer's) game
-  configuration (its game data, compilers and folders), keeping the rest of the file.
-- **Manifests:** a `.vmm` opens as one map of its submaps, each an instance; Collapse All makes
-  them one map to save as a VMF.
-- CS:GO's displacement blend rows (`multiblend` and the like) are kept when a displacement is
-  edited.
-- Map Properties and the building generator are panels in the side; the tools' own panels
-  (Face Edit, Sprinkle) have their tabs after the others, under a line. The side keeps its width
-  when Face Edit comes and goes, and remembers the width it is dragged to. Preferences → Maps can
-  make it show one panel at a time, as Blender's tabs do.
-- The 2D views draw a brush as it is turned, resized or sheared, not only the selection's box,
-  and keep a dragged radius in view.
-- A selected entity's radii (a sound's reach, a light's falloff) can be dragged by a handle in
-  the 2D views; the cursor shows what a handle does and when it is being dragged.
-- The sprinkle brush is sized with Alt+wheel and, Photoshop-style, by a right-drag that also sets
-  the density.
-- The block tool keeps the box it was drawing while another tool is used.
-- Changing an entity's class drops the keys only its old class had.
-- A map tab's status bar shows only the map's own (no sound controls while nothing plays, no game
-  file count).
-- The texture browser remembers its picture size.
-- **Autosave:** a changed map is written to `<map>.vmf.autosave` every five minutes (Preferences →
-  Maps: on or off, how often), as saving would write it. A map that opens with a newer autosave
-  beside it (a crash) shows a bar to recover it or delete it; new maps' autosaves are offered back
-  at the next start.
-- **Tool bars:** the commands are icons on Qt's tool bars round the views (Selection Mode, 3D
-  Gizmo, Grid, Locks, Show, Objects, Views, Compile, and the tools down the side), each moved to
-  any edge, floated or hidden. Right-click a bar for icons, words or both, and Customize Tool Bars
-  to move buttons between bars, reorder and hide them. The layout is every map tab's and kept.
-- **Particles:** `info_particle_system` plays its effect in the 3D views, found by name in the
-  files the game's manifest (and the map's own) lists, from its origin and the entities its
-  `cpoint` keys name, with the particle editor's simulation. Show → Particles turns them off;
-  names the game lacks are listed in the status bar.
-- **Animated materials:** AnimatedTexture, TextureScroll, Sine and the other proxies that need
-  only the time play in textured 3D views: frames, scrolling, colour and alpha.
-- **Where things move:** a selected door, button or momentary_door shows an arrow along its
-  `movedir` as far as it travels (its size less `lip`) and its box where it stops;
-  func_movelinear and func_water_analog by `movedistance` from `startposition`; a train or path
-  arrows along its `target` chain.
-- **Import Stripper Config** (Map menu): a Stripper:Source config's changes made one undoable
-  edit of the map: what it adds becomes entities, what it modifies is changed, and what it filters
-  out is kept but hidden, each kind in a visgroup under "Stripper: <config>" (Added, Modified,
-  Removed). Visgroups made here are saved in the map.
-
-### Hammer maps: the spline tool (new)
-- A path of points with a strip of displacements swept along it, for roads, paths and river
-  beds: click points on surfaces in 3D or on the grid in 2D, Enter makes the pieces. The curve
-  passes through every point without loops (centripetal Catmull-Rom), its height never rises
-  past or dips under its points, the strip stays level across, and neighbouring pieces share
-  their edges point for point. Width, piece length, displacement power, thickness, material,
-  texture scale and loop are in the side panel; the texture runs along the road.
-- The spline stays editable: it is kept in the map (a `vomit_spline` block naming its pieces).
-  Choose the tool with a piece selected to take it up; dragging a point, adding one on the curve,
-  removing one (right-click) or changing a setting makes the pieces again, one undo step each.
-  Hammer keeps the pieces as ordinary displacements and drops the block on its own saves.
-- Points have handles, as Photoshop's: drag the picked point's handle end to set how the curve
-  leaves it; double-click (or Automatic Handle) gives it back to the curve.
-- Shift-click picks several points; Brush Edit's G, R and E move, turn and scale them (X/Y/Z to
-  lock, numbers to type the amount); Ctrl+X removes them. Ctrl+Z and Ctrl+Shift+Z step through
-  a path's points before it is made.
-- The pieces are kept in one group (Group the pieces, on), so a click takes the whole strip.
-- The preview draws each piece's outline in white; Browse picks the material in the texture
-  browser; points clicked on a displacement land on its surface.
-- The 3D views show the world's axes at 0 0 0 (Origin Axes on the Show bar).
-
-### Hammer maps: the physics tool (new)
-- Hammer++'s Physics Simulation: select props and brushes, Space, and they fall, tumble and
-  settle against the rest of the map (brushes, displacements, other props' collision models);
-  Space again keeps where they land, one undo step, and Escape puts them back. Props move as
-  their collision models (.phy) with their mass; brushes as their own shapes.
-- While it runs, in a 3D view: left-drag pulls an object, right click shoots it, middle click
-  sets off an explosion. The panel has the strengths, gravity, air density, time scale, sleeping
-  until touched, mass from the model, props only, and drawing the collision models.
-- While it's stopped, a click in a 3D view picks what falls next, as the selection tool does.
-- A prop whose model has no .phy falls as its model's bounds, and the panel says so; one that
-  isn't moving is nothing for the others to hit, as in the game.
-- Ragdolls: a model whose .phy is several solids jointed (a player, a zombie) falls as its
-  parts, each joint held within the angles its .phy gives, and lies where it lands; its parts
-  pass through one another unless Disable self collisions is unticked. The prop is kept where its
-  root part ends up; its pose isn't kept yet.
-- Runs on Box3D (Erin Catto, MIT).
-
-### Hammer maps
-- The Building Generator is a fold at the bottom of New Objects rather than a panel of its own,
-  open to start with (folding it is remembered); Tools > Building Generator opens it there.
-- A small edit, a selection or hiding something redraws only the part of each 2D view it
-  touches, not the whole view: about 1 ms a view instead of 25 to 100 on a big map.
-- A selected sprite (env_sprite, a light's or an FGD's sprite) shows its picture in the 2D
-  views, facing the view, as the 3D views draw it; see-through sprites let what is under them show.
-- New Objects' Objects box is as tall as a box: the side's spare height goes below the panel.
-- A 3D view can be orthographic (its pane's menu, or the View_3D_Orthographic key; keypad 5
-  in the Blender keys): no perspective, what it looks at the same size as before, the wheel
-  zooming about the pointer. The 2D views draw its camera as a box.
-- The texture browser shows the material under the mouse live beside the grid (proxies
-  animating, on a square or a ball, with its shader and size), and the one picked once the
-  mouse leaves the grid.
-- Browse beside a particle system key opens a particle browser: the game's systems as a list
-  with the file each is from (and whether the game loads it) or as a grid of pictures, filtered
-  by words; the one under the mouse plays beside them, as the particle editor plays it.
-  Each system is marked a parent, a child or both, and beside it what it spawns and what
-  spawns it.
-- The particle editor's material field has Browse beside it: the texture browser, on sprite
-  materials to start with, the one under the mouse drawn live.
-- The particle editor's Add is a list under the stack, always there, on the kind picked in the
-  stack (initializers when an initializer or their heading is picked...); a box beside its filter
-  switches kind (or to child systems). Double-click, Enter or Add adds the function highlighted;
-  the filter takes words. The split between the stack and the list is remembered.
-- Map > Nodraw Faces Facing the Void: the world's faces only the outside can see (each wall's back,
-  the floor's underside...) get nodraw, as one undo step. The map's own and its instances' world
-  brushes seal it (clip, trigger and hint brushes don't); when the outside reaches an entity it
-  says where the map leaks and changes nothing, and the same when no entity is inside. Tool
-  textures and displacements are left alone.
-- Check for Problems tells errors (the compile fails or the game breaks) from warnings: each row
-  tagged ERROR or WARN with its icon and colour, errors first, a count of each, toggles to show
-  either, and a badge on the side tab with the error count (or the warnings', when none).
-- Selecting an entity (a click, Find Entities, the Entity Report) brings Object Properties
-  forward when another tab of its group was showing, without taking the keyboard; not while a
-  tool's own panel is in charge or you're typing elsewhere. Preferences > Maps can turn it off.
-
-### Browsing
-- The game browser's, the folder browser's and archives' trees keep the open folders of the rows
-  at their top pinned over them while scrolling; a click on one folds it and scrolls to it.
-- The three trees look alike: the same icons (a file's by its kind, the Source formats included:
-  material, texture, model, particles, map, archive...; the folder open while expanded), and a
-  Type column in each.
+- **Map editor:** `.vmf` maps in a tab laid out as Hammer++'s (3D view plus Top, Front and
+  Side), with its keys, colours, grid and camera. Drawn on the graphics card or in software;
+  large maps open in about a second.
+- **Editing:** move, resize, rotate and shear by handles, a 3D gizmo, G/R/E with typed amounts,
+  cut/copy/paste as VMF text, groups, tie to entity, pivot, Transform, Flip, Paste Special.
+  Every edit undoes; saving is lossless and keeps a `.vmx`.
+- **Tools:** block, entity, clipping, carve, make hollow, vertex, texture application with
+  Face Edit and a texture browser, displacements (paint, sew, subdivide, sculpt), sprinkle,
+  spline (roads of displacements), physics simulation (Box3D) and a building generator.
+- **Object Properties** and **Map Properties** edit keys, flags and outputs with SmartEdit.
+- **Reports:** Replace Textures, Find Entities, Entity Report, Check for Problems.
+- **Cordons**, **Run Map** (F9, Hammer's compile window and sequences, leaks drawn),
+  `vomit-tools-cli map compile`, autosave and recovery, manifests (`.vmm`), Set Up Hammer.
+- **Shown:** materials with `$detail` and animated proxies, overlays and decals, the 2D and 3D
+  skies, fog, detail sprites, particles, dust motes, FGD helpers, where doors and trains move,
+  and a Lighting panel for the map's sun, shadows, tone map and colour correction.
+- Import Stripper Config as an undoable edit, grouped in visgroups.
+- Tool bars round the views, movable and customizable.
 
 ### Shaders (new)
-- Compiled shader files (.vcs, versions 4 to 6: every one of HL2's and the game folder's own) are
-  read, each combo's Direct3D 9 bytecode (vs_1_1 to ps_3_0) disassembled with its constants'
-  and samplers' names. `vomit-tools-cli shader <file.vcs>` prints it.
-- Pixel shaders (ps_2_0 to ps_3_0) run in software, and screenspace_general materials over a
-  picture as the game draws them: their textures in s0 to s3 (the frame for _rt_FullFrameFB),
-  $c0_x to $c3_w in c0 to c3, texel sizes in c4 to c7, sRGB read and written unless
-  $linearread_*/$linearwrite, and $additive, $alpha_blend, $alpha_blend_color_overlay, $copyalpha.
-- The material editor previews a screenspace_general material by running its pixel shader over
-  a sample scene (its proxies, CurrentTime say, moving it), with a Shader tab holding the
-  disassembly; a shader the game's files don't have is named, and the scene shows as it is.
-- Hammer maps: a Screen Effect panel draws a screenspace_general material over the 3D views, as
-  the game draws an env_screenoverlay's or a post effect: picked from what the map names
-  (env_screenoverlay's OverlayName keys, r_screenoverlay commands) or the texture browser, its
-  proxies moving it, its c0 to c3 changeable there. On the graphics card its pixel shader is
-  written as GLSL and baked as the map draws (the scene to a texture, the effect from it); in
-  software it runs through the interpreter.
-- The Screen Effect panel is now Screenspace Shaders. Under the material, the .vcs it runs and
-  its profile; "Enabled" shows it. Pick by Shader lists the map's own (env_screenoverlay,
-  r_screenoverlay, material_modify_control) and every screenspace_general material in the game
-  with the pixel shader it names (those whose .vcs is missing greyed, last), read once on a
-  thread, and a Shaders tab with each .vcs under shaders/fxc and the materials using it; a filter
-  takes words. "Any Material..." lists every material by name (the texture browser as a list).
-- Its Statistics: c0 to c3 as the shader sees them now (proxies and held values applied,
-  updating as they move), its instructions, texture reads and temporaries, the constants and
-  samplers it reads by their names in the shader with what each is (the material's $c, a
-  texture's size, the frame), its cost in software, and for screenspace_font_line its constants
-  unpacked (the box, rows, reveal, tint, parameter widths and runtime glyph cells).
+- Compiled shaders (`.vcs` v4–6) read and disassembled; `vomit-tools-cli shader`.
+- ps_2_0–ps_3_0 pixel shaders run in software: screenspace_general materials preview in the
+  material editor, and over the map's 3D views (Screenspace Shaders panel, on the card as GLSL).
 
 ### Settings file (new)
-- Settings live in `vomit-tools.nut` (beside Qt's settings: `~/.config/vomit-tools/` on Linux),
-  written as Squirrel (VScript) tables and read as data, never run: `map <- { fov = 90 }`,
-  `map.fov = 90;`, `local` values, and `IncludeScript( "keys.nut" )` to pull in others
-  (relative, `~`, globs). Preferences writes each change back in place and leaves the rest of the
-  file as written; edits saved in the file apply at once. The first run moves the old settings
-  into it, every setting listed, the defaults commented out.
-- Problems in the file (a typo'd key, a bad value, an unknown action, a syntax error) show in a
-  bar over the tabs with the file and line, until fixed. Edit → Open Settings File opens it.
-- Keys: `map.keys_preset` and `binds` / `unbinds` lists (`[ "map", "Ctrl+Shift+E", <action> ]`),
-  actions named as in Hammer++'s keybindings; Preferences → Keys writes them.
-- Rules: `[ "group:<name>", pattern ]` puts matching files' tabs in a group;
-  `[ "editor:<map|model|detail|stripper>", pattern ]` opens them in that editor.
-- Per-editor tables: `editor <- { sound = { code = { font_size = 12 } } }` (the text editor's
-  scheme, font, size and completion).
-- Theme: `theme.color_scheme` (system, light, dark), `theme.accent` and `theme.style`.
-- The app's own state (window layouts, recent files, last folders, the session) is kept as
-  Squirrel tables too, in `vomit-tools.state.nut` (Qt's `vomit-tools.conf` before), moved over
-  on the first run.
-
-### Skyboxes
-- Import Panorama: an equirectangular panorama becomes all six faces, with a face size, a turn,
-  and a preview to look around in. An HDRI (.hdr, or OpenEXR .exr) also gives the HDR set the
-  game draws with HDR on (`<name>_hdr<f>`, shader `sky`, as Valve's skies are): compressed
-  (BGRA8888, `$hdrcompressedtexture`) or float (RGBA16161616F, `$hdrbasetexture`). It is brought
-  to a stock day sky's brightness, adjustable in stops, and the LDR faces are tone mapped from
-  it (filmic, Reinhard or clip, with an exposure).
-- The sky list leaves out a sky's HDR set (`train_hdr` beside `train`).
-- OpenEXR files open wherever images do (through tinyexr).
-- A sky's proxies run: a LinearRamp scrolling its texture transform (through TextureTransform)
-  moves it in the sky editor's view and in the map's 3D views, as the game does.
-- A sky face's material or texture opens in the material or texture editor: a second button
-  on its preview, and Open in Material Editor on the sky editor's faces.
-- Hammer maps: the textured 3D views draw the map's 2D sky behind everything, so what nothing
-  covers shows the sky in that direction (2D Sky on the Show bar, and in Preferences > Maps).
+- Settings live in `vomit-tools.nut` (Squirrel tables read as data), written back in place;
+  problems show with their line. Keys, tab group rules, per-editor settings and the theme.
 
 ### Also
-- The main window's tabs are grouped under a strip by kind (maps, textures, sounds...); a tab's
-  right-click moves it into a group of your own, kept across starts. Preferences → General turns
-  grouping off.
-- The File menu is shorter: **New** holds everything that makes something (maps, particles,
-  skyboxes, detail files, soundscapes, soundscripts, textures), **Open** holds File, Folder, Game
-  and Recent. VPKs and compiled maps open through Open → File; Open Sky moved to the Game menu.
-- Open → Recent is a searchable list of the last 100 files, folders and games, each with its
-  kind's icon, its name before its folder; files saved here are marked ✎ and tell when.
-- The detail editor remembers the sprite material last used with each detail.vbsp, and puts it
-  back when the file opens again.
-- Garry's Mod's `cfg/mount.cfg`: the games it names are mounted after Garry's Mod's own files,
-  their VPKs too; a Windows path in it is found again in the Steam library holding Garry's Mod.
-- The model exporter's GMod playermodel tab: a model on the ValveBiped skeleton (HL2's humans,
-  CS:S's players) becomes a playermodel project: its QC for models/player/<name>.mdl with GMod's
-  male, female or zombie animations included, its ragdoll kept from its .phy (each piece on its
-  bone, the joints' limits and the mass as they were), a ragdoll pose, and the Lua listing it
-  (and its arms) in GMod's player model menu. Models on other skeletons say which bones they lack.
+- Skyboxes: Import Panorama (HDRI too, with the HDR set), OpenEXR, sky proxies run.
+- Tabs grouped by kind; a shorter File menu; a searchable Recent list.
+- Particle browser and live material previews in the browsers; pinned folders in the trees.
+- Garry's Mod's `mount.cfg`; GMod playermodel export from ValveBiped models.
 
 ## 0.7.0 — The Model (2026-10-27)
 
-### Models (new)
-- **Model viewer:** open compiled models (`.mdl` with its `.vvd`, `.vtx`, `.phy` and `.ani`) in a
-  tab: bodies, skins, LODs, sequence playback and inspection, and editing the compiled files in
-  place.
-- **Model browser** (Browse Models): every model of the mounted game as a grid of pictures,
-  searchable by name, material, surface property or texture, with a details panel. Pictures are
-  cached on disk, so later visits only draw new or changed models.
-- Exports to exchange formats, editable source projects, glTF mesh import, and compiling and packing
-  into a map with the Source tools found on the system. Also in `vomit-tools-cli model`.
-- **Model to VMF:** export Hammer brushes from physics hulls, matching extruded cutout caps, or a
-  convex decomposition of a render mesh, with material choices, optional grid snapping and
-  Hammer++ vertex data. Also available as `vomit-tools-cli model vmf`; invalid hulls are omitted
-  with reasons. Automatic targets the visible mesh, with a surface voxel fallback for open
-  character meshes. Hull vertex counts respect the brush side budget; collision export remains an
-  explicit choice.
-
-### Archives and maps
-- Open VPKs and other archives (GCF, GMA, PAK, WAD, XZP, ZIP) in a tab of their own: their folders
-  and files, a path search, a preview of the picked file, and exporting files out.
-- Maps (`.bsp`) open the same way: their packed files, beside their entities with keyvalues and
-  the table of lumps.
-
-### Sounds and manifests
-- Listening from positions: a top-down plan with the listener and env_soundscape's eight position
-  targets, each draggable; sounds are heard by distance and direction.
-- Generate Manifest: soundscapes, soundscripts and particles manifests, or a map's
-  `<map>_particles.txt`, from the game's files. Entries that stay listed keep their place and comments.
-
-### Also
-- Open and save windows are the desktop's own file chooser on Linux, asked for through the XDG
-  desktop portal (so KDE's, GNOME's, or whichever one the desktop is set up with), and each one
-  starts in the folder the last one finished in. Qt's window is the fallback when no portal is
-  running; Preferences → Interface switches back to it.
+- **Models (new):** viewer for `.mdl` and its files (bodies, skins, LODs, sequences), in-place
+  editing, exports and glTF import, compiling and packing; a model browser of the whole game;
+  Model to VMF (brushes from hulls, cutouts or convex decomposition). Also `vomit-tools-cli model`.
+- **Archives:** VPK, GCF, GMA, PAK, WAD, XZP and ZIP open in a tab; `.bsp` shows its pakfile,
+  entities and lumps.
+- **Sounds:** listen from env_soundscape's positions on a top-down plan; Generate Manifest.
+- File windows use the desktop's own chooser on Linux (XDG portal).
 
 ## 0.6.6 - qol (2026-10-25)
 
-- A program icon, and a splash screen that says what is loading.
-- Sound editor: copy and paste entries, blocks and keys (right-click, Ctrl+C, Ctrl+V), within a
-  file or between files; they go on the clipboard as KeyValues text.
-- Right-click menus follow one order everywhere (copy and paste, add, rename, delete), and long Add
-  lists are a search box over a scrolling list.
-- The icon in About; Help → About Premium.
-- The folder browser's folder and the open tabs come back at the next start (Preferences → Interface).
-- Save As starts in the folder picked in the side panel's tree.
-- Details editor: selecting a type or group lights all its sprites on the sheet; drag them to move
-  them together. Duplicate a type, group or entry with the Duplicate button, Ctrl+D or Ctrl-drag.
-- Details editor: types, groups and entries are panels. Click a title or into a field to select one
-  (the Select button is gone), drag it to move it (Ctrl: copy), drop it on another file's to copy,
-  and Ctrl+C / Ctrl+V. The type list has a right-click menu.
-- Saving is faster: the saved file joins the mounted game instead of the whole game being mounted again.
-- Preferences → Advanced → Debug log: prints background work, timed, to the terminal and a log file.
+- Program icon and a splash screen.
+- Sound editor: copy and paste entries, blocks and keys.
+- Details editor: types, groups and entries as draggable panels; duplicate and copy.
+- The open folder and tabs come back at the next start; faster saving; a debug log.
 
 ## 0.6.5 — The Detail Sprite (2026-10-24)
 
-### Details editor (new)
-- Open and create `.vbsp` detail files with lossless saves, undo, type selection, group and entry
-  cards, simple controls, and checks against the game’s models and material references.
-- **3D preview:** the type scattered on its ground material (picked from the materials that use
-  it), blended across so each group shows; sprites in their orientation and shape, and models.
-- Each entry's card shows its sprite; on the sheet, drag the picked one's handles to move or resize it.
-- Select or draw sprite rectangles on the sheet; pack pictures with existing sprites into a new
-  VTF and VMT, updating their rectangles together. Open the sheet in the texture editor.
-- Search the game’s detail types from `%detailtype` in the material editor and open their cards.
-
-### File browsers
-- Right-click a file or folder for its menu (Explorer's own on Windows). **Show in File Manager**
-  in the Folder tab. Every column can be resized, and the widths are kept.
-
-### Other
-- Saving a file the manifest doesn't list asks once, with **Don't remind me again** (back on in
-  Preferences → Interface); an empty file isn't offered.
-- A new sound file or entry without a name warns instead of doing nothing.
+- **Details editor (new):** `.vbsp` detail files with lossless saves, undo, checks, a 3D
+  preview, and sprite rectangles drawn and packed on the sheet.
+- File browsers: right-click menus, Show in File Manager, resizable columns.
+- Manifest reminder on save, with Don't remind me again.
 
 ## 0.6.0 — The VTF (2026-10-24)
 
-### Texture editor (new)
-- `.vtf` files open in their own tab, with undo: every mipmap, frame, cube face (or a cross) and
-  volume slice, channels on their own, zoom, pan and tiling; header, resources and flags beside it.
-- **Import** pictures as an image, frames (GIF/APNG too), a cube map (also from a panorama) or a
-  volume, in every format but P8, VTF 7.1–7.5. Presets, mipmap filters, exact or power-of-two
-  sizes, normal maps from height, `$distancealpha`, HDR.
-- **Convert**, **Properties**, **Export**, **Copy Image**, drag and drop, **Sprite Sheet** (mksheet
-  with `.mks`), **File → Create VTF from Pictures** and **Convert a Folder of Textures**.
-- **Sprays:** the side panel says whether it works as one (512 KB, 4096 a side); **Make Spray**
-  makes it fit.
-- New textures and materials ask where to save.
-
-### Material editor (new)
-- A material opens in its texture's tab, drawn in the same viewer (flat or on a ball, right-drag
-  for the light), with **Messages** below for mistakes, misspellings and missing textures.
-- **Visual** (parameters with fitting inputs, add from a dialog, tick to hide from the preview) or
-  **Raw** (highlighted text), picked in Preferences → Materials.
-- **Create VMT** with shader, alpha mode, normal map, reflections, phong and `$surfaceprop`.
-
-### vomit-tools-cli (new)
-- `create` (with `--spray`), `edit`, `extract`, `info` and `thumbnail`, with `--watch`.
-- VTF thumbnails in GNOME Files, Thunar, Nemo, Caja and Dolphin.
-
-### Sound editor
-- **Simple interface:** tidy names, number boxes with units, ranges, lists and tick boxes.
-- One click opens a value's choices, filtered as you type.
-- Short cards no longer have extra space above and below.
-
-### Other
-- Files opened while the app runs join its window (Preferences → Interface).
-- RGBA16161616 textures show as linear light.
+- **Texture editor (new):** `.vtf` with every mip, frame, face and slice; import (frames, cube
+  maps, volumes, every format but P8), convert, export, sprite sheets, sprays, batch convert.
+- **Material editor (new):** visual or raw editing with live preview and messages; Create VMT.
+- **vomit-tools-cli (new)** for textures, and VTF thumbnails in Linux file managers.
+- Sound editor: Simple Interface with typed fields.
 
 ## 0.5.0 — The Vulkan (2026-10-24)
 
-### Preferences
-- **Edit → Preferences** (Ctrl+,) is where the app's settings go from now on, a page each:
-  **Interface** (the simple or regular interface, still under View too), **Graphics** and
-  **Particles**. Changes take effect at once, except the graphics API, which waits for the next
-  start.
-- Graphics APIs are inline choices, avoiding a Wayland crash when reopening the backend picker
-  with Kvantum and affected KWindowSystem versions.
-
-### Graphics: Vulkan
-- **Every preview draws on the graphics card:** the sky view, the material preview, the particle
-  preview and the particle grid's pictures, through Qt's RHI. **Automatic** (the default) uses Vulkan
-  where it works, then the platform's usual API (Direct3D 11 on Windows, OpenGL on Linux), then the
-  CPU. Preferences → Graphics can pick Vulkan, OpenGL, Direct3D 11 or 12, or Software, and says what
-  is in use; so do Help → About's build details.
-- **The same pictures as before:** each shader does what its software renderer does, step by step,
-  and the tests compare the two. All 10,267 CS:S and HL2 materials match.
-- The material preview draws at the full size of the view, not at most 512 pixels, and stays sharp
-  while its proxies play.
-- The particle preview's **GPU** checkbox is gone: Preferences decides for every view. A view whose
-  graphics card fails draws in software.
-- Material-preview snapshots requested before the window is shown draw in software, avoiding stale
-  images and a Vulkan driver crash during shutdown.
-
-### Particle editor: layout and grid
-- **Layout:** the preview and the properties sit in the middle; the selected system's lists move to
-  the right.
-- **The grid plays:** the selected system's picture plays in the grid. Preferences → Particles →
-  **Animate every system in the grid** makes every one in view play. On the graphics card they are
-  all drawn in one pass.
-
-### Particles: the game's own settings
-- **Every built-in function, with the game's settings.** The particle editor now knows the 95
-  functions the game builds in and every setting each one reads: its type and the value the game
-  uses when a file leaves it out. They come from the data tables in the Source SDK 2013's particle
-  library (not its code), and CS:S's client has every one of them.
-  - The properties panel lists all of a function's settings in the game's order. Those the file
-    leaves out show in italics at the game's default; changing one adds it to the file. Settings
-    the game doesn't read sit under **Not read by the game**.
-  - The system's properties work the same way. A new system starts with exactly the game's
-    settings: the material is `vgui/white`, and there's no `bounding_box_control_point`, which the
-    game doesn't read.
-  - New operators get every setting at the game's default, as Valve's editor writes them. Bold
-    marks a setting changed from the game's default instead of from the value the game's files use
-    most, and **Reset to the Game's Default** goes back to it.
-  - The **Add** menu lists every built-in function, including ones no file uses yet.
-  - Settings that pick a particle field ("output field") list only the fields of the kind they
-    take: one number or three.
-  - A new system's starter operators keep a few values of their own (lifetime 1–2 s, radius 4–8, a
-    small sphere with some speed). At the game's defaults their particles would live no time at all.
-- **The preview reads defaults as the game does.** A setting the file leaves out runs at the game's
-  default: Radius Random without its radii makes particles of radius 1, not 0, and Pull towards
-  control point without its force doesn't pull. The bounds box no longer follows
-  `bounding_box_control_point`.
-- **Older names come from the game's own list** of 54 (`alpha_fade`, `Random Cull`,
-  `Initial Velocity Noise`…). `Inherit Velocity` is one of them: the game runs it as Velocity
-  Inherit from Control Point. `movement_basic`, `basic_rotation` and
-  `position_lock_to_controlpoint` were only on our list; the game doesn't take them, so they no
-  longer run.
-- **Checks:** a setting a built-in function doesn't read is noted, a setting of another type than
-  the game reads is a warning, and so is a function that isn't built in and that no game file uses.
-
-### Particle preview
-- **Control points go into the file.** Dragging any point but CP0 writes it into the system's **Set
-  Control Point Positions** operator, adding one (first in the list) when there is none. Its four
-  slots all start on the dragged point, so no other point changes; dragging another point takes a
-  slot that repeats one. Square handles mark the points the file places.
-- **Snapping:** dragged points snap to the grid while it shows.
-- **Undo:** every control point move undoes, CP0 and **Reset CPs** included. Moves that only change
-  the view don't mark the file as modified. Hold Ctrl to move a point the file doesn't place in the
-  view only.
-- **Set Control Point Positions** now measures from the world or from its offset point, as its
-  settings say, and places its points from the start.
-- **More operators:** Position Along Path Sequential, Position In CP Hierarchy, Position From Parent
-  Particles, Position Modify Warp Random, Set child control points from particle positions,
-  oscillating_movement and Collision via traces (against the floor under the grid; the preview has
-  no map). Also Velocity Random and Position Along Path Random, which no CS:S or HL2 file uses.
-  - All 57 functions CS:S and HL2 use now run, so all 288 of their systems run completely.
-  - An operator's tooltip says where the preview's version falls short.
-- **Functions from other games:** the preview now also runs what TF2's files and custom files made
-  with later editors use: Rotation Basic and Rotation Speed Random, Movement Rotate Particle Around
-  Axis, Movement Max Velocity, Movement Maintain / Lock to Saved Position Along Path, Noise Scalar,
-  Remap Scalar, Remap Distance to Control Point to Vector, Remap Distance Between Two Control
-  Points to Scalar, Remap Dot Product to Scalar, Set Control Point To Particles' Center / To Player,
-  Color Light from Control Point, Rotation Orient Relative to CP / to 2D Direction, Cull relative to
-  model, Move Particles Between 2 Control Points, Remap Control Point to Scalar, Remap Initial
-  Distance to Control Point to Scalar, remap scalar to vector, Position Along Ring, Position from
-  Parent Cache, Lifetime from Time to Impact, emit noise, turbulent force, Constrain distance to path
-  between two control points, Prevent passing through static part of world and
-  render_screen_velocity_rotate; and, from the VDC articles, Clamp Scalar, Cull when crossing
-  sphere, Lerp Initial Scalar/Vector, Lifespan Minimum Radius/Velocity Decay, Lifespan Maintain
-  Count Decay, Normalize Vector, Remap Speed To Scalar, Ramp Scalar Linear Simple, Stop Effect after
-  Duration, Inherit Attribute / Initial Value From Parent Particle, Scalar Random, Vector Random
-  and Remap Particle Count to Scalar.
-- **Older names:** files that use an early editor's names (`basic_movement`, `lifespan_decay`,
-  `position_within_sphere`, …) or another case (`Lifetime From Sequence`) run too; setting names
-  match without regard to case. (The list is now the game's own; see above.)
-- **Checked against the VDC articles:** a particle's rotation speed now turns it only with Rotation
-  Basic; Oscillate counts its frequency over the life or per second as "proportional" says, and its
-  start and end as "start/end proportional" says; Movement Lock to Control Point lets go between its
-  fade-out times and by distance; operators' "fade oscillate" repeats their fade window.
-- Of the 93 particle files on this machine's second drive (TF2's and CS:S custom ones), everything
-  runs but what needs the map (Velocity Repulse from World, Cull relative to Ray Trace Environment),
-  the control point chain TF2's flamethrower code sets up, and Alpha Fade In/Out Simple, whose
-  settings no file shows. An operator's tooltip says why.
-- **Models:** **Model** under the preview stands any of the game's models on a control point, as the
-  game's effects stand on players and props. It's drawn in both the software and GPU previews,
-  textured and lit, and hides the particles behind it.
-  - **Position on Model Random** puts particles in its hitboxes (with the hitbox scale, tries and
-    direction bias); **Movement Lock to Bone** keeps them there as the model moves. The model stands
-    still in its reference pose.
-  - **Put a CP on an Attachment** puts a control point where one of the model's attachments is; it
-    moves with the model after.
-  - **Moving and turning:** drag the model to move it (its control point moves with it, in the view
-    only), drag the ring at its feet to turn it (15° steps while the grid shows), or set its pitch,
-    yaw and roll under **Model → Turn**. Particles locked to it and points on its attachments turn
-    with it, and every move and turn undoes.
-  - With **Bounds**, its hitboxes and attachment names show; selecting Position on Model Random shows
-    the hitboxes either way. **Frame** takes the model in.
-  - Reads MDL versions 44–49 with their `.vvd` and `.vtx`: every CS:S and HL2 model that has
-    geometry (3,743 of 3,785; the rest only hold animations).
-- **Timeline:** a slider under the preview follows the effect; drag it to go to any moment (it
-  pauses). Going back replays from the start, so it shows exactly what playing does.
-- **Velocity kept:** placing a particle (Position Within Sphere Random) no longer drops the speed an
-  earlier initializer such as Velocity Random gave it.
-- **Emission shapes:** the selected position initializer's sphere (with its inner shell and bias),
-  box or offset range shows around its control point; with **Bounds**, every one does.
-
-### Particle editor
-- **View → Simple Interface** (remembered): names without the underscores and lower case —
-  "Max Particles" for max_particles, "Animated Sprites" for render_animated_sprites — and easier
-  ways to type values: number boxes with units (s, °, °/s) and sensible steps, control points as
-  "CP n", named choices for settings that pick from a few (orientation type, restart behaviour,
-  light type, bulge control, collision group…), X/Y/Z boxes for vectors. Advanced settings (when
-  an operator runs, visibility tests, the system's simulation tuning) are tucked away while they
-  have their usual value. The file is edited exactly the same; turn it off for the files' own keys
-  and fields.
-- The names, a line on what each function and setting does, and the named values are in
-  `src/app/data/lang_en.txt` (Valve's language file layout); how each number is typed is in
-  `src/app/data/particle_inputs.txt`. Both are built into the app.
-- **Add to a Map's Manifest…** lists the file in `maps/<map>_particles.txt` (made in the write
-  folder when the map has none), so only that map loads it.
-- In either interface, tooltips give the other name and the explanation, the Add menu finds
-  operators by either name, and settings that pick a particle field ("output field") are a list of
-  named fields instead of a number.
-- The explanations are our own, written from the VDC articles and the preview's behaviour.
-
-### Skybox editor
-- **File → Open Sky from Game** lists the skies in a searchable list that fits on the screen,
-  instead of a menu that ran off it.
-- **Fixed a crash** when picking a sky from that list could not open it: the warning showed while
-  the list was still handling the click. What's picked now runs after the click.
-- **Cube-map skies:** a sky whose materials only name a cube map (`$envmap`, as WindowImposter skies
-  do) opens from that cube map's faces, HDR ones included. The face order and turns were worked out
-  from Valve's own cube maps, whose seams then meet exactly.
-- **Show Material:** right-click a face to see the material it came from.
-- **Fixed another crash picking a sky**, seen on Wayland. Closing the menu could hover **Open Sky
-  from Game** again and refill the list while it was still handling the click. Menus that refill
-  as they open (skies, recent files, games, the particle editor's **Add** menu, the preview's
-  **Model** menu) now delete their old entries after the click is over.
-- **Skies that share one texture:** faces that pick their part of a shared texture with proxies
-  (TextureTransform over an atlas) now show that part, as the map starts. The texture repeats past
-  its edge unless it is clamped.
-
-### Material view
-- **Any `.vmt`** picked in the **Game** or **Folder** tab now opens in a material view:
-  - **Preview:** the material the way the game draws it, on a flat square or a ball. Drag to move
-    the light. Its textures, `$color`, translucency, additive and alpha-tested cut-outs, detail
-    textures (every `$detailblendmode` but 10, the detail as a second bump map), bump and
-    self-shadowing bump maps, self-illumination, reflections (masked, tinted, with contrast and
-    saturation), phong and the Sprite, Modulate, Refract, Water and WindowImposter shaders all
-    show.
-  - **Proxies run:** animated textures, scrolling, Sine, LinearRamp, the arithmetic proxies and
-    TextureTransform play in the preview. Proxies that need the game (PlayerLogo and the like) are
-    listed instead.
-  - **HDR skies:** an **HDR** switch shows a sky's HDR texture, with an exposure slider. The sun and
-    bright clouds show when it's lowered.
-  - **Parameters** as the material ends up with them, on a DirectX 9 PC: a patch's include resolved,
-    and fallback blocks (`LightmappedGeneric_DX9`, `>=dx90`, …) and conditions applied, with where
-    each value came from. The simple interface names them ("Base Texture") and their values
-    ("Darken and Lighten").
-  - **Textures:** each texture with its size, format and frames. Missing ones are marked.
-    Double-click one, or an included material, to open it, then **Back** to return.
-  - **Text:** the file itself, with parse diagnostics.
-- **Said plainly:** what only the map has (lightmaps, `env_cubemap`, the water's views) gets a
-  stand-in, and the view says so, along with the parameters it doesn't show.
-- **Checked:** all 10,267 CS:S and HL2 materials read and draw. The only textures that don't load
-  are the 369 the game doesn't ship. 135 of the 139 HDR sky faces are as bright as their LDR ones;
-  the other four differ in the files themselves.
+- **Preferences** (Ctrl+,): Interface, Graphics and Particles.
+- **Every preview draws on the graphics card** through Qt's RHI (Vulkan, OpenGL, Direct3D),
+  matching the software renderers; software is the fallback.
+- **Particles:** every built-in function with the game's settings and defaults (from the SDK's
+  data tables), the game's older names, more operators (all CS:S and HL2 systems run), models
+  in the preview, a timeline, control points written into the file, and a Simple Interface.
+- **Material view:** any `.vmt` previewed as the game draws it, proxies running, with its
+  resolved parameters and textures.
+- Skybox fixes: cube-map skies, shared-texture faces, crashes picking a sky.
 
 ## 0.4.0 — The Particle (2026-10-23)
 
-The particle editor arrives: open, edit and save the game's `.pcf` files, with a live preview.
-
-### Particle editor
-- **Opening:** double-click a `.pcf` in the Game or Folder tab, open it from **File → Open File**, drop
-  it on the window, or start one with **File → New Particle File**.
-- **Systems:**
-  - Listed with child systems under the systems that spawn them, or as a **Grid** of pictures of
-    each effect.
-  - **New System** starts one with a basic set of operators. **Duplicate** and **Delete** are there
-    too, and double-click or F2 renames.
-  - Renaming also updates the child links and cull replacements that name the system.
-- **Operators:** the selected system's renderers, operators, initializers, emitters, child systems,
-  forces and constraints, each list in the order it runs.
-  - **Add** offers every function the game's own particle files use, most used first, in a
-    searchable list.
-  - ▲ ▼ reorder, and **Remove** takes one out.
-- **Properties:** a fitting field for each value: numbers, vectors, colours with a picker, on/off
-  values, materials completed from the game's, and child systems. Names in bold differ from the
-  game's usual value, and right-click resets them.
-- **Copy and paste** between files, bringing the systems a system spawns along; the clipboard also
-  gets keyvalues2 text.
-- **Search:** **Edit → Find Particle System** (Ctrl+Shift+F) searches every particle file the game
-  has by system name, material, operator or child system, and opens the result.
-- **Checks:**
-  - systems that spawn themselves
-  - child links to nothing
-  - names used twice
-  - names another game file also defines
-  - missing materials
-  - cull replacements that don't exist
-  - operators the game never uses, or uses as another kind
-  - files the manifest doesn't list
-- **Saving:**
-  - An unedited file is written back byte for byte.
-  - Files from a VPK save to the write folder.
-  - **Save As** converts between binary encodings 1 and 2, or writes keyvalues2 text.
-  - **Add to Manifest** lists the file in `particles/particles_manifest.txt`.
-- **Undo** for every change.
-
-### Particle preview
-- **What plays:** the selected system and the systems it spawns, with the game's materials and
-  sprite sheets.
-  - Sprites can face the camera, stand upright, or lie flat like decals (`orientation_type` 0, 1, 2).
-  - Sprite trails and ropes are drawn too.
-  - Blending is additive or alpha, with overbright and add-self.
-- **Camera:** drag to orbit, right-drag to pan, scroll to zoom, double-click or **Frame** to fit.
-- **Control points:** the ones the system uses are handles. Drag one to move it; hold Shift to move
-  it up and down. Particles locked to a control point follow it.
-- **Particle limits:** a panel shows each system's particles against its `max_particles`, orange
-  when it's full.
-- **Bounds:** shows each system's bounding box next to where its particles really are.
-- **Playback:** play/pause, restart, speeds from 0.1× to 2×, looping and a ground grid.
-- **Live edits:** changes show at once, without starting the effect over.
-- **GPU:** draws on the graphics card where Qt 6.7+ and its Shader Tools are available, in software
-  otherwise.
-- **Coverage:** 48 of the 57 operator functions CS:S and HL2 use are simulated. The rest are greyed
-  out and named under the preview, and collisions, models and refraction aren't drawn. The
-  simulation is worked out from each operator's name and settings, so it's close, not exact.
-
-### Everywhere
-- A footer in the status bar shows the edition, version and operating system.
-- The code now follows the Source SDK's naming and layout conventions (see **Code style** in the
-  README), with a `.clang-format` for the layout.
-
-### Known issues
-- Particle files from games after the 2013 branch (DMX binary encodings 3–5) can't be opened yet.
-- An edited particle file hasn't been checked in game yet.
+- **Particle editor (new):** open, edit and save `.pcf` files: systems, operators, properties,
+  copy and paste, search across the game, checks, lossless saving and undo.
+- **Particle preview:** sprites, trails and ropes with the game's materials, draggable control
+  points, limits, bounds and playback controls, on the GPU where available.
+- The code follows the Source SDK's naming conventions.
 
 ## 0.3.0 — The Sky (2026-10-23)
 
-- **Skybox creator:**
-  - Six faces on a cross laid out the way they join, and a square preview from inside with the
-    game's `setang` angles.
-  - Checks for missing faces, unusable sizes and mismatched seams, plus a one-click fix for turned
-    up and down faces.
-  - Export to VTF and VMT, and a labelled test pattern.
-- **Opening skies:** any sky the game has, or a sky saved as files, by opening any one of its faces.
-- **Sound previews:** a playhead on the waveform and click-to-play from any point. Only one preview
-  plays at a time.
-- **Help → About** shows the version and build.
-- Windows and Linux builds are published from tags.
+- **Skybox creator:** six faces on a cross, a preview from inside, checks and fixes, export to
+  VTF and VMT.
+- Sound previews with a playhead; Help → About; Windows and Linux builds from tags.
