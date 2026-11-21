@@ -17,7 +17,6 @@
 #include "hud/Hud.h"
 #include "CrashHandler.h"
 #include "bsp/Stripper.h"
-#include "HammerSetupDialog.h"
 #include "map/Manifest.h"
 
 #include <set>
@@ -1084,9 +1083,6 @@ void CMainWindow::BuildMenus( QAction *pSearchPathsToggle )
 			pScheme->setEnabled( m_Game.has_value() );
 		}
 	} );
-	auto *pHammerSetup = pTools->addAction( tr( "Set Up &Hammer…" ), this, &CMainWindow::SetUpHammer );
-	pHammerSetup->setObjectName( QStringLiteral( "hammerSetupAction" ) );
-	pHammerSetup->setToolTip( tr( "Write the open game's entry into Hammer++'s or Hammer's game configuration" ) );
 	QAction *pDemo = pTools->addAction( tr( "&Demo Viewer…" ), this, [ this ] {
 		const QString szFile = AskOpenFile( this, tr( "Open Demo" ), LastFolderOr( m_Game ? ToQString( m_Game->m_GameDir ) : QString{} ), tr( "Source demos (*.dem);;All files (*)" ) );
 		if ( !szFile.isEmpty() )
@@ -1094,11 +1090,10 @@ void CMainWindow::BuildMenus( QAction *pSearchPathsToggle )
 	} );
 	pDemo->setObjectName( QStringLiteral( "demoViewerAction" ) );
 	pDemo->setToolTip( tr( "A recorded demo (.dem): what it says about itself, its timeline, camera path and console commands" ) );
-	connect( pTools, &QMenu::aboutToShow, this, [ this, pCreatePrefab, pBuilding, pSprinkle, pHammerSetup ] {
+	connect( pTools, &QMenu::aboutToShow, this, [ this, pCreatePrefab, pBuilding, pSprinkle ] {
 		pCreatePrefab->setEnabled( GetCurrentMap() && !GetCurrentMap()->GetDocument().GetSelection().empty() );
 		pSprinkle->setEnabled( GetCurrentMap() != nullptr );
 		pBuilding->setEnabled( GetCurrentMap() != nullptr );
-		pHammerSetup->setEnabled( m_Game.has_value() );
 	} );
 
 	auto *pView = menuBar()->addMenu( tr( "&View" ) );
@@ -1115,18 +1110,6 @@ void CMainWindow::BuildMenus( QAction *pSearchPathsToggle )
 	pHelp->addAction( tr( "&About Vomit Tools" ), this, [ this ] { CAboutDialog{ this }.exec(); } );
 	pHelp->addAction( tr( "About &Premium…" ), this, [ this ] { CPremiumDialog{ this }.exec(); } );
 	pHelp->addAction( tr( "About &Qt" ), qApp, &QApplication::aboutQt );
-}
-
-//-----------------------------------------------------------------------------
-// Purpose: After a save, maps opened from now on read the game data the entry names.
-//-----------------------------------------------------------------------------
-void CMainWindow::SetUpHammer()
-{
-	if ( !m_Game )
-		return;
-	CHammerSetupDialog dialog( m_Game->m_GameDir, QString::fromStdString( m_Game->m_szGame ), this );
-	if ( dialog.exec() == QDialog::Accepted )
-		statusBar()->showMessage( tr( "Saved %1" ).arg( ToQString( dialog.GetConfigFile() ) ), 8000 );
 }
 
 //-----------------------------------------------------------------------------
@@ -1972,6 +1955,7 @@ void CMainWindow::Remount()
 			pTab->GameChanged( &*m_Game );
 		}
 	}
+	SetPreferencesGame();
 	if ( !szSelected.isEmpty() )
 	{
 		const QModelIndex index = m_pFilter->mapFromSource( m_pModel->IndexForPath( szSelected.toStdString() ) );
@@ -3165,10 +3149,26 @@ CPreferencesDialog *CMainWindow::ShowPreferences()
 	{
 		m_pPreferences = new CPreferencesDialog( this );
 	}
+	SetPreferencesGame();
 	m_pPreferences->show();
 	m_pPreferences->raise();
 	m_pPreferences->activateWindow();
 	return m_pPreferences;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Preferences > Maps > General edits the open game's Hammer entry.
+//-----------------------------------------------------------------------------
+void CMainWindow::SetPreferencesGame()
+{
+	if ( !m_pPreferences )
+		return;
+	if ( !m_Game )
+	{
+		m_pPreferences->SetGame( {}, {}, {} );
+		return;
+	}
+	m_pPreferences->SetGame( m_Game->m_GameDir, QString::fromStdString( m_Game->m_szGame ), [ this ] { return m_pFileSystem->Find( "materials", ".vmt", true ); } );
 }
 
 //-----------------------------------------------------------------------------

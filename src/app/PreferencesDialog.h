@@ -8,10 +8,14 @@
 //===========================================================================//
 #pragma once
 
+#include <filesystem>
 #include <functional>
+#include <string>
+#include <vector>
 
 #include <QDialog>
 
+class CHammerSetupPage;
 class QListWidget;
 class QStackedWidget;
 class QTabWidget;
@@ -29,6 +33,9 @@ public:
 
 	// Turns to a page by its title ("Graphics").
 	void ShowPage( const QString &szTitle );
+	// The open game, for the Hammer section in Maps > General (an empty folder: none).
+	void SetGame( const std::filesystem::path &gameDir, const QString &szGameName, const std::function<std::vector<std::string>()> &pfnMaterials );
+	[[nodiscard]] CHammerSetupPage *GetHammerPage() const;
 
 private:
 	void AddPage( const QString &szTitle, QWidget *pPage );
@@ -47,4 +54,5 @@ private:
 	QTabWidget *m_pGraphicsTabs = nullptr;
 	QTabWidget *m_pMapTabs = nullptr;
 	QStackedWidget *m_pStack = nullptr;
+	CHammerSetupPage *m_pHammer = nullptr;
 };

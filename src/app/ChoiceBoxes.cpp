@@ -145,6 +145,31 @@ QComboBox *MakeSearchBox( const std::vector<Choice_t> &choices, QWidget *pParent
 }
 
 //-----------------------------------------------------------------------------
+// Purpose: The box's text stays as typed, whether or not the new choices hold it.
+//-----------------------------------------------------------------------------
+void SetSearchChoices( QComboBox *pBox, const std::vector<Choice_t> &choices )
+{
+	const QString szText = pBox->currentText();
+	QAbstractItemModel *pOld = pBox->model();
+	pBox->setModel( MakeModel( choices, pBox ) );
+	pBox->setModelColumn( 0 );
+	if ( pOld && pOld->parent() == pBox )
+	{
+		pOld->deleteLater();
+	}
+	if ( auto *pView = qobject_cast<QTreeView *>( pBox->view() ) )
+	{
+		FitWidth( pView, choices );
+		if ( auto *pPopup = qobject_cast<QTreeView *>( pBox->completer()->popup() ) )
+		{
+			pPopup->setColumnWidth( 0, pView->columnWidth( 0 ) );
+			pPopup->setMinimumWidth( pView->minimumWidth() );
+		}
+	}
+	pBox->setCurrentText( szText );
+}
+
+//-----------------------------------------------------------------------------
 // Purpose: Drops down every choice of a search box now.
 //-----------------------------------------------------------------------------
 void RevealChoices( QComboBox *pBox )

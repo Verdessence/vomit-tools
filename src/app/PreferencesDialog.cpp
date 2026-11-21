@@ -37,6 +37,7 @@
 #include "FileActions.h"
 #include "FileDialogs.h"
 #include "Graphics.h"
+#include "HammerSetupPage.h"
 #include "InterfaceMode.h"
 #include "Preferences.h"
 #include "SourceTools.h"
@@ -127,6 +128,9 @@ CPreferencesDialog::CPreferencesDialog( QWidget *pParent )
 	m_pGraphicsTabs->addTab( Scrollable( BuildGraphicsPage() ), tr( "General" ) );
 	m_pMapTabs = new QTabWidget;
 	m_pMapTabs->setObjectName( QStringLiteral( "preferencesMapTabs" ) );
+	// Maps > General holds it; it outlives the page being built again, and with it the game
+	// and edits not saved yet.
+	m_pHammer = new CHammerSetupPage( this );
 	BuildMapSections();
 	AddPage( tr( "Interface" ), m_pInterfaceTabs );
 	AddPage( tr( "Graphics" ), m_pGraphicsTabs );
@@ -487,80 +491,24 @@ void CPreferencesDialog::BuildMapSections()
 		} );
 		return pButton;
 	};
-	// General: game data, a list of FGDs in the order they are read, and textures.
+	// General: textures, and the game's Hammer entry (its game data and default entities are
+	// what maps read too).
 	{
 		QVBoxLayout *pLayout = Section( m_pMapTabs, tr( "General" ), 0 );
-		auto *pFgds = new QListWidget;
-		pFgds->setObjectName( QStringLiteral( "preferencesMapFgds" ) );
-		pFgds->addItems( current.m_Fgds );
-		pFgds->setMaximumHeight( 110 );
-		auto storeFgds = [ pFgds, change ] {
-			QStringList fgds;
-			for ( int i = 0; i < pFgds->count(); i++ )
-			{
-				fgds << pFgds->item( i )->text();
-			}
-			change( [ & ]( MapPreferences_t &preferences ) { preferences.m_Fgds = fgds; } );
-		};
-		auto *pAdd = new QPushButton( tr( "Add…" ) );
-		pAdd->setObjectName( QStringLiteral( "preferencesMapFgdAdd" ) );
-		auto *pRemove = new QPushButton( tr( "Remove" ) );
-		pRemove->setObjectName( QStringLiteral( "preferencesMapFgdRemove" ) );
-		auto *pUp = new QPushButton( tr( "Up" ) );
-		auto *pDown = new QPushButton( tr( "Down" ) );
-		connect( pAdd, &QPushButton::clicked, this, [ this, pFgds, storeFgds ] {
-			for ( const QString &szFile : AskOpenFiles( this, tr( "Add Game Data" ), {}, tr( "Game data (*.fgd)" ) ) )
-			{
-				pFgds->addItem( QDir::fromNativeSeparators( szFile ) );
-			}
-			storeFgds();
-		} );
-		connect( pRemove, &QPushButton::clicked, this, [ pFgds, storeFgds ] {
-			delete pFgds->currentItem();
-			storeFgds();
-		} );
-		auto move = [ pFgds, storeFgds ]( int nBy ) {
-			const int nRow = pFgds->currentRow();
-			if ( nRow < 0 || nRow + nBy < 0 || nRow + nBy >= pFgds->count() )
-			{
-				return;
-			}
-			QListWidgetItem *pItem = pFgds->takeItem( nRow );
-			pFgds->insertItem( nRow + nBy, pItem );
-			pFgds->setCurrentItem( pItem );
-			storeFgds();
-		};
-		connect( pUp, &QPushButton::clicked, this, [ move ] { move( -1 ); } );
-		connect( pDown, &QPushButton::clicked, this, [ move ] { move( 1 ); } );
-		auto *pFgdButtons = new QHBoxLayout;
-		for ( QPushButton *pButton : { pAdd, pRemove, pUp, pDown } )
-		{
-			pFgdButtons->addWidget( pButton );
-		}
-		pFgdButtons->addStretch();
-		pLayout->addWidget( new QLabel( tr( "Game data (FGD files), read in this order:" ) ) );
-		pLayout->addWidget( pFgds );
-		pLayout->addLayout( pFgdButtons );
 		auto *pForm = new QFormLayout;
 		std::vector<std::pair<QString, int>> sizes;
 		for ( const int nSize : { 256, 512, 1024, 2048, 4096 } )
 		{
 			sizes.emplace_back( QString::number( nSize ), nSize );
 		}
-		const auto entity = [ this, change ]( const QString &szName, const QString &szValue, QString MapPreferences_t::*pMember ) {
-			auto *pEdit = new QLineEdit( szValue );
-			pEdit->setObjectName( szName );
-			pEdit->setPlaceholderText( tr( "From game configuration" ) );
-			pEdit->setToolTip( tr( "Applies when a map opens." ) );
-			connect( pEdit, &QLineEdit::editingFinished, this, [ pEdit, change, pMember ] {
-				change( [ & ]( MapPreferences_t &preferences ) { preferences.*pMember = pEdit->text().trimmed(); } );
-			} );
-			return pEdit;
-		};
-		pForm->addRow( tr( "Default point entity" ), entity( QStringLiteral( "preferencesMapDefaultPointEntity" ), current.m_szDefaultPointEntity, &MapPreferences_t::m_szDefaultPointEntity ) );
-		pForm->addRow( tr( "Default brush entity" ), entity( QStringLiteral( "preferencesMapDefaultBrushEntity" ), current.m_szDefaultBrushEntity, &MapPreferences_t::m_szDefaultBrushEntity ) );
 		pForm->addRow( tr( "Largest texture size" ), choice( QStringLiteral( "preferencesMapTextureSize" ), sizes, current.m_nTextureSize, []( MapPreferences_t &p, int n ) { p.m_nTextureSize = n; } ) );
 		pLayout->addLayout( pForm );
+		auto *pHammer = new QGroupBox( tr( "Hammer configuration (game data, default entities, compilers)" ) );
+		pHammer->setObjectName( QStringLiteral( "preferencesMapHammer" ) );
+		auto *pHammerLayout = new QVBoxLayout( pHammer );
+		pHammerLayout->addWidget( m_pHammer );
+		m_pHammer->show();
+		pLayout->addWidget( pHammer );
 		pLayout->addStretch();
 	}
 
@@ -711,10 +659,18 @@ void CPreferencesDialog::BuildMapSections()
 //-----------------------------------------------------------------------------
 void CPreferencesDialog::ResetMapSettings()
 {
+	// What older settings named apart from the Hammer entry isn't one of these choices; the
+	// Hammer section shows it and a save there clears it.
 	MapPreferences_t preferences;
-	preferences.m_Fgds = CPreferences::Instance().GetMapPreferences().m_Fgds;
+	const MapPreferences_t &before = CPreferences::Instance().GetMapPreferences();
+	preferences.m_Fgds = before.m_Fgds;
+	preferences.m_szDefaultPointEntity = before.m_szDefaultPointEntity;
+	preferences.m_szDefaultBrushEntity = before.m_szDefaultBrushEntity;
 	CPreferences::Instance().SetMapPreferences( preferences );
 	const int nMapTab = m_pMapTabs->currentIndex();
+	// Out of General before it goes.
+	m_pHammer->setParent( this );
+	m_pHammer->hide();
 	for ( QTabWidget *pTabs : { m_pInterfaceTabs, m_pGraphicsTabs, m_pMapTabs } )
 	{
 		const int nKeep = pTabs == m_pInterfaceTabs ? 2 : pTabs == m_pGraphicsTabs ? 1
@@ -747,6 +703,22 @@ QWidget *CPreferencesDialog::BuildMapsPage()
 	pLayout->addWidget( m_pMapTabs, 1 );
 	pLayout->addWidget( pReset, 0, Qt::AlignRight );
 	return pPage;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+void CPreferencesDialog::SetGame( const std::filesystem::path &gameDir, const QString &szGameName, const std::function<std::vector<std::string>()> &pfnMaterials )
+{
+	m_pHammer->SetGame( gameDir, szGameName, pfnMaterials );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+CHammerSetupPage *CPreferencesDialog::GetHammerPage() const
+{
+	return m_pHammer;
 }
 
 //-----------------------------------------------------------------------------

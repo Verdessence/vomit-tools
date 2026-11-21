@@ -29,6 +29,8 @@ struct Choice_t
 // An editable box that works like a search box: a click drops down every choice next to what it
 // means, and typing narrows them (anywhere in the name, whatever the case).
 [[nodiscard]] QComboBox *MakeSearchBox( const std::vector<Choice_t> &choices, QWidget *pParent = nullptr );
+// Puts other choices in a search box made by MakeSearchBox, keeping what it holds.
+void SetSearchChoices( QComboBox *pBox, const std::vector<Choice_t> &choices );
 // Drops down every choice of a search box now, with its text selected so typing replaces it.
 void RevealChoices( QComboBox *pBox );
 // Fills a fixed list whose dropdown shows each choice next to what it means, nVisible rows high
