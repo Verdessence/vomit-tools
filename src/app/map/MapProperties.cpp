@@ -7,9 +7,14 @@
 #include "MapProperties.h"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
+#include <optional>
 
 #include <QClipboard>
+#include <QColorDialog>
+#include <QIcon>
+#include <QPixmap>
 #include <QComboBox>
 #include <QGuiApplication>
 #include <QMenu>
@@ -59,6 +64,47 @@ QString FromStd( const std::string &sz )
 QString FromView( std::string_view sz )
 {
 	return QString::fromUtf8( sz.data(), static_cast<qsizetype>( sz.size() ) );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Whether a key's FGD type is a colour: color255 ("255 128 0", a brightness after it
+//          for lights) or color1 ("1 0.5 0").
+//-----------------------------------------------------------------------------
+bool IsColorType( const std::string &szType )
+{
+	return szType == "color255" || szType == "color1";
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: The colour a value's first three numbers give, and what follows them.
+//-----------------------------------------------------------------------------
+std::optional<std::pair<QColor, QString>> ParseColor( const QString &szValue, bool bUnit )
+{
+	const QStringList parts = szValue.simplified().split( QLatin1Char( ' ' ), Qt::SkipEmptyParts );
+	if ( parts.size() < 3 )
+		return std::nullopt;
+	std::array<int, 3> channels{};
+	for ( std::size_t i = 0; i < 3; i++ )
+	{
+		bool bOk = false;
+		const double fl = parts[ static_cast<qsizetype>( i ) ].toDouble( &bOk );
+		if ( !bOk )
+			return std::nullopt;
+		channels[ i ] = std::clamp( static_cast<int>( std::lround( bUnit ? fl * 255.0 : fl ) ), 0, 255 );
+	}
+	return std::pair{ QColor( channels[ 0 ], channels[ 1 ], channels[ 2 ] ), parts.mid( 3 ).join( QLatin1Char( ' ' ) ) };
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: A colour written back as the key's type has it, with what followed it before.
+//-----------------------------------------------------------------------------
+QString FormatColor( const QColor &color, bool bUnit, const QString &szRest )
+{
+	auto channel = [ bUnit ]( int n ) { return bUnit ? QString::number( n / 255.0, 'g', 4 ) : QString::number( n ); };
+	QString sz = QStringLiteral( "%1 %2 %3" ).arg( channel( color.red() ), channel( color.green() ), channel( color.blue() ) );
+	if ( !szRest.isEmpty() )
+		sz += QLatin1Char( ' ' ) + szRest;
+	return sz;
 }
 
 //-----------------------------------------------------------------------------
@@ -126,10 +172,15 @@ QWidget *CPropertyDelegate::createEditor( QWidget *pParent, const QStyleOptionVi
 	}
 	auto *pCombo = new QComboBox( pParent );
 	pCombo->setEditable( true );
+	pCombo->setInsertPolicy( QComboBox::NoInsert );
 	for ( const auto &[ szValue, szName ] : choices )
 	{
 		pCombo->addItem( FromStd( szName ), FromStd( szValue ) );
 	}
+	// Typing narrows the choices to those holding it anywhere, whatever the case.
+	pCombo->completer()->setCompletionMode( QCompleter::PopupCompletion );
+	pCombo->completer()->setFilterMode( Qt::MatchContains );
+	pCombo->completer()->setCaseSensitivity( Qt::CaseInsensitive );
 	return pCombo;
 }
 
@@ -427,6 +478,15 @@ void CMapProperties::Refresh()
 		pItem->setData( 1, ROLE_ROW, static_cast<qulonglong>( i ) );
 		pItem->setData( 1, ROLE_VALUE, FromStd( row.m_szValue ) );
 		pItem->setFlags( pItem->flags() | Qt::ItemIsEditable );
+		if ( IsColorType( row.m_szType ) && !row.m_bDiffers )
+		{
+			if ( const auto color = ParseColor( FromStd( row.m_szValue ), row.m_szType == "color1" ) )
+			{
+				QPixmap swatch( 14, 14 );
+				swatch.fill( color->first );
+				pItem->setIcon( 1, QIcon( swatch ) );
+			}
+		}
 		if ( row.m_bDefault )
 		{
 			// Not in the map: what the game data says it defaults to.
@@ -540,7 +600,15 @@ void CMapProperties::BrowseKey( std::size_t nRow )
 	const xv::map::PropertyRow_t &row = m_Sheet.m_Rows[ nRow ];
 	const QString szCurrent = FromStd( row.m_szValue );
 	std::optional<QString> picked;
-	if ( row.m_szType == "material" || row.m_szType == "decal" || row.m_szType == "sprite" || row.m_szType == "studio" || ( row.m_szType == "particlesystem" && m_pfnPick ) )
+	if ( IsColorType( row.m_szType ) )
+	{
+		const bool bUnit = row.m_szType == "color1";
+		const auto current = ParseColor( szCurrent, bUnit );
+		const QColor color = QColorDialog::getColor( current ? current->first : QColor( Qt::white ), this, tr( "Pick %1" ).arg( FromStd( row.m_szName ) ) );
+		if ( color.isValid() )
+			picked = FormatColor( color, bUnit, current ? current->second : QString{} );
+	}
+	else if ( row.m_szType == "material" || row.m_szType == "decal" || row.m_szType == "sprite" || row.m_szType == "studio" || ( row.m_szType == "particlesystem" && m_pfnPick ) )
 	{
 		if ( m_pfnPick )
 			picked = m_pfnPick( row.m_szType, szCurrent );
@@ -630,7 +698,9 @@ void CMapProperties::ShowHelp()
 		const xv::map::PropertyRow_t &row = m_Sheet.m_Rows[ i ];
 		m_pBrowseInstance->setVisible( row.m_szKey == "file" && m_Sheet.m_szClass == "func_instance" );
 		const bool bSound = IsSoundKey( row );
-		m_pBrowseKey->setVisible( ( bSound || IsBrowsable( row.m_szType ) ) && ( m_pfnNames || m_pfnPick ) );
+		const bool bColor = IsColorType( row.m_szType );
+		m_pBrowseKey->setVisible( bColor || ( ( bSound || IsBrowsable( row.m_szType ) ) && ( m_pfnNames || m_pfnPick ) ) );
+		m_pBrowseKey->setText( bColor ? tr( "Pick Color…" ) : tr( "Browse…" ) );
 		m_pPlaySound->setVisible( bPlaying || ( bSound && static_cast<bool>( m_pfnPlaySound ) ) );
 		m_pPlaySound->setEnabled( bPlaying || ( !row.m_bDiffers && !row.m_szValue.empty() ) );
 		const bool bSides = ( row.m_szKey == "sides" || row.m_szKey == "sides2" ) && ( m_Sheet.m_szClass == "info_overlay" || m_Sheet.m_szClass == "info_overlay_transition" );

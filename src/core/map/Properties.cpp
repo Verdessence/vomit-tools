@@ -7,6 +7,8 @@
 #include "map/Properties.h"
 
 #include <algorithm>
+#include <cctype>
+#include <map>
 #include <optional>
 
 #include "kv1/Kv1.h"
@@ -91,6 +93,54 @@ namespace
 {
 
 //-----------------------------------------------------------------------------
+// Purpose: Whether a key names a filter entity: the FGD says so (filterclass), or the key has
+//          "filter" in its name and takes a name (target_destination, a string, or a type the
+//          game data doesn't give), as damagefilter, enemyfilter and filtername do in Valve's
+//          FGDs. A filter's own keys (filter_activator_name's filtername is the activator's
+//          name) and keys that pick from a list don't.
+//-----------------------------------------------------------------------------
+bool NamesFilter( std::string_view szKey, std::string_view szType, const FgdClass_t *pClass )
+{
+	if ( szType == "filterclass" )
+		return true;
+	if ( pClass && pClass->m_nKind == FgdClassKind_t::FGD_CLASS_KIND_FILTER )
+		return false;
+	if ( !( szType.empty() || szType == "target_destination" || szType == "string" || szType == "target_name_or_class" ) )
+		return false;
+	std::string szLower{ szKey };
+	std::ranges::transform( szLower, szLower.begin(), []( unsigned char ch ) { return static_cast<char>( std::tolower( ch ) ); } );
+	return szLower.find( "filter" ) != std::string::npos;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: The names of the map's filters, for a key that names one: each name once, with the
+//          filter's class beside it, in name order. A filter is an entity of an FGD FilterClass,
+//          or one whose class starts with filter_ when the game data doesn't know it.
+//-----------------------------------------------------------------------------
+std::vector<std::pair<std::string, std::string>> FilterChoices( const CScene &scene )
+{
+	std::map<std::string, std::string, std::less<>> names;
+	for ( const Entity_t &entity : scene.m_Map.m_Entities )
+	{
+		if ( entity.m_bDeleted )
+			continue;
+		const std::string_view szName = entity.GetValue( "targetname" );
+		const std::string_view szClass = entity.GetClassname();
+		if ( szName.empty() )
+			continue;
+		const FgdClass_t *pClass = scene.m_pFgd ? scene.m_pFgd->Find( szClass ) : nullptr;
+		const bool bFilter = pClass ? pClass->m_nKind == FgdClassKind_t::FGD_CLASS_KIND_FILTER : szClass.size() > 7 && kv1::EqualsIgnoreCase( szClass.substr( 0, 7 ), "filter_" );
+		if ( bFilter )
+			names.try_emplace( std::string{ szName }, std::string{ szClass } );
+	}
+	std::vector<std::pair<std::string, std::string>> choices;
+	choices.reserve( names.size() );
+	for ( const auto &[ szName, szClass ] : names )
+		choices.emplace_back( szName, szName + " (" + szClass + ")" );
+	return choices;
+}
+
+//-----------------------------------------------------------------------------
 // Purpose: The sheet for some entities, each with the object number its outputs are listed
 //          under; bInputs lists what fires at them from anywhere in the map.
 //-----------------------------------------------------------------------------
@@ -150,6 +200,10 @@ PropertySheet_t DescribeEntities( const CScene &scene, const std::vector<const E
 				const auto choice = std::ranges::find_if( key.m_Choices, [ & ]( const FgdChoice_t &c ) { return c.m_szValue == added.m_szValue; } );
 				added.m_szShown = choice != key.m_Choices.end() && !added.m_bDiffers ? choice->m_szName : added.m_szValue;
 			}
+			else if ( NamesFilter( key.m_szName, key.m_szType, pClass ) )
+			{
+				added.m_Choices = FilterChoices( scene );
+			}
 			done.push_back( key.m_szName );
 		}
 	}
@@ -170,7 +224,10 @@ PropertySheet_t DescribeEntities( const CScene &scene, const std::vector<const E
 			row.m_szHelp = pKey->m_szDescription;
 			row.m_szType = pKey->m_szType;
 		}
+		const bool bFilter = NamesFilter( key.m_szKey, row.m_szType, pClass ) && !( !pClass && kv1::EqualsIgnoreCase( first.GetClassname().substr( 0, 7 ), "filter_" ) );
 		add( std::move( row ), Common( entities, key.m_szKey, {} ) );
+		if ( bFilter )
+			sheet.m_Rows.back().m_Choices = FilterChoices( scene );
 		done.push_back( key.m_szKey );
 	}
 
