@@ -302,6 +302,7 @@ void ForEachGeneralPreference( Visit_t &&pfnVisit, General_t &...generals )
 	pfnVisit( "general:single_window", "singleWindow", "files opened from outside join the window already open", generals.m_bSingleWindow... );
 	pfnVisit( "general:reopen_session", "reopenSession", "the files open at closing open again", generals.m_bReopenSession... );
 	pfnVisit( "general:tab_groups", "tabGroups/on", "tabs grouped under a strip by kind", generals.m_bTabGroups... );
+	pfnVisit( "general:all_tab_groups", nullptr, "every kind's group in the strip, even with no tabs open", generals.m_bAllTabGroups... );
 	pfnVisit( "general:editor_windows", nullptr, "each kind of editor (maps, particles...) in a window of its own", generals.m_bEditorWindows... );
 	pfnVisit( "general:manifest_reminder", "manifestReminder", "offer to add saved files to the game's manifest", generals.m_bManifestReminder... );
 	pfnVisit( "general:desktop_file_chooser", "desktopFileChooser", "the desktop's own open and save windows", generals.m_bDesktopFileChooser... );
@@ -1143,7 +1144,7 @@ void CPreferences::ApplyConfig()
 	{
 		emit MaterialEditingChanged();
 	}
-	if ( old.m_bTabGroups != general.m_bTabGroups )
+	if ( old.m_bTabGroups != general.m_bTabGroups || old.m_bAllTabGroups != general.m_bAllTabGroups )
 	{
 		emit TabGroupsChanged( general.m_bTabGroups );
 	}
@@ -1575,6 +1576,16 @@ void CPreferences::SetTabGroups( bool bGroups )
 	m_General.m_bTabGroups = bGroups;
 	Store( "general:tab_groups", bGroups );
 	emit TabGroupsChanged( bGroups );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: The strip shows again with its groups as they now are.
+//-----------------------------------------------------------------------------
+void CPreferences::SetAllTabGroups( bool bAll )
+{
+	m_General.m_bAllTabGroups = bAll;
+	Store( "general:all_tab_groups", bAll );
+	emit TabGroupsChanged( m_General.m_bTabGroups );
 }
 
 //-----------------------------------------------------------------------------

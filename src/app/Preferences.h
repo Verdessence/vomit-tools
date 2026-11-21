@@ -62,6 +62,7 @@ struct GeneralPreferences_t
 	bool m_bSingleWindow = true;
 	bool m_bReopenSession = true;
 	bool m_bTabGroups = true;
+	bool m_bAllTabGroups = true; // every kind's group in the strip, those without tabs too
 	bool m_bEditorWindows = false; // each kind of editor in a window of its own
 	bool m_bManifestReminder = true;
 	bool m_bDesktopFileChooser = true;
@@ -376,6 +377,8 @@ public:
 	[[nodiscard]] double GetUiScale() const { return m_General.m_flUiScale; }
 	void SetUiScale( double flScale );
 	void SetTabGroups( bool bGroups );
+	[[nodiscard]] bool IsAllTabGroups() const { return m_General.m_bAllTabGroups; }
+	void SetAllTabGroups( bool bAll );
 
 	[[nodiscard]] FooterInfo_t GetFooterInfo() const { return m_General.m_nFooterInfo; }
 	void SetFooterInfo( FooterInfo_t nInfo );

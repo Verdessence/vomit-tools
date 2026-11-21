@@ -887,9 +887,15 @@ QStringList CTabGroups::GetGroups() const
 		if ( !kinds.contains( tr( kind.m_pszKind ) ) )
 			kinds.append( tr( kind.m_pszKind ) );
 	}
+	// Every kind's, with the preference; Other only when something is in it.
+	const bool bAll = CPreferences::Instance().IsAllTabGroups();
+	if ( bAll )
+		groups = kinds;
 	kinds.append( tr( OTHER ) );
 	for ( const QString &szKind : kinds )
 	{
+		if ( groups.contains( szKind ) )
+			continue;
 		for ( int i = 1; i < m_pTabs->count(); i++ )
 		{
 			if ( GroupOf( m_pTabs->widget( i ) ) == szKind )

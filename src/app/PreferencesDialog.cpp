@@ -245,6 +245,13 @@ QWidget *CPreferencesDialog::BuildInterfacePage()
 	connect( pGroups, &QCheckBox::toggled, this, []( bool bOn ) { CPreferences::Instance().SetTabGroups( bOn ); } );
 	pLayout->addWidget( pGroups );
 	pGroups->setToolTip( tr( "Filter tabs by group from the header. Right-click an editor tab to move it." ) );
+	auto *pAllGroups = new QCheckBox( tr( "Show every group, even with no tabs open" ) );
+	pAllGroups->setObjectName( QStringLiteral( "preferencesAllTabGroups" ) );
+	pAllGroups->setChecked( CPreferences::Instance().IsAllTabGroups() );
+	pAllGroups->setEnabled( CPreferences::Instance().IsTabGroups() );
+	connect( pAllGroups, &QCheckBox::toggled, this, []( bool bOn ) { CPreferences::Instance().SetAllTabGroups( bOn ); } );
+	connect( pGroups, &QCheckBox::toggled, pAllGroups, &QCheckBox::setEnabled );
+	pLayout->addWidget( pAllGroups );
 
 	auto *pFooter = new QComboBox;
 	pFooter->setObjectName( QStringLiteral( "preferencesFooterInfo" ) );
