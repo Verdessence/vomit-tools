@@ -599,7 +599,7 @@ void CPreferencesDialog::BuildMapSections()
 		pLayout->addWidget( check( QStringLiteral( "preferencesMapVertices" ), tr( "Draw brushes' corners" ), current.m_bDrawVertices, []( MapPreferences_t &p, bool b ) { p.m_bDrawVertices = b; } ) );
 		pLayout->addWidget( check( QStringLiteral( "preferencesMapCenterHandles" ), tr( "Draw centre handles" ), current.m_bCenterHandles, []( MapPreferences_t &p, bool b ) { p.m_bCenterHandles = b; } ) );
 		pLayout->addWidget( check( QStringLiteral( "preferencesMapModels2D" ), tr( "Draw models" ), current.m_bModels2D, []( MapPreferences_t &p, bool b ) { p.m_bModels2D = b; } ) );
-		pLayout->addWidget( check( QStringLiteral( "preferencesMapTexturedModels2D" ), tr( "Draw models textured (else their edges)" ), current.m_bTexturedModels2D, []( MapPreferences_t &p, bool b ) { p.m_bTexturedModels2D = b; } ) );
+		pLayout->addWidget( check( QStringLiteral( "preferencesMapTexturedModels2D" ), tr( "Draw selected models textured (else their edges); the rest show their edges" ), current.m_bTexturedModels2D, []( MapPreferences_t &p, bool b ) { p.m_bTexturedModels2D = b; } ) );
 		pLayout->addWidget( check( QStringLiteral( "preferencesMapGroupColors" ), tr( "Draw objects in their visgroup's and group's colour" ), current.m_bGroupColors, []( MapPreferences_t &p, bool b ) { p.m_bGroupColors = b; } ) );
 		pLayout->addWidget( check( QStringLiteral( "preferencesMapInstanceColor2D" ), tr( "Draw instances' contents in the instance colour (Interface → Map Colours), not the func_instance's" ), current.m_bInstanceColor2D, []( MapPreferences_t &p, bool b ) { p.m_bInstanceColor2D = b; } ) );
 		pLayout->addStretch();

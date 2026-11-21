@@ -961,10 +961,10 @@ bool CMapView2D::IsTexturedModel( const MapFlatObject_t &object, const QRectF &b
 }
 
 //-----------------------------------------------------------------------------
-// Purpose: The props big enough to show their models, drawn textured by the software renderer
-//          looking straight along this view's axis, over the grid and under every line.
-//          Selected ones are left to PaintObjects, which draws their edges, unless they show
-//          their box instead (MapSelectedModelEdges).
+// Purpose: The selected props big enough to show their models, drawn textured by the software
+//          renderer looking straight along this view's axis, over the grid and under every
+//          line. The others are PaintObjects' edges, as Hammer draws props until they are
+//          selected.
 //-----------------------------------------------------------------------------
 void CMapView2D::PaintModels( QPainter &painter ) const
 {
@@ -987,7 +987,7 @@ void CMapView2D::PaintModels( QPainter &painter ) const
 	bool bAny = false;
 	for ( const MapFlatObject_t &object : m_Objects )
 	{
-		if ( !bModels || ( document.GetGeometryPreviewBase() && std::ranges::binary_search( document.GetPreviewObjects(), object.m_nObject ) ) || object.m_nModelLineCount == 0 || !Overlaps( object.m_Bounds, all ) || !document.IsShown( object.m_nObject ) || ( document.IsSelected( object.m_nObject ) && MapSelectedModelEdges( *pScene, object.m_nObject ) ) )
+		if ( !bModels || ( document.GetGeometryPreviewBase() && std::ranges::binary_search( document.GetPreviewObjects(), object.m_nObject ) ) || object.m_nModelLineCount == 0 || !Overlaps( object.m_Bounds, all ) || !document.IsShown( object.m_nObject ) || !document.IsSelected( object.m_nObject ) )
 		{
 			continue;
 		}
@@ -1164,12 +1164,11 @@ void CMapView2D::PaintObjects( QPainter &painter, const QRectF &visible, bool bP
 			const xv::CVec3 &b = instances.m_Vertices[ instances.m_Lines[ nLine + 1 ] ].m_vecPosition;
 			contents.m_Lines.emplace_back( ToWidget( Flatten( { a.m_flX, a.m_flY, a.m_flZ } ) ), ToWidget( Flatten( { b.m_flX, b.m_flY, b.m_flZ } ) ) );
 		}
-		// A prop big enough on screen shows its model (Shift+M): textured (PaintModels) unless it is
-		// selected, when Hammer++ shows its edges (or, for models that aren't props, their box over
-		// the picture); else its box.
+		// A prop big enough on screen shows its model (Shift+M): its edges, as Hammer draws props,
+		// until it is selected, when it shows textured (PaintModels) inside its box; else its box.
 		const bool bModel = object.m_nModelLineCount > 0 && settings.m_bModels2D && std::max( box.width(), box.height() ) >= look.m_nModelsFromPixels;
-		const bool bBoxed = bModel && bSelected && !MapSelectedModelEdges( *pScene, object.m_nObject );
-		const bool bTextured = bModel && ( !bSelected || bBoxed ) && IsTexturedModel( object, box );
+		const bool bTextured = bModel && bSelected && IsTexturedModel( object, box );
+		const bool bBoxed = bTextured;
 		if ( bModel && !bTextured && !bBoxed )
 		{
 			const xv::map::CMapMesh &props = *m_pProps;

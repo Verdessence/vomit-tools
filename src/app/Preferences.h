@@ -291,7 +291,7 @@ struct MapPreferences_t
 	int m_nCenterHandlesFromPixels = mapstyle::CENTER_HANDLES_FROM_PIXELS;
 	int m_nNamesFromPixels = mapstyle::NAMES_FROM_PIXELS;
 	bool m_bModels2D = true;
-	bool m_bTexturedModels2D = true; // models as their textures, else as their edges
+	bool m_bTexturedModels2D = true; // selected models as their textures, else as their edges (the rest always their edges)
 	int m_nModelsFromPixels = mapstyle::MODELS_FROM_PIXELS;
 	bool m_bGroupColors = true;      // objects in their visgroup's (and group's) colour
 	MapGroupColors_t m_nGroupColors = MapGroupColors_t::MAP_GROUP_COLORS_RANDOM;
