@@ -121,6 +121,7 @@ void ForEachMapPreference( Visit_t &&pfnVisit, Preferences_t &...maps )
 	pfnVisit( "maps/detailDistance", maps.m_flDetailDistance... );
 	pfnVisit( "maps/wheelStep", maps.m_flWheelStep... );
 	pfnVisit( "maps/panScale", maps.m_flPanScale... );
+	pfnVisit( "maps/bothButtonsStrafe", maps.m_bBothButtonsStrafe... );
 	pfnVisit( "maps/farStep", maps.m_flFarStep... );
 	pfnVisit( "maps/textureFilter", maps.m_nTextureFilter... );
 	pfnVisit( "maps/selectionTint", maps.m_flSelectionTint... );

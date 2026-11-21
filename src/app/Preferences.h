@@ -206,6 +206,10 @@ struct MapPreferences_t
 	double m_flDetailDistance = mapstyle::DETAIL_DISTANCE; // detail.vbsp's sprites: how far they are drawn
 	double m_flWheelStep = mapstyle::WHEEL_STEP; // units a wheel notch moves the camera
 	double m_flPanScale = mapstyle::PAN_SCALE;   // units a pixel of right-drag moves it
+	// Left and right held together move the camera in any tool: up and down the mouse goes
+	// forward and back, across it goes sideways (level, never up or down). Off: Hammer's, only
+	// with the camera tool or Space, and only forward and back.
+	bool m_bBothButtonsStrafe = true;
 	double m_flFarStep = mapstyle::FAR_PLANE_STEP; // keys 1 and 2
 	MapTextureFilter_t m_nTextureFilter = MapTextureFilter_t::MAP_TEXTURE_FILTER_ANISOTROPIC_4X;
 	double m_flSelectionTint = mapstyle::SELECTION_TINT; // how far selected faces go toward the selection colour

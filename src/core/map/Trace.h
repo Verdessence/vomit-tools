@@ -25,8 +25,8 @@ struct TraceHit_t
 };
 
 // The objects along the ray (dir a unit vector) within flMax, each once at its nearest hit,
-// nearest first. Hidden objects, and tool textures and nodraw when they're toggled off, are passed
-// through.
+// nearest first. Hidden objects, tool textures and nodraw when they're toggled off, and faces seen
+// from behind (as the views cull them: from inside a brush, its own faces) are passed through.
 [[nodiscard]] std::vector<TraceHit_t> TraceScene( const RasterScene_t &scene, bool bToolTextures, bool bNodraw, Point_t from, Point_t dir, double flMax );
 // Whether anything of the meshes in occluders but object nSkip lies along the ray within flMax
 // (passing through what TraceScene passes through): stops at the first hit.

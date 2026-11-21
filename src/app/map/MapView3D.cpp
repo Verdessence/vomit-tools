@@ -2,8 +2,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
 // Purpose: See MapView3D.h. The camera controls are Hammer's: the camera tool's drags, Z to
-//          toggle mouselook (Space to hold it, Space and a drag for the camera tool's drags),
-//          WASD and the arrows to fly, the wheel to step.
+//          toggle mouselook (Space to hold it, Space and a drag for the camera tool's drags,
+//          with mouselook on too), WASD and the arrows to fly, the wheel to step; with the
+//          preference, both buttons together fly forward, back and sideways in any tool; Alt
+//          and a right drag orbit the point under the pointer.
 //
 //===========================================================================//
 #include "MapView3D.h"
@@ -138,6 +140,11 @@ CMapEventClock &CMapEventClock::Get()
 
 namespace
 {
+
+// The orbit's point: this far ahead when nothing is under the pointer or selected; the wheel
+// brings the camera no nearer than this.
+constexpr double ORBIT_AHEAD = 256.0;
+constexpr double ORBIT_NEAREST = 8.0;
 
 constexpr int TICK_MS = 16;
 constexpr int SETTLE_MS = 150;
@@ -786,7 +793,14 @@ void CMapView3D::SetMouselook( bool bOn )
 	m_bMouselook = bOn;
 	if ( bOn )
 	{
-		CapturePointer( mapFromGlobal( QCursor::pos() ), [ this ]( QPointF delta ) { Look( delta ); } );
+		// A drag begun with Space (or both buttons) while it is on moves the camera instead of
+		// turning it: a pinned pointer's movement only comes through here.
+		CapturePointer( mapFromGlobal( QCursor::pos() ), [ this ]( QPointF delta ) {
+			if ( m_bSpaceDrag )
+				DragCamera( m_Dragging, delta );
+			else
+				Look( delta );
+		} );
 	}
 	else
 	{
@@ -856,6 +870,32 @@ void CMapView3D::Look( QPointF delta )
 //-----------------------------------------------------------------------------
 void CMapView3D::mousePressEvent( QMouseEvent *pEvent )
 {
+	// Alt and a right drag orbit the point under the pointer (the texture tool and the
+	// displacement brush keep Alt and the right button for themselves).
+	if ( pEvent->button() == Qt::RightButton && pEvent->modifiers() == Qt::AltModifier && !m_bOrbit && !m_bSpaceDrag && !m_bMouselook && !m_ModalTransform && !IsPaintingDisplacements() && m_Editor.GetTool() != MapTool_t::MAP_TOOL_TEXTURE )
+	{
+		setFocus( Qt::MouseFocusReason );
+		BeginOrbit( pEvent->position() );
+		pEvent->accept();
+		return;
+	}
+	// With the preference, left and right held together move the camera whatever the tool: what
+	// the first button began is let go, and neither button's release reaches the tool.
+	const Qt::MouseButtons both = Qt::LeftButton | Qt::RightButton;
+	if ( CPreferences::Instance().GetMapPreferences().m_bBothButtonsStrafe && !m_bSpaceDrag && !m_ModalTransform && ( pEvent->buttons() & both ) == both )
+	{
+		CancelDrags();
+		m_bMenuPending = false;
+		m_bBothDrag = true;
+		m_bSpaceDrag = true;
+		m_Dragging = pEvent->buttons();
+		m_PressAt = pEvent->position().toPoint();
+		m_bMoved = false;
+		if ( !m_bMouselook )
+			CapturePointer( m_PressAt, [ this ]( QPointF delta ) { DragCamera( m_Dragging, delta ); } );
+		pEvent->accept();
+		return;
+	}
 	// With Space held the buttons move the camera, as the camera tool's do: left looks, right
 	// pans, both go forward and back. No tool sees the click.
 	if ( ( m_bSpaceHeld || m_bSpaceDrag ) && !m_ModalTransform && ( pEvent->button() == Qt::LeftButton || pEvent->button() == Qt::RightButton ) )
@@ -1035,10 +1075,12 @@ void CMapView3D::mousePressEvent( QMouseEvent *pEvent )
 	}
 	// Hammer++'s right click on the gizmo goes round its modes; anywhere else, the menu of what
 	// is under the cursor.
+	// It opens when the button comes up, as Hammer's does, so the left one can still join it
+	// for the both-buttons drag.
 	if ( pEvent->button() == Qt::RightButton && m_Editor.GetTool() == MapTool_t::MAP_TOOL_SELECT && !m_bMouselook && !( GetGizmo() && m_nGizmoHover >= 0 ) )
 	{
-		const std::vector<xv::map::TraceHit_t> hits = HitsAt( pEvent->position() );
-		m_Editor.ShowObjectMenu( this, pEvent->globalPosition().toPoint(), hits.empty() ? std::nullopt : std::optional<std::uint32_t>{ hits.front().m_nObject }, FaceAt( pEvent->position() ) );
+		m_MenuAt = pEvent->position();
+		m_bMenuPending = true;
 		return;
 	}
 	if ( pEvent->button() == Qt::RightButton && m_Editor.GetTool() == MapTool_t::MAP_TOOL_SELECT && GetGizmo() )
@@ -1828,6 +1870,17 @@ void CMapView3D::EndGizmo( bool bCommit, QPointF at, Qt::KeyboardModifiers modif
 //-----------------------------------------------------------------------------
 void CMapView3D::mouseMoveEvent( QMouseEvent *pEvent )
 {
+	if ( m_bOrbit )
+	{
+		if ( m_PointerLock.IsActive() )
+			return;
+		const QPoint at = pEvent->position().toPoint();
+		const QPoint delta = at - m_LastMouse;
+		m_LastMouse = at;
+		Orbit( delta );
+		WarpToMiddle();
+		return;
+	}
 	if ( m_bSpaceDrag )
 	{
 		// A pinned pointer's movement comes through the lock's callback.
@@ -1980,11 +2033,26 @@ void CMapView3D::DragCamera( Qt::MouseButtons buttons, QPointF delta )
 {
 	const bool bLeft = ( buttons & Qt::LeftButton ) != 0;
 	const bool bRight = ( buttons & Qt::RightButton ) != 0;
-	const double flPan = CPreferences::Instance().GetMapPreferences().m_flPanScale;
+	const MapPreferences_t &preferences = CPreferences::Instance().GetMapPreferences();
+	const double flPan = preferences.m_flPanScale;
 	if ( bLeft && bRight )
 	{
-		m_Camera.m_Eye = xv::map::Add( m_Camera.m_Eye, xv::map::Scale( m_Camera.GetForward(), -delta.y() * flPan ) );
+		xv::map::Point_t move = xv::map::Scale( m_Camera.GetForward(), -delta.y() * flPan );
+		if ( preferences.m_bBothButtonsStrafe )
+		{
+			// Sideways stays level, whatever the camera's pitch.
+			xv::map::Point_t right = m_Camera.GetRight();
+			right[ 2 ] = 0.0;
+			const double flLength = std::hypot( right[ 0 ], right[ 1 ] );
+			if ( flLength > 1e-6 )
+				move = xv::map::Add( move, xv::map::Scale( right, delta.x() * flPan / flLength ) );
+		}
+		m_Camera.m_Eye = xv::map::Add( m_Camera.m_Eye, move );
 		Changed();
+	}
+	else if ( m_bBothDrag )
+	{
+		// One of the two let go: nothing until the other is too.
 	}
 	else if ( bLeft )
 	{
@@ -1998,6 +2066,73 @@ void CMapView3D::DragCamera( Qt::MouseButtons buttons, QPointF delta )
 }
 
 //-----------------------------------------------------------------------------
+// Purpose: The point orbited is what the pointer is on, else the selection's centre, else a
+//          point ahead; the camera turns to face it, staying as far away.
+//-----------------------------------------------------------------------------
+void CMapView3D::BeginOrbit( QPointF at )
+{
+	const auto [ from, dir ] = GetSizedCamera().Ray( at.x(), at.y() );
+	const std::vector<xv::map::TraceHit_t> hits = HitsAt( at );
+	const xv::map::Box_t selection = GetDocument().GetSelectionBounds();
+	if ( !hits.empty() )
+		m_OrbitCenter = xv::map::Add( from, xv::map::Scale( dir, hits.front().m_flDistance ) );
+	else if ( !selection.IsEmpty() )
+		m_OrbitCenter = selection.GetCenter();
+	else
+		m_OrbitCenter = xv::map::Add( m_Camera.m_Eye, xv::map::Scale( m_Camera.GetForward(), ORBIT_AHEAD ) );
+	const double flRadius = std::max( ORBIT_NEAREST, xv::map::Length( xv::map::Subtract( m_Camera.m_Eye, m_OrbitCenter ) ) );
+	m_Camera.LookAt( m_Camera.m_Eye, m_OrbitCenter );
+	m_Camera.m_Eye = xv::map::Subtract( m_OrbitCenter, xv::map::Scale( m_Camera.GetForward(), flRadius ) );
+	Changed();
+	m_bOrbit = true;
+	CapturePointer( at.toPoint(), [ this ]( QPointF delta ) { Orbit( delta ); } );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Across the mouse goes round the point, up and down over it; up stays up, so the
+//          camera stops short of the poles.
+//-----------------------------------------------------------------------------
+void CMapView3D::Orbit( QPointF delta )
+{
+	if ( delta.isNull() )
+		return;
+	const double flRadius = xv::map::Length( xv::map::Subtract( m_Camera.m_Eye, m_OrbitCenter ) );
+	const double flSensitivity = CPreferences::Instance().GetMapPreferences().m_flSensitivity;
+	m_Camera.m_flYaw -= delta.x() * flSensitivity;
+	m_Camera.m_flPitch = std::clamp( m_Camera.m_flPitch + delta.y() * flSensitivity, -89.0, 89.0 );
+	m_Camera.m_Eye = xv::map::Subtract( m_OrbitCenter, xv::map::Scale( m_Camera.GetForward(), flRadius ) );
+	Changed();
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+void CMapView3D::EndOrbit()
+{
+	if ( !m_bOrbit )
+		return;
+	m_bOrbit = false;
+	ReleasePointer();
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Whatever a button began with a tool, given up (as Escape gives it up).
+//-----------------------------------------------------------------------------
+void CMapView3D::CancelDrags()
+{
+	if ( m_nGizmoDrag >= 0 )
+		EndGizmo( false, m_GizmoFrom, Qt::NoModifier );
+	if ( m_nBoxFace >= 0 || m_nBoxPlane >= 0 )
+		EndBoxDrag( false );
+	if ( m_BlockPlane )
+		EndBlockDrag( false );
+	if ( m_pOverlayScene )
+		EndOverlayDrag( false );
+	if ( m_pPaintScene )
+		EndPaint( false );
+}
+
+//-----------------------------------------------------------------------------
 // Purpose: Ends a drag begun with Space held, letting the pointer go.
 //-----------------------------------------------------------------------------
 void CMapView3D::EndSpaceDrag()
@@ -2005,6 +2140,7 @@ void CMapView3D::EndSpaceDrag()
 	if ( !m_bSpaceDrag )
 		return;
 	m_bSpaceDrag = false;
+	m_bBothDrag = false;
 	m_Dragging = Qt::NoButton;
 	if ( !m_bMouselook )
 		ReleasePointer();
@@ -2015,6 +2151,22 @@ void CMapView3D::EndSpaceDrag()
 //-----------------------------------------------------------------------------
 void CMapView3D::mouseReleaseEvent( QMouseEvent *pEvent )
 {
+	if ( m_bOrbit )
+	{
+		if ( pEvent->button() == Qt::RightButton )
+			EndOrbit();
+		return;
+	}
+	if ( m_bMenuPending && pEvent->button() == Qt::RightButton )
+	{
+		m_bMenuPending = false;
+		if ( ( pEvent->position() - m_MenuAt ).manhattanLength() <= QApplication::startDragDistance() )
+		{
+			const std::vector<xv::map::TraceHit_t> hits = HitsAt( m_MenuAt );
+			m_Editor.ShowObjectMenu( this, mapToGlobal( m_MenuAt.toPoint() ), hits.empty() ? std::nullopt : std::optional<std::uint32_t>{ hits.front().m_nObject }, FaceAt( m_MenuAt ) );
+		}
+		return;
+	}
 	if ( m_bSpaceDrag )
 	{
 		m_Dragging = pEvent->buttons();
@@ -3177,6 +3329,16 @@ void CMapView3D::wheelEvent( QWheelEvent *pEvent )
 		return;
 	}
 	const double flNotches = pEvent->angleDelta().y() / 120.0;
+	if ( m_bOrbit )
+	{
+		// Nearer the point or further out, still looking at it.
+		const double flRadius = xv::map::Length( xv::map::Subtract( m_Camera.m_Eye, m_OrbitCenter ) );
+		const double flNew = std::max( ORBIT_NEAREST, flRadius - flNotches * CPreferences::Instance().GetMapPreferences().m_flWheelStep );
+		m_Camera.m_Eye = xv::map::Subtract( m_OrbitCenter, xv::map::Scale( m_Camera.GetForward(), flNew ) );
+		Changed();
+		pEvent->accept();
+		return;
+	}
 	if ( IsOrthographic() )
 	{
 		// Zoomed about the pointer: the point under it stays there.
@@ -3361,6 +3523,7 @@ void CMapView3D::focusOutEvent( QFocusEvent *pEvent )
 	m_flSpeed = 0.0;
 	m_bSpaceHeld = false;
 	EndSpaceDrag();
+	EndOrbit();
 	if ( m_bMouselook )
 	{
 		SetMouselook( false );

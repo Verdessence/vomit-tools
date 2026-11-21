@@ -111,6 +111,7 @@ std::vector<TraceHit_t> TraceScene( const RasterScene_t &scene, bool bToolTextur
 			{
 				continue;
 			}
+			const bool bBothSides = batch.m_nMaterial < scene.m_Materials.size() && scene.m_Materials[ batch.m_nMaterial ].m_bNoCull;
 			for ( std::uint32_t i = batch.m_nFirstIndex; i < batch.m_nFirstIndex + batch.m_nIndexCount; i += 3 )
 			{
 				const MeshVertex_t &a = mesh.m_Vertices[ mesh.m_Indices[ i ] ];
@@ -118,7 +119,16 @@ std::vector<TraceHit_t> TraceScene( const RasterScene_t &scene, bool bToolTextur
 				{
 					continue;
 				}
-				const auto t = HitsTriangle( ToPoint( a.m_vecPosition ), ToPoint( mesh.m_Vertices[ mesh.m_Indices[ i + 1 ] ].m_vecPosition ), ToPoint( mesh.m_Vertices[ mesh.m_Indices[ i + 2 ] ].m_vecPosition ), from, dir );
+				const Point_t pa = ToPoint( a.m_vecPosition );
+				const Point_t pb = ToPoint( mesh.m_Vertices[ mesh.m_Indices[ i + 1 ] ].m_vecPosition );
+				const Point_t pc = ToPoint( mesh.m_Vertices[ mesh.m_Indices[ i + 2 ] ].m_vecPosition );
+				// As drawn: a face seen from behind isn't there (from inside a brush, its own
+				// faces), unless its material draws both sides. Wound clockwise seen from outside.
+				if ( !bBothSides && Dot( Cross( Subtract( pc, pa ), Subtract( pb, pa ) ), dir ) >= 0.0 )
+				{
+					continue;
+				}
+				const auto t = HitsTriangle( pa, pb, pc, from, dir );
 				if ( !t || *t > flMax )
 				{
 					continue;

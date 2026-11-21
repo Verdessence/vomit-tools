@@ -171,6 +171,10 @@ private:
 	void Look( QPointF delta );
 	void DragCamera( Qt::MouseButtons buttons, QPointF delta );
 	void EndSpaceDrag();
+	void CancelDrags();
+	void BeginOrbit( QPointF at );
+	void Orbit( QPointF delta );
+	void EndOrbit();
 	// Hides the cursor and holds it in the view while the mouse moves the camera.
 	void CapturePointer( QPoint at, std::function<void( QPointF )> pfnMoved );
 	void ReleasePointer();
@@ -254,6 +258,11 @@ private:
 	CPointerLock m_PointerLock; // Wayland: pins the pointer meanwhile
 	bool m_bSpaceHeld = false;
 	bool m_bSpaceDrag = false; // a drag begun with Space held: the camera's, whatever the tool
+	bool m_bBothDrag = false;  // one begun by both buttons together (the preference)
+	bool m_bOrbit = false;     // Alt and a right drag: round m_OrbitCenter
+	bool m_bMenuPending = false; // the right button down with the selection tool: its menu at m_MenuAt on release
+	QPointF m_MenuAt;
+	xv::map::Point_t m_OrbitCenter{};
 	Qt::MouseButtons m_Dragging;
 	QPoint m_LastMouse;
 	QPoint m_PressAt;
