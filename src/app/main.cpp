@@ -22,6 +22,7 @@
 #include "PopupBlur.h"
 #include "Preferences.h"
 #include "StateFormat.h"
+#include "AppFolders.h"
 #include "PremiumDialog.h"
 #include "SingleInstance.h"
 #include "Splash.h"
@@ -49,6 +50,7 @@ int main( int nArgc, char *argv[] )
 	CApplication app{ nArgc, argv };
 	QApplication::setApplicationDisplayName( QStringLiteral( "Vomit Tools" ) );
 	MigrateSettingsToNut();
+	MoveOldAppFolders();
 	QApplication::setApplicationVersion( CAboutDialog::VersionText() );
 	QApplication::setWindowIcon( QIcon( QStringLiteral( ":/assets/vomit-tools.png" ) ) );
 	InstallCrashHandler();

@@ -5,6 +5,7 @@
 //
 //===========================================================================//
 #include "CrashHandler.h"
+#include "AppFolders.h"
 
 #include <algorithm>
 #include <atomic>
@@ -362,7 +363,7 @@ void SetCrashContext( const QString &szContext )
 //-----------------------------------------------------------------------------
 QString CrashLogFolder()
 {
-	return QDir{ QStandardPaths::writableLocation( QStandardPaths::AppLocalDataLocation ) }.filePath( QStringLiteral( "crashlogs" ) );
+	return QDir{ AppDataFolder() }.filePath( QStringLiteral( "crashlogs" ) );
 }
 
 //-----------------------------------------------------------------------------

@@ -5,6 +5,7 @@
 //
 //===========================================================================//
 #include "ModelBrowser.h"
+#include "AppFolders.h"
 
 #include "LoadingView.h"
 
@@ -605,7 +606,7 @@ bool CModelBrowser::IsFinished() const
 
 QString CModelBrowser::CacheFolder()
 {
-	return QStandardPaths::writableLocation( QStandardPaths::CacheLocation ) + QStringLiteral( "/model-pictures/v%1" ).arg( PICTURE_VERSION );
+	return AppCacheFolder() + QStringLiteral( "/model-pictures/v%1" ).arg( PICTURE_VERSION );
 }
 
 //-----------------------------------------------------------------------------
@@ -699,7 +700,7 @@ void CModelBrowser::Run( xv::vfs::CGameInfo game )
 	QDir().mkpath( CacheFolder() );
 	// Pictures from earlier versions are never read again.
 	for ( int nOld = 1; nOld < PICTURE_VERSION; nOld++ )
-		QDir( QStandardPaths::writableLocation( QStandardPaths::CacheLocation ) + QStringLiteral( "/model-pictures/v%1" ).arg( nOld ) ).removeRecursively();
+		QDir( AppCacheFolder() + QStringLiteral( "/model-pictures/v%1" ).arg( nOld ) ).removeRecursively();
 	CSpriteCache sprites;
 	std::vector<bool> drawn( paths.size(), false );
 	std::size_t nNext = 0;

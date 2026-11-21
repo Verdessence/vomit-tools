@@ -5,6 +5,7 @@
 //
 //===========================================================================//
 #include "MapLighting.h"
+#include "AppFolders.h"
 
 #include <QElapsedTimer>
 #include <QFile>
@@ -138,7 +139,7 @@ std::filesystem::path CMapLighting::CacheFileFor( const std::filesystem::path &m
 	}
 	if ( szFolder.isEmpty() )
 	{
-		szFolder = QStandardPaths::writableLocation( QStandardPaths::CacheLocation ) + QStringLiteral( "/lighting" );
+		szFolder = AppCacheFolder() + QStringLiteral( "/lighting" );
 	}
 	const QString szMap = QFileInfo( QString::fromStdU16String( map.u16string() ) ).absoluteFilePath();
 	const QByteArray hash = QCryptographicHash::hash( szMap.toUtf8(), QCryptographicHash::Sha1 ).toHex();

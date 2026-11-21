@@ -5,6 +5,7 @@
 //
 //===========================================================================//
 #include "DebugLog.h"
+#include "AppFolders.h"
 
 #include <cstdio>
 
@@ -58,7 +59,7 @@ void Handle( QtMsgType nType, const QMessageLogContext &context, const QString &
 //-----------------------------------------------------------------------------
 QString DebugLogPath()
 {
-	return QDir{ QStandardPaths::writableLocation( QStandardPaths::AppLocalDataLocation ) }.filePath( QStringLiteral( "debug.log" ) );
+	return QDir{ AppDataFolder() }.filePath( QStringLiteral( "debug.log" ) );
 }
 
 //-----------------------------------------------------------------------------

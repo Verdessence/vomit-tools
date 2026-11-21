@@ -5,6 +5,7 @@
 //
 //===========================================================================//
 #include "MapAutosave.h"
+#include "AppFolders.h"
 
 #include <atomic>
 
@@ -27,7 +28,7 @@ constexpr char NEW_PREFIX[] = "new-";
 //-----------------------------------------------------------------------------
 QString AutosaveFolder()
 {
-	return QStandardPaths::writableLocation( QStandardPaths::AppDataLocation ) + QStringLiteral( "/autosave" );
+	return AppDataFolder() + QStringLiteral( "/autosave" );
 }
 
 } // namespace

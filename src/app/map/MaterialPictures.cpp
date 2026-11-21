@@ -5,6 +5,7 @@
 //
 //===========================================================================//
 #include "MaterialPictures.h"
+#include "AppFolders.h"
 #include <algorithm>
 #include <QCryptographicHash>
 #include <QDir>
@@ -65,7 +66,7 @@ QImage Composed( QImage picture, bool bSeeThrough, int nPictureSize )
 //-----------------------------------------------------------------------------
 QString MaterialPictureCacheFolder()
 {
-	return QStandardPaths::writableLocation( QStandardPaths::CacheLocation ) + QStringLiteral( "/material-pictures/v3" );
+	return AppCacheFolder() + QStringLiteral( "/material-pictures/v3" );
 }
 
 //-----------------------------------------------------------------------------
