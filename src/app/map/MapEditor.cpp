@@ -2470,6 +2470,21 @@ void CMapEditor::ShowObjectMenu( CMapView *pView, QPoint globalAt, std::optional
 		add( tr( "Carve" ), MapAction_t::MAP_ACTION_CARVE );
 		add( tr( "Hollow" ), MapAction_t::MAP_ACTION_HOLLOW );
 		add( tr( "Transform…" ), MapAction_t::MAP_ACTION_TRANSFORM );
+		{
+			QMenu *pAlign = menu.addMenu( tr( "Align" ) );
+			const auto addAlign = [ & ]( const QString &szText, MapAction_t nAction ) {
+				QAction *pAction = pAlign->addAction( szText, this, [ this, nAction, pView ] { RunAction( nAction, pView ); } );
+				pAction->setShortcut( MapActionKey( nAction ) );
+				pAction->setShortcutVisibleInContextMenu( true );
+			};
+			for ( const auto &[ szText, nAction ] : MapAlignActions() )
+			{
+				if ( szText.isEmpty() )
+					pAlign->addSeparator();
+				else
+					addAlign( szText, nAction );
+			}
+		}
 		menu.addSeparator();
 		add( tr( "Hide" ), MapAction_t::MAP_ACTION_QUICK_HIDE );
 		add( tr( "Hide Others" ), MapAction_t::MAP_ACTION_QUICK_HIDE_OTHERS );
@@ -2917,6 +2932,21 @@ bool CMapEditor::RunAction( MapAction_t nAction, CMapView *pFrom )
 		}
 		case MapAction_t::MAP_ACTION_SNAP_SELECTION:
 			SnapSelection();
+			return true;
+		case MapAction_t::MAP_ACTION_ALIGN_LEFT:
+		case MapAction_t::MAP_ACTION_ALIGN_RIGHT:
+		case MapAction_t::MAP_ACTION_ALIGN_TOP:
+		case MapAction_t::MAP_ACTION_ALIGN_BOTTOM:
+		case MapAction_t::MAP_ACTION_ALIGN_CENTER_HORIZONTAL:
+		case MapAction_t::MAP_ACTION_ALIGN_CENTER_VERTICAL:
+		case MapAction_t::MAP_ACTION_DISTRIBUTE_HORIZONTAL:
+		case MapAction_t::MAP_ACTION_DISTRIBUTE_VERTICAL:
+		case MapAction_t::MAP_ACTION_DISTRIBUTE_DIAGONAL:
+			AlignSelection( nAction, pFrom ? pFrom : m_pActiveView );
+			return true;
+		case MapAction_t::MAP_ACTION_MOVE_TO_FLOOR:
+		case MapAction_t::MAP_ACTION_MOVE_TO_CEILING:
+			DropSelection( nAction == MapAction_t::MAP_ACTION_MOVE_TO_CEILING );
 			return true;
 		case MapAction_t::MAP_ACTION_TOGGLE_HELPERS: return toggle( m_Settings.m_bHelpers );
 		case MapAction_t::MAP_ACTION_TOGGLE_MODELS_2D: return toggle( m_Settings.m_bModels2D );

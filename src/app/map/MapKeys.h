@@ -168,6 +168,19 @@ enum class MapAction_t
 	MAP_ACTION_BRUSH_MODE_FACE,       // Blender's 3
 	MAP_ACTION_BRUSH_LEAVE,           // Tab (Escape too, always): back to the selection tool
 	MAP_ACTION_NODRAW_VOID_FACES,     // the Map menu: the world's faces facing the void get nodraw
+	// Map > Align: the selected objects lined up on the view's axes (a 3D view's are x and z),
+	// each object (a brush entity, a group) moved as one.
+	MAP_ACTION_ALIGN_LEFT,
+	MAP_ACTION_ALIGN_RIGHT,
+	MAP_ACTION_ALIGN_TOP,
+	MAP_ACTION_ALIGN_BOTTOM,
+	MAP_ACTION_ALIGN_CENTER_HORIZONTAL,
+	MAP_ACTION_ALIGN_CENTER_VERTICAL,
+	MAP_ACTION_DISTRIBUTE_HORIZONTAL, // evenly spaced between the outermost two
+	MAP_ACTION_DISTRIBUTE_VERTICAL,
+	MAP_ACTION_DISTRIBUTE_DIAGONAL,   // on the line between the outermost two, evenly spaced
+	MAP_ACTION_MOVE_TO_FLOOR,         // each object down onto what is under it
+	MAP_ACTION_MOVE_TO_CEILING,       // and up against what is over it
 	MAP_ACTION_COUNT
 };
 

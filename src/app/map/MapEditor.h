@@ -75,6 +75,10 @@ class CPanelColumn;
 class QToolBar;
 class QVBoxLayout;
 
+// Map > Align's commands in menu order, an empty name for a separator (the Map menu and the
+// views' right-click menu list the same).
+[[nodiscard]] std::vector<std::pair<QString, MapAction_t>> MapAlignActions();
+
 class CMapEditor : public QWidget, public IEditorTab
 {
 	Q_OBJECT
@@ -252,6 +256,11 @@ public:
 	void ShowTransformDialog();
 	void ApplyTransformValues( const TransformValues_t &values );
 	void FlipSelection( std::size_t nAxis );
+	// Map > Align (map/MapArrange.cpp): the selection's objects lined up or spaced out on the
+	// view's axes (a 3D view's are x and z), or each dropped onto what is under it (raised
+	// against what is over it with bUp). A brush entity, and a group in Groups mode, moves as one.
+	void AlignSelection( MapAction_t nHow, CMapView *pFrom );
+	void DropSelection( bool bUp );
 	// Paste Special (Ctrl+Shift+V) and what it applies; bStartAtView puts the first copy's centre
 	// at the active 2D view's centre.
 	void ShowPasteSpecialDialog();
@@ -449,6 +458,13 @@ private:
 	void GoToBrush();
 	void Paste( CMapView *pFrom );
 	void SnapSelection();
+	// The selection as the objects Align moves as one: each brush or point entity (by its
+	// entity's object), each outermost group in Groups mode, each world solid otherwise.
+	[[nodiscard]] std::vector<std::vector<std::uint32_t>> SelectionUnits() const;
+	// The box round a unit as drawn: a prop's model where it is loaded.
+	[[nodiscard]] xv::map::Box_t UnitBounds( const std::vector<std::uint32_t> &unit ) const;
+	// One undo step moving each unit by its own offset.
+	void MoveUnits( const std::vector<std::vector<std::uint32_t>> &units, const std::vector<xv::map::Point_t> &offsets, const QString &szName );
 	void ShowProperties();
 	// Object Properties brought forward when the selection takes an entity it hadn't.
 	void FollowSelectionWithProperties();

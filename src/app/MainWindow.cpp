@@ -897,6 +897,22 @@ void CMainWindow::BuildMenus( QAction *pSearchPathsToggle )
 			pMap->RunAction( MapAction_t::MAP_ACTION_FLIP_VERTICAL, pMap->GetActiveView() );
 		}
 	} );
+	QMenu *pAlign = m_pMapMenu->addMenu( tr( "&Align" ) );
+	pAlign->setObjectName( QStringLiteral( "mapAlignMenu" ) );
+	for ( const auto &[ szText, nAction ] : MapAlignActions() )
+	{
+		if ( szText.isEmpty() )
+		{
+			pAlign->addSeparator();
+			continue;
+		}
+		pAlign->addAction( szText, this, [ this, nAction ] {
+			if ( CMapEditor *pMap = GetCurrentMap() )
+			{
+				pMap->RunAction( nAction, pMap->GetActiveView() );
+			}
+		} );
+	}
 	m_pMapMenu->addAction( tr( "Replace &Textures…" ), this, [ this ] {
 		if ( CMapEditor *pMap = GetCurrentMap() )
 		{

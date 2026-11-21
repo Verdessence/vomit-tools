@@ -98,6 +98,8 @@ public:
 	// What frames share, as it stands, without a camera or per-view state (the 2D views draw props
 	// from it).
 	[[nodiscard]] MapFrame_t GetShared();
+	// A prop's model's box where it was placed; empty when its model isn't loaded.
+	[[nodiscard]] xv::map::Box_t GetPropBounds( std::uint32_t nObject ) const;
 	// The frame for a camera, from what the document shows now.
 	[[nodiscard]] MapFrame_t Snapshot( const xv::map::CViewCamera &camera, const xv::map::RasterOptions_t &options, const MapViewSettings_t &settings );
 	// Each object's line colour (MapLineColors), made again when the settings or preferences

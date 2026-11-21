@@ -174,6 +174,17 @@ const MapActionInfo_t ACTIONS[] = {
 	{ A::MAP_ACTION_BRUSH_MODE_FACE, "Brush_Mode_Face", QT_TRANSLATE_NOOP( "MapKeys", "Faces" ), "Brush Edit", BRUSH },
 	{ A::MAP_ACTION_BRUSH_LEAVE, "Brush_Leave", QT_TRANSLATE_NOOP( "MapKeys", "Leave Brush Edit" ), "Brush Edit", BRUSH },
 	{ A::MAP_ACTION_NODRAW_VOID_FACES, "Map_Nodraw_Void_Faces", QT_TRANSLATE_NOOP( "MapKeys", "Nodraw faces facing the void" ), "Tools", BOTH },
+	{ A::MAP_ACTION_ALIGN_LEFT, "Tools_Align_Left", QT_TRANSLATE_NOOP( "MapKeys", "Align left" ), QT_TRANSLATE_NOOP( "MapKeys", "Align" ), BOTH },
+	{ A::MAP_ACTION_ALIGN_RIGHT, "Tools_Align_Right", QT_TRANSLATE_NOOP( "MapKeys", "Align right" ), "Align", BOTH },
+	{ A::MAP_ACTION_ALIGN_TOP, "Tools_Align_Top", QT_TRANSLATE_NOOP( "MapKeys", "Align top" ), "Align", BOTH },
+	{ A::MAP_ACTION_ALIGN_BOTTOM, "Tools_Align_Bottom", QT_TRANSLATE_NOOP( "MapKeys", "Align bottom" ), "Align", BOTH },
+	{ A::MAP_ACTION_ALIGN_CENTER_HORIZONTAL, "Tools_Align_Center_Horizontal", QT_TRANSLATE_NOOP( "MapKeys", "Centre horizontally" ), "Align", BOTH },
+	{ A::MAP_ACTION_ALIGN_CENTER_VERTICAL, "Tools_Align_Center_Vertical", QT_TRANSLATE_NOOP( "MapKeys", "Centre vertically" ), "Align", BOTH },
+	{ A::MAP_ACTION_DISTRIBUTE_HORIZONTAL, "Tools_Distribute_Horizontal", QT_TRANSLATE_NOOP( "MapKeys", "Space evenly across" ), "Align", BOTH },
+	{ A::MAP_ACTION_DISTRIBUTE_VERTICAL, "Tools_Distribute_Vertical", QT_TRANSLATE_NOOP( "MapKeys", "Space evenly up" ), "Align", BOTH },
+	{ A::MAP_ACTION_DISTRIBUTE_DIAGONAL, "Tools_Distribute_Diagonal", QT_TRANSLATE_NOOP( "MapKeys", "Space evenly on a diagonal" ), "Align", BOTH },
+	{ A::MAP_ACTION_MOVE_TO_FLOOR, "Tools_Move_To_Floor", QT_TRANSLATE_NOOP( "MapKeys", "Move to the floor" ), "Align", BOTH },
+	{ A::MAP_ACTION_MOVE_TO_CEILING, "Tools_Move_To_Ceiling", QT_TRANSLATE_NOOP( "MapKeys", "Move to the ceiling" ), "Align", BOTH },
 };
 static_assert( std::size( ACTIONS ) == static_cast<std::size_t>( MapAction_t::MAP_ACTION_COUNT ), "every action is listed" );
 

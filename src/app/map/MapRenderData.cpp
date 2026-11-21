@@ -618,6 +618,17 @@ void CMapRenderData::SetMaterials( std::shared_ptr<const std::vector<xv::map::Ra
 //-----------------------------------------------------------------------------
 // Purpose:
 //-----------------------------------------------------------------------------
+xv::map::Box_t CMapRenderData::GetPropBounds( std::uint32_t nObject ) const
+{
+	const auto it = std::ranges::lower_bound( m_PropObjects, nObject );
+	if ( it == m_PropObjects.end() || *it != nObject )
+		return {};
+	return m_PropBounds[ static_cast<std::size_t>( it - m_PropObjects.begin() ) ];
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
 void CMapRenderData::SetProps( std::shared_ptr<const xv::map::CMapMesh> pProps, std::vector<std::uint32_t> objects, std::shared_ptr<const xv::map::MeshParts_t> pParts )
 {
 	if ( m_Document.GetScene() != m_pBuiltFor )
