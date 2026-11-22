@@ -61,6 +61,8 @@ public:
 	~CVfsModel() override;
 
 	void Rebuild( const xv::vfs::CFileSystem &fileSystem );
+	// Empty, before the mounts its files point at go (a remount clears them first).
+	void Clear();
 	[[nodiscard]] int GetFileCount() const { return m_nFileCount; }
 	[[nodiscard]] QModelIndex IndexForPath( const std::string &szPath ) const;
 	// Adds one file (or changes the mount an existing one is read from), keeping the rest of the tree.

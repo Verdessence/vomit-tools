@@ -30,6 +30,17 @@ CVfsModel::~CVfsModel() = default;
 //-----------------------------------------------------------------------------
 // Purpose:
 //-----------------------------------------------------------------------------
+void CVfsModel::Clear()
+{
+	beginResetModel();
+	m_pRoot = std::make_unique<Node_t>();
+	m_nFileCount = 0;
+	endResetModel();
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
 void CVfsModel::Rebuild( const xv::vfs::CFileSystem &fileSystem )
 {
 	beginResetModel();

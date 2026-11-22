@@ -540,6 +540,13 @@ CMainWindow::CMainWindow( QWidget *pParent, xv::audio::CEngine::Output_t nAudio 
 	m_pTree->setSortingEnabled( true );
 	m_pTree->sortByColumn( CVfsModel::COLUMN_NAME_COLUMN, Qt::AscendingOrder );
 	m_pTree->header()->restoreState( QSettings{}.value( QStringLiteral( "gameTreeColumnsWithSize" ) ).toByteArray() );
+	// A header saved before the tree sorted brings back unclickable sections and a hidden
+	// indicator on whichever column it last had: clickable again, and by name.
+	if ( !m_pTree->header()->isSortIndicatorShown() )
+		m_pTree->header()->setSortIndicator( CVfsModel::COLUMN_NAME_COLUMN, Qt::AscendingOrder );
+	m_pTree->header()->setSectionsClickable( true );
+	m_pTree->header()->setSortIndicatorShown( true );
+	m_pTree->sortByColumn( m_pTree->header()->sortIndicatorSection(), m_pTree->header()->sortIndicatorOrder() );
 	const auto storeColumns = [ this ] { QSettings{}.setValue( QStringLiteral( "gameTreeColumnsWithSize" ), m_pTree->header()->saveState() ); };
 	connect( m_pTree->header(), &QHeaderView::sectionResized, this, storeColumns );
 	connect( m_pTree->header(), &QHeaderView::sortIndicatorChanged, this, storeColumns );
@@ -831,7 +838,13 @@ CMainWindow::CMainWindow( QWidget *pParent, xv::audio::CEngine::Output_t nAudio 
 //-----------------------------------------------------------------------------
 // Purpose:
 //-----------------------------------------------------------------------------
-CMainWindow::~CMainWindow() = default;
+CMainWindow::~CMainWindow()
+{
+	// The Game tree's rows point into the file system, which as a member goes before Qt
+	// deletes the tree; a tree still on screen lays itself out once more on the way.
+	if ( m_pModel )
+		m_pModel->Clear();
+}
 
 //-----------------------------------------------------------------------------
 // Purpose:
@@ -2037,6 +2050,9 @@ void CMainWindow::Remount()
 	DebugLog() << "mounting" << ToQString( m_Game->m_File ) << "again, all of it";
 	{
 		CDebugTimer timer( QStringLiteral( "mounting the search paths" ) );
+		// The tree's rows point at the mounts Mount is about to replace: emptied first, so a
+		// repaint while the game loads doesn't read them.
+		m_pModel->Clear();
 		m_pFileSystem->Mount( *m_Game );
 	}
 	{

@@ -428,6 +428,8 @@ CVpkEditor::CVpkEditor( std::unique_ptr<xv::vfs::CPackage> pPackage, CSoundPlaye
 	m_pTree->setColumnWidth( COLUMN_STORED, 140 );
 	// Its own key: a layout saved before the Type column came would put the columns out of step.
 	m_pTree->header()->restoreState( QSettings{}.value( QStringLiteral( "archiveTreeColumns" ) ).toByteArray() );
+	// A saved layout carries whether the headers can be clicked: they sort, so they can.
+	m_pTree->header()->setSectionsClickable( true );
 	connect( m_pTree->header(), &QHeaderView::sectionResized, this, [ this ] { QSettings{}.setValue( QStringLiteral( "archiveTreeColumns" ), m_pTree->header()->saveState() ); } );
 	m_pTree->setContextMenuPolicy( Qt::CustomContextMenu );
 	connect( m_pTree, &QTreeView::customContextMenuRequested, this, &CVpkEditor::ShowContextMenu );

@@ -105,6 +105,8 @@ CFolderBrowser::CFolderBrowser( QWidget *pParent )
 	m_pView->setColumnWidth( 1, 76 );
 	m_pView->setColumnWidth( 2, 110 );
 	m_pView->header()->restoreState( QSettings{}.value( HEADER_KEY ).toByteArray() );
+	// A saved layout carries whether the headers can be clicked: they sort, so they can.
+	m_pView->header()->setSectionsClickable( true );
 	// Shown, as in the other trees (layouts saved before hid it).
 	m_pView->setColumnHidden( 2, false );
 	connect( m_pView->header(), &QHeaderView::sectionResized, this, [ this ] { QSettings{}.setValue( HEADER_KEY, m_pView->header()->saveState() ); } );
