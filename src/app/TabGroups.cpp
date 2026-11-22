@@ -33,6 +33,10 @@
 namespace
 {
 
+// Room around each workspace button: across between neighbours, and above and below.
+constexpr int WORKSPACE_GAP = 10;
+constexpr int WORKSPACE_PAD = 3;
+
 class CWorkspaceTabs final : public QTabBar
 {
 public:
@@ -50,7 +54,7 @@ QSize CWorkspaceTabs::tabSizeHint( int nIndex ) const
 	const QFontMetrics metrics = fontMetrics();
 	const int nBadgeSize = std::max( metrics.height(), metrics.horizontalAdvance( tabText( nIndex ) ) + 4 );
 	const int nDiameter = std::max( iconSize().height() + 9, metrics.height() + 8 );
-	return { nDiameter + std::max( 4, nBadgeSize / 2 ), nDiameter };
+	return { nDiameter + std::max( 4, nBadgeSize / 2 ) + WORKSPACE_GAP, nDiameter + WORKSPACE_PAD * 2 };
 }
 
 //-----------------------------------------------------------------------------
@@ -89,9 +93,10 @@ void CWorkspaceTabs::paintEvent( QPaintEvent * )
 	const QFontMetrics metrics = fontMetrics();
 	for ( int i = 0; i < count(); i++ )
 	{
-		const QRect tab = tabRect( i );
-		if ( !available.intersects( tab ) )
+		const QRect whole = tabRect( i );
+		if ( !available.intersects( whole ) )
 			continue;
+		const QRect tab = whole.adjusted( WORKSPACE_GAP / 2, WORKSPACE_PAD, -( WORKSPACE_GAP - WORKSPACE_GAP / 2 ), -WORKSPACE_PAD );
 
 		QStyleOptionTab option;
 		initStyleOption( &option, i );
