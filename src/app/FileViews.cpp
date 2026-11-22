@@ -66,7 +66,9 @@ QPlainTextEdit *MakeTextView( const QString &szText )
 	return pView;
 }
 
-// The decoded sound's envelope, with the loop point marked.
+// The decoded sound's envelope, with the loop point marked: the peaks faint and the RMS (how
+// loud it sounds) strong over them, as audio editors draw it, so a busy sound doesn't read as a
+// solid block at full scale.
 class CWaveformView : public QWidget
 {
 public:
@@ -80,18 +82,23 @@ public:
 		{
 			return;
 		}
-		// Peaks per bucket; painting picks buckets per pixel column.
+		// Peaks and squares per bucket; painting joins buckets per pixel column.
 		constexpr std::size_t nBUCKETS = 4000;
 		const std::uint64_t nFrames = pClip->GetFrames();
 		m_Peaks.assign( std::min<std::uint64_t>( nBUCKETS, nFrames ), { 0.0f, 0.0f } );
+		m_Squares.assign( m_Peaks.size(), { 0.0, 0 } );
 		for ( std::uint64_t nFrame = 0; nFrame < nFrames; nFrame++ )
 		{
-			auto &[ low, high ] = m_Peaks[ static_cast<std::size_t>( nFrame * m_Peaks.size() / nFrames ) ];
+			const std::size_t nBucket = static_cast<std::size_t>( nFrame * m_Peaks.size() / nFrames );
+			auto &[ low, high ] = m_Peaks[ nBucket ];
+			auto &[ flSum, nCount ] = m_Squares[ nBucket ];
 			for ( std::uint32_t c = 0; c < pClip->m_nChannels; c++ )
 			{
 				const float flSample = pClip->m_Samples[ nFrame * pClip->m_nChannels + c ];
 				low = std::min( low, flSample );
 				high = std::max( high, flSample );
+				flSum += static_cast<double>( flSample ) * flSample;
+				nCount++;
 			}
 		}
 		if ( pClip->m_LoopStart )
@@ -132,19 +139,34 @@ protected:
 			shade.setAlpha( 40 );
 			painter.fillRect( 0, 0, nPlayed, height(), shade );
 		}
-		painter.setPen( palette().color( QPalette::Highlight ) );
+		// Full scale stops short of the edges, so a sound that peaks at it still has room.
+		const double flScale = nMiddle * 0.9;
+		const QColor strong = palette().color( QPalette::Highlight );
+		QColor faint = strong;
+		faint.setAlphaF( 0.45f );
 		for ( int x = 0; x < width(); x++ )
 		{
 			const std::size_t nFirst = static_cast<std::size_t>( x ) * m_Peaks.size() / static_cast<std::size_t>( width() );
 			const std::size_t nLast = std::max( nFirst + 1, static_cast<std::size_t>( x + 1 ) * m_Peaks.size() / static_cast<std::size_t>( width() ) );
 			float flLow = 0;
 			float flHigh = 0;
+			double flSum = 0.0;
+			std::uint64_t nCount = 0;
 			for ( std::size_t i = nFirst; i < nLast && i < m_Peaks.size(); i++ )
 			{
 				flLow = std::min( flLow, m_Peaks[ i ].first );
 				flHigh = std::max( flHigh, m_Peaks[ i ].second );
+				flSum += m_Squares[ i ].first;
+				nCount += m_Squares[ i ].second;
 			}
-			painter.drawLine( x, nMiddle - static_cast<int>( flHigh * nMiddle ), x, nMiddle - static_cast<int>( flLow * nMiddle ) );
+			painter.setPen( faint );
+			painter.drawLine( x, nMiddle - static_cast<int>( std::lround( flHigh * flScale ) ), x, nMiddle - static_cast<int>( std::lround( flLow * flScale ) ) );
+			// The RMS within the peaks either side.
+			const double flRms = nCount ? std::sqrt( flSum / static_cast<double>( nCount ) ) : 0.0;
+			const int nUp = static_cast<int>( std::lround( std::min<double>( flRms, flHigh ) * flScale ) );
+			const int nDown = static_cast<int>( std::lround( std::min<double>( flRms, -flLow ) * flScale ) );
+			painter.setPen( strong );
+			painter.drawLine( x, nMiddle - nUp, x, nMiddle + nDown );
 		}
 		if ( m_Loop )
 		{
@@ -170,6 +192,7 @@ protected:
 
 private:
 	std::vector<std::pair<float, float>> m_Peaks;
+	std::vector<std::pair<double, std::uint64_t>> m_Squares; // each bucket's sum of squares, and how many
 	std::optional<double> m_Loop;
 	std::optional<double> m_Playhead;
 };
