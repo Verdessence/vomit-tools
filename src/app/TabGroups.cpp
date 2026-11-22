@@ -1063,6 +1063,8 @@ void CTabGroups::Refresh()
 			m_pBar->setCurrentIndex( i );
 	}
 	m_pBar->setVisible( bStrip );
+	// Its width follows its buttons at once, the pad round it with it.
+	m_pBar->updateGeometry();
 	const bool bAll = !bStrip || m_szCurrent == QLatin1String( ALL );
 	for ( int i = 1; i < m_pTabs->count(); i++ )
 	{

@@ -12,12 +12,30 @@
 #include <vector>
 
 #include <QAbstractItemModel>
+#include <QCollator>
+#include <QSortFilterProxyModel>
 
 namespace xv::vfs
 {
 class CFileSystem;
 class CMount;
 } // namespace xv::vfs
+
+// The game tree's sorting and search: folders always above files, names in natural order
+// ("map2" before "map10"), sizes by their bytes.
+class CVfsSortFilter : public QSortFilterProxyModel
+{
+	Q_OBJECT
+
+public:
+	explicit CVfsSortFilter( QObject *pParent = nullptr );
+
+protected:
+	[[nodiscard]] bool lessThan( const QModelIndex &left, const QModelIndex &right ) const override;
+
+private:
+	QCollator m_Collator;
+};
 
 class CVfsModel : public QAbstractItemModel
 {
@@ -35,7 +53,8 @@ public:
 	enum Role_t
 	{
 		ROLE_PATH_ROLE = Qt::UserRole + 1,
-		ROLE_IS_DIRECTORY_ROLE
+		ROLE_IS_DIRECTORY_ROLE,
+		ROLE_SORT_ROLE, // what a column sorts by: sizes in bytes, the rest as text
 	};
 
 	explicit CVfsModel( QObject *pParent = nullptr );

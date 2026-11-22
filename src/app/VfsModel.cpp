@@ -265,6 +265,15 @@ QVariant CVfsModel::data( const QModelIndex &index, int nRole ) const
 			return QString::fromStdString( pNode->m_szPath );
 		case ROLE_IS_DIRECTORY_ROLE:
 			return bFolder;
+		case ROLE_SORT_ROLE:
+			if ( index.column() == COLUMN_SIZE_COLUMN )
+			{
+				if ( pNode->m_pMount )
+					if ( const auto nSize = pNode->m_pMount->FileSize( pNode->m_szPath ) )
+						return static_cast<qint64>( *nSize );
+				return qint64{ -1 };
+			}
+			return data( index, Qt::DisplayRole );
 		default:
 			return {};
 	}
@@ -290,4 +299,38 @@ QVariant CVfsModel::headerData( int nSection, Qt::Orientation nOrientation, int 
 		default:
 			return tr( "Read from" );
 	}
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+CVfsSortFilter::CVfsSortFilter( QObject *pParent )
+	: QSortFilterProxyModel( pParent )
+{
+	m_Collator.setNumericMode( true );
+	m_Collator.setCaseSensitivity( Qt::CaseInsensitive );
+	setSortRole( CVfsModel::ROLE_SORT_ROLE );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Folders stay above files whichever way the column sorts (Qt turns the answer round
+//          for a descending sort, so the folders' rule is turned round with it).
+//-----------------------------------------------------------------------------
+bool CVfsSortFilter::lessThan( const QModelIndex &left, const QModelIndex &right ) const
+{
+	const bool bLeftFolder = left.data( CVfsModel::ROLE_IS_DIRECTORY_ROLE ).toBool();
+	const bool bRightFolder = right.data( CVfsModel::ROLE_IS_DIRECTORY_ROLE ).toBool();
+	if ( bLeftFolder != bRightFolder )
+		return ( sortOrder() == Qt::AscendingOrder ) == bLeftFolder;
+	const QVariant a = left.data( sortRole() );
+	const QVariant b = right.data( sortRole() );
+	if ( a.typeId() == QMetaType::LongLong && b.typeId() == QMetaType::LongLong && a.toLongLong() != b.toLongLong() )
+		return a.toLongLong() < b.toLongLong();
+	const int nOrder = m_Collator.compare( a.toString(), b.toString() );
+	if ( nOrder != 0 )
+		return nOrder < 0;
+	// Equal in the column: by name, so the order is always the same.
+	const QModelIndex leftName = left.siblingAtColumn( CVfsModel::COLUMN_NAME_COLUMN );
+	const QModelIndex rightName = right.siblingAtColumn( CVfsModel::COLUMN_NAME_COLUMN );
+	return m_Collator.compare( leftName.data().toString(), rightName.data().toString() ) < 0;
 }

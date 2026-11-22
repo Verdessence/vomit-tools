@@ -418,7 +418,7 @@ CMainWindow::CMainWindow( QWidget *pParent, xv::audio::CEngine::Output_t nAudio 
 	: QMainWindow( pParent ),
 	  m_pFileSystem( std::make_unique<xv::vfs::CFileSystem>() ),
 	  m_pModel( new CVfsModel( this ) ),
-	  m_pFilter( new QSortFilterProxyModel( this ) ),
+	  m_pFilter( new CVfsSortFilter( this ) ),
 	  m_pUndoGroup( new QUndoGroup( this ) )
 {
 	setWindowTitle( tr( "Vomit Tools" ) );
@@ -439,6 +439,7 @@ CMainWindow::CMainWindow( QWidget *pParent, xv::audio::CEngine::Output_t nAudio 
 	connect( pSearch, &QLineEdit::textChanged, m_pFilter, &QSortFilterProxyModel::setFilterFixedString );
 
 	m_pTree = new QTreeView;
+	m_pTree->setObjectName( QStringLiteral( "gameTree" ) );
 	m_pTree->setModel( m_pFilter );
 	m_pGameLoading = new CLoadingView( m_pTree->viewport(), LoadingLayout_t::LOADING_LAYOUT_ROWS );
 	m_pTree->setUniformRowHeights( true );
@@ -451,8 +452,13 @@ CMainWindow::CMainWindow( QWidget *pParent, xv::audio::CEngine::Output_t nAudio 
 	m_pTree->setColumnWidth( CVfsModel::COLUMN_SIZE_COLUMN, 68 );
 	m_pTree->setColumnWidth( CVfsModel::COLUMN_SOURCE_COLUMN, 90 );
 	// The extra column changes the order of the sections stored by older versions.
+	// A header click sorts by that column (folders stay first); by name until one is clicked.
+	m_pTree->setSortingEnabled( true );
+	m_pTree->sortByColumn( CVfsModel::COLUMN_NAME_COLUMN, Qt::AscendingOrder );
 	m_pTree->header()->restoreState( QSettings{}.value( QStringLiteral( "gameTreeColumnsWithSize" ) ).toByteArray() );
-	connect( m_pTree->header(), &QHeaderView::sectionResized, this, [ this ] { QSettings{}.setValue( QStringLiteral( "gameTreeColumnsWithSize" ), m_pTree->header()->saveState() ); } );
+	const auto storeColumns = [ this ] { QSettings{}.setValue( QStringLiteral( "gameTreeColumnsWithSize" ), m_pTree->header()->saveState() ); };
+	connect( m_pTree->header(), &QHeaderView::sectionResized, this, storeColumns );
+	connect( m_pTree->header(), &QHeaderView::sortIndicatorChanged, this, storeColumns );
 	m_pTree->setContextMenuPolicy( Qt::CustomContextMenu );
 	connect( m_pTree, &QTreeView::customContextMenuRequested, this, [ this ]( const QPoint &at ) {
 		const QModelIndex proxyIndex = m_pTree->indexAt( at );
@@ -636,18 +642,21 @@ CMainWindow::CMainWindow( QWidget *pParent, xv::audio::CEngine::Output_t nAudio 
 	auto *pDiscordTimer = new QTimer( this );
 	connect( pDiscordTimer, &QTimer::timeout, this, &CMainWindow::UpdateDiscord );
 	pDiscordTimer->start( 5000 );
+	// Each pane has its own header, so the Game and Folder tabs centre over the file tree and the
+	// workspace pad over the editor tabs, both following the splitter between them.
+	auto *pSideHeader = new QWidget;
+	pSideHeader->setObjectName( QStringLiteral( "fileBrowserHeader" ) );
+	auto *pSideHeaderLayout = new QHBoxLayout( pSideHeader );
+	pSideHeaderLayout->setContentsMargins( 0, 0, 0, 0 );
+	pSideHeaderLayout->setSpacing( 0 );
+	pSideHeaderLayout->addStretch( 1 );
+	pSideHeaderLayout->addWidget( pBrowserTabs, 0, Qt::AlignBottom );
+	pSideHeaderLayout->addStretch( 1 );
 	auto *pHeader = new QWidget;
 	pHeader->setObjectName( QStringLiteral( "workspaceHeader" ) );
-	auto *pHeaderLayout = new QGridLayout( pHeader );
+	auto *pHeaderLayout = new QHBoxLayout( pHeader );
 	pHeaderLayout->setContentsMargins( 6, 0, 6, 0 );
 	pHeaderLayout->setSpacing( 0 );
-	// Balance the browser tabs with an equal column so the strip centres in the window.
-	const int nBrowserTabsWidth = pBrowserTabs->sizeHint().width() + 6;
-	pHeaderLayout->setColumnMinimumWidth( 0, nBrowserTabsWidth );
-	pHeaderLayout->setColumnMinimumWidth( 2, nBrowserTabsWidth );
-	pHeaderLayout->setColumnStretch( 0, 1 );
-	pHeaderLayout->setColumnStretch( 2, 1 );
-	pHeaderLayout->addWidget( pBrowserTabs, 0, 0, Qt::AlignLeft | Qt::AlignBottom );
 	auto *pPad = new QFrame;
 	pPad->setObjectName( QStringLiteral( "workspacePad" ) );
 	pPad->setStyleSheet( QStringLiteral( "QFrame#workspacePad { background: palette(base); border: 1px solid palette(mid); border-radius: 6px; }" ) );
@@ -667,18 +676,32 @@ CMainWindow::CMainWindow( QWidget *pParent, xv::audio::CEngine::Output_t nAudio 
 	connect( pHome, &QToolButton::clicked, this, [ this ] { m_pTabs->setCurrentWidget( m_pPreviewHost ); } );
 	pPadLayout->addWidget( pHome );
 	pPadLayout->addWidget( m_pTabGroups->GetBar() );
-	pHeaderLayout->addWidget( pPad, 0, 1 );
+	pHeaderLayout->addStretch( 1 );
+	pHeaderLayout->addWidget( pPad, 0 );
+	pHeaderLayout->addStretch( 1 );
 	groupTabs();
+	// One height for both, so they read as one row.
+	const int nHeaderHeight = std::max( pPad->sizeHint().height(), pBrowserTabs->sizeHint().height() );
+	pHeader->setFixedHeight( nHeaderHeight );
+	pSideHeader->setFixedHeight( nHeaderHeight );
+	auto *pSideColumn = new QWidget;
+	pSideColumn->setObjectName( QStringLiteral( "fileBrowserColumn" ) );
+	auto *pSideLayout = new QVBoxLayout( pSideColumn );
+	pSideLayout->setContentsMargins( 0, 0, 0, 0 );
+	pSideLayout->setSpacing( 0 );
+	pSideLayout->addWidget( pSideHeader );
+	pSideLayout->addWidget( m_pSides, 1 );
 
 	auto *pEditorColumn = new QWidget;
 	auto *pEditorLayout = new QVBoxLayout( pEditorColumn );
 	pEditorLayout->setContentsMargins( 0, 0, 0, 0 );
 	pEditorLayout->setSpacing( 0 );
+	pEditorLayout->addWidget( pHeader );
 	pEditorLayout->addWidget( BuildConfigBar() );
 	pEditorLayout->addWidget( m_pTabs, 1 );
 
 	auto *pSplitter = new QSplitter;
-	pSplitter->addWidget( m_pSides );
+	pSplitter->addWidget( pSideColumn );
 	pSplitter->addWidget( pEditorColumn );
 	pSplitter->setStretchFactor( 1, 3 );
 	pSplitter->setSizes( { 420, 980 } );
@@ -686,7 +709,6 @@ CMainWindow::CMainWindow( QWidget *pParent, xv::audio::CEngine::Output_t nAudio 
 	auto *pCentralLayout = new QVBoxLayout( pCentral );
 	pCentralLayout->setContentsMargins( 0, 0, 0, 0 );
 	pCentralLayout->setSpacing( 0 );
-	pCentralLayout->addWidget( pHeader );
 	pCentralLayout->addWidget( pSplitter, 1 );
 	setCentralWidget( pCentral );
 
