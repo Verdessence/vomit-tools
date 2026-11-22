@@ -1457,6 +1457,8 @@
 		"vtf:format:DXT1_ONEBITALPHA#tip"	"Compressed, with alpha that is only clear or solid."
 		"vtf:format:DXT3#tip"	"Compressed, with sharp 4-bit alpha."
 		"vtf:format:DXT5#tip"	"Compressed, with smooth alpha (8 bits a pixel). Most textures with alpha."
+		"vtf:format:ATI2N#tip"	"Compressed normal map: red and green kept (8 bits a pixel), blue rebuilt by the shader. Sharper normals than DXT5; no alpha."
+		"vtf:format:ATI1N#tip"	"Compressed single channel (4 bits a pixel): a mask or height, no colour."
 		"vtf:format:BGR888#tip"	"Uncompressed colour, no alpha: exact, but six times DXT1's size."
 		"vtf:format:BGRA8888#tip"	"Uncompressed colour and alpha: exact, but large."
 		"vtf:format:RGB888#tip"	"Uncompressed colour, red first."

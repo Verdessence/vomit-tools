@@ -147,6 +147,120 @@ void DecodeColourBlock( const std::byte *pBlock, bool bAlwaysFourColour, std::ar
 }
 
 //-----------------------------------------------------------------------------
+// Purpose: One 8-byte block of eight-level values (DXT5's alpha, each ATI1N/ATI2N channel)
+//          into its 16 values.
+//-----------------------------------------------------------------------------
+void DecodeAlphaBlock( const std::byte *pBlock, std::array<std::uint8_t, 16> &values )
+{
+	const unsigned nA0 = std::to_integer<unsigned>( pBlock[ 0 ] );
+	const unsigned nA1 = std::to_integer<unsigned>( pBlock[ 1 ] );
+	std::array<unsigned, 8> palette{ nA0, nA1 };
+	if ( nA0 > nA1 )
+	{
+		for ( unsigned i = 1; i < 7; i++ )
+		{
+			palette[ i + 1 ] = ( ( 7 - i ) * nA0 + i * nA1 + 3 ) / 7;
+		}
+	}
+	else
+	{
+		for ( unsigned i = 1; i < 5; i++ )
+		{
+			palette[ i + 1 ] = ( ( 5 - i ) * nA0 + i * nA1 + 2 ) / 5;
+		}
+		palette[ 6 ] = 0;
+		palette[ 7 ] = 255;
+	}
+	std::uint64_t nBits = 0;
+	for ( int i = 0; i < 6; i++ )
+	{
+		nBits |= static_cast<std::uint64_t>( std::to_integer<unsigned>( pBlock[ 2 + i ] ) ) << ( 8 * i );
+	}
+	for ( std::size_t i = 0; i < 16; i++ )
+	{
+		values[ i ] = static_cast<std::uint8_t>( palette[ ( nBits >> ( 3 * i ) ) & 7 ] );
+	}
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: ATI1N (one channel, shown as grey) or ATI2N (a normal map's X and Y, with Z rebuilt
+//          as the game's shaders do) to RGBA.
+//-----------------------------------------------------------------------------
+void DecodeAti( VtfFormat_t nFormat, int nWidth, int nHeight, std::span<const std::byte> data, CImage &out )
+{
+	const bool bTwo = nFormat == VtfFormat_t::ATI2N;
+	const std::size_t nBlockBytes = bTwo ? 16 : 8;
+	const int nBlocksWide = std::max( 1, ( nWidth + 3 ) / 4 );
+	const int nBlocksHigh = std::max( 1, ( nHeight + 3 ) / 4 );
+	for ( int nBy = 0; nBy < nBlocksHigh; nBy++ )
+	{
+		for ( int nBx = 0; nBx < nBlocksWide; nBx++ )
+		{
+			const std::byte *pBlock = data.data() + ( static_cast<std::size_t>( nBy ) * static_cast<std::size_t>( nBlocksWide ) + static_cast<std::size_t>( nBx ) ) * nBlockBytes;
+			std::array<std::uint8_t, 16> red{};
+			std::array<std::uint8_t, 16> green{};
+			DecodeAlphaBlock( pBlock, red );
+			if ( bTwo )
+			{
+				DecodeAlphaBlock( pBlock + 8, green );
+			}
+			for ( std::size_t i = 0; i < 16; i++ )
+			{
+				const int x = nBx * 4 + static_cast<int>( i % 4 );
+				const int y = nBy * 4 + static_cast<int>( i / 4 );
+				if ( x >= nWidth || y >= nHeight )
+				{
+					continue;
+				}
+				std::uint8_t *p = out.Pixel( x, y );
+				if ( !bTwo )
+				{
+					p[ 0 ] = p[ 1 ] = p[ 2 ] = red[ i ];
+					p[ 3 ] = 255;
+					continue;
+				}
+				const float flX = red[ i ] / 127.5f - 1.0f;
+				const float flY = green[ i ] / 127.5f - 1.0f;
+				const float flZ = std::sqrt( std::max( 0.0f, 1.0f - flX * flX - flY * flY ) );
+				p[ 0 ] = red[ i ];
+				p[ 1 ] = green[ i ];
+				p[ 2 ] = static_cast<std::uint8_t>( std::lround( ( flZ + 1.0f ) * 127.5f ) );
+				p[ 3 ] = 255;
+			}
+		}
+	}
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Encodes one 4x4 ATI1N block (from red) or ATI2N block (red and green); pixels outside
+//          the image repeat the nearest edge pixel.
+//-----------------------------------------------------------------------------
+void EncodeAtiBlock( const CImage &image, int nBx, int nBy, bool bTwo, std::byte *pOut )
+{
+	std::array<std::uint8_t, 32> channels{};
+	for ( int i = 0; i < 16; i++ )
+	{
+		const int x = std::min( nBx * 4 + i % 4, image.m_nWidth - 1 );
+		const int y = std::min( nBy * 4 + i / 4, image.m_nHeight - 1 );
+		const std::uint8_t *p = image.Pixel( x, y );
+		if ( bTwo )
+		{
+			channels[ static_cast<std::size_t>( i ) * 2 ] = p[ 0 ];
+			channels[ static_cast<std::size_t>( i ) * 2 + 1 ] = p[ 1 ];
+		}
+		else
+		{
+			channels[ static_cast<std::size_t>( i ) ] = p[ 0 ];
+		}
+	}
+	auto *pDest = reinterpret_cast<unsigned char *>( pOut );
+	if ( bTwo )
+		stb_compress_bc5_block( pDest, channels.data() );
+	else
+		stb_compress_bc4_block( pDest, channels.data() );
+}
+
+//-----------------------------------------------------------------------------
 // Purpose:
 //-----------------------------------------------------------------------------
 void DecodeDxt( VtfFormat_t nFormat, int nWidth, int nHeight, std::span<const std::byte> data, CImage &out )
@@ -171,34 +285,7 @@ void DecodeDxt( VtfFormat_t nFormat, int nWidth, int nHeight, std::span<const st
 			}
 			else if ( nFormat == VtfFormat_t::DXT5 )
 			{
-				const unsigned nA0 = std::to_integer<unsigned>( pBlock[ 0 ] );
-				const unsigned nA1 = std::to_integer<unsigned>( pBlock[ 1 ] );
-				std::array<unsigned, 8> palette{ nA0, nA1 };
-				if ( nA0 > nA1 )
-				{
-					for ( unsigned i = 1; i < 7; i++ )
-					{
-						palette[ i + 1 ] = ( ( 7 - i ) * nA0 + i * nA1 + 3 ) / 7;
-					}
-				}
-				else
-				{
-					for ( unsigned i = 1; i < 5; i++ )
-					{
-						palette[ i + 1 ] = ( ( 5 - i ) * nA0 + i * nA1 + 2 ) / 5;
-					}
-					palette[ 6 ] = 0;
-					palette[ 7 ] = 255;
-				}
-				std::uint64_t nBits = 0;
-				for ( int i = 0; i < 6; i++ )
-				{
-					nBits |= static_cast<std::uint64_t>( std::to_integer<unsigned>( pBlock[ 2 + i ] ) ) << ( 8 * i );
-				}
-				for ( std::size_t i = 0; i < 16; i++ )
-				{
-					alpha[ i ] = static_cast<std::uint8_t>( palette[ ( nBits >> ( 3 * i ) ) & 7 ] );
-				}
+				DecodeAlphaBlock( pBlock, alpha );
 			}
 			std::array<std::array<std::uint8_t, 4>, 4> colours{};
 			std::uint32_t nIndices = 0;
@@ -306,6 +393,8 @@ std::string_view FormatName( VtfFormat_t nFormat )
 		case VtfFormat_t::R32F: return "R32F";
 		case VtfFormat_t::RGB323232F: return "RGB323232F";
 		case VtfFormat_t::RGBA32323232F: return "RGBA32323232F";
+		case VtfFormat_t::ATI2N: return "ATI2N";
+		case VtfFormat_t::ATI1N: return "ATI1N";
 	}
 	return "unknown";
 }
@@ -372,9 +461,11 @@ std::size_t ImageSize( VtfFormat_t nFormat, int nWidth, int nHeight )
 	{
 		case VtfFormat_t::DXT1:
 		case VtfFormat_t::DXT1_ONEBITALPHA:
+		case VtfFormat_t::ATI1N:
 			return nBlocks * 8;
 		case VtfFormat_t::DXT3:
 		case VtfFormat_t::DXT5:
+		case VtfFormat_t::ATI2N:
 			return nBlocks * 16;
 		case VtfFormat_t::I8:
 		case VtfFormat_t::P8:
@@ -622,6 +713,18 @@ std::optional<CVtf> ReadVtf( std::span<const std::byte> data, std::string *pErro
 		}
 		return nTotal;
 	};
+	// Tools disagree on which of 37 and 38 is ATI2N, and the two differ in block size, so the
+	// file's size settles it: the image data runs to the end of the file.
+	if ( info.m_nFormat == VtfFormat_t::ATI1N || info.m_nFormat == VtfFormat_t::ATI2N )
+	{
+		const VtfFormat_t nDeclared = info.m_nFormat;
+		const std::uint64_t nDeclaredSize = totalSize();
+		info.m_nFormat = nDeclared == VtfFormat_t::ATI1N ? VtfFormat_t::ATI2N : VtfFormat_t::ATI1N;
+		const bool bOtherFits = vtf.m_nImageOffset <= data.size() && totalSize() == data.size() - vtf.m_nImageOffset;
+		const bool bDeclaredFits = vtf.m_nImageOffset <= data.size() && nDeclaredSize == data.size() - vtf.m_nImageOffset;
+		if ( !bOtherFits || bDeclaredFits )
+			info.m_nFormat = nDeclared;
+	}
 	if ( vtf.m_nImageOffset + totalSize() > data.size() && info.m_nFaces == 7 )
 	{
 		info.m_nFaces = 6; // a cube map written without the sphere map
@@ -655,6 +758,11 @@ std::optional<CImage> DecodeImage( VtfFormat_t nFormat, int nWidth, int nHeight,
 	if ( nFormat == VtfFormat_t::DXT1 || nFormat == VtfFormat_t::DXT1_ONEBITALPHA || nFormat == VtfFormat_t::DXT3 || nFormat == VtfFormat_t::DXT5 )
 	{
 		DecodeDxt( nFormat, nWidth, nHeight, data, out );
+		return out;
+	}
+	if ( nFormat == VtfFormat_t::ATI1N || nFormat == VtfFormat_t::ATI2N )
+	{
+		DecodeAti( nFormat, nWidth, nHeight, data, out );
 		return out;
 	}
 	const std::size_t nPixelBytes = nSize / ( static_cast<std::size_t>( nWidth ) * static_cast<std::size_t>( nHeight ) );
@@ -1026,9 +1134,10 @@ std::vector<std::byte> EncodeImage( const CImage &image, VtfFormat_t nFormat )
 		return EncodeFloat( ToFloat( image ), nFormat );
 	}
 	std::vector<std::byte> out( ImageSize( nFormat, image.m_nWidth, image.m_nHeight ) );
-	if ( nFormat == VtfFormat_t::DXT1 || nFormat == VtfFormat_t::DXT1_ONEBITALPHA || nFormat == VtfFormat_t::DXT3 || nFormat == VtfFormat_t::DXT5 )
+	const bool bAti = nFormat == VtfFormat_t::ATI1N || nFormat == VtfFormat_t::ATI2N;
+	if ( bAti || nFormat == VtfFormat_t::DXT1 || nFormat == VtfFormat_t::DXT1_ONEBITALPHA || nFormat == VtfFormat_t::DXT3 || nFormat == VtfFormat_t::DXT5 )
 	{
-		const int nBlockBytes = nFormat == VtfFormat_t::DXT1 || nFormat == VtfFormat_t::DXT1_ONEBITALPHA ? 8 : 16;
+		const int nBlockBytes = nFormat == VtfFormat_t::DXT1 || nFormat == VtfFormat_t::DXT1_ONEBITALPHA || nFormat == VtfFormat_t::ATI1N ? 8 : 16;
 		const int nBlocksWide = std::max( 1, ( image.m_nWidth + 3 ) / 4 );
 		const int nBlocksHigh = std::max( 1, ( image.m_nHeight + 3 ) / 4 );
 		for ( int nBy = 0; nBy < nBlocksHigh; nBy++ )
@@ -1039,6 +1148,8 @@ std::vector<std::byte> EncodeImage( const CImage &image, VtfFormat_t nFormat )
 				std::byte *pBlock = out.data() + nBlock * static_cast<std::size_t>( nBlockBytes );
 				switch ( nFormat )
 				{
+					case VtfFormat_t::ATI1N:
+					case VtfFormat_t::ATI2N: EncodeAtiBlock( image, nBx, nBy, nFormat == VtfFormat_t::ATI2N, pBlock ); break;
 					case VtfFormat_t::DXT1_ONEBITALPHA: EncodeDxt1AlphaBlock( image, nBx, nBy, pBlock ); break;
 					case VtfFormat_t::DXT3: EncodeDxt3Block( image, nBx, nBy, pBlock ); break;
 					default: EncodeDxtBlock( image, nBx, nBy, nFormat == VtfFormat_t::DXT5, pBlock ); break;

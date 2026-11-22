@@ -55,6 +55,9 @@ enum class VtfFormat_t : std::int32_t
 	R32F = 27,
 	RGB323232F = 28,
 	RGBA32323232F = 29,
+	// 30 to 36 are depth and null formats the game only makes at run time.
+	ATI2N = 37, // two channels (BC5): a normal map's X and Y
+	ATI1N = 38, // one channel (BC4)
 };
 
 // Texture flags (the header's flags field).

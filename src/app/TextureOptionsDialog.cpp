@@ -52,7 +52,7 @@ QString Qs( std::string_view szText )
 
 // The formats offered, in groups; a separator goes between groups.
 constexpr std::array<std::array<VtfFormat_t, 7>, 7> FORMAT_GROUPS{ {
-	{ VtfFormat_t::DXT1, VtfFormat_t::DXT5, VtfFormat_t::DXT1_ONEBITALPHA, VtfFormat_t::DXT3, VtfFormat_t::VTF_FORMAT_NONE, VtfFormat_t::VTF_FORMAT_NONE, VtfFormat_t::VTF_FORMAT_NONE },
+	{ VtfFormat_t::DXT1, VtfFormat_t::DXT5, VtfFormat_t::DXT1_ONEBITALPHA, VtfFormat_t::DXT3, VtfFormat_t::ATI2N, VtfFormat_t::ATI1N, VtfFormat_t::VTF_FORMAT_NONE },
 	{ VtfFormat_t::BGR888, VtfFormat_t::BGRA8888, VtfFormat_t::BGRX8888, VtfFormat_t::RGB888, VtfFormat_t::RGBA8888, VtfFormat_t::ABGR8888, VtfFormat_t::ARGB8888 },
 	{ VtfFormat_t::BGR565, VtfFormat_t::RGB565, VtfFormat_t::BGRA4444, VtfFormat_t::BGRA5551, VtfFormat_t::BGRX5551, VtfFormat_t::VTF_FORMAT_NONE, VtfFormat_t::VTF_FORMAT_NONE },
 	{ VtfFormat_t::I8, VtfFormat_t::IA88, VtfFormat_t::A8, VtfFormat_t::VTF_FORMAT_NONE, VtfFormat_t::VTF_FORMAT_NONE, VtfFormat_t::VTF_FORMAT_NONE, VtfFormat_t::VTF_FORMAT_NONE },
@@ -770,8 +770,8 @@ QString CTextureOptionsDialog::Notes() const
 	if ( m_nMode == MODE_CONVERT )
 	{
 		const VtfFormat_t nFrom = m_Initial.m_Write.m_nFormat;
-		const bool bLossyFrom = nFrom == VtfFormat_t::DXT1 || nFrom == VtfFormat_t::DXT1_ONEBITALPHA || nFrom == VtfFormat_t::DXT3 || nFrom == VtfFormat_t::DXT5;
-		if ( bLossyFrom && nFormat != nFrom && ( nFormat == VtfFormat_t::DXT1 || nFormat == VtfFormat_t::DXT5 || nFormat == VtfFormat_t::DXT3 || nFormat == VtfFormat_t::DXT1_ONEBITALPHA ) )
+		const bool bLossyFrom = nFrom == VtfFormat_t::DXT1 || nFrom == VtfFormat_t::DXT1_ONEBITALPHA || nFrom == VtfFormat_t::DXT3 || nFrom == VtfFormat_t::DXT5 || nFrom == VtfFormat_t::ATI2N || nFrom == VtfFormat_t::ATI1N;
+		if ( bLossyFrom && nFormat != nFrom && ( nFormat == VtfFormat_t::DXT1 || nFormat == VtfFormat_t::DXT5 || nFormat == VtfFormat_t::DXT3 || nFormat == VtfFormat_t::DXT1_ONEBITALPHA || nFormat == VtfFormat_t::ATI2N || nFormat == VtfFormat_t::ATI1N ) )
 		{
 			notes << tr( "Compressing an already compressed texture again loses a little more detail." );
 		}

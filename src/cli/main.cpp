@@ -130,9 +130,10 @@ bool WriteFile( const fs::path &path, const std::vector<std::byte> &bytes )
 //-----------------------------------------------------------------------------
 std::optional<VtfFormat_t> FormatByName( const std::string &szName )
 {
-	for ( int n = 0; n <= static_cast<int>( VtfFormat_t::RGBA32323232F ); n++ )
+	for ( int n = 0; n <= static_cast<int>( VtfFormat_t::ATI1N ); n++ )
 	{
-		if ( Lower( std::string{ FormatName( static_cast<VtfFormat_t>( n ) ) } ) == Lower( szName ) )
+		const std::string_view szFormat = FormatName( static_cast<VtfFormat_t>( n ) );
+		if ( szFormat != "unknown" && Lower( std::string{ szFormat } ) == Lower( szName ) )
 		{
 			return static_cast<VtfFormat_t>( n );
 		}
