@@ -22,6 +22,8 @@ add_library(vomit_tools_ui STATIC
         DemoViewModel.cpp
         DemoFigures.cpp
         DemoFigures.h
+        DemoGraphs.cpp
+        DemoGraphs.h
         DemoWorld.cpp
         DemoWorld.h
         StripperEditor.cpp

@@ -28,7 +28,11 @@ class QPainter;
 
 // A text with chat colour codes as HTML: the team colour for \x03, the given colours for the
 // rest.
-[[nodiscard]] QString DemoColoredHtml( std::string_view szText, const QColor &team, const QColor &normal );
+[[nodiscard]] QString DemoColoredHtml( std::string_view szText, const QColor &team, const QColor &normal, const QColor &background = {} );
+// A span's style for text in a colour on a background: the colour, and where the two are too
+// alike to read (the game's pale colours on a light theme, its dark ones on a dark theme), a
+// backing of the opposite tone behind it. No background: the colour alone.
+[[nodiscard]] QString DemoReadableStyle( const QColor &color, const QColor &background );
 
 // A HUD message where its x and y put it in rect, each letter in its colour seconds after it
 // began, in font.

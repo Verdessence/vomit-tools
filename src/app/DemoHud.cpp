@@ -182,15 +182,41 @@ QFont DemoHudTextFont( int nTall )
 //-----------------------------------------------------------------------------
 // Purpose: Each run in its colour, the text escaped, line breaks kept.
 //-----------------------------------------------------------------------------
-QString DemoColoredHtml( std::string_view szText, const QColor &team, const QColor &normal )
+QString DemoColoredHtml( std::string_view szText, const QColor &team, const QColor &normal, const QColor &background )
 {
 	QString szHtml;
 	for ( const ColorRun_t &run : SplitColors( szText ) )
 	{
 		const QString szEscaped = Utf8( run.m_szText ).toHtmlEscaped().replace( u'\n', QStringLiteral( "<br>" ) );
-		szHtml += QStringLiteral( "<span style=\"color:%1\">%2</span>" ).arg( RunColor( run, team, normal ).name(), szEscaped );
+		szHtml += QStringLiteral( "<span style=\"%1\">%2</span>" ).arg( DemoReadableStyle( RunColor( run, team, normal ), background ), szEscaped );
 	}
 	return szHtml;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: The WCAG contrast between the text and the background; under 3:1 (the least for
+//          large or bold text) the text gets a backing it reads against, near black for pale
+//          text and near white for dark.
+//-----------------------------------------------------------------------------
+QString DemoReadableStyle( const QColor &color, const QColor &background )
+{
+	const QString szColor = QStringLiteral( "color:%1" ).arg( color.name() );
+	if ( !background.isValid() )
+		return szColor;
+	const auto luminance = []( const QColor &c ) {
+		const auto channel = []( double fl ) { return fl <= 0.04045 ? fl / 12.92 : std::pow( ( fl + 0.055 ) / 1.055, 2.4 ); };
+		return 0.2126 * channel( c.redF() ) + 0.7152 * channel( c.greenF() ) + 0.0722 * channel( c.blueF() );
+	};
+	const auto contrast = [ & ]( const QColor &a, const QColor &b ) {
+		const double flA = luminance( a ), flB = luminance( b );
+		return ( std::max( flA, flB ) + 0.05 ) / ( std::min( flA, flB ) + 0.05 );
+	};
+	constexpr double READABLE = 3.0;
+	if ( contrast( color, background ) >= READABLE )
+		return szColor;
+	const QColor dark( 24, 24, 28 ), light( 242, 242, 245 );
+	const QColor backing = contrast( color, dark ) >= contrast( color, light ) ? dark : light;
+	return szColor + QStringLiteral( ";background-color:%1" ).arg( backing.name() );
 }
 
 //-----------------------------------------------------------------------------

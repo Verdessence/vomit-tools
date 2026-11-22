@@ -11,8 +11,10 @@
 #include <cctype>
 #include <cmath>
 #include <cstdio>
+#include <initializer_list>
 #include <limits>
 #include <numbers>
+#include <unordered_map>
 
 #include <QCheckBox>
 #include <QClipboard>
@@ -53,6 +55,7 @@
 #include <QToolButton>
 #include <QVBoxLayout>
 
+#include "DemoGraphs.h"
 #include "DemoHud.h"
 #include "DemoVoice.h"
 #include "Preferences.h"
@@ -69,6 +72,8 @@ namespace
 
 constexpr int TIMELINE_TALL = 72;
 constexpr int PATH_MARGIN = 24;
+// How often the heat is drawn again while the view moves, in milliseconds.
+constexpr int HEAT_INTERVAL = 50;
 // The isometric view's slant above the horizon: the angle that shows the three axes alike.
 constexpr double ISOMETRIC_PITCH = 35.264;
 // The isometric view cuts the map this far above the highest place a player stood, so roofs
@@ -386,10 +391,17 @@ CDemoPathView::CDemoPathView( CDemoViewer &viewer, QWidget *pParent )
 	m_pPathTimer->setSingleShot( true );
 	m_pPathTimer->setInterval( PATH_INTERVAL );
 	connect( m_pPathTimer, &QTimer::timeout, this, &CDemoPathView::InvalidatePaths );
+	m_pHeatTimer = new QTimer( this );
+	m_pHeatTimer->setSingleShot( true );
+	m_pHeatTimer->setInterval( HEAT_INTERVAL );
+	connect( m_pHeatTimer, &QTimer::timeout, this, [ this ] {
+		BuildHeat();
+		update();
+	} );
 	connect( &viewer, &CDemoViewer::TickChanged, this, [ this ] {
 		// Heat up to the playhead is counted again a second of play at a time.
 		if ( m_bUpToPlayhead && ( m_nMode == DemoPathMode_t::DEMO_PATH_PRESENCE || m_nMode == DemoPathMode_t::DEMO_PATH_DEATHS ) && std::abs( m_Viewer.GetTick() - m_nHeatTick ) * m_Viewer.GetDemo().GetTickInterval() >= 1.0 )
-			BuildHeat();
+			InvalidateHeat();
 		update();
 	} );
 }
@@ -484,15 +496,20 @@ void CDemoPathView::UpdateProjection() const
 }
 
 //-----------------------------------------------------------------------------
-// Purpose: Reproject the heat immediately and give path and floor painting their own cadence.
+// Purpose: Give the heat, path and floor painting their own cadence; paint warps the old
+//          pictures meanwhile.
 //-----------------------------------------------------------------------------
 void CDemoPathView::ViewChanged()
 {
 	UpdateProjection();
-	BuildHeat();
+	if ( ( m_nMode == DemoPathMode_t::DEMO_PATH_PRESENCE || m_nMode == DemoPathMode_t::DEMO_PATH_DEATHS ) && !m_pHeatTimer->isActive() )
+		m_pHeatTimer->start();
 	if ( !m_FaintPaths.isNull() && !m_pPathTimer->isActive() )
 		m_pPathTimer->start();
-	m_pFloorTimer->start();
+	// At most every FLOOR_DELAY while the view keeps moving, so a long turn doesn't leave the
+	// warped floor drifting from the heat and paths drawn over it.
+	if ( !m_pFloorTimer->isActive() )
+		m_pFloorTimer->start();
 	update();
 }
 
@@ -551,7 +568,7 @@ void CDemoPathView::SetMode( DemoPathMode_t nMode )
 {
 	m_nMode = nMode;
 	InvalidatePaths();
-	BuildHeat();
+	InvalidateHeat();
 	update();
 }
 
@@ -561,7 +578,7 @@ void CDemoPathView::SetMode( DemoPathMode_t nMode )
 void CDemoPathView::SetUpToPlayhead( bool bUpTo )
 {
 	m_bUpToPlayhead = bUpTo;
-	BuildHeat();
+	InvalidateHeat();
 	update();
 }
 
@@ -572,7 +589,7 @@ void CDemoPathView::SetTeam( int nTeam )
 {
 	m_nTeam = nTeam;
 	InvalidatePaths();
-	BuildHeat();
+	InvalidateHeat();
 	update();
 }
 
@@ -779,7 +796,7 @@ void CDemoPathView::UpdatePlayedPath( int nTick )
 }
 
 //-----------------------------------------------------------------------------
-// Purpose: Draw the cached paths, moving and scaling the old images during a pan or zoom.
+// Purpose: Draw the cached paths, warping the old images during a pan, zoom or turn.
 //-----------------------------------------------------------------------------
 void CDemoPathView::PaintPaths( QPainter &painter, int nTick )
 {
@@ -812,15 +829,11 @@ void CDemoPathView::PaintPaths( QPainter &painter, int nTick )
 			faintPainter.drawPolyline( stretch.m_Points );
 		}
 	}
-	if ( !m_PathProjection.SameTurn( m_Projection ) )
-		return;
 	UpdatePlayedPath( nTick );
-	const double flRatio = m_Projection.m_flScale / m_PathProjection.m_flScale;
+	const QTransform warp = Reprojection( m_PathProjection );
 	painter.save();
-	painter.translate( m_Projection.m_Offset );
-	painter.scale( flRatio, flRatio );
-	painter.translate( -m_PathProjection.m_Offset );
-	painter.setRenderHint( QPainter::SmoothPixmapTransform, flRatio != 1.0 );
+	painter.setTransform( warp, true );
+	painter.setRenderHint( QPainter::SmoothPixmapTransform, !warp.isIdentity() );
 	painter.drawImage( 0, 0, m_FaintPaths );
 	painter.drawImage( 0, 0, m_PlayedPaths );
 	painter.restore();
@@ -1069,7 +1082,7 @@ bool CDemoPathView::IsInCut( const xv::CVec3 &vecAt ) const
 void CDemoPathView::SetCut( const PathCut_t &cut )
 {
 	m_Cut = cut;
-	BuildHeat();
+	InvalidateHeat();
 	if ( !m_pCutTimer->isActive() )
 		m_pCutTimer->start();
 	update();
@@ -1219,35 +1232,39 @@ void CDemoPathView::SetPreferRadar( bool bPrefer )
 }
 
 //-----------------------------------------------------------------------------
-// Purpose: The heat in cells a few pixels across: the seconds living players spent in each
-//          (from the time to their next sample, a second at most), or the deaths there; then
-//          as colours from clear through blue and yellow to red, on a log scale so the
-//          crowded places don't wash out the rest.
+// Purpose: The heat in the world, binned a fraction of the spread across: the seconds living
+//          players spent in each bin (from the time to their next sample, a second at most,
+//          laid along the way they walked), or the deaths there. Counted once for what it
+//          counts, not for the view, so a pan, zoom or turn only projects the bins.
 //-----------------------------------------------------------------------------
-void CDemoPathView::BuildHeat()
+void CDemoPathView::GatherHeat()
 {
-	m_Heat.clear();
-	m_HeatImage = {};
-	if ( ( m_nMode != DemoPathMode_t::DEMO_PATH_PRESENCE && m_nMode != DemoPathMode_t::DEMO_PATH_DEATHS ) || width() <= 0 || height() <= 0 )
-		return;
-	constexpr int CELL = 6;
-	const int nCols = ( width() + CELL - 1 ) / CELL;
-	const int nRows = ( height() + CELL - 1 ) / CELL;
-	m_Heat.assign( static_cast<std::size_t>( nCols ) * static_cast<std::size_t>( nRows ), 0.0f );
-	const int nUpTo = m_bUpToPlayhead ? m_Viewer.GetTick() : std::numeric_limits<int>::max();
+	m_HeatPoints.clear();
+	m_bHeatGathered = true;
 	m_nHeatTick = m_Viewer.GetTick();
-	const double flInterval = m_Viewer.GetDemo().GetTickInterval() > 0.0 ? m_Viewer.GetDemo().GetTickInterval() : FALLBACK_TICK_INTERVAL;
-	const auto addAt = [ & ]( const xv::CVec3 &vecAt, float flAmount ) {
-		if ( !IsInCut( vecAt ) )
-			return;
-		const QPointF at = ToWidget( vecAt );
-		const int nCol = static_cast<int>( at.x() ) / CELL;
-		const int nRow = static_cast<int>( at.y() ) / CELL;
-		if ( at.x() >= 0 && at.y() >= 0 && nCol < nCols && nRow < nRows )
-			m_Heat[ static_cast<std::size_t>( nRow ) * static_cast<std::size_t>( nCols ) + static_cast<std::size_t>( nCol ) ] += flAmount;
+	if ( m_nMode != DemoPathMode_t::DEMO_PATH_PRESENCE && m_nMode != DemoPathMode_t::DEMO_PATH_DEATHS )
+		return;
+	const float flBin = std::max( 4.0f, m_flHeatSpread / 3.0f );
+	struct Bin_t
+	{
+		double m_flX = 0.0, m_flY = 0.0, m_flZ = 0.0;
+		float m_flAmount = 0.0f;
 	};
+	std::unordered_map<std::uint64_t, Bin_t> bins;
+	const auto binOf = [ flBin ]( float fl ) { return static_cast<std::uint64_t>( static_cast<std::int64_t>( std::floor( fl / flBin ) ) & 0x1fffff ); };
+	const auto add = [ & ]( const xv::CVec3 &vecAt, float flAmount ) {
+		Bin_t &bin = bins[ binOf( vecAt.m_flX ) | binOf( vecAt.m_flY ) << 21 | binOf( vecAt.m_flZ ) << 42 ];
+		bin.m_flX += static_cast<double>( vecAt.m_flX ) * flAmount;
+		bin.m_flY += static_cast<double>( vecAt.m_flY ) * flAmount;
+		bin.m_flZ += static_cast<double>( vecAt.m_flZ ) * flAmount;
+		bin.m_flAmount += flAmount;
+	};
+	const int nUpTo = m_bUpToPlayhead ? m_Viewer.GetTick() : std::numeric_limits<int>::max();
+	const double flInterval = m_Viewer.GetDemo().GetTickInterval() > 0.0 ? m_Viewer.GetDemo().GetTickInterval() : FALLBACK_TICK_INTERVAL;
 	if ( m_nMode == DemoPathMode_t::DEMO_PATH_PRESENCE )
 	{
+		// Farther than this between two samples is a teleport or a respawn, not a walk.
+		constexpr float WALK_LIMIT = 256.0f;
 		for ( const xv::demo::PlayerTrack_t &track : m_Viewer.GetPlayers().GetTracks() )
 		{
 			for ( std::size_t i = 0; i < track.m_Samples.size(); i++ )
@@ -1255,10 +1272,27 @@ void CDemoPathView::BuildHeat()
 				const xv::demo::PlayerSample_t &sample = track.m_Samples[ i ];
 				if ( sample.m_nTick > nUpTo )
 					break;
-				if ( !sample.m_bAlive || !sample.m_bThere || sample.m_nTeam < 2 || ( m_nTeam != 0 && sample.m_nTeam != m_nTeam ) )
+				if ( !sample.m_bAlive || !sample.m_bThere || sample.m_nTeam < 2 || ( m_nTeam != 0 && sample.m_nTeam != m_nTeam ) || !IsInCut( sample.m_vecOrigin ) )
 					continue;
-				const int nNext = i + 1 < track.m_Samples.size() ? std::min( track.m_Samples[ i + 1 ].m_nTick, nUpTo ) : sample.m_nTick + 1;
-				addAt( sample.m_vecOrigin, static_cast<float>( std::min( 1.0, ( nNext - sample.m_nTick ) * flInterval ) ) );
+				const xv::demo::PlayerSample_t *pNext = i + 1 < track.m_Samples.size() ? &track.m_Samples[ i + 1 ] : nullptr;
+				const int nNext = pNext ? std::min( pNext->m_nTick, nUpTo ) : sample.m_nTick + 1;
+				const float flSeconds = static_cast<float>( std::min( 1.0, ( nNext - sample.m_nTick ) * flInterval ) );
+				// The time between two samples is spread along the line between them, so a run
+				// reads as a trail rather than a row of dots.
+				const float flWalked = pNext ? xv::Length( pNext->m_vecOrigin - sample.m_vecOrigin ) : 0.0f;
+				if ( pNext && pNext->m_bAlive && pNext->m_bThere && pNext->m_nTick <= nUpTo && flWalked < WALK_LIMIT && flWalked > flBin )
+				{
+					const int nSteps = std::clamp( static_cast<int>( flWalked / flBin ) + 1, 1, 64 );
+					for ( int n = 0; n < nSteps; n++ )
+					{
+						const float t = ( static_cast<float>( n ) + 0.5f ) / static_cast<float>( nSteps );
+						add( sample.m_vecOrigin + ( pNext->m_vecOrigin - sample.m_vecOrigin ) * t, flSeconds / static_cast<float>( nSteps ) );
+					}
+				}
+				else
+				{
+					add( sample.m_vecOrigin, flSeconds );
+				}
 			}
 		}
 	}
@@ -1271,49 +1305,165 @@ void CDemoPathView::BuildHeat()
 			// Where the victim last stood alive.
 			if ( const auto state = m_Viewer.GetPlayers().At( kill.m_nVictim, kill.m_nTick - 1 ) )
 			{
-				if ( m_nTeam == 0 || state->m_nTeam == m_nTeam )
-					addAt( state->m_vecOrigin, 1.0f );
+				if ( ( m_nTeam == 0 || state->m_nTeam == m_nTeam ) && IsInCut( state->m_vecOrigin ) )
+					add( state->m_vecOrigin, 1.0f );
 			}
 		}
 	}
-	// Spread each cell a little into its neighbours, so single samples read as spots.
+	m_HeatPoints.reserve( bins.size() );
+	for ( const auto &[ nKey, bin ] : bins )
+	{
+		if ( bin.m_flAmount <= 0.0f )
+			continue;
+		const double flShare = 1.0 / bin.m_flAmount;
+		m_HeatPoints.push_back( { xv::CVec3{ static_cast<float>( bin.m_flX * flShare ), static_cast<float>( bin.m_flY * flShare ), static_cast<float>( bin.m_flZ * flShare ) }, bin.m_flAmount } );
+	}
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+void CDemoPathView::InvalidateHeat()
+{
+	m_bHeatGathered = false;
+	BuildHeat();
+	update();
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: The gathered heat projected into cells sized to the spread (so the blur is always
+//          a few cells wide, whatever the zoom), blurred, then as colours from clear through
+//          blue and yellow to red, on a log scale so the crowded places don't wash out the
+//          rest.
+//-----------------------------------------------------------------------------
+void CDemoPathView::BuildHeat()
+{
+	m_Heat.clear();
+	m_HeatImage = {};
+	if ( ( m_nMode != DemoPathMode_t::DEMO_PATH_PRESENCE && m_nMode != DemoPathMode_t::DEMO_PATH_DEATHS ) || width() <= 0 || height() <= 0 )
+		return;
+	if ( !m_bHeatGathered )
+		GatherHeat();
+	if ( size() != m_ProjectedFor )
+		UpdateProjection();
+	m_HeatProjection = m_Projection;
+	// The blur's width in pixels, and cells that make it about HEAT_SIGMA_CELLS of them.
+	constexpr double HEAT_SIGMA_CELLS = 2.5;
+	const double flSigmaPixels = std::max( 0.75, m_flHeatSpread * m_Projection.m_flScale );
+	m_flHeatCell = std::max( 1.0, flSigmaPixels / HEAT_SIGMA_CELLS );
+	const int nCols = static_cast<int>( std::ceil( width() / m_flHeatCell ) );
+	const int nRows = static_cast<int>( std::ceil( height() / m_flHeatCell ) );
+	const auto cell = [ nCols ]( int nRow, int nCol ) { return static_cast<std::size_t>( nRow ) * static_cast<std::size_t>( nCols ) + static_cast<std::size_t>( nCol ); };
+	m_Heat.assign( static_cast<std::size_t>( nCols ) * static_cast<std::size_t>( nRows ), 0.0f );
+	const float flSigma = static_cast<float>( flSigmaPixels / m_flHeatCell );
+	const int nRadius = static_cast<int>( std::ceil( flSigma * 3.0f ) );
+	// Shared between the four cells around the point, so a spot sits where it was, not on the
+	// cell grid. Points just off the edge still warm the cells inside it.
+	for ( const HeatPoint_t &point : m_HeatPoints )
+	{
+		const QPointF at = Project( m_Projection, point.m_vecAt.m_flX, point.m_vecAt.m_flY, point.m_vecAt.m_flZ );
+		const double flX = at.x() / m_flHeatCell - 0.5, flY = at.y() / m_flHeatCell - 0.5;
+		if ( flX < -nRadius || flY < -nRadius || flX > nCols + nRadius || flY > nRows + nRadius )
+			continue;
+		const int nCol = static_cast<int>( std::floor( flX ) ), nRow = static_cast<int>( std::floor( flY ) );
+		const float fx = static_cast<float>( flX - nCol ), fy = static_cast<float>( flY - nRow );
+		const float weights[ 4 ] = { ( 1 - fx ) * ( 1 - fy ), fx * ( 1 - fy ), ( 1 - fx ) * fy, fx * fy };
+		for ( int k = 0; k < 4; k++ )
+		{
+			const int c = std::clamp( nCol + ( k & 1 ), 0, nCols - 1 ), r = std::clamp( nRow + ( k >> 1 ), 0, nRows - 1 );
+			m_Heat[ cell( r, c ) ] += point.m_flAmount * weights[ k ];
+		}
+	}
+	// A Gaussian blur, rows then columns, so single samples read as round spots and paths as
+	// soft bands.
+	std::vector<float> kernel( static_cast<std::size_t>( nRadius ) * 2 + 1 );
+	for ( int k = -nRadius; k <= nRadius; k++ )
+		kernel[ static_cast<std::size_t>( k + nRadius ) ] = std::exp( -0.5f * static_cast<float>( k * k ) / ( flSigma * flSigma ) );
+	std::vector<float> across( m_Heat.size(), 0.0f );
 	std::vector<float> spread( m_Heat.size(), 0.0f );
 	for ( int nRow = 0; nRow < nRows; nRow++ )
 	{
 		for ( int nCol = 0; nCol < nCols; nCol++ )
 		{
-			float flSum = 0.0f;
-			for ( int dy = -1; dy <= 1; dy++ )
-				for ( int dx = -1; dx <= 1; dx++ )
-				{
-					const int r = nRow + dy, c = nCol + dx;
-					if ( r >= 0 && c >= 0 && r < nRows && c < nCols )
-						flSum += m_Heat[ static_cast<std::size_t>( r ) * static_cast<std::size_t>( nCols ) + static_cast<std::size_t>( c ) ] * ( dx == 0 && dy == 0 ? 1.0f : 0.35f );
-				}
-			spread[ static_cast<std::size_t>( nRow ) * static_cast<std::size_t>( nCols ) + static_cast<std::size_t>( nCol ) ] = flSum;
+			const float flValue = m_Heat[ cell( nRow, nCol ) ];
+			if ( flValue == 0.0f )
+				continue;
+			for ( int k = std::max( -nRadius, -nCol ); k <= std::min( nRadius, nCols - 1 - nCol ); k++ )
+				across[ cell( nRow, nCol + k ) ] += flValue * kernel[ static_cast<std::size_t>( k + nRadius ) ];
+		}
+	}
+	for ( int nRow = 0; nRow < nRows; nRow++ )
+	{
+		for ( int nCol = 0; nCol < nCols; nCol++ )
+		{
+			const float flValue = across[ cell( nRow, nCol ) ];
+			if ( flValue == 0.0f )
+				continue;
+			for ( int k = std::max( -nRadius, -nRow ); k <= std::min( nRadius, nRows - 1 - nRow ); k++ )
+				spread[ cell( nRow + k, nCol ) ] += flValue * kernel[ static_cast<std::size_t>( k + nRadius ) ];
 		}
 	}
 	const float flMost = spread.empty() ? 0.0f : *std::ranges::max_element( spread );
 	if ( flMost <= 0.0f )
 		return;
+	// Below this share of the log scale it is the blur's tail: left clear.
+	constexpr float FAINTEST = 0.02f;
 	m_HeatImage = QImage( nCols, nRows, QImage::Format_ARGB32 );
 	const auto ramp = []( float flPart ) {
 		// Clear, blue, cyan, yellow, red.
-		static const QColor stops[] = { QColor( 0, 0, 255, 0 ), QColor( 30, 80, 255, 150 ), QColor( 0, 220, 220, 190 ), QColor( 255, 230, 0, 215 ), QColor( 255, 40, 0, 235 ) };
+		static const QColor stops[] = { QColor( 30, 80, 255, 0 ), QColor( 30, 80, 255, 150 ), QColor( 0, 220, 220, 190 ), QColor( 255, 230, 0, 215 ), QColor( 255, 40, 0, 235 ) };
 		const float flAt = std::clamp( flPart, 0.0f, 1.0f ) * 4.0f;
 		const int n = std::min( 3, static_cast<int>( flAt ) );
 		const float f = flAt - static_cast<float>( n );
 		const QColor &a = stops[ n ], &b = stops[ n + 1 ];
-		return QColor( static_cast<int>( a.red() + ( b.red() - a.red() ) * f ), static_cast<int>( a.green() + ( b.green() - a.green() ) * f ), static_cast<int>( a.blue() + ( b.blue() - a.blue() ) * f ), static_cast<int>( a.alpha() + ( b.alpha() - a.alpha() ) * f ) );
+		return qRgba( static_cast<int>( a.red() + ( b.red() - a.red() ) * f ), static_cast<int>( a.green() + ( b.green() - a.green() ) * f ), static_cast<int>( a.blue() + ( b.blue() - a.blue() ) * f ), static_cast<int>( a.alpha() + ( b.alpha() - a.alpha() ) * f ) );
 	};
+	// The log scale spans HEAT_RANGE to one below the hottest cell, whatever the zoom or the
+	// cells' size, so the faint edge of a spot fades out instead of ending in a hard ring.
+	constexpr float HEAT_RANGE = 150.0f;
+	const float flUnit = flMost / HEAT_RANGE;
+	const float flTop = std::log1p( HEAT_RANGE );
 	for ( int nRow = 0; nRow < nRows; nRow++ )
 	{
+		auto *pLine = reinterpret_cast<QRgb *>( m_HeatImage.scanLine( nRow ) );
 		for ( int nCol = 0; nCol < nCols; nCol++ )
 		{
-			const float flValue = spread[ static_cast<std::size_t>( nRow ) * static_cast<std::size_t>( nCols ) + static_cast<std::size_t>( nCol ) ];
-			m_HeatImage.setPixelColor( nCol, nRow, flValue > 0.0f ? ramp( std::log1p( flValue ) / std::log1p( flMost ) ) : QColor( 0, 0, 0, 0 ) );
+			const float flPart = std::log1p( spread[ cell( nRow, nCol ) ] / flUnit ) / flTop;
+			pLine[ nCol ] = flPart > FAINTEST ? ramp( flPart ) : qRgba( 0, 0, 0, 0 );
 		}
 	}
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+void CDemoPathView::SetHeatSpread( float flUnits )
+{
+	if ( flUnits == m_flHeatSpread )
+		return;
+	m_flHeatSpread = flUnits;
+	InvalidateHeat();
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Three points at the paths' middle height, where they were drawn and where they
+//          are now, give the affine map between the two pictures.
+//-----------------------------------------------------------------------------
+QTransform CDemoPathView::Reprojection( const Projection_t &from ) const
+{
+	if ( size() != m_ProjectedFor )
+		UpdateProjection();
+	const double flX = ( m_vecMins.m_flX + m_vecMaxs.m_flX ) * 0.5, flY = ( m_vecMins.m_flY + m_vecMaxs.m_flY ) * 0.5, flZ = ( m_vecMins.m_flZ + m_vecMaxs.m_flZ ) * 0.5;
+	constexpr double REACH = 1024.0;
+	const auto frame = [ & ]( const Projection_t &projection ) {
+		const QPointF origin = Project( projection, flX, flY, flZ );
+		const QPointF across = Project( projection, flX + REACH, flY, flZ ) - origin;
+		const QPointF along = Project( projection, flX, flY + REACH, flZ ) - origin;
+		return QTransform( across.x(), across.y(), along.x(), along.y(), origin.x(), origin.y() );
+	};
+	bool bInvertible = false;
+	const QTransform back = frame( from ).inverted( &bInvertible );
+	return bInvertible ? back * frame( m_Projection ) : QTransform{};
 }
 
 //-----------------------------------------------------------------------------
@@ -1446,22 +1596,24 @@ void CDemoPathView::paintEvent( QPaintEvent * )
 	{
 		PaintRadar( painter );
 	}
-	else if ( m_bShowMap && !m_Floor.isNull() && m_FloorProjection.SameTurn( m_Projection ) )
+	else if ( m_bShowMap && !m_Floor.isNull() )
 	{
-		// Drawn for another zoom or pan: moved and scaled to fit until it is drawn again.
-		const double flRatio = m_FloorProjection.m_flScale > 0.0 ? m_Projection.m_flScale / m_FloorProjection.m_flScale : 1.0;
+		// Drawn for another view: warped to fit until it is drawn again, so a turn never
+		// leaves the view blank between redraws.
+		const QTransform warp = Reprojection( m_FloorProjection );
 		painter.save();
-		painter.translate( m_Projection.m_Offset );
-		painter.scale( flRatio, flRatio );
-		painter.translate( -m_FloorProjection.m_Offset );
-		painter.setRenderHint( QPainter::SmoothPixmapTransform, flRatio != 1.0 );
+		painter.setTransform( warp, true );
+		painter.setRenderHint( QPainter::SmoothPixmapTransform, !warp.isIdentity() );
 		painter.drawImage( 0, 0, m_Floor );
 		painter.restore();
 	}
 	if ( !m_HeatImage.isNull() )
 	{
+		painter.save();
+		painter.setTransform( Reprojection( m_HeatProjection ), true );
 		painter.setRenderHint( QPainter::SmoothPixmapTransform, true );
-		painter.drawImage( QRectF( 0, 0, m_HeatImage.width() * 6.0, m_HeatImage.height() * 6.0 ), m_HeatImage );
+		painter.drawImage( QRectF( 0, 0, m_HeatImage.width() * m_flHeatCell, m_HeatImage.height() * m_flHeatCell ), m_HeatImage );
+		painter.restore();
 	}
 	const int nTick = m_Viewer.GetTick();
 	PaintPaths( painter, nTick );
@@ -1599,8 +1751,8 @@ QWidget *CDemoViewer::BuildPaths()
 	if ( m_Demo.HasCamera() )
 		pMode->addItem( tr( "The recorder's camera" ), static_cast<int>( DemoPathMode_t::DEMO_PATH_CAMERA ) );
 	pMode->addItem( tr( "Every player's path" ), static_cast<int>( DemoPathMode_t::DEMO_PATH_PLAYERS ) );
-	pMode->addItem( tr( "Heatmap: where players were" ), static_cast<int>( DemoPathMode_t::DEMO_PATH_PRESENCE ) );
-	pMode->addItem( tr( "Heatmap: where players died" ), static_cast<int>( DemoPathMode_t::DEMO_PATH_DEATHS ) );
+	pMode->addItem( tr( "Heatmap: Player Paths" ), static_cast<int>( DemoPathMode_t::DEMO_PATH_PRESENCE ) );
+	pMode->addItem( tr( "Heatmap: Deaths" ), static_cast<int>( DemoPathMode_t::DEMO_PATH_DEATHS ) );
 	pMode->setCurrentIndex( pMode->findData( static_cast<int>( m_pPath->GetMode() ) ) );
 	connect( pMode, &QComboBox::activated, this, [ this, pMode ] { m_pPath->SetMode( static_cast<DemoPathMode_t>( pMode->currentData().toInt() ) ); } );
 	auto *pTeam = new QComboBox;
@@ -1613,6 +1765,38 @@ QWidget *CDemoViewer::BuildPaths()
 	pUpTo->setObjectName( QStringLiteral( "demoPathUpTo" ) );
 	pUpTo->setToolTip( tr( "Count the heatmap only up to the playhead (else the whole demo)" ) );
 	connect( pUpTo, &QCheckBox::toggled, m_pPath, &CDemoPathView::SetUpToPlayhead );
+	// The heatmap's granularity: how far each spot spreads, in world units.
+	static constexpr int SPREADS[] = { 8, 12, 16, 24, 32, 48, 64, 96, 128, 192, 256 };
+	const auto spreadIndex = []( int nUnits ) {
+		const auto *pAt = std::ranges::min_element( SPREADS, {}, [ nUnits ]( int n ) { return std::abs( n - nUnits ); } );
+		return static_cast<int>( pAt - std::begin( SPREADS ) );
+	};
+	auto *pSpreadLabel = new QLabel( tr( "Granularity" ) );
+	auto *pSpread = new QSlider( Qt::Horizontal );
+	pSpread->setObjectName( QStringLiteral( "demoPathHeatSpread" ) );
+	pSpread->setRange( 0, static_cast<int>( std::size( SPREADS ) ) - 1 );
+	pSpread->setPageStep( 1 );
+	pSpread->setFixedWidth( 110 );
+	pSpread->setAccessibleName( tr( "Heatmap granularity" ) );
+	auto *pSpreadValue = new QLabel;
+	pSpreadValue->setMinimumWidth( pSpreadValue->fontMetrics().horizontalAdvance( QStringLiteral( "256 u" ) ) );
+	const auto showSpread = [ this, pSpread, pSpreadValue ] {
+		const int nUnits = SPREADS[ pSpread->value() ];
+		pSpreadValue->setText( tr( "%1 u" ).arg( nUnits ) );
+		pSpread->setToolTip( tr( "How far each heatmap spot spreads: %1 units. Left for fine detail, right for the broad picture." ).arg( nUnits ) );
+		m_pPath->SetHeatSpread( static_cast<float>( nUnits ) );
+		QSettings{}.setValue( QStringLiteral( "demoViewer/heatSpread" ), nUnits );
+	};
+	pSpread->setValue( spreadIndex( QSettings{}.value( QStringLiteral( "demoViewer/heatSpread" ), static_cast<int>( m_pPath->GetHeatSpread() ) ).toInt() ) );
+	showSpread();
+	connect( pSpread, &QSlider::valueChanged, this, showSpread );
+	const auto enableHeatControls = [ this, pUpTo, pSpreadLabel, pSpread, pSpreadValue ] {
+		const bool bHeat = m_pPath->GetMode() == DemoPathMode_t::DEMO_PATH_PRESENCE || m_pPath->GetMode() == DemoPathMode_t::DEMO_PATH_DEATHS;
+		for ( QWidget *pWidget : std::initializer_list<QWidget *>{ pUpTo, pSpreadLabel, pSpread, pSpreadValue } )
+			pWidget->setEnabled( bHeat );
+	};
+	enableHeatControls();
+	connect( pMode, &QComboBox::activated, this, enableHeatControls );
 	auto *pView = new QComboBox;
 	pView->setObjectName( QStringLiteral( "demoPathView" ) );
 	pView->addItem( tr( "Top" ), static_cast<int>( DemoPathView_t::DEMO_PATH_VIEW_TOP ) );
@@ -1623,6 +1807,9 @@ QWidget *CDemoViewer::BuildPaths()
 	pBar->addWidget( pMode );
 	pBar->addWidget( pTeam );
 	pBar->addWidget( pUpTo );
+	pBar->addWidget( pSpreadLabel );
+	pBar->addWidget( pSpread );
+	pBar->addWidget( pSpreadValue );
 	pBar->addStretch( 1 );
 	auto *pMap = new QCheckBox( tr( "Map" ) );
 	pMap->setObjectName( QStringLiteral( "demoPathMap" ) );
@@ -1659,6 +1846,59 @@ QWidget *CDemoViewer::BuildPaths()
 }
 
 //-----------------------------------------------------------------------------
+// Purpose: The graphs page: which graph, which team's players, and what the graph can't say.
+//-----------------------------------------------------------------------------
+QWidget *CDemoViewer::BuildGraphs()
+{
+	auto *pGraph = new CDemoGraphView( *this );
+	auto *pWhich = new QComboBox;
+	pWhich->setObjectName( QStringLiteral( "demoGraphWhich" ) );
+	pWhich->addItem( tr( "Players on each team" ), static_cast<int>( DemoGraph_t::DEMO_GRAPH_TEAMS ) );
+	pWhich->addItem( tr( "Player scores" ), static_cast<int>( DemoGraph_t::DEMO_GRAPH_SCORE ) );
+	pWhich->addItem( tr( "Damage taken" ), static_cast<int>( DemoGraph_t::DEMO_GRAPH_DAMAGE ) );
+	auto *pTeam = new QComboBox;
+	pTeam->setObjectName( QStringLiteral( "demoGraphTeam" ) );
+	pTeam->addItem( tr( "Both teams" ), 0 );
+	for ( const int nTeam : { 2, 3 } )
+		pTeam->addItem( QString::fromStdString( xv::demo::TeamName( m_Demo.GetHeader().m_szGameDir, nTeam ) ), nTeam );
+	pTeam->setToolTip( tr( "Only the players who were on this team at some point" ) );
+	auto *pNote = new QLabel;
+	pNote->setObjectName( QStringLiteral( "demoGraphNote" ) );
+	pNote->setWordWrap( true );
+	pNote->setForegroundRole( QPalette::PlaceholderText );
+	const auto chosen = [ pGraph, pWhich, pTeam, pNote ] {
+		const auto nGraph = static_cast<DemoGraph_t>( pWhich->currentData().toInt() );
+		pGraph->SetGraph( nGraph );
+		pTeam->setEnabled( nGraph != DemoGraph_t::DEMO_GRAPH_TEAMS );
+		switch ( nGraph )
+		{
+			case DemoGraph_t::DEMO_GRAPH_TEAMS:
+				pNote->setText( tr( "Solid: players on the team. Dashed: those of them alive." ) );
+				break;
+			case DemoGraph_t::DEMO_GRAPH_SCORE:
+				pNote->setText( tr( "The score the scoreboard showed, sampled every half second." ) );
+				break;
+			case DemoGraph_t::DEMO_GRAPH_DAMAGE:
+				pNote->setText( tr( "Health each player lost while alive, added up (big drops many players had at once, the map setting health, left out). Demos record players' health, not who hurt them, so damage dealt can't be shown." ) );
+				break;
+		}
+	};
+	connect( pWhich, &QComboBox::currentIndexChanged, this, chosen );
+	connect( pTeam, &QComboBox::currentIndexChanged, this, [ pGraph, pTeam ] { pGraph->SetTeam( pTeam->currentData().toInt() ); } );
+	chosen();
+	auto *pBar = new QHBoxLayout;
+	pBar->addWidget( pWhich );
+	pBar->addWidget( pTeam );
+	pBar->addWidget( pNote, 1 );
+	auto *pPage = new QWidget;
+	auto *pLayout = new QVBoxLayout( pPage );
+	pLayout->setContentsMargins( 0, 0, 0, 0 );
+	pLayout->addLayout( pBar );
+	pLayout->addWidget( pGraph, 1 );
+	return pPage;
+}
+
+//-----------------------------------------------------------------------------
 // Purpose: The summary beside the pages, the timeline and its controls under both.
 //-----------------------------------------------------------------------------
 CDemoViewer::CDemoViewer( const QString &szName, xv::demo::CDemo demo, const std::filesystem::path &disk, bool bFromGame, xv::demo::CPlayers players, std::shared_ptr<const xv::demo::CContents> pContents, QWidget *pParent )
@@ -1684,6 +1924,7 @@ CDemoViewer::CDemoViewer( const QString &szName, xv::demo::CDemo demo, const std
 	m_pPages->setObjectName( QStringLiteral( "demoPages" ) );
 	m_pPages->addTab( BuildWorld(), tr( "World" ) );
 	m_pPages->addTab( BuildPaths(), tr( "Paths" ) );
+	m_pPages->addTab( BuildGraphs(), tr( "Graphs" ) );
 	QWidget *pSide = BuildSide();
 	connect( &CPreferences::Instance(), &CPreferences::MutedDemoPlayersChanged, this, &CDemoViewer::UpdatePlayerMutes );
 	// A demo with no camera and no players opens its side on what it does have: the summary
@@ -2097,8 +2338,17 @@ QWidget *CDemoViewer::BuildSide()
 {
 	m_pSide = new QSplitter( Qt::Vertical );
 	m_pSide->setObjectName( QStringLiteral( "demoSide" ) );
-	m_pSide->setMinimumWidth( 320 );
 	m_pSide->setChildrenCollapsible( false );
+	m_pSide->installEventFilter( this );
+	// The splitter over a stretch: with every group folded it shrinks to their tab bars and
+	// they stay at the top.
+	auto *pSideBox = new QWidget;
+	pSideBox->setMinimumWidth( 320 );
+	auto *pSideLayout = new QVBoxLayout( pSideBox );
+	pSideLayout->setContentsMargins( 0, 0, 0, 0 );
+	pSideLayout->setSpacing( 0 );
+	pSideLayout->addWidget( m_pSide, 1 );
+	pSideLayout->addStretch( 0 );
 	for ( std::size_t nGroup = 0; nGroup < m_SideGroups.size(); nGroup++ )
 	{
 		auto *pGroup = new QTabWidget;
@@ -2153,7 +2403,7 @@ QWidget *CDemoViewer::BuildSide()
 	connect( m_pWorld, &CDemoWorld::LogicMapRead, this, &CDemoViewer::BuildLogic );
 	UpdateCameraControls();
 	UpdatePlayerList();
-	return m_pSide;
+	return pSideBox;
 }
 
 //-----------------------------------------------------------------------------
@@ -2192,38 +2442,105 @@ void CDemoViewer::SetSideCollapsed( int nGroup, bool bCollapsed )
 	pButton->setToolTip( szLabel );
 	pButton->setAccessibleName( szLabel );
 
-	auto sizes = m_pSide->sizes();
 	const bool bWasCollapsed = pGroup->maximumHeight() != QWIDGETSIZE_MAX;
 	const int nHeight = std::max( pGroup->tabBar()->sizeHint().height(), pButton->sizeHint().height() );
+	if ( bCollapsed && !bWasCollapsed && pGroup->isVisible() && m_pSide->isVisible() )
+		m_SideExpandedHeights[ nGroup ] = m_pSide->sizes()[ nGroup ];
 	pGroup->setMaximumHeight( bCollapsed ? nHeight : QWIDGETSIZE_MAX );
 	if ( auto *pPages = pGroup->findChild<QStackedWidget *>( QString{}, Qt::FindDirectChildrenOnly ) )
 		pPages->setVisible( !bCollapsed );
-	if ( bCollapsed == bWasCollapsed || !pGroup->isVisible() )
-		return;
+	ApplySideSizes( !bCollapsed && bWasCollapsed ? nGroup : -1 );
+}
 
-	if ( bCollapsed )
+//-----------------------------------------------------------------------------
+// Purpose: Folded groups get their tab bars; the open ones share what is left in the
+//          proportions they had (a group just unfolded first gets its old height back, at
+//          most most of the room); with none open the splitter is held to the tab bars.
+//-----------------------------------------------------------------------------
+void CDemoViewer::ApplySideSizes( int nOpened )
+{
+	QList<int> sizes = m_pSide->sizes();
+	if ( sizes.size() != SIDE_GROUPS )
+		return;
+	int nShown = 0, nFolded = 0;
+	std::vector<int> open;
+	for ( int i = 0; i < SIDE_GROUPS; i++ )
 	{
-		m_SideExpandedHeights[ nGroup ] = sizes[ nGroup ];
-		const int nReleased = std::max( 0, sizes[ nGroup ] - nHeight );
-		sizes[ nGroup ] = nHeight;
-		// Set the splitter's sizes explicitly so it gives the space to the other panes
-		// even when the active page's minimum size hint has just changed.
-		int nReceiver = -1;
-		for ( int i = 0; i < SIDE_GROUPS; ++i )
+		if ( m_SideGroups[ i ]->isHidden() )
 		{
-			if ( i != nGroup && m_SideGroups[ i ]->isVisible() && !m_SideButtons[ i ]->isChecked() &&
-				( nReceiver < 0 || sizes[ i ] > sizes[ nReceiver ] ) )
-				nReceiver = i;
+			sizes[ i ] = 0;
+			continue;
 		}
-		if ( nReceiver >= 0 )
-			sizes[ nReceiver ] += nReleased;
+		nShown++;
+		if ( m_SideButtons[ i ]->isChecked() )
+		{
+			sizes[ i ] = m_SideGroups[ i ]->maximumHeight();
+			nFolded += sizes[ i ];
+		}
+		else
+		{
+			open.push_back( i );
+		}
 	}
-	else
+	const int nHandles = std::max( 0, nShown - 1 ) * m_pSide->handleWidth();
+	m_pSide->setMaximumHeight( open.empty() ? nFolded + nHandles : QWIDGETSIZE_MAX );
+	// Before the side is shown it has no height to share: done again on its first show.
+	if ( !m_pSide->isVisible() || open.empty() )
 	{
-		const int nRestore = m_SideExpandedHeights[ nGroup ];
-		sizes[ nGroup ] = nRestore > 0 ? nRestore : pGroup->sizeHint().height();
+		m_pSide->setSizes( sizes );
+		return;
+	}
+	const int nRoom = std::max( 0, m_pSide->height() - nHandles - nFolded );
+	int nLeft = nRoom;
+	if ( nOpened >= 0 && std::ranges::find( open, nOpened ) != open.end() && open.size() > 1 )
+	{
+		const int nWanted = m_SideExpandedHeights[ nOpened ] > 0 ? m_SideExpandedHeights[ nOpened ] : m_SideGroups[ nOpened ]->sizeHint().height();
+		sizes[ nOpened ] = std::clamp( nWanted, std::min( 120, nRoom / 2 ), nRoom * 2 / 3 );
+		nLeft -= sizes[ nOpened ];
+		std::erase( open, nOpened );
+	}
+	// Shares by the heights the open groups have now; ones squeezed to nothing (the room a
+	// folded group had) count as the splitter's stretch would give them.
+	std::vector<double> weights;
+	double flTotal = 0.0;
+	for ( const int i : open )
+	{
+		const int nNow = sizes[ i ] > m_SideGroups[ i ]->tabBar()->sizeHint().height() + 8 ? sizes[ i ] : 0;
+		weights.push_back( nNow > 0 ? nNow : std::max( 1, m_SideGroups[ i ]->sizeHint().height() ) );
+		flTotal += weights.back();
+	}
+	for ( std::size_t n = 0; n < open.size(); n++ )
+	{
+		const int nShare = n + 1 == open.size() ? nLeft : static_cast<int>( nLeft * weights[ n ] / flTotal );
+		sizes[ open[ n ] ] = nShare;
+		nLeft -= nShare;
 	}
 	m_pSide->setSizes( sizes );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Once the splitter has laid itself out (a show, a resize), the folded groups' room
+//          is handed back to the open ones.
+//-----------------------------------------------------------------------------
+void CDemoViewer::QueueSideSizes()
+{
+	if ( m_bSideSizesQueued )
+		return;
+	m_bSideSizesQueued = true;
+	QTimer::singleShot( 0, this, [ this ] {
+		m_bSideSizesQueued = false;
+		ApplySideSizes();
+	} );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+bool CDemoViewer::eventFilter( QObject *pWatched, QEvent *pEvent )
+{
+	if ( pWatched == m_pSide && ( pEvent->type() == QEvent::Show || pEvent->type() == QEvent::Resize ) )
+		QueueSideSizes();
+	return QWidget::eventFilter( pWatched, pEvent );
 }
 
 //-----------------------------------------------------------------------------
@@ -3300,8 +3617,24 @@ void CDemoViewer::BuildFeed()
 	if ( !m_pContents )
 		return;
 	m_Feed = xv::demo::CFeed::Build( *m_pContents, m_Players, [ this ]( std::string_view szToken ) { return m_Hud.Localize( szToken ); }, m_Demo.GetCommands() );
+	BuildLogs();
+	if ( m_pTimeline )
+		m_pTimeline->update();
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: The three logs' lines from the feed, in the palette's colours (again when the
+//          palette changes, so pale text gets a backing on a light scheme and dark text on
+//          a dark one).
+//-----------------------------------------------------------------------------
+void CDemoViewer::BuildLogs()
+{
+	if ( !m_pContents || !m_pChatLog )
+		return;
 	const QColor normal = palette().color( QPalette::Text );
 	const QColor grey = palette().color( QPalette::PlaceholderText );
+	// The logs' background, which every coloured run is checked against.
+	const QColor base = m_pChatLog ? m_pChatLog->palette().color( QPalette::Base ) : palette().color( QPalette::Base );
 	const auto teamColor = [ & ]( int nEntity, int nTick ) {
 		const int nTeam = nEntity ? PlayerTeam( nEntity, nTick ) : 0;
 		return nTeam >= 2 ? DemoTeamColor( nTeam ) : normal;
@@ -3315,31 +3648,31 @@ void CDemoViewer::BuildFeed()
 		switch ( line.m_nKind )
 		{
 			case xv::demo::FeedKind_t::FEED_KIND_CHAT:
-				chat.push_back( { line.m_nTick, DemoColoredHtml( line.m_szText, team, normal ) } );
+				chat.push_back( { line.m_nTick, DemoColoredHtml( line.m_szText, team, normal, base ) } );
 				break;
 			case xv::demo::FeedKind_t::FEED_KIND_RADIO:
-				chat.push_back( { line.m_nTick, kindHtml( tr( "radio" ) ) + DemoColoredHtml( line.m_szText, team, QColor( 90, 190, 90 ) ) } );
+				chat.push_back( { line.m_nTick, kindHtml( tr( "radio" ) ) + DemoColoredHtml( line.m_szText, team, QColor( 90, 190, 90 ), base ) } );
 				break;
 			case xv::demo::FeedKind_t::FEED_KIND_NOTICE:
-				chat.push_back( { line.m_nTick, DemoColoredHtml( line.m_szText, team, grey ) } );
+				chat.push_back( { line.m_nTick, DemoColoredHtml( line.m_szText, team, grey, base ) } );
 				break;
 			case xv::demo::FeedKind_t::FEED_KIND_CONSOLE:
-				messages.push_back( { line.m_nTick, kindHtml( tr( "console" ) ) + DemoColoredHtml( line.m_szText, team, normal ) } );
+				messages.push_back( { line.m_nTick, kindHtml( tr( "console" ) ) + DemoColoredHtml( line.m_szText, team, normal, base ) } );
 				break;
 			case xv::demo::FeedKind_t::FEED_KIND_CENTER:
-				messages.push_back( { line.m_nTick, kindHtml( tr( "centre" ) ) + DemoColoredHtml( line.m_szText, team, normal ) } );
+				messages.push_back( { line.m_nTick, kindHtml( tr( "centre" ) ) + DemoColoredHtml( line.m_szText, team, normal, base ) } );
 				break;
 			case xv::demo::FeedKind_t::FEED_KIND_HINT:
-				messages.push_back( { line.m_nTick, kindHtml( tr( "hint" ) ) + DemoColoredHtml( line.m_szText, team, normal ) } );
+				messages.push_back( { line.m_nTick, kindHtml( tr( "hint" ) ) + DemoColoredHtml( line.m_szText, team, normal, base ) } );
 				break;
 			case xv::demo::FeedKind_t::FEED_KIND_KEY_HINT:
-				messages.push_back( { line.m_nTick, kindHtml( tr( "key hint" ) ) + DemoColoredHtml( line.m_szText, team, normal ) } );
+				messages.push_back( { line.m_nTick, kindHtml( tr( "key hint" ) ) + DemoColoredHtml( line.m_szText, team, normal, base ) } );
 				break;
 			case xv::demo::FeedKind_t::FEED_KIND_DIALOG:
 				if ( line.m_szText != szLastDialog )
 				{
 					const QColor own( static_cast<int>( line.m_nRgba >> 24 ), static_cast<int>( ( line.m_nRgba >> 16 ) & 0xff ), static_cast<int>( ( line.m_nRgba >> 8 ) & 0xff ) );
-					messages.push_back( { line.m_nTick, kindHtml( tr( "dialog" ) ) + DemoColoredHtml( line.m_szText, team, own == QColor( 255, 255, 255 ) ? normal : own ) } );
+					messages.push_back( { line.m_nTick, kindHtml( tr( "dialog" ) ) + DemoColoredHtml( line.m_szText, team, own == QColor( 255, 255, 255 ) ? normal : own, base ) } );
 				}
 				szLastDialog = line.m_szText;
 				break;
@@ -3348,25 +3681,25 @@ void CDemoViewer::BuildFeed()
 	for ( const xv::demo::HudText_t &text : m_Feed.GetHudTexts() )
 	{
 		const QColor color( static_cast<int>( text.m_nColor1 >> 24 ), static_cast<int>( ( text.m_nColor1 >> 16 ) & 0xff ), static_cast<int>( ( text.m_nColor1 >> 8 ) & 0xff ) );
-		messages.push_back( { text.m_nTick, kindHtml( tr( "HUD %1" ).arg( text.m_nChannel ) ) + DemoColoredHtml( text.m_szText, color, color ) } );
+		messages.push_back( { text.m_nTick, kindHtml( tr( "HUD %1" ).arg( text.m_nChannel ) ) + DemoColoredHtml( text.m_szText, color, color, base ) } );
 	}
 	for ( const xv::demo::MenuShown_t &menu : m_Feed.GetMenus() )
-		messages.push_back( { menu.m_nTick, kindHtml( tr( "menu" ) ) + DemoColoredHtml( menu.m_szText, normal, normal ) } );
+		messages.push_back( { menu.m_nTick, kindHtml( tr( "menu" ) ) + DemoColoredHtml( menu.m_szText, normal, normal, base ) } );
 	for ( const xv::demo::PanelShown_t &panel : m_Feed.GetPanels() )
 		messages.push_back( { panel.m_nTick, kindHtml( tr( "panel" ) ) + ( panel.m_bShow ? tr( "%1 opened" ) : tr( "%1 closed" ) ).arg( QString::fromStdString( panel.m_szName ).toHtmlEscaped() ) } );
 	for ( const xv::demo::Round_t &round : m_Feed.GetRounds() )
 	{
 		if ( round.m_nEnd >= 0 )
-			messages.push_back( { round.m_nEnd, kindHtml( tr( "round" ) ) + DemoColoredHtml( round.m_szMessage, normal, normal ) } );
+			messages.push_back( { round.m_nEnd, kindHtml( tr( "round" ) ) + DemoColoredHtml( round.m_szMessage, normal, normal, base ) } );
 	}
 	std::ranges::stable_sort( messages, {}, &CDemoLog::Entry_t::m_nTick );
 	for ( const xv::demo::Kill_t &kill : m_Feed.GetKills() )
 	{
 		QString szHtml;
 		if ( kill.m_nAttacker && kill.m_nAttacker != kill.m_nVictim )
-			szHtml += QStringLiteral( "<span style=\"color:%1\">%2</span> " ).arg( teamColor( kill.m_nAttacker, kill.m_nTick ).name(), PlayerName( kill.m_nAttacker, kill.m_nTick ).toHtmlEscaped() );
+			szHtml += QStringLiteral( "<span style=\"%1\">%2</span> " ).arg( DemoReadableStyle( teamColor( kill.m_nAttacker, kill.m_nTick ), base ), PlayerName( kill.m_nAttacker, kill.m_nTick ).toHtmlEscaped() );
 		szHtml += kindHtml( QStringLiteral( "[%1%2]" ).arg( QString::fromStdString( kill.m_szWeapon ), kill.m_bHeadshot ? tr( ", headshot" ) : QString{} ) );
-		szHtml += QStringLiteral( "<span style=\"color:%1\">%2</span>" ).arg( teamColor( kill.m_nVictim, kill.m_nTick ).name(), PlayerName( kill.m_nVictim, kill.m_nTick ).toHtmlEscaped() );
+		szHtml += QStringLiteral( "<span style=\"%1\">%2</span>" ).arg( DemoReadableStyle( teamColor( kill.m_nVictim, kill.m_nTick ), base ), PlayerName( kill.m_nVictim, kill.m_nTick ).toHtmlEscaped() );
 		kills.push_back( { kill.m_nTick, szHtml } );
 	}
 	const auto time = [ this ]( int nTick ) { return FormatTime( nTick ); };
@@ -3374,8 +3707,16 @@ void CDemoViewer::BuildFeed()
 	m_pKillLog->SetEntries( std::move( kills ), time );
 	m_pMessageLog->SetEntries( std::move( messages ), time );
 	UpdateLogs();
-	if ( m_pTimeline )
-		m_pTimeline->update();
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+void CDemoViewer::changeEvent( QEvent *pEvent )
+{
+	QWidget::changeEvent( pEvent );
+	if ( pEvent->type() == QEvent::PaletteChange )
+		BuildLogs();
 }
 
 //-----------------------------------------------------------------------------

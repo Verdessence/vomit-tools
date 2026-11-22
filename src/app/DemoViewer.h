@@ -24,6 +24,7 @@
 #include <QElapsedTimer>
 #include <QImage>
 #include <QPolygonF>
+#include <QTransform>
 #include <QWidget>
 
 #include "DemoHud.h"
@@ -141,6 +142,10 @@ public:
 	void SetTeam( int nTeam );
 	// The heatmap's cells as last counted (for tests): seconds or deaths in each.
 	[[nodiscard]] const std::vector<float> &GetHeat() const { return m_Heat; }
+	// How far a heatmap's spots spread, in world units (the blur's width): small for fine
+	// detail, large to see the broad picture.
+	[[nodiscard]] float GetHeatSpread() const { return m_flHeatSpread; }
+	void SetHeatSpread( float flUnits );
 	// The map's floors are in: drawn under the paths.
 	void MapArrived();
 	void LoadRadar();
@@ -173,8 +178,12 @@ private:
 	};
 	// The fit for the widget's size and the view now (kept until either changes).
 	void UpdateProjection() const;
-	// Heat follows the view at once. The paths and floors are rebuilt on their own timers.
+	// The heat, paths and floors are drawn again on their own timers; until then the last
+	// pictures are warped to the new view (Reprojection).
 	void ViewChanged();
+	// Takes what was drawn for another projection to where the view puts it now: exact for a
+	// pan or zoom, and for a turn exact at the middle height (near enough for a moment).
+	[[nodiscard]] QTransform Reprojection( const Projection_t &from ) const;
 	[[nodiscard]] QPointF Project( const Projection_t &projection, double x, double y, double z, double *pDepth = nullptr ) const;
 	[[nodiscard]] QPointF Facing( const xv::CVec3 &vecAt, double flYaw, double flLength ) const;
 	// One stretch of a path without a jump in it (a respawn or a teleport breaks it), in
@@ -204,6 +213,11 @@ private:
 	[[nodiscard]] bool HasRadarBackground() const { return m_bPreferRadar && m_nView == DemoPathView_t::DEMO_PATH_VIEW_TOP && !m_Radar.isNull(); }
 	void PaintRadar( QPainter &painter ) const;
 	void BuildFloor();
+	// The heat in the world (where, how much), counted again when what it counts changes.
+	void GatherHeat();
+	// Gathered again, then drawn.
+	void InvalidateHeat();
+	// The gathered heat as the view sees it.
 	void BuildHeat();
 
 	CDemoViewer &m_Viewer;
@@ -224,7 +238,11 @@ private:
 	double m_flRadarScale = 0.0;
 	QImage m_Floor;     // the map from above, at the widget's size
 	Projection_t m_FloorProjection; // what m_Floor was drawn with
-	QImage m_HeatImage; // the heatmap, at the widget's size
+	QImage m_HeatImage; // the heatmap, a pixel a cell
+	Projection_t m_HeatProjection; // what m_HeatImage was drawn with
+	double m_flHeatCell = 2.0;      // its cells' size, in widget pixels
+	float m_flHeatSpread = 48.0f;
+	QTimer *m_pHeatTimer = nullptr;
 	DemoPathView_t m_nView = DemoPathView_t::DEMO_PATH_VIEW_TOP;
 	double m_flYaw = 45.0; // the isometric view's
 	double m_flZoom = 1.0; // times the fitted scale
@@ -243,6 +261,14 @@ private:
 	QPoint m_DragFrom;
 	Qt::MouseButton m_nDragButton = Qt::NoButton;
 	std::vector<float> m_Heat;
+	// The heat in world space: each bin's weighted middle and its seconds (or deaths).
+	struct HeatPoint_t
+	{
+		xv::CVec3 m_vecAt;
+		float m_flAmount = 0.0f;
+	};
+	std::vector<HeatPoint_t> m_HeatPoints;
+	bool m_bHeatGathered = false;
 	int m_nHeatTick = -1; // the playhead the heat was counted to (up to the playhead)
 };
 
@@ -350,12 +376,15 @@ signals:
 
 protected:
 	void keyPressEvent( QKeyEvent *pEvent ) override;
+	bool eventFilter( QObject *pWatched, QEvent *pEvent ) override;
+	void changeEvent( QEvent *pEvent ) override;
 
 private:
 	[[nodiscard]] QWidget *BuildSummary();
 	[[nodiscard]] QWidget *BuildCommands();
 	[[nodiscard]] QWidget *BuildFrameKinds();
 	[[nodiscard]] QWidget *BuildPaths();
+	[[nodiscard]] QWidget *BuildGraphs();
 	[[nodiscard]] QWidget *BuildPathCut();
 	[[nodiscard]] QWidget *BuildMix();
 	void ShowMuteSounds();
@@ -372,6 +401,7 @@ private:
 	[[nodiscard]] int RowOfTrack( std::size_t nTrack ) const;
 	// The feed read again (with the language, once the files come) and the logs filled.
 	void BuildFeed();
+	void BuildLogs();
 	void BuildLogic();
 	void UpdateLogs();
 	void UpdateSound();
@@ -420,6 +450,12 @@ private:
 	};
 	void FillSideGroups();
 	void SetSideCollapsed( int nGroup, bool bCollapsed );
+	// Every group's height from what is folded: a folded group its tab bar, the open ones the
+	// rest, in their proportions (nOpened, just unfolded, gets back its old height first).
+	// The splitter alone would leave a folded group's old room empty under its tab bar.
+	void ApplySideSizes( int nOpened = -1 );
+	void QueueSideSizes();
+	bool m_bSideSizesQueued = false;
 	void ShowSideMenu( QTabWidget *pGroup, const QPoint &point );
 	QSplitter *m_pSide = nullptr;
 	std::array<QTabWidget *, SIDE_GROUPS> m_SideGroups{};
