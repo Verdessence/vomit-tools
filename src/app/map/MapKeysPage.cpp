@@ -114,16 +114,9 @@ CMapKeysPage::CMapKeysPage( QWidget *pParent )
 	connect( m_pPreset, &QComboBox::currentIndexChanged, this, [ this ] {
 		if ( m_bFilling )
 			return;
-		MapPreferences_t preferences = CPreferences::Instance().GetMapPreferences();
-		preferences.m_nKeyPreset = static_cast<MapKeyPreset_t>( m_pPreset->currentData().toInt() );
-		CPreferences::Instance().SetMapPreferences( preferences );
+		Change( static_cast<MapKeyPreset_t>( m_pPreset->currentData().toInt() ), m_CustomKeys );
 	} );
-	connect( m_pCopy, &QPushButton::clicked, this, [] {
-		MapPreferences_t preferences = CPreferences::Instance().GetMapPreferences();
-		preferences.m_CustomKeys = MapKeysToSettings( MapPresetKeys( preferences.m_nKeyPreset, preferences.m_CustomKeys ) );
-		preferences.m_nKeyPreset = MapKeyPreset_t::MAP_KEY_PRESET_CUSTOM;
-		CPreferences::Instance().SetMapPreferences( preferences );
-	} );
+	connect( m_pCopy, &QPushButton::clicked, this, [ this ] { Change( MapKeyPreset_t::MAP_KEY_PRESET_CUSTOM, MapKeysToSettings( MapPresetKeys( m_nPreset, m_CustomKeys ) ) ); } );
 	connect( m_pFilter, &QLineEdit::textChanged, this, &CMapKeysPage::ApplyFilter );
 	connect( m_pTree, &QTreeWidget::currentItemChanged, this, &CMapKeysPage::ShowSelected );
 	connect( m_pKey, &QKeySequenceEdit::editingFinished, this, &CMapKeysPage::KeyEdited );
@@ -131,7 +124,54 @@ CMapKeysPage::CMapKeysPage( QWidget *pParent )
 	// The clear buttons don't finish editing; an emptied box is a change all the same.
 	connect( m_pKey, &QKeySequenceEdit::keySequenceChanged, this, [ this ]( const QKeySequence &key ) {if(key.isEmpty())KeyEdited(); } );
 	connect( m_pAlternative, &QKeySequenceEdit::keySequenceChanged, this, [ this ]( const QKeySequence &key ) {if(key.isEmpty())KeyEdited(); } );
-	connect( &CPreferences::Instance(), &CPreferences::MapPreferencesChanged, this, &CMapKeysPage::Fill );
+	// The preferences' keys show unless a change of the page's waits to be applied; once the
+	// preferences hold it, they show again.
+	connect( &CPreferences::Instance(), &CPreferences::MapPreferencesChanged, this, [ this ] {
+		const MapPreferences_t &preferences = CPreferences::Instance().GetMapPreferences();
+		if ( preferences.m_nKeyPreset == m_nPreset && preferences.m_CustomKeys == m_CustomKeys )
+			m_bChanged = false;
+		if ( m_bChanged )
+			return;
+		m_nPreset = preferences.m_nKeyPreset;
+		m_CustomKeys = preferences.m_CustomKeys;
+		Fill();
+	} );
+	m_nPreset = CPreferences::Instance().GetMapPreferences().m_nKeyPreset;
+	m_CustomKeys = CPreferences::Instance().GetMapPreferences().m_CustomKeys;
+	Fill();
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+void CMapKeysPage::Show( const MapPreferences_t &preferences )
+{
+	m_nPreset = preferences.m_nKeyPreset;
+	m_CustomKeys = preferences.m_CustomKeys;
+	m_bChanged = true;
+	Fill();
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Applied when the stage's turn comes, the keys as they are at that moment.
+//-----------------------------------------------------------------------------
+void CMapKeysPage::Change( MapKeyPreset_t nPreset, QStringList customKeys )
+{
+	m_nPreset = nPreset;
+	m_CustomKeys = std::move( customKeys );
+	const auto apply = [ nPreset = m_nPreset, keys = m_CustomKeys ] {
+		MapPreferences_t preferences = CPreferences::Instance().GetMapPreferences();
+		preferences.m_nKeyPreset = nPreset;
+		preferences.m_CustomKeys = keys;
+		CPreferences::Instance().SetMapPreferences( preferences );
+	};
+	if ( !m_pfnStage )
+	{
+		apply();
+		return;
+	}
+	m_bChanged = true;
+	m_pfnStage( apply );
 	Fill();
 }
 
@@ -142,10 +182,9 @@ void CMapKeysPage::Fill()
 {
 	const std::optional<MapAction_t> nSelected = GetSelectedAction();
 	m_bFilling = true;
-	const MapPreferences_t &preferences = CPreferences::Instance().GetMapPreferences();
-	m_pPreset->setCurrentIndex( std::max( 0, m_pPreset->findData( static_cast<int>( preferences.m_nKeyPreset ) ) ) );
-	m_pCopy->setEnabled( preferences.m_nKeyPreset != MapKeyPreset_t::MAP_KEY_PRESET_CUSTOM );
-	const std::vector<MapKeyBinding_t> keys = MapPresetKeys( preferences.m_nKeyPreset, preferences.m_CustomKeys );
+	m_pPreset->setCurrentIndex( std::max( 0, m_pPreset->findData( static_cast<int>( m_nPreset ) ) ) );
+	m_pCopy->setEnabled( m_nPreset != MapKeyPreset_t::MAP_KEY_PRESET_CUSTOM );
+	const std::vector<MapKeyBinding_t> keys = MapPresetKeys( m_nPreset, m_CustomKeys );
 	const std::vector<MapKeyClash_t> clashes = FindMapKeyClashes( keys );
 
 	m_pTree->clear();
@@ -244,8 +283,7 @@ void CMapKeysPage::ShowSelected()
 	m_bFilling = true;
 	m_pKey->setEnabled( nAction.has_value() );
 	m_pAlternative->setEnabled( nAction.has_value() );
-	const MapPreferences_t &preferences = CPreferences::Instance().GetMapPreferences();
-	const auto [ key, alternative ] = nAction ? KeysOf( MapPresetKeys( preferences.m_nKeyPreset, preferences.m_CustomKeys ), *nAction ) : std::pair{ QKeyCombination{ Qt::Key_unknown }, QKeyCombination{ Qt::Key_unknown } };
+	const auto [ key, alternative ] = nAction ? KeysOf( MapPresetKeys( m_nPreset, m_CustomKeys ), *nAction ) : std::pair{ QKeyCombination{ Qt::Key_unknown }, QKeyCombination{ Qt::Key_unknown } };
 	m_pKey->setKeySequence( key.key() == Qt::Key_unknown ? QKeySequence{} : QKeySequence{ key } );
 	m_pAlternative->setKeySequence( alternative.key() == Qt::Key_unknown ? QKeySequence{} : QKeySequence{ alternative } );
 	m_bFilling = bWas;
@@ -269,8 +307,7 @@ void CMapKeysPage::KeyEdited()
 //-----------------------------------------------------------------------------
 void CMapKeysPage::SetKeys( MapAction_t nAction, QKeyCombination key, QKeyCombination alternative )
 {
-	MapPreferences_t preferences = CPreferences::Instance().GetMapPreferences();
-	std::vector<MapKeyBinding_t> keys = MapPresetKeys( preferences.m_nKeyPreset, preferences.m_CustomKeys );
+	std::vector<MapKeyBinding_t> keys = MapPresetKeys( m_nPreset, m_CustomKeys );
 	if ( KeysOf( keys, nAction ) == std::pair{ key, alternative } )
 		return;
 	std::erase_if( keys, [ & ]( const MapKeyBinding_t &binding ) { return binding.m_nAction == nAction; } );
@@ -279,7 +316,5 @@ void CMapKeysPage::SetKeys( MapAction_t nAction, QKeyCombination key, QKeyCombin
 		if ( combination.key() != Qt::Key_unknown )
 			keys.push_back( { nAction, combination } );
 	}
-	preferences.m_CustomKeys = MapKeysToSettings( keys );
-	preferences.m_nKeyPreset = MapKeyPreset_t::MAP_KEY_PRESET_CUSTOM;
-	CPreferences::Instance().SetMapPreferences( preferences );
+	Change( MapKeyPreset_t::MAP_KEY_PRESET_CUSTOM, MapKeysToSettings( keys ) );
 }

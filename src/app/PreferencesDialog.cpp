@@ -19,11 +19,9 @@
 #include <QDoubleSpinBox>
 #include <QComboBox>
 #include <QDialogButtonBox>
-#include <QShowEvent>
 #include <QStandardItemModel>
 #include <QStyleFactory>
 #include <QMessageBox>
-#include <QSaveFile>
 #include <QFile>
 #include <QPushButton>
 #include <QDesktopServices>
@@ -142,7 +140,9 @@ CPreferencesDialog::CPreferencesDialog( QWidget *pParent )
 	AddPage( tr( "Graphics" ), m_pGraphicsTabs );
 	AddPage( tr( "Materials" ), Scrollable( BuildMaterialsPage() ) );
 	AddPage( tr( "Maps" ), BuildMapsPage() );
-	AddPage( tr( "Keybinds" ), new CMapKeysPage );
+	m_pKeys = new CMapKeysPage;
+	m_pKeys->SetStage( [ this ]( std::function<void()> pfnApply ) { Stage( QStringLiteral( "keys" ), std::move( pfnApply ) ); } );
+	AddPage( tr( "Keybinds" ), m_pKeys );
 	AddPage( tr( "Advanced" ), BuildAdvancedPage() );
 	for ( const auto &[ szTitle, pfnMake ] : LocalPages() )
 	{
@@ -153,8 +153,8 @@ CPreferencesDialog::CPreferencesDialog( QWidget *pParent )
 	}
 	m_pPages->setCurrentRow( 0 );
 
-	// Changes show at once; Apply keeps them, OK keeps them and closes, Cancel (or closing the
-	// window) puts back the settings as they were when it opened or at the last Apply.
+	// Nothing takes effect until Apply (or OK, which closes too); Cancel or closing the window
+	// drops what wasn't applied.
 	auto *pButtons = new QDialogButtonBox( QDialogButtonBox::Ok | QDialogButtonBox::Apply | QDialogButtonBox::Cancel );
 	pButtons->setObjectName( QStringLiteral( "preferencesButtons" ) );
 	connect( pButtons, &QDialogButtonBox::accepted, this, [ this ] {
@@ -163,7 +163,6 @@ CPreferencesDialog::CPreferencesDialog( QWidget *pParent )
 	} );
 	connect( pButtons->button( QDialogButtonBox::Apply ), &QPushButton::clicked, this, &CPreferencesDialog::Apply );
 	connect( pButtons, &QDialogButtonBox::rejected, this, &QDialog::reject );
-	m_Kept = ReadSettingsFile();
 	auto *pColumns = new QHBoxLayout;
 	pColumns->addWidget( m_pPages );
 	pColumns->addWidget( m_pStack, 1 );
@@ -174,19 +173,35 @@ CPreferencesDialog::CPreferencesDialog( QWidget *pParent )
 }
 
 //-----------------------------------------------------------------------------
-// Purpose:
+// Purpose: A change with a key replaces the one waiting with the same key, keeping its place;
+//          one without (or with a new key) goes last.
 //-----------------------------------------------------------------------------
-QByteArray CPreferencesDialog::ReadSettingsFile()
+void CPreferencesDialog::Stage( const QString &szKey, std::function<void()> pfnApply )
 {
-	QFile file( CPreferences::Instance().GetConfigPath() );
-	return file.open( QIODevice::ReadOnly ) ? file.readAll() : QByteArray{};
+	if ( !szKey.isEmpty() )
+	{
+		for ( auto &[ szWaiting, pfnWaiting ] : m_Staged )
+		{
+			if ( szWaiting == szKey )
+			{
+				pfnWaiting = std::move( pfnApply );
+				return;
+			}
+		}
+	}
+	m_Staged.emplace_back( szKey, std::move( pfnApply ) );
 }
 
 //-----------------------------------------------------------------------------
-// Purpose:
+// Purpose: The waiting changes in the order they were made, then the Hammer section's entry.
 //-----------------------------------------------------------------------------
 bool CPreferencesDialog::Apply()
 {
+	std::vector<std::pair<QString, std::function<void()>>> staged;
+	staged.swap( m_Staged );
+	for ( const auto &[ szKey, pfnApply ] : staged )
+		pfnApply();
+	m_nMapEdits = 0;
 	if ( m_pHammer->IsModified() )
 	{
 		QString szError;
@@ -196,32 +211,25 @@ bool CPreferencesDialog::Apply()
 			return false;
 		}
 	}
-	m_Kept = ReadSettingsFile();
 	return true;
 }
 
 //-----------------------------------------------------------------------------
 // Purpose:
 //-----------------------------------------------------------------------------
-void CPreferencesDialog::showEvent( QShowEvent *pEvent )
+bool CPreferencesDialog::HasChanges() const
 {
-	if ( !pEvent->spontaneous() )
-		m_Kept = ReadSettingsFile();
-	QDialog::showEvent( pEvent );
+	return !m_Staged.empty() || m_pHammer->IsModified();
 }
 
 //-----------------------------------------------------------------------------
-// Purpose: The file written back as it was and read again, which puts every setting back
-//          (and tells the app, as an edit of the file by hand would).
+// Purpose: What wasn't applied is dropped; the window shows the settings as they are when it
+//          is made again (MainWindow makes it again after a Cancel).
 //-----------------------------------------------------------------------------
 void CPreferencesDialog::reject()
 {
-	if ( !m_Kept.isEmpty() && ReadSettingsFile() != m_Kept )
-	{
-		QSaveFile file( CPreferences::Instance().GetConfigPath() );
-		if ( file.open( QIODevice::WriteOnly ) && file.write( m_Kept ) == m_Kept.size() && file.commit() )
-			CPreferences::Instance().ReloadConfig();
-	}
+	m_Staged.clear();
+	m_nMapEdits = 0;
 	QDialog::reject();
 }
 
@@ -265,7 +273,7 @@ QWidget *CPreferencesDialog::BuildInterfacePage()
 	auto *pSimple = new QCheckBox( tr( "Simple interface" ) );
 	pSimple->setObjectName( QStringLiteral( "preferencesSimple" ) );
 	pSimple->setChecked( CInterfaceMode::Instance().IsSimple() );
-	connect( pSimple, &QCheckBox::toggled, this, []( bool bOn ) { CInterfaceMode::Instance().SetSimple( bOn ); } );
+	connect( pSimple, &QCheckBox::toggled, this, [ this ]( bool bOn ) { Stage( QStringLiteral( "Simple" ), [ bOn ] { CInterfaceMode::Instance().SetSimple( bOn ); } ); } );
 	connect( &CInterfaceMode::Instance(), &CInterfaceMode::Changed, pSimple, &QCheckBox::setChecked );
 	QVBoxLayout *pLayout = PageLayout( pPage );
 	pLayout->addWidget( pSimple );
@@ -276,7 +284,7 @@ QWidget *CPreferencesDialog::BuildInterfacePage()
 	pScale->setSingleStep( 25 );
 	pScale->setSuffix( QStringLiteral( "%" ) );
 	pScale->setValue( static_cast<int>( std::lround( CPreferences::Instance().GetUiScale() * 100.0 ) ) );
-	connect( pScale, &QSpinBox::valueChanged, this, []( int nPercent ) { CPreferences::Instance().SetUiScale( nPercent / 100.0 ); } );
+	connect( pScale, &QSpinBox::valueChanged, this, [ this ]( int nPercent ) { Stage( QStringLiteral( "UiScale" ), [ nPercent ] { CPreferences::Instance().SetUiScale( nPercent / 100.0 ); } ); } );
 	auto *pScaleRow = new QFormLayout;
 	pScaleRow->setContentsMargins( 0, 0, 0, 0 );
 	pScaleRow->addRow( tr( "UI scale" ), pScale );
@@ -316,51 +324,61 @@ QWidget *CPreferencesDialog::BuildInterfacePage()
 				nAt = i;
 		pStyle->setCurrentIndex( nAt );
 	}
-	connect( pStyle, &QComboBox::currentIndexChanged, this, [ pStyle ] { CPreferences::Instance().SetThemeStyle( pStyle->currentData().toString() ); } );
+	connect( pStyle, &QComboBox::currentIndexChanged, this, [ this, pStyle ] { Stage( QStringLiteral( "ThemeStyle" ), [ pStyle ] { CPreferences::Instance().SetThemeStyle( pStyle->currentData().toString() ); } ); } );
 	auto *pScheme = new QComboBox;
 	pScheme->setObjectName( QStringLiteral( "preferencesColorScheme" ) );
 	pScheme->addItem( tr( "System" ), static_cast<int>( ThemeScheme_t::THEME_SCHEME_SYSTEM ) );
 	pScheme->addItem( tr( "Light" ), static_cast<int>( ThemeScheme_t::THEME_SCHEME_LIGHT ) );
 	pScheme->addItem( tr( "Dark" ), static_cast<int>( ThemeScheme_t::THEME_SCHEME_DARK ) );
 	pScheme->setCurrentIndex( pScheme->findData( static_cast<int>( CPreferences::Instance().GetThemeScheme() ) ) );
-	connect( pScheme, &QComboBox::currentIndexChanged, this, [ pScheme ] { CPreferences::Instance().SetThemeScheme( static_cast<ThemeScheme_t>( pScheme->currentData().toInt() ) ); } );
-	pScaleRow->addRow( tr( "Application style" ), pStyle );
-	pScaleRow->addRow( tr( "Color scheme" ), pScheme );
+	connect( pScheme, &QComboBox::currentIndexChanged, this, [ this, pScheme ] { Stage( QStringLiteral( "ThemeScheme" ), [ pScheme ] { CPreferences::Instance().SetThemeScheme( static_cast<ThemeScheme_t>( pScheme->currentData().toInt() ) ); } ); } );
+	auto *pOwn = new QCheckBox( tr( "Use the app's own colours, not the desktop's (qt6ct, KDE)" ) );
+	pOwn->setObjectName( QStringLiteral( "preferencesOwnPalette" ) );
+	pOwn->setChecked( CPreferences::Instance().IsThemeOwnPalette() );
+	pOwn->setToolTip( tr( "A desktop that hands the app a palette of its own (qt6ct, KDE's colour schemes) keeps it whatever the colour scheme says; with this, Light and Dark are the app's own." ) );
+	connect( pOwn, &QCheckBox::toggled, this, [ this ]( bool bOn ) { Stage( QStringLiteral( "ThemeOwnPalette" ), [ bOn ] { CPreferences::Instance().SetThemeOwnPalette( bOn ); } ); } );
+	auto *pAppearance = new QGroupBox( tr( "Appearance" ) );
+	pAppearance->setObjectName( QStringLiteral( "preferencesAppearance" ) );
+	auto *pAppearanceLayout = new QFormLayout( pAppearance );
+	pAppearanceLayout->addRow( tr( "Application style" ), pStyle );
+	pAppearanceLayout->addRow( tr( "Color scheme" ), pScheme );
+	pAppearanceLayout->addRow( pOwn );
+	pLayout->addWidget( pAppearance );
 	auto *pSingle = new QCheckBox( tr( "Open files in the window already open" ) );
 	pSingle->setObjectName( QStringLiteral( "preferencesSingleWindow" ) );
 	pSingle->setChecked( CPreferences::Instance().IsSingleWindow() );
-	connect( pSingle, &QCheckBox::toggled, this, []( bool bOn ) { CPreferences::Instance().SetSingleWindow( bOn ); } );
+	connect( pSingle, &QCheckBox::toggled, this, [ this ]( bool bOn ) { Stage( QStringLiteral( "SingleWindow" ), [ bOn ] { CPreferences::Instance().SetSingleWindow( bOn ); } ); } );
 	pLayout->addWidget( pSingle );
 	pSingle->setToolTip( tr( "Send files opened from outside the app to the running window. Takes effect after restarting." ) );
 	auto *pManifest = new QCheckBox( tr( "Offer to add saved files to the game's manifest" ) );
 	pManifest->setObjectName( QStringLiteral( "preferencesManifestReminder" ) );
 	pManifest->setChecked( CPreferences::Instance().IsManifestReminder() );
-	connect( pManifest, &QCheckBox::toggled, this, []( bool bOn ) { CPreferences::Instance().SetManifestReminder( bOn ); } );
+	connect( pManifest, &QCheckBox::toggled, this, [ this ]( bool bOn ) { Stage( QStringLiteral( "ManifestReminder" ), [ bOn ] { CPreferences::Instance().SetManifestReminder( bOn ); } ); } );
 	pLayout->addWidget( pManifest );
 	pManifest->setToolTip( tr( "Ask when a saved soundscape, soundscript or particle file is missing from its manifest." ) );
 	auto *pReopen = new QCheckBox( tr( "Continue where you left off" ) );
 	pReopen->setObjectName( QStringLiteral( "preferencesReopenSession" ) );
 	pReopen->setChecked( CPreferences::Instance().IsReopenSession() );
-	connect( pReopen, &QCheckBox::toggled, this, []( bool bOn ) { CPreferences::Instance().SetReopenSession( bOn ); } );
+	connect( pReopen, &QCheckBox::toggled, this, [ this ]( bool bOn ) { Stage( QStringLiteral( "ReopenSession" ), [ bOn ] { CPreferences::Instance().SetReopenSession( bOn ); } ); } );
 	pLayout->addWidget( pReopen );
 	pReopen->setToolTip( tr( "Restore the last session when starting without files." ) );
 	auto *pWindows = new QCheckBox( tr( "Each kind of editor in a window of its own" ) );
 	pWindows->setObjectName( QStringLiteral( "preferencesEditorWindows" ) );
 	pWindows->setChecked( CPreferences::Instance().IsEditorWindows() );
-	connect( pWindows, &QCheckBox::toggled, this, []( bool bOn ) { CPreferences::Instance().SetEditorWindows( bOn ); } );
+	connect( pWindows, &QCheckBox::toggled, this, [ this ]( bool bOn ) { Stage( QStringLiteral( "EditorWindows" ), [ bOn ] { CPreferences::Instance().SetEditorWindows( bOn ); } ); } );
 	pLayout->addWidget( pWindows );
 	pWindows->setToolTip( tr( "Open each kind of editor in a separate window with its own tabs." ) );
 	auto *pGroups = new QCheckBox( tr( "Tab groups" ) );
 	pGroups->setObjectName( QStringLiteral( "preferencesTabGroups" ) );
 	pGroups->setChecked( CPreferences::Instance().IsTabGroups() );
-	connect( pGroups, &QCheckBox::toggled, this, []( bool bOn ) { CPreferences::Instance().SetTabGroups( bOn ); } );
+	connect( pGroups, &QCheckBox::toggled, this, [ this ]( bool bOn ) { Stage( QStringLiteral( "TabGroups" ), [ bOn ] { CPreferences::Instance().SetTabGroups( bOn ); } ); } );
 	pLayout->addWidget( pGroups );
 	pGroups->setToolTip( tr( "Filter tabs by group from the header. Right-click an editor tab to move it." ) );
 	auto *pAllGroups = new QCheckBox( tr( "Show every group, even with no tabs open" ) );
 	pAllGroups->setObjectName( QStringLiteral( "preferencesAllTabGroups" ) );
 	pAllGroups->setChecked( CPreferences::Instance().IsAllTabGroups() );
 	pAllGroups->setEnabled( CPreferences::Instance().IsTabGroups() );
-	connect( pAllGroups, &QCheckBox::toggled, this, []( bool bOn ) { CPreferences::Instance().SetAllTabGroups( bOn ); } );
+	connect( pAllGroups, &QCheckBox::toggled, this, [ this ]( bool bOn ) { Stage( QStringLiteral( "AllTabGroups" ), [ bOn ] { CPreferences::Instance().SetAllTabGroups( bOn ); } ); } );
 	connect( pGroups, &QCheckBox::toggled, pAllGroups, &QCheckBox::setEnabled );
 	pLayout->addWidget( pAllGroups );
 
@@ -370,9 +388,9 @@ QWidget *CPreferencesDialog::BuildInterfacePage()
 	pFooter->addItem( tr( "Version only" ) );
 	pFooter->addItem( tr( "Hidden" ) );
 	pFooter->setCurrentIndex( static_cast<int>( CPreferences::Instance().GetFooterInfo() ) );
-	connect( pFooter, &QComboBox::currentIndexChanged, this, []( int nIndex ) {
+	connect( pFooter, &QComboBox::currentIndexChanged, this, [ this ]( int nIndex ) {
 		if ( nIndex >= 0 )
-			CPreferences::Instance().SetFooterInfo( static_cast<FooterInfo_t>( nIndex ) );
+			Stage( QStringLiteral( "FooterInfo" ), [ nIndex ] { CPreferences::Instance().SetFooterInfo( static_cast<FooterInfo_t>( nIndex ) ); } );
 	} );
 	connect( &CPreferences::Instance(), &CPreferences::FooterInfoChanged, pFooter, [ pFooter ]( FooterInfo_t nInfo ) {
 		pFooter->setCurrentIndex( static_cast<int>( nInfo ) );
@@ -385,7 +403,7 @@ QWidget *CPreferencesDialog::BuildInterfacePage()
 	auto *pChooser = new QCheckBox( tr( "Use the desktop's file chooser" ) );
 	pChooser->setObjectName( QStringLiteral( "preferencesDesktopFileChooser" ) );
 	pChooser->setChecked( CPreferences::Instance().IsDesktopFileChooser() );
-	connect( pChooser, &QCheckBox::toggled, this, []( bool bOn ) { CPreferences::Instance().SetDesktopFileChooser( bOn ); } );
+	connect( pChooser, &QCheckBox::toggled, this, [ this ]( bool bOn ) { Stage( QStringLiteral( "DesktopFileChooser" ), [ bOn ] { CPreferences::Instance().SetDesktopFileChooser( bOn ); } ); } );
 	pLayout->addWidget( pChooser );
 	pChooser->setToolTip( tr( "Use the system file chooser through the desktop portal." ) );
 #endif
@@ -425,8 +443,8 @@ QWidget *CPreferencesDialog::BuildGraphicsPage()
 	pNow->setTextInteractionFlags( Qt::TextSelectableByMouse );
 	auto *pRestart = Hint( tr( "Takes effect the next time vomit-tools starts." ) );
 	pRestart->setVisible( false );
-	connect( pApi, &QButtonGroup::idClicked, this, [ pRestart ]( int nApi ) {
-		CPreferences::Instance().SetGraphicsApi( static_cast<GraphicsApi_t>( nApi ) );
+	connect( pApi, &QButtonGroup::idClicked, this, [ this, pRestart ]( int nApi ) {
+		Stage( QStringLiteral( "GraphicsApi" ), [ nApi ] { CPreferences::Instance().SetGraphicsApi( static_cast<GraphicsApi_t>( nApi ) ); } );
 		pRestart->setVisible( true );
 	} );
 	auto *pForm = new QFormLayout;
@@ -441,7 +459,7 @@ QWidget *CPreferencesDialog::BuildGraphicsPage()
 	auto *pAll = new QCheckBox( tr( "Animate every system in the grid preview" ) );
 	pAll->setObjectName( QStringLiteral( "preferencesGridAnimation" ) );
 	pAll->setChecked( CPreferences::Instance().IsGridAnimatingAll() );
-	connect( pAll, &QCheckBox::toggled, this, []( bool bOn ) { CPreferences::Instance().SetGridAnimatingAll( bOn ); } );
+	connect( pAll, &QCheckBox::toggled, this, [ this ]( bool bOn ) { Stage( QStringLiteral( "GridAnimatingAll" ), [ bOn ] { CPreferences::Instance().SetGridAnimatingAll( bOn ); } ); } );
 	pParticleLayout->addWidget( pAll );
 	pLayout->addWidget( pParticles );
 	pLayout->addStretch();
@@ -459,14 +477,14 @@ QWidget *CPreferencesDialog::BuildMaterialsPage()
 	auto *pText = new QRadioButton( tr( "Edit materials as text" ) );
 	pText->setObjectName( QStringLiteral( "preferencesMaterialText" ) );
 	( CPreferences::Instance().IsMaterialVisual() ? pVisual : pText )->setChecked( true );
-	connect( pVisual, &QRadioButton::toggled, this, []( bool bOn ) { CPreferences::Instance().SetMaterialVisual( bOn ); } );
+	connect( pVisual, &QRadioButton::toggled, this, [ this ]( bool bOn ) { Stage( QStringLiteral( "MaterialVisual" ), [ bOn ] { CPreferences::Instance().SetMaterialVisual( bOn ); } ); } );
 	connect( &CPreferences::Instance(), &CPreferences::MaterialEditingChanged, pPage, [ pVisual, pText ] {
 		( CPreferences::Instance().IsMaterialVisual() ? pVisual : pText )->setChecked( true );
 	} );
 	auto *pLive = new QCheckBox( tr( "Redraw the preview at each edit in the list" ) );
 	pLive->setObjectName( QStringLiteral( "preferencesMaterialLive" ) );
 	pLive->setChecked( CPreferences::Instance().IsMaterialLive() );
-	connect( pLive, &QCheckBox::toggled, this, []( bool bOn ) { CPreferences::Instance().SetMaterialLive( bOn ); } );
+	connect( pLive, &QCheckBox::toggled, this, [ this ]( bool bOn ) { Stage( QStringLiteral( "MaterialLive" ), [ bOn ] { CPreferences::Instance().SetMaterialLive( bOn ); } ); } );
 	connect( &CPreferences::Instance(), &CPreferences::MaterialEditingChanged, pLive, [ pLive ] { pLive->setChecked( CPreferences::Instance().IsMaterialLive() ); } );
 	QVBoxLayout *pLayout = PageLayout( pPage );
 	pLayout->addWidget( pVisual );
@@ -491,7 +509,7 @@ QWidget *CPreferencesDialog::BuildTextEditorPage()
 		pScheme->addItem( CodeSchemeName( static_cast<CodeScheme_t>( i ) ) );
 	}
 	pScheme->setCurrentIndex( static_cast<int>( preferences.GetCodeScheme() ) );
-	connect( pScheme, &QComboBox::currentIndexChanged, this, []( int nIndex ) { CPreferences::Instance().SetCodeScheme( static_cast<CodeScheme_t>( nIndex ) ); } );
+	connect( pScheme, &QComboBox::currentIndexChanged, this, [ this ]( int nIndex ) { Stage( QStringLiteral( "CodeScheme" ), [ nIndex ] { CPreferences::Instance().SetCodeScheme( static_cast<CodeScheme_t>( nIndex ) ); } ); } );
 
 	auto *pSystemFont = new QCheckBox( tr( "The system's fixed-width font" ) );
 	pSystemFont->setObjectName( QStringLiteral( "preferencesCodeSystemFont" ) );
@@ -507,9 +525,9 @@ QWidget *CPreferencesDialog::BuildTextEditorPage()
 	pSize->setValue( preferences.GetCodeFontSize() );
 	pSystemFont->setChecked( preferences.GetCodeFontFamily().isEmpty() );
 	pFont->setEnabled( !pSystemFont->isChecked() );
-	const auto applyFont = [ pSystemFont, pFont, pSize ] {
+	const auto applyFont = [ this, pSystemFont, pFont, pSize ] {
 		pFont->setEnabled( !pSystemFont->isChecked() );
-		CPreferences::Instance().SetCodeFont( pSystemFont->isChecked() ? QString{} : pFont->currentFont().family(), pSize->value() );
+		Stage( QStringLiteral( "CodeFont" ), [ szFamily = pSystemFont->isChecked() ? QString{} : pFont->currentFont().family(), nSize = pSize->value() ] { CPreferences::Instance().SetCodeFont( szFamily, nSize ); } );
 	};
 	connect( pSystemFont, &QCheckBox::toggled, this, applyFont );
 	connect( pFont, &QFontComboBox::currentFontChanged, this, applyFont );
@@ -528,7 +546,7 @@ QWidget *CPreferencesDialog::BuildTextEditorPage()
 	auto *pCompletion = new QCheckBox( tr( "Suggest words as they're typed" ) );
 	pCompletion->setObjectName( QStringLiteral( "preferencesCodeCompletion" ) );
 	pCompletion->setChecked( preferences.IsCodeCompletion() );
-	connect( pCompletion, &QCheckBox::toggled, this, []( bool bOn ) { CPreferences::Instance().SetCodeCompletion( bOn ); } );
+	connect( pCompletion, &QCheckBox::toggled, this, [ this ]( bool bOn ) { Stage( QStringLiteral( "CodeCompletion" ), [ bOn ] { CPreferences::Instance().SetCodeCompletion( bOn ); } ); } );
 
 	QVBoxLayout *pLayout = PageLayout( pPage );
 	pLayout->addLayout( pForm );
@@ -543,11 +561,16 @@ QWidget *CPreferencesDialog::BuildTextEditorPage()
 //-----------------------------------------------------------------------------
 void CPreferencesDialog::BuildMapSections()
 {
-	const MapPreferences_t &current = CPreferences::Instance().GetMapPreferences();
-	auto change = []( auto pfnEdit ) {
-		MapPreferences_t preferences = CPreferences::Instance().GetMapPreferences();
-		pfnEdit( preferences );
-		CPreferences::Instance().SetMapPreferences( preferences );
+	// As they will be once Apply is pressed, after a restore; else as they are.
+	const MapPreferences_t &current = m_MapShown ? *m_MapShown : CPreferences::Instance().GetMapPreferences();
+	// Each edit of the map's settings applies on its own, after those before it, so edits of
+	// different settings in one Apply all count.
+	auto change = [ this ]( auto pfnEdit ) {
+		Stage( QStringLiteral( "map:%1" ).arg( m_nMapEdits++ ), [ pfnEdit ] {
+			MapPreferences_t preferences = CPreferences::Instance().GetMapPreferences();
+			pfnEdit( preferences );
+			CPreferences::Instance().SetMapPreferences( preferences );
+		} );
 	};
 	auto spin = [ & ]( const QString &szName, double flValue, double flLowest, double flHighest, double flStep, int nDecimals, auto pfnStore ) {
 		auto *pSpin = new QDoubleSpinBox;
@@ -556,7 +579,7 @@ void CPreferencesDialog::BuildMapSections()
 		pSpin->setSingleStep( flStep );
 		pSpin->setDecimals( nDecimals );
 		pSpin->setValue( flValue );
-		connect( pSpin, &QDoubleSpinBox::valueChanged, this, [ change, pfnStore ]( double flNew ) { change( [ & ]( MapPreferences_t &preferences ) { pfnStore( preferences, flNew ); } ); } );
+		connect( pSpin, &QDoubleSpinBox::valueChanged, this, [ change, pfnStore ]( double flNew ) { change( [ = ]( MapPreferences_t &preferences ) { pfnStore( preferences, flNew ); } ); } );
 		return pSpin;
 	};
 	auto whole = [ & ]( const QString &szName, int nValue, int nLowest, int nHighest, const QString &szSuffix, auto pfnStore ) {
@@ -565,14 +588,14 @@ void CPreferencesDialog::BuildMapSections()
 		pSpin->setRange( nLowest, nHighest );
 		pSpin->setValue( nValue );
 		pSpin->setSuffix( szSuffix );
-		connect( pSpin, &QSpinBox::valueChanged, this, [ change, pfnStore ]( int nNew ) { change( [ & ]( MapPreferences_t &preferences ) { pfnStore( preferences, nNew ); } ); } );
+		connect( pSpin, &QSpinBox::valueChanged, this, [ change, pfnStore ]( int nNew ) { change( [ = ]( MapPreferences_t &preferences ) { pfnStore( preferences, nNew ); } ); } );
 		return pSpin;
 	};
 	auto check = [ & ]( const QString &szName, const QString &szText, bool bValue, auto pfnStore ) {
 		auto *pCheck = new QCheckBox( szText );
 		pCheck->setObjectName( szName );
 		pCheck->setChecked( bValue );
-		connect( pCheck, &QCheckBox::toggled, this, [ change, pfnStore ]( bool bOn ) { change( [ & ]( MapPreferences_t &preferences ) { pfnStore( preferences, bOn ); } ); } );
+		connect( pCheck, &QCheckBox::toggled, this, [ change, pfnStore ]( bool bOn ) { change( [ = ]( MapPreferences_t &preferences ) { pfnStore( preferences, bOn ); } ); } );
 		return pCheck;
 	};
 	auto choice = [ & ]( const QString &szName, const std::vector<std::pair<QString, int>> &items, int nValue, auto pfnStore ) {
@@ -583,7 +606,7 @@ void CPreferencesDialog::BuildMapSections()
 			pCombo->addItem( szText, nData );
 		}
 		pCombo->setCurrentIndex( std::max( 0, pCombo->findData( nValue ) ) );
-		connect( pCombo, &QComboBox::currentIndexChanged, this, [ pCombo, change, pfnStore ] { change( [ & ]( MapPreferences_t &preferences ) { pfnStore( preferences, pCombo->currentData().toInt() ); } ); } );
+		connect( pCombo, &QComboBox::currentIndexChanged, this, [ pCombo, change, pfnStore ] { change( [ = ]( MapPreferences_t &preferences ) { pfnStore( preferences, pCombo->currentData().toInt() ); } ); } );
 		return pCombo;
 	};
 	// A swatch that opens a colour picker.
@@ -604,7 +627,7 @@ void CPreferencesDialog::BuildMapSections()
 			if ( picked.isValid() )
 			{
 				show( picked );
-				change( [ & ]( MapPreferences_t &preferences ) { pfnStore( preferences, picked ); } );
+				change( [ = ]( MapPreferences_t &preferences ) { pfnStore( preferences, picked ); } );
 			}
 		} );
 		return pButton;
@@ -785,7 +808,11 @@ void CPreferencesDialog::ResetMapSettings()
 	preferences.m_Fgds = before.m_Fgds;
 	preferences.m_szDefaultPointEntity = before.m_szDefaultPointEntity;
 	preferences.m_szDefaultBrushEntity = before.m_szDefaultBrushEntity;
-	CPreferences::Instance().SetMapPreferences( preferences );
+	// The map's edits waiting before it (and the keys') give way to it.
+	std::erase_if( m_Staged, []( const auto &staged ) { return staged.first.startsWith( u"map:" ) || staged.first == u"keys"; } );
+	Stage( QStringLiteral( "map-reset" ), [ preferences ] { CPreferences::Instance().SetMapPreferences( preferences ); } );
+	m_pKeys->Show( preferences );
+	m_MapShown = preferences;
 	const int nMapTab = m_pMapTabs->currentIndex();
 	// Out of General before it goes.
 	m_pHammer->setParent( this );
@@ -849,7 +876,7 @@ QWidget *CPreferencesDialog::BuildAdvancedPage()
 	auto *pLog = new QCheckBox( tr( "Debug log" ) );
 	pLog->setObjectName( QStringLiteral( "preferencesDebugLog" ) );
 	pLog->setChecked( CPreferences::Instance().IsDebugLog() );
-	connect( pLog, &QCheckBox::toggled, this, []( bool bOn ) { CPreferences::Instance().SetDebugLog( bOn ); } );
+	connect( pLog, &QCheckBox::toggled, this, [ this ]( bool bOn ) { Stage( QStringLiteral( "DebugLog" ), [ bOn ] { CPreferences::Instance().SetDebugLog( bOn ); } ); } );
 	auto *pShow = new QPushButton( tr( "Show Log File" ) );
 	pShow->setObjectName( QStringLiteral( "preferencesShowLog" ) );
 	connect( pShow, &QPushButton::clicked, this, [] { RevealInFileManager( DebugLogPath() ); } );
@@ -886,7 +913,7 @@ QWidget *CPreferencesDialog::BuildSourceToolsPage()
 		pRow->addWidget( pPath, 1 );
 		pRow->addWidget( pBrowse );
 		pLayout->addLayout( pRow );
-		connect( pPath, &QLineEdit::textChanged, pPage, [ nTool ]( const QString &szPath ) { CPreferences::Instance().SetSourceToolPath( nTool, szPath ); } );
+		connect( pPath, &QLineEdit::textChanged, pPage, [ this, nTool ]( const QString &szPath ) { Stage( QStringLiteral( "SourceTool%1" ).arg( static_cast<int>( nTool ) ), [ nTool, szPath ] { CPreferences::Instance().SetSourceToolPath( nTool, szPath ); } ); } );
 		connect( pBrowse, &QPushButton::clicked, pPage, [ this, pPath ] {
 			const QString szFile = AskOpenFile( this, tr( "Select Source Tool" ), pPath->text() );
 			if ( !szFile.isEmpty() )
@@ -904,7 +931,7 @@ QWidget *CPreferencesDialog::BuildSourceToolsPage()
 		pRow->addWidget( pPath, 1 );
 		pRow->addWidget( pBrowse );
 		pLayout->addLayout( pRow );
-		connect( pPath, &QLineEdit::textChanged, pPage, []( const QString &szPath ) { CPreferences::Instance().SetBspDir( szPath ); } );
+		connect( pPath, &QLineEdit::textChanged, pPage, [ this ]( const QString &szPath ) { Stage( QStringLiteral( "BspDir" ), [ szPath ] { CPreferences::Instance().SetBspDir( szPath ); } ); } );
 		connect( pBrowse, &QPushButton::clicked, pPage, [ this, pPath ] {
 			const QString szFolder = AskFolder( this, tr( "Compiled Maps Folder" ), pPath->text() );
 			if ( !szFolder.isEmpty() )

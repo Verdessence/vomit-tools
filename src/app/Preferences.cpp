@@ -313,6 +313,7 @@ void ForEachGeneralPreference( Visit_t &&pfnVisit, General_t &...generals )
 	pfnVisit( "theme:color_scheme", nullptr, "light or dark, else the desktop's", generals.m_nThemeScheme... );
 	pfnVisit( "theme:accent", nullptr, "#rrggbb for selections and highlights; empty: the desktop's", generals.m_ThemeAccent... );
 	pfnVisit( "theme:style", nullptr, "a Qt style (Fusion, Windows...); empty: the desktop's", generals.m_szThemeStyle... );
+	pfnVisit( "theme:own_palette", nullptr, "the app's own light or dark colours, not the desktop's palette (qt6ct, KDE)", generals.m_bThemeOwnPalette... );
 	pfnVisit( "code:scheme", "codeEditor/scheme", "the text editors' colours", generals.m_nCodeScheme... );
 	pfnVisit( "code:font", "codeEditor/fontFamily", "empty: the system's fixed-width font", generals.m_szCodeFontFamily... );
 	pfnVisit( "code:font_size", "codeEditor/fontSize", "points; 0: the system's", generals.m_nCodeFontSize... );
@@ -1127,7 +1128,7 @@ void CPreferences::ApplyConfig()
 	const GeneralPreferences_t old = m_General;
 	const bool bCode = old.m_nCodeScheme != general.m_nCodeScheme || old.m_szCodeFontFamily != general.m_szCodeFontFamily || old.m_nCodeFontSize != general.m_nCodeFontSize ||
 		old.m_bCodeCompletion != general.m_bCodeCompletion || overrides != m_CodeOverrides;
-	const bool bTheme = old.m_nThemeScheme != general.m_nThemeScheme || old.m_ThemeAccent != general.m_ThemeAccent || old.m_szThemeStyle != general.m_szThemeStyle;
+	const bool bTheme = old.m_nThemeScheme != general.m_nThemeScheme || old.m_ThemeAccent != general.m_ThemeAccent || old.m_szThemeStyle != general.m_szThemeStyle || old.m_bThemeOwnPalette != general.m_bThemeOwnPalette;
 	const bool bRules = rules != m_Rules;
 	m_General = general;
 	m_CodeOverrides = overrides;
@@ -1273,6 +1274,52 @@ void CPreferences::StoreKeys()
 	SaveConfig();
 }
 
+namespace
+{
+
+//-----------------------------------------------------------------------------
+// Purpose: A whole palette of the app's own, light or dark, in place of the desktop's: every
+//          role set, the disabled ones greyed, so no colour of the platform theme's shows.
+//-----------------------------------------------------------------------------
+QPalette OwnPalette( bool bDark )
+{
+	struct Colors_t
+	{
+		QColor m_Window, m_Text, m_Base, m_AlternateBase, m_Button, m_Highlight, m_HighlightedText, m_Link, m_Mid, m_Disabled;
+	};
+	const Colors_t c = bDark ? Colors_t{ QColor( 0x2b, 0x2b, 0x2e ), QColor( 0xe6, 0xe6, 0xe6 ), QColor( 0x1e, 0x1e, 0x20 ), QColor( 0x26, 0x26, 0x29 ), QColor( 0x35, 0x35, 0x39 ), QColor( 0x3d, 0x7e, 0xd6 ), Qt::white, QColor( 0x6a, 0xa8, 0xf0 ), QColor( 0x4a, 0x4a, 0x50 ), QColor( 0x80, 0x80, 0x84 ) }
+							 : Colors_t{ QColor( 0xef, 0xef, 0xf1 ), QColor( 0x1c, 0x1c, 0x1e ), Qt::white, QColor( 0xf5, 0xf5, 0xf7 ), QColor( 0xe4, 0xe4, 0xe7 ), QColor( 0x2f, 0x6f, 0xc8 ), Qt::white, QColor( 0x1f, 0x5f, 0xb8 ), QColor( 0xb8, 0xb8, 0xbe ), QColor( 0x9a, 0x9a, 0xa0 ) };
+	QPalette palette;
+	for ( const QPalette::ColorGroup nGroup : { QPalette::Active, QPalette::Inactive, QPalette::Disabled } )
+	{
+		const bool bOff = nGroup == QPalette::Disabled;
+		palette.setColor( nGroup, QPalette::Window, c.m_Window );
+		palette.setColor( nGroup, QPalette::WindowText, bOff ? c.m_Disabled : c.m_Text );
+		palette.setColor( nGroup, QPalette::Base, c.m_Base );
+		palette.setColor( nGroup, QPalette::AlternateBase, c.m_AlternateBase );
+		palette.setColor( nGroup, QPalette::ToolTipBase, c.m_Button );
+		palette.setColor( nGroup, QPalette::ToolTipText, c.m_Text );
+		palette.setColor( nGroup, QPalette::PlaceholderText, c.m_Disabled );
+		palette.setColor( nGroup, QPalette::Text, bOff ? c.m_Disabled : c.m_Text );
+		palette.setColor( nGroup, QPalette::Button, c.m_Button );
+		palette.setColor( nGroup, QPalette::ButtonText, bOff ? c.m_Disabled : c.m_Text );
+		palette.setColor( nGroup, QPalette::BrightText, Qt::red );
+		palette.setColor( nGroup, QPalette::Light, c.m_Button.lighter( 125 ) );
+		palette.setColor( nGroup, QPalette::Midlight, c.m_Button.lighter( 110 ) );
+		palette.setColor( nGroup, QPalette::Mid, c.m_Mid );
+		palette.setColor( nGroup, QPalette::Dark, c.m_Mid.darker( 130 ) );
+		palette.setColor( nGroup, QPalette::Shadow, Qt::black );
+		palette.setColor( nGroup, QPalette::Highlight, bOff ? c.m_Mid : c.m_Highlight );
+		palette.setColor( nGroup, QPalette::HighlightedText, c.m_HighlightedText );
+		palette.setColor( nGroup, QPalette::Accent, c.m_Highlight );
+		palette.setColor( nGroup, QPalette::Link, c.m_Link );
+		palette.setColor( nGroup, QPalette::LinkVisited, c.m_Link.darker( 120 ) );
+	}
+	return palette;
+}
+
+} // namespace
+
 //-----------------------------------------------------------------------------
 // Purpose: The light or dark look, accent and style, onto the application. An accent sets only
 //          the highlight roles, so the rest of the desktop's palette stays.
@@ -1284,7 +1331,9 @@ void CPreferences::ApplyTheme() const
 	{
 		return;
 	}
-	const QString szStyle = m_General.m_szThemeStyle.isEmpty() ? GetDesktopStyle() : m_General.m_szThemeStyle;
+	// Taken before any style of the settings' replaces it.
+	const QString szDesktop = GetDesktopStyle();
+	const QString szStyle = m_General.m_szThemeStyle.isEmpty() ? szDesktop : m_General.m_szThemeStyle;
 	if ( !szStyle.isEmpty() && QApplication::style() && QApplication::style()->name().compare( szStyle, Qt::CaseInsensitive ) != 0 )
 	{
 		QApplication::setStyle( szStyle );
@@ -1295,19 +1344,36 @@ void CPreferences::ApplyTheme() const
 																								  : Qt::ColorScheme::Unknown;
 	QGuiApplication::styleHints()->setColorScheme( nScheme );
 #endif
-	// The desktop's palette is left alone until an accent is set, so it keeps following the
-	// desktop's light and dark switches.
-	static bool s_bAccentSet = false;
-	if ( !m_General.m_ThemeAccent.isValid() )
+	// The desktop's palette is left alone until the app's own colours or an accent are asked
+	// for, so it keeps following the desktop's light and dark switches.
+	static bool s_bPaletteSet = false;
+	const bool bOwn = m_General.m_bThemeOwnPalette;
+	if ( !bOwn && !m_General.m_ThemeAccent.isValid() )
 	{
-		if ( s_bAccentSet )
+		if ( s_bPaletteSet )
 		{
 			QApplication::setPalette( QPalette() );
-			s_bAccentSet = false;
+			s_bPaletteSet = false;
 		}
 		return;
 	}
 	QPalette palette;
+	if ( bOwn )
+	{
+		// System: the scheme the platform says, else what the desktop's palette looks like.
+		bool bDark = m_General.m_nThemeScheme == ThemeScheme_t::THEME_SCHEME_DARK;
+		if ( m_General.m_nThemeScheme == ThemeScheme_t::THEME_SCHEME_SYSTEM )
+		{
+#if QT_VERSION >= QT_VERSION_CHECK( 6, 5, 0 )
+			const Qt::ColorScheme nDesktop = QGuiApplication::styleHints()->colorScheme();
+			bDark = nDesktop == Qt::ColorScheme::Dark || ( nDesktop == Qt::ColorScheme::Unknown && QPalette().color( QPalette::Window ).lightnessF() < 0.5 );
+#else
+			bDark = QPalette().color( QPalette::Window ).lightnessF() < 0.5;
+#endif
+		}
+		palette = OwnPalette( bDark );
+	}
+	if ( m_General.m_ThemeAccent.isValid() )
 	{
 		const QColor accent = m_General.m_ThemeAccent;
 		const QColor text = accent.lightnessF() > 0.6 ? Qt::black : Qt::white;
@@ -1319,7 +1385,7 @@ void CPreferences::ApplyTheme() const
 		}
 	}
 	QApplication::setPalette( palette );
-	s_bAccentSet = true;
+	s_bPaletteSet = true;
 }
 
 //-----------------------------------------------------------------------------
@@ -1606,6 +1672,18 @@ void CPreferences::SetThemeStyle( const QString &szStyle )
 		return;
 	m_General.m_szThemeStyle = szStyle;
 	Store( "theme:style", szStyle );
+	emit ThemeChanged();
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: main() applies it on ThemeChanged.
+//-----------------------------------------------------------------------------
+void CPreferences::SetThemeOwnPalette( bool bOwn )
+{
+	if ( m_General.m_bThemeOwnPalette == bOwn )
+		return;
+	m_General.m_bThemeOwnPalette = bOwn;
+	Store( "theme:own_palette", bOwn );
 	emit ThemeChanged();
 }
 

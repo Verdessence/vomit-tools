@@ -73,6 +73,9 @@ struct GeneralPreferences_t
 	ThemeScheme_t m_nThemeScheme = ThemeScheme_t::THEME_SCHEME_SYSTEM;
 	QColor m_ThemeAccent;  // invalid: the desktop's
 	QString m_szThemeStyle; // a Qt style ("Fusion"); empty: the desktop's
+	// The app's own light or dark colours, not the desktop's palette (qt6ct, KDE): a platform
+	// theme that hands Qt a palette of its own ignores the colour scheme otherwise.
+	bool m_bThemeOwnPalette = false;
 	CodeScheme_t m_nCodeScheme = CodeScheme_t::CODE_SCHEME_SYSTEM;
 	QString m_szCodeFontFamily; // empty: the system's fixed font
 	int m_nCodeFontSize = 0;    // points; 0: the system's
@@ -387,6 +390,8 @@ public:
 	void SetThemeStyle( const QString &szStyle );
 	[[nodiscard]] const QString &GetThemeStyle() const { return m_General.m_szThemeStyle; }
 	[[nodiscard]] ThemeScheme_t GetThemeScheme() const { return m_General.m_nThemeScheme; }
+	[[nodiscard]] bool IsThemeOwnPalette() const { return m_General.m_bThemeOwnPalette; }
+	void SetThemeOwnPalette( bool bOwn );
 	// The style the desktop gave the app, before the settings' own.
 	[[nodiscard]] static QString GetDesktopStyle();
 	void SetThemeScheme( ThemeScheme_t nScheme );
