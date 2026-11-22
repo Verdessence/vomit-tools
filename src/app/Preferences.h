@@ -382,6 +382,14 @@ public:
 
 	[[nodiscard]] FooterInfo_t GetFooterInfo() const { return m_General.m_nFooterInfo; }
 	void SetFooterInfo( FooterInfo_t nInfo );
+	// The app's look: a Qt style by its name (empty: the desktop's), and light, dark or the
+	// desktop's. Both take effect at once.
+	void SetThemeStyle( const QString &szStyle );
+	[[nodiscard]] const QString &GetThemeStyle() const { return m_General.m_szThemeStyle; }
+	[[nodiscard]] ThemeScheme_t GetThemeScheme() const { return m_General.m_nThemeScheme; }
+	// The style the desktop gave the app, before the settings' own.
+	[[nodiscard]] static QString GetDesktopStyle();
+	void SetThemeScheme( ThemeScheme_t nScheme );
 
 	// Whether open and save windows are the desktop's own file chooser (the XDG portal's, on
 	// Linux) rather than Qt's.

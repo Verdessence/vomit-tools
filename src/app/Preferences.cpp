@@ -1284,8 +1284,7 @@ void CPreferences::ApplyTheme() const
 	{
 		return;
 	}
-	static const QString s_szDesktopStyle = QApplication::style() ? QApplication::style()->name() : QString{};
-	const QString szStyle = m_General.m_szThemeStyle.isEmpty() ? s_szDesktopStyle : m_General.m_szThemeStyle;
+	const QString szStyle = m_General.m_szThemeStyle.isEmpty() ? GetDesktopStyle() : m_General.m_szThemeStyle;
 	if ( !szStyle.isEmpty() && QApplication::style() && QApplication::style()->name().compare( szStyle, Qt::CaseInsensitive ) != 0 )
 	{
 		QApplication::setStyle( szStyle );
@@ -1586,6 +1585,40 @@ void CPreferences::SetAllTabGroups( bool bAll )
 	m_General.m_bAllTabGroups = bAll;
 	Store( "general:all_tab_groups", bAll );
 	emit TabGroupsChanged( m_General.m_bTabGroups );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Taken the first time it is asked, which ApplyTheme() does at start, before any
+//          style of the settings' is set.
+//-----------------------------------------------------------------------------
+QString CPreferences::GetDesktopStyle()
+{
+	static const QString s_szDesktopStyle = QApplication::style() ? QApplication::style()->name() : QString{};
+	return s_szDesktopStyle;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: main() applies it on ThemeChanged.
+//-----------------------------------------------------------------------------
+void CPreferences::SetThemeStyle( const QString &szStyle )
+{
+	if ( m_General.m_szThemeStyle == szStyle )
+		return;
+	m_General.m_szThemeStyle = szStyle;
+	Store( "theme:style", szStyle );
+	emit ThemeChanged();
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: main() applies it on ThemeChanged.
+//-----------------------------------------------------------------------------
+void CPreferences::SetThemeScheme( ThemeScheme_t nScheme )
+{
+	if ( m_General.m_nThemeScheme == nScheme )
+		return;
+	m_General.m_nThemeScheme = nScheme;
+	Store( "theme:color_scheme", nScheme );
+	emit ThemeChanged();
 }
 
 //-----------------------------------------------------------------------------

@@ -3272,6 +3272,11 @@ CPreferencesDialog *CMainWindow::ShowPreferences()
 	if ( !m_pPreferences )
 	{
 		m_pPreferences = new CPreferencesDialog( this );
+		// Cancelled, its controls show what was put back only once it is made again.
+		connect( m_pPreferences, &QDialog::rejected, this, [ this ] {
+			m_pPreferences->deleteLater();
+			m_pPreferences = nullptr;
+		} );
 	}
 	SetPreferencesGame();
 	m_pPreferences->show();

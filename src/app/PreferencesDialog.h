@@ -36,9 +36,20 @@ public:
 	// The open game, for the Hammer section in Maps > General (an empty folder: none).
 	void SetGame( const std::filesystem::path &gameDir, const QString &szGameName, const std::function<std::vector<std::string>()> &pfnMaterials );
 	[[nodiscard]] CHammerSetupPage *GetHammerPage() const;
+	// Keeps what was changed (the Hammer section's entry saved too, if edited); false when the
+	// entry couldn't be written.
+	bool Apply();
+	// Puts back what was kept at opening or the last Apply, and closes.
+	void reject() override;
+
+protected:
+	// What Cancel puts back is read again each time the window comes up, so a setting changed
+	// elsewhere meanwhile isn't undone.
+	void showEvent( QShowEvent *pEvent ) override;
 
 private:
 	void AddPage( const QString &szTitle, QWidget *pPage );
+	[[nodiscard]] static QByteArray ReadSettingsFile();
 	[[nodiscard]] QWidget *BuildInterfacePage();
 	[[nodiscard]] QWidget *BuildGraphicsPage();
 	[[nodiscard]] QWidget *BuildMaterialsPage();
@@ -55,4 +66,5 @@ private:
 	QTabWidget *m_pMapTabs = nullptr;
 	QStackedWidget *m_pStack = nullptr;
 	CHammerSetupPage *m_pHammer = nullptr;
+	QByteArray m_Kept; // vomit-tools.nut as it was at opening or the last Apply
 };

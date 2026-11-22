@@ -19,6 +19,12 @@
 #include <QDoubleSpinBox>
 #include <QComboBox>
 #include <QDialogButtonBox>
+#include <QShowEvent>
+#include <QStandardItemModel>
+#include <QStyleFactory>
+#include <QMessageBox>
+#include <QSaveFile>
+#include <QFile>
 #include <QPushButton>
 #include <QDesktopServices>
 #include <QDir>
@@ -147,8 +153,17 @@ CPreferencesDialog::CPreferencesDialog( QWidget *pParent )
 	}
 	m_pPages->setCurrentRow( 0 );
 
-	auto *pButtons = new QDialogButtonBox( QDialogButtonBox::Close );
+	// Changes show at once; Apply keeps them, OK keeps them and closes, Cancel (or closing the
+	// window) puts back the settings as they were when it opened or at the last Apply.
+	auto *pButtons = new QDialogButtonBox( QDialogButtonBox::Ok | QDialogButtonBox::Apply | QDialogButtonBox::Cancel );
+	pButtons->setObjectName( QStringLiteral( "preferencesButtons" ) );
+	connect( pButtons, &QDialogButtonBox::accepted, this, [ this ] {
+		if ( Apply() )
+			accept();
+	} );
+	connect( pButtons->button( QDialogButtonBox::Apply ), &QPushButton::clicked, this, &CPreferencesDialog::Apply );
 	connect( pButtons, &QDialogButtonBox::rejected, this, &QDialog::reject );
+	m_Kept = ReadSettingsFile();
 	auto *pColumns = new QHBoxLayout;
 	pColumns->addWidget( m_pPages );
 	pColumns->addWidget( m_pStack, 1 );
@@ -156,6 +171,58 @@ CPreferencesDialog::CPreferencesDialog( QWidget *pParent )
 	pLayout->addLayout( pColumns, 1 );
 	pLayout->addWidget( pButtons );
 	resize( 620, 380 );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+QByteArray CPreferencesDialog::ReadSettingsFile()
+{
+	QFile file( CPreferences::Instance().GetConfigPath() );
+	return file.open( QIODevice::ReadOnly ) ? file.readAll() : QByteArray{};
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+bool CPreferencesDialog::Apply()
+{
+	if ( m_pHammer->IsModified() )
+	{
+		QString szError;
+		if ( !m_pHammer->Save( &szError ) )
+		{
+			QMessageBox::warning( this, windowTitle(), szError );
+			return false;
+		}
+	}
+	m_Kept = ReadSettingsFile();
+	return true;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+void CPreferencesDialog::showEvent( QShowEvent *pEvent )
+{
+	if ( !pEvent->spontaneous() )
+		m_Kept = ReadSettingsFile();
+	QDialog::showEvent( pEvent );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: The file written back as it was and read again, which puts every setting back
+//          (and tells the app, as an edit of the file by hand would).
+//-----------------------------------------------------------------------------
+void CPreferencesDialog::reject()
+{
+	if ( !m_Kept.isEmpty() && ReadSettingsFile() != m_Kept )
+	{
+		QSaveFile file( CPreferences::Instance().GetConfigPath() );
+		if ( file.open( QIODevice::WriteOnly ) && file.write( m_Kept ) == m_Kept.size() && file.commit() )
+			CPreferences::Instance().ReloadConfig();
+	}
+	QDialog::reject();
 }
 
 //-----------------------------------------------------------------------------
@@ -215,6 +282,50 @@ QWidget *CPreferencesDialog::BuildInterfacePage()
 	pScaleRow->addRow( tr( "UI scale" ), pScale );
 	pLayout->addLayout( pScaleRow );
 	pScale->setToolTip( tr( "Scales the interface on top of the desktop scale. Takes effect after restarting." ) );
+	// The app's look: Qt's style (Windows, Breeze, Union first, then whatever else this system
+	// has) and light or dark, each taking effect at once.
+	auto *pStyle = new QComboBox;
+	pStyle->setObjectName( QStringLiteral( "preferencesStyle" ) );
+	const QString szDesktop = CPreferences::GetDesktopStyle();
+	pStyle->addItem( szDesktop.isEmpty() ? tr( "Desktop's" ) : tr( "Desktop's (%1)" ).arg( szDesktop ), QString{} );
+	const QStringList available = QStyleFactory::keys();
+	const auto has = [ & ]( const QString &szName ) { return available.contains( szName, Qt::CaseInsensitive ); };
+	QStringList listed;
+	for ( const QString &szName : { QStringLiteral( "Windows" ), QStringLiteral( "Breeze" ), QStringLiteral( "Union" ) } )
+	{
+		pStyle->addItem( szName, szName );
+		listed << szName;
+		if ( !has( szName ) )
+		{
+			// Shown so the choice is known, but not offered on a system without it.
+			auto *pModel = qobject_cast<QStandardItemModel *>( pStyle->model() );
+			if ( pModel )
+				pModel->item( pStyle->count() - 1 )->setEnabled( false );
+			pStyle->setItemData( pStyle->count() - 1, tr( "Not installed on this system" ), Qt::ToolTipRole );
+		}
+	}
+	pStyle->insertSeparator( pStyle->count() );
+	for ( const QString &szName : available )
+		if ( !listed.contains( szName, Qt::CaseInsensitive ) )
+			pStyle->addItem( szName, szName );
+	{
+		const QString szCurrent = CPreferences::Instance().GetThemeStyle();
+		int nAt = 0;
+		for ( int i = 0; i < pStyle->count(); i++ )
+			if ( !szCurrent.isEmpty() && pStyle->itemData( i ).toString().compare( szCurrent, Qt::CaseInsensitive ) == 0 )
+				nAt = i;
+		pStyle->setCurrentIndex( nAt );
+	}
+	connect( pStyle, &QComboBox::currentIndexChanged, this, [ pStyle ] { CPreferences::Instance().SetThemeStyle( pStyle->currentData().toString() ); } );
+	auto *pScheme = new QComboBox;
+	pScheme->setObjectName( QStringLiteral( "preferencesColorScheme" ) );
+	pScheme->addItem( tr( "System" ), static_cast<int>( ThemeScheme_t::THEME_SCHEME_SYSTEM ) );
+	pScheme->addItem( tr( "Light" ), static_cast<int>( ThemeScheme_t::THEME_SCHEME_LIGHT ) );
+	pScheme->addItem( tr( "Dark" ), static_cast<int>( ThemeScheme_t::THEME_SCHEME_DARK ) );
+	pScheme->setCurrentIndex( pScheme->findData( static_cast<int>( CPreferences::Instance().GetThemeScheme() ) ) );
+	connect( pScheme, &QComboBox::currentIndexChanged, this, [ pScheme ] { CPreferences::Instance().SetThemeScheme( static_cast<ThemeScheme_t>( pScheme->currentData().toInt() ) ); } );
+	pScaleRow->addRow( tr( "Application style" ), pStyle );
+	pScaleRow->addRow( tr( "Color scheme" ), pScheme );
 	auto *pSingle = new QCheckBox( tr( "Open files in the window already open" ) );
 	pSingle->setObjectName( QStringLiteral( "preferencesSingleWindow" ) );
 	pSingle->setChecked( CPreferences::Instance().IsSingleWindow() );

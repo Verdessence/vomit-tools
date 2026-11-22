@@ -47,6 +47,8 @@ public:
 	// entry, which the map viewer reads first, then give way to it, or take its values where the
 	// viewer would read another configuration. False with pError on failure.
 	bool Save( QString *pError );
+	// Whether the fields differ from the entry they were last filled with or saved as.
+	[[nodiscard]] bool IsModified() const;
 	[[nodiscard]] std::filesystem::path GetConfigFile() const;
 	[[nodiscard]] xv::map::HammerSetup_t GetSetup() const;
 
@@ -72,4 +74,5 @@ private:
 	QDoubleSpinBox *m_pTextureScale = nullptr;
 	QSpinBox *m_pLightmapScale = nullptr;
 	QComboBox *m_pCordonTexture = nullptr;
+	std::string m_szFilled; // the fields' entry as written, when they were last filled
 };

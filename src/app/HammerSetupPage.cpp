@@ -284,6 +284,15 @@ void CHammerSetupPage::FillFields( const xv::map::HammerSetup_t &setup )
 	m_pCordonTexture->setCurrentText( QString::fromStdString( setup.m_szCordonTexture ) );
 	m_pFgdsEdited->stop();
 	FillEntityChoices();
+	m_szFilled = xv::map::WriteHammerSetup( {}, GetSetup() );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Compared as the entry would be written, so only what Hammer would see counts.
+//-----------------------------------------------------------------------------
+bool CHammerSetupPage::IsModified() const
+{
+	return !m_GameDir.empty() && xv::map::WriteHammerSetup( {}, GetSetup() ) != m_szFilled;
 }
 
 //-----------------------------------------------------------------------------
@@ -453,6 +462,7 @@ bool CHammerSetupPage::Save( QString *pError )
 		return false;
 	}
 	UpdatePreferences( setup );
+	m_szFilled = xv::map::WriteHammerSetup( {}, setup );
 	return true;
 }
 
