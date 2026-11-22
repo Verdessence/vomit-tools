@@ -19,6 +19,7 @@ layout(location = 3) out vec3 v_normal;
 layout(location = 4) flat out vec4 v_state; // flat colour, and the flags in alpha
 layout(location = 5) out vec3 v_world;
 layout(location = 6) out vec4 v_light;
+layout(location = 7) flat out vec4 v_tint; // the entity's rendercolor and opacity (map/RenderFx.h)
 
 layout(std140, binding = 0) uniform Frame {
 	mat4 viewProjection; // looking from the origin: positions go in relative to the eye
@@ -27,7 +28,7 @@ layout(std140, binding = 0) uniform Frame {
 	vec4 selection;     // rgb
 	vec4 selectionEdge; // rgb
 	vec4 faceShade;     // xyz
-	vec4 state;         // the state texture's width, and the most samples anisotropic filtering takes
+	vec4 state;         // the state texture's width, the most samples anisotropic filtering takes, and the row its tints start at
 	vec4 instance;      // rgb, and how much of it func_instances' contents take
 	vec4 pass;          // x 1: the 3D skybox, drawn from its own camera first; y 1: a mesh as read; z 1: sky faces show their own texture
 	vec4 invalid;       // rgb, and how much of it broken solids' faces take
@@ -62,6 +63,7 @@ void main() {
 	int n = int(object);
 	int width = int(frame.state.x);
 	v_state = texelFetch(stateTexture, ivec2(n % width, n / width), 0);
+	v_tint = texelFetch(stateTexture, ivec2(n % width, n / width + int(frame.state.z)), 0);
 	int flags = int(v_state.a * 255.0 + 0.5);
 	v_texel = texel;
 	v_luxel = luxel;

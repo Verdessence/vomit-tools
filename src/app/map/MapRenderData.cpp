@@ -5,6 +5,7 @@
 //
 //===========================================================================//
 #include "MapRenderData.h"
+#include "map/RenderFx.h"
 #include "MapParticles.h"
 
 #include <algorithm>
@@ -19,6 +20,7 @@
 #include "map/MapDocument.h"
 #include "map/Overlay.h"
 #include "map/Props.h"
+#include "util/Numbers.h"
 
 namespace
 {
@@ -147,6 +149,8 @@ xv::map::RasterScene_t MapFrame_t::MakeScene() const
 	{
 		scene.m_ObjectFlags = *m_pFlags;
 	}
+	if ( m_pTints )
+		scene.m_ObjectTints = *m_pTints;
 	if ( m_pFlatColors )
 	{
 		scene.m_ObjectColors = *m_pFlatColors;
@@ -762,7 +766,84 @@ MapFrame_t CMapRenderData::GetShared()
 	{
 		Rebuild();
 	}
+	if ( m_Document.GetScene() )
+		UpdateTints();
 	return m_Frame;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+void CMapRenderData::SetFxTime( double flTime )
+{
+	m_flFxTime = flTime;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+bool CMapRenderData::HasRenderFx()
+{
+	if ( m_Document.GetScene() )
+		UpdateTints();
+	return !m_FxEntities.empty() || m_bRainbowText;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Worked out again for a new snapshot of the map; between, only the entities whose
+//          renderfx moves, as time goes on. An entity's solids take its look.
+//-----------------------------------------------------------------------------
+void CMapRenderData::UpdateTints()
+{
+	const xv::map::CScene *pScene = m_Document.GetScene();
+	const auto give = []( const xv::map::CScene &scene, std::vector<std::array<std::uint8_t, 4>> &tints, std::size_t nEntity, const std::array<std::uint8_t, 4> &tint ) {
+		tints[ scene.EntityObject( nEntity ) ] = tint;
+		for ( const std::uint32_t nSolid : scene.m_Map.m_Entities[ nEntity ].m_Solids )
+			tints[ scene.SolidObject( nSolid ) ] = tint;
+	};
+	if ( pScene != m_pTintsFor || pScene->m_nRevision != m_nTintsRevision )
+	{
+		m_pTintsFor = pScene;
+		m_nTintsRevision = pScene->m_nRevision;
+		m_FxEntities.clear();
+		m_bRainbowText = false;
+		auto pTints = std::make_shared<std::vector<std::array<std::uint8_t, 4>>>( pScene->GetObjectCount(), std::array<std::uint8_t, 4>{ 255, 255, 255, 255 } );
+		bool bAny = false;
+		for ( std::size_t e = 0; e < pScene->m_Map.m_Entities.size(); e++ )
+		{
+			const xv::map::Entity_t &entity = pScene->m_Map.m_Entities[ e ];
+			if ( entity.m_bDeleted )
+				continue;
+			// A world text's rainbow (MapView3D's PaintWorldTexts) moves on as time passes.
+			if ( entity.HasKey( "rainbow" ) && xv::ParseNumber<double>( entity.GetValue( "rainbow" ) ).value_or( 0.0 ) != 0.0 )
+				m_bRainbowText = true;
+			if ( !entity.HasKey( "rendercolor" ) && !entity.HasKey( "rendermode" ) )
+				continue;
+			const xv::map::RenderLook_t look = xv::map::RenderLookOf( entity, 0.0, static_cast<std::uint32_t>( entity.m_nId ) );
+			if ( look.m_bAnimated )
+				m_FxEntities.push_back( e );
+			if ( look.m_Tint != std::array<std::uint8_t, 4>{ 255, 255, 255, 255 } || look.m_bAnimated )
+			{
+				give( *pScene, *pTints, e, look.m_Tint );
+				bAny = true;
+			}
+		}
+		m_pBaseTints = bAny ? std::move( pTints ) : nullptr;
+		m_Frame.m_pTints = m_pBaseTints;
+		m_flTintsAt = -1.0;
+		m_nGeneration++;
+	}
+	if ( m_FxEntities.empty() || !m_pBaseTints || m_flTintsAt == m_flFxTime )
+		return;
+	m_flTintsAt = m_flFxTime;
+	auto pTints = std::make_shared<std::vector<std::array<std::uint8_t, 4>>>( *m_pBaseTints );
+	for ( const std::size_t e : m_FxEntities )
+	{
+		const xv::map::Entity_t &entity = pScene->m_Map.m_Entities[ e ];
+		give( *pScene, *pTints, e, xv::map::RenderLookOf( entity, m_flFxTime, static_cast<std::uint32_t>( entity.m_nId ) ).m_Tint );
+	}
+	m_Frame.m_pTints = std::move( pTints );
+	m_nGeneration++;
 }
 
 //-----------------------------------------------------------------------------
@@ -852,6 +933,8 @@ MapFrame_t CMapRenderData::Snapshot( const xv::map::CViewCamera &camera, const x
 		m_Frame.m_pFlags = pFlags;
 		m_nGeneration++;
 	}
+	if ( pScene )
+		UpdateTints();
 	if ( pScene )
 	{
 		static_cast<void>( GetLineColors( settings ) );

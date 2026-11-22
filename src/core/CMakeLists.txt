@@ -114,6 +114,8 @@ add_library(vomit_tools_core STATIC
         map/Props.cpp
         map/Props.h
         map/Raster.cpp
+        map/RenderFx.cpp
+        map/RenderFx.h
         map/Raster.h
         map/Scene.cpp
         map/Scene.h

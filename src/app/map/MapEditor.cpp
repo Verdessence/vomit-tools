@@ -717,6 +717,13 @@ CMapEditor::CMapEditor( const QString &szPath, bool bFromGame, QWidget *pParent 
 		m_pLoading->SetProgress( tr( "Reading the map… %1% (%2)" ).arg( nPercent ).arg( szStage ), nPercent );
 	} );
 	connect( m_pDocument, &CMapDocument::Loaded, this, &CMapEditor::Loaded );
+	// A map (or an edit) with renderfx that move keeps the views drawing as time goes on.
+	const auto startFx = [ this ] {
+		if ( m_pRenderData->HasRenderFx() && !m_pAnimationTimer->isActive() )
+			m_pAnimationTimer->start();
+	};
+	connect( m_pDocument, &CMapDocument::Loaded, this, startFx );
+	connect( m_pDocument, &CMapDocument::SceneEdited, this, startFx );
 	connect( m_pDocument, &CMapDocument::LoadFailed, this, [ this ]( const QString &szError ) {
 		m_pLoading->Fail( tr( "This map can't be read:\n%1" ).arg( szError ) );
 	} );
@@ -1249,6 +1256,7 @@ void CMapEditor::BuildToolBars()
 	toggle( MapIcon_t::MAP_ICON_SKY_FACES, tr( "Sky on Sky Faces" ), MapAction_t::MAP_ACTION_TOGGLE_SKY_FACES, "mapToggleSkyFaces", m_Settings.m_bSkyFaces );
 	toggle( MapIcon_t::MAP_ICON_SKY_2D, tr( "2D Sky" ), MapAction_t::MAP_ACTION_TOGGLE_SKY_2D, "mapToggleSky2D", m_Settings.m_bSky2D );
 	toggle( MapIcon_t::MAP_ICON_ORIGIN_AXES, tr( "Origin Axes" ), MapAction_t::MAP_ACTION_TOGGLE_ORIGIN_AXES, "mapToggleOriginAxes", m_Settings.m_bOriginAxes );
+	toggle( MapIcon_t::MAP_ICON_ENTITY_ANGLES, tr( "Entity Angles" ), MapAction_t::MAP_ACTION_TOGGLE_ENTITY_ANGLES, "mapToggleEntityAngles", m_Settings.m_bEntityAngles );
 	toggle( MapIcon_t::MAP_ICON_FOG, tr( "Fog" ), MapAction_t::MAP_ACTION_TOGGLE_FOG, "mapToggleFog", m_Settings.m_bFog );
 	toggle( MapIcon_t::MAP_ICON_WALKABLE, tr( "Walkable" ), MapAction_t::MAP_ACTION_TOGGLE_WALKABLE, "mapToggleWalkable", m_Settings.m_bWalkable );
 	toggle( MapIcon_t::MAP_ICON_PARTICLES, tr( "Particles" ), MapAction_t::MAP_ACTION_TOGGLE_PARTICLES, "mapToggleParticles", m_Settings.m_bParticles );
@@ -2957,6 +2965,7 @@ bool CMapEditor::RunAction( MapAction_t nAction, CMapView *pFrom )
 		case MapAction_t::MAP_ACTION_TOGGLE_SKY_2D: return toggle( m_Settings.m_bSky2D );
 		case MapAction_t::MAP_ACTION_TOGGLE_SKY_FACES: return toggle( m_Settings.m_bSkyFaces );
 		case MapAction_t::MAP_ACTION_TOGGLE_ORIGIN_AXES: return toggle( m_Settings.m_bOriginAxes );
+		case MapAction_t::MAP_ACTION_TOGGLE_ENTITY_ANGLES: return toggle( m_Settings.m_bEntityAngles );
 		case MapAction_t::MAP_ACTION_TOGGLE_FOG: return toggle( m_Settings.m_bFog );
 		case MapAction_t::MAP_ACTION_TOGGLE_WALKABLE: return toggle( m_Settings.m_bWalkable );
 		case MapAction_t::MAP_ACTION_TOGGLE_PARTICLES: return toggle( m_Settings.m_bParticles );
@@ -5024,19 +5033,25 @@ void CMapEditor::AnimateMaterials()
 	const bool bParticles = m_Settings.m_bParticles && m_pParticles->IsPlaying();
 	// A screen effect its proxies move needs drawing again as time passes.
 	const bool bEffect = GetShownScreenEffect() && GetShownScreenEffect()->IsAnimated();
-	if ( !m_pResources->HasAnimated() && !m_pParticles->IsPlaying() && !bEffect )
+	// Entities whose renderfx pulses, strobes or fades (map/RenderFx.h), or world texts in a
+	// rainbow.
+	const bool bFx = m_pRenderData->HasRenderFx();
+	const bool bRainbow = bFx && m_pRenderData->HasRainbowText();
+	if ( !m_pResources->HasAnimated() && !m_pParticles->IsPlaying() && !bEffect && !bFx )
 	{
 		m_pAnimationTimer->stop();
 		return;
 	}
 	const float flNow = static_cast<float>( m_AnimationClock.elapsed() ) / 1000.0f;
+	if ( bFx )
+		m_pRenderData->SetFxTime( flNow );
 	const float flStep = std::clamp( flNow - m_flAnimatedAt, 0.0f, 0.25f );
 	m_flAnimatedAt = flNow;
 	std::vector<CMapView3D *> shown;
 	for ( CMapView *pView : GetViews() )
 	{
 		auto *p3D = qobject_cast<CMapView3D *>( pView );
-		if ( p3D && p3D->isVisible() && ( bEffect || ( p3D->GetType() != MapViewType_t::MAP_VIEW_TYPE_3D_WIREFRAME && p3D->GetType() != MapViewType_t::MAP_VIEW_TYPE_3D_FLAT ) ) )
+		if ( p3D && p3D->isVisible() && ( bEffect || bRainbow || ( p3D->GetType() != MapViewType_t::MAP_VIEW_TYPE_3D_WIREFRAME && p3D->GetType() != MapViewType_t::MAP_VIEW_TYPE_3D_FLAT ) ) )
 			shown.push_back( p3D );
 	}
 	const auto &pSprites = m_pRenderData->GetSprites();
@@ -5058,7 +5073,7 @@ void CMapEditor::AnimateMaterials()
 		m_pParticles->Advance( flStep );
 	}
 	const bool bMaterials = m_pResources->HasAnimated() && m_pResources->Animate( flNow );
-	if ( !bMaterials && !bParticles && !bEffect )
+	if ( !bMaterials && !bParticles && !bEffect && !bFx )
 	{
 		return;
 	}

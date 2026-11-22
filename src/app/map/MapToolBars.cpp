@@ -533,6 +533,23 @@ QIcon MakeMapIcon( MapIcon_t nIcon, const QColor &color )
 			painter.drawLine( origin, QPointF{ 10, 4 } );
 			break;
 		}
+		case MapIcon_t::MAP_ICON_ENTITY_ANGLES:
+		{
+			// A point with its own axes, turned: forward long, left and up short.
+			const QPointF at{ 9, 21 };
+			painter.setPen( QPen{ mapstyle::AXIS_X, 2.5, Qt::SolidLine, Qt::RoundCap } );
+			painter.drawLine( at, QPointF{ 26, 12 } );
+			painter.drawLine( QPointF{ 26, 12 }, QPointF{ 20, 11 } );
+			painter.drawLine( QPointF{ 26, 12 }, QPointF{ 23, 17 } );
+			painter.setPen( QPen{ mapstyle::AXIS_Y, 2.5, Qt::SolidLine, Qt::RoundCap } );
+			painter.drawLine( at, QPointF{ 6, 13 } );
+			painter.setPen( QPen{ mapstyle::AXIS_Z, 2.5, Qt::SolidLine, Qt::RoundCap } );
+			painter.drawLine( at, QPointF{ 13, 28 } );
+			painter.setBrush( color );
+			painter.setPen( Qt::NoPen );
+			painter.drawEllipse( at, 2.5, 2.5 );
+			break;
+		}
 		case MapIcon_t::MAP_ICON_SKY_FACES:
 		{
 			// A cloud on a face: the sky drawn where the sky texture is.

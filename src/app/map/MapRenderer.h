@@ -151,6 +151,8 @@ private:
 	std::unique_ptr<QRhiSampler> m_pNearest;
 	const void *m_pStateFlags = nullptr;
 	const void *m_pStateColors = nullptr;
+	const void *m_pStateTints = nullptr;
+	int m_nTintRow = 1; // where the state texture's tints start
 	const void *m_pStateLines = nullptr;
 	int m_nStateWidth = 1024;
 	std::unique_ptr<QRhiGraphicsPipeline> m_pOpaque;

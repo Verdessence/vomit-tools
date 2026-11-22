@@ -14,12 +14,14 @@
 #include <mutex>
 #include <optional>
 #include <thread>
+#include <unordered_map>
 #include <utility>
 #include <span>
 #include <vector>
 
 #include <QElapsedTimer>
 #include <QImage>
+#include <QPainterPath>
 #include <QPointer>
 
 #include "PointerLock.h"
@@ -142,6 +144,8 @@ public:
 	// handles: a part facing the view can't be behind its own convex brush).
 	[[nodiscard]] std::vector<bool> BrushesHide( std::span<const xv::map::Point_t> points, std::span<const std::uint32_t> objects );
 	[[nodiscard]] xv::map::CViewCamera GetSizedCamera() const;
+	// The world texts alone, as the overlay paints them (for timing them).
+	void PaintWorldTextsForTest( QPainter &painter ) { PaintWorldTexts( painter ); }
 
 protected:
 	[[nodiscard]] PortalProjection_t PortalProjection() const override;
@@ -183,9 +187,11 @@ private:
 	// The block tool's box, the entity tool's marker and the gizmo, over the picture.
 	void PaintTools( QPainter &painter );
 	void PaintOriginAxes( QPainter &painter ) const;
+	void PaintEntityAngles( QPainter &painter ) const;
 	// A selected game_text's message as the game shows it on a player's screen (each channel's
 	// last one selected), faded in and held.
 	void PaintGameTexts( QPainter &painter ) const;
+	void PaintWorldTexts( QPainter &painter );
 	void UpdateCollapsibleVertices();
 	bool BeginOverlayDrag( QPointF at );
 	// A selected overlay's corner (0 to 3) or centre (4) under the mouse, with the Overlay tool.
@@ -244,6 +250,21 @@ private:
 	bool m_bQuit = false;
 	QImage m_Image;
 	double m_flRenderMs = 0.0;
+	// A world text laid out, and pictured with its outline and shadow (stroking those every frame
+	// cost tens of milliseconds); its letters' fill is pictured again only when their colours move.
+	struct WorldTextPicture_t
+	{
+		QString m_szKey;               // what it was laid out from
+		double m_flRaster = 0.0;       // picture pixels a layout pixel
+		QRectF m_Bounds;               // the text, in layout pixels (origin at 0 0)
+		QRectF m_Area;                 // the pictures' rectangle: the text and its halo
+		std::vector<std::pair<QPainterPath, qsizetype>> m_Letters; // each with its place in the message
+		QPainterPath m_Path;           // all of them
+		QImage m_Effects;              // outline, shadow, glow
+		QImage m_Fill;                 // the letters in their colours
+		double m_flFillAt = -1.0;      // the rainbow's moment m_Fill shows
+	};
+	std::unordered_map<std::size_t, WorldTextPicture_t> m_WorldTexts; // by entity
 	float m_flExposure = 1.0f; // the HDR lighting preview's auto exposure, as last measured
 	bool m_bReduced = false;
 	QTimer *m_pSettle = nullptr; // full resolution once the camera stops

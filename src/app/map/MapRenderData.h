@@ -60,6 +60,9 @@ struct MapFrame_t
 	std::shared_ptr<const xv::map::Fog_t> m_pFog;           // the map's, in the lighting preview
 	std::shared_ptr<const std::vector<std::uint8_t>> m_pFlags;
 	std::shared_ptr<const std::vector<std::array<std::uint8_t, 3>>> m_pFlatColors;
+	// Each object's rendercolor and opacity (map/RenderFx.h): an entity's, its solids' too;
+	// null when nothing in the map has either.
+	std::shared_ptr<const std::vector<std::array<std::uint8_t, 4>>> m_pTints;
 	std::shared_ptr<const std::vector<std::array<std::uint8_t, 3>>> m_pLineColors;
 	std::vector<xv::map::RasterLine_t> m_Lines;
 	xv::map::CViewCamera m_Camera;
@@ -98,6 +101,13 @@ public:
 	// What frames share, as it stands, without a camera or per-view state (the 2D views draw props
 	// from it).
 	[[nodiscard]] MapFrame_t GetShared();
+	// The moment renderfx (and rainbow world texts) are shown at (seconds), and whether any
+	// entity has something that moves with it.
+	void SetFxTime( double flTime );
+	[[nodiscard]] double GetFxTime() const { return m_flFxTime; }
+	[[nodiscard]] bool HasRenderFx();
+	// Whether a world text's rainbow is among them (it shows in every 3D view, not only textured).
+	[[nodiscard]] bool HasRainbowText() const { return m_bRainbowText; }
 	// A prop's model's box where it was placed; empty when its model isn't loaded.
 	[[nodiscard]] xv::map::Box_t GetPropBounds( std::uint32_t nObject ) const;
 	// The frame for a camera, from what the document shows now.
@@ -164,6 +174,14 @@ private:
 	std::uint64_t m_nGeneration = 0;
 	std::uint64_t m_nFlatFor = ~0ull; // the preferences' revision the flat colours follow
 	MapFrame_t m_Frame;
+	void UpdateTints();
+	const xv::map::CScene *m_pTintsFor = nullptr;
+	std::uint64_t m_nTintsRevision = ~0ull;
+	std::shared_ptr<const std::vector<std::array<std::uint8_t, 4>>> m_pBaseTints; // with renderfx at no time in particular
+	std::vector<std::size_t> m_FxEntities;                                        // whose renderfx moves
+	bool m_bRainbowText = false;                                                  // a world text's hues run
+	double m_flFxTime = 0.0;
+	double m_flTintsAt = -1.0;
 	std::vector<std::uint32_t> m_PropObjects; // sorted
 	std::vector<xv::map::Box_t> m_PropBounds; // each one's model, where it stands
 	std::shared_ptr<const std::vector<xv::map::SpritePlacement_t>> m_pReceivedSprites;

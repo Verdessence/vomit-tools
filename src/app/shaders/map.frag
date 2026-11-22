@@ -10,6 +10,7 @@ layout(location = 3) in vec3 v_normal;
 layout(location = 4) flat in vec4 v_state;
 layout(location = 5) in vec3 v_world;
 layout(location = 6) in vec4 v_light;
+layout(location = 7) flat in vec4 v_tint;
 
 layout(location = 0) out vec4 fragColor;
 
@@ -20,7 +21,7 @@ layout(std140, binding = 0) uniform Frame {
 	vec4 selection;     // rgb
 	vec4 selectionEdge; // rgb
 	vec4 faceShade;     // xyz
-	vec4 state;         // the state texture's width, and the most samples anisotropic filtering takes
+	vec4 state;         // the state texture's width, the most samples anisotropic filtering takes, and the row its tints start at
 	vec4 instance;      // rgb, and how much of it func_instances' contents take
 	vec4 pass;          // x 1: the 3D skybox, drawn from its own camera first; y 1: a mesh as read; z 1: sky faces show their own texture
 	vec4 invalid;       // rgb, and how much of it broken solids' faces take
@@ -286,6 +287,16 @@ void main() {
 	bool hasDetail = material.detail.x > -0.5;
 	vec3 n = normalize(v_normal);
 	bool textured = mode != MODE_FLAT && mode != MODE_WIREFRAME;
+	if (textured && v_tint.a < 1.0) {
+		// The entity's opacity as a screen door, as xv::map::IsScreenDoorPixel: a pixel in a
+		// fixed 4x4 pattern drawn or not.
+		const int bayer[16] = int[16](0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5);
+		int level = (int(v_tint.a * 255.0 + 0.5) * 16 + 127) / 255;
+		ivec2 p = ivec2(gl_FragCoord.xy) & 3;
+		if (bayer[p.y * 4 + p.x] >= level) {
+			discard;
+		}
+	}
 	if (textured && material.refraction.x > 0.5) {
 		fragColor = shadeRefract(across, down, n);
 		return;
@@ -324,6 +335,7 @@ void main() {
 			discard;
 		}
 		color.rgb *= material.color.rgb;
+		color.rgb *= v_tint.rgb; // the entity's rendercolor
 		if (material.extra.y > 0.5) {
 			color.rgb *= v_state.rgb;
 		}

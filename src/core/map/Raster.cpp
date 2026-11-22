@@ -16,6 +16,23 @@
 namespace xv::map
 {
 
+//-----------------------------------------------------------------------------
+// Purpose: Rounded, so a whole opacity shows every pixel and none shows none.
+//-----------------------------------------------------------------------------
+int ScreenDoorLevel( std::uint8_t nAlpha )
+{
+	return static_cast<int>( ( nAlpha * 16 + 127 ) / 255 );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Bayer's 4x4 ordered dither.
+//-----------------------------------------------------------------------------
+bool IsScreenDoorPixel( int x, int y, int nLevel )
+{
+	static constexpr std::array<int, 16> BAYER{ 0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5 };
+	return BAYER[ static_cast<std::size_t>( ( y & 3 ) * 4 + ( x & 3 ) ) ] < nLevel;
+}
+
 namespace
 {
 
@@ -420,6 +437,15 @@ void CRasterizer::FillTriangle( const ScreenVertex_t &a, const ScreenVertex_t &b
 	{
 		shade.m_nMode = RasterMode_t::RASTER_MODE_FLAT;
 	}
+	// The entity's rendercolor and opacity show in the textured looks only; the opacity as a
+	// screen door (a pixel in a fixed 4x4 pattern drawn or not), so nothing needs sorting.
+	int nDoor = 16;
+	if ( nObject < m_Scene.m_ObjectTints.size() && shade.m_nMode != RasterMode_t::RASTER_MODE_FLAT && shade.m_nMode != RasterMode_t::RASTER_MODE_WIREFRAME )
+	{
+		const auto &tint = m_Scene.m_ObjectTints[ nObject ];
+		input.m_RenderTint = { tint[ 0 ] / 255.0f, tint[ 1 ] / 255.0f, tint[ 2 ] / 255.0f, tint[ 3 ] / 255.0f };
+		nDoor = ScreenDoorLevel( tint[ 3 ] );
+	}
 	// The mip level is picked per pixel, as a graphics card picks it: from how fast the texel
 	// coordinates change across the screen, in the faster of the two directions. Texel over w
 	// and 1/w change by the same amounts at every pixel of the triangle.
@@ -456,6 +482,10 @@ void CRasterizer::FillTriangle( const ScreenVertex_t &a, const ScreenVertex_t &b
 			const double l0 = w0 / flArea;
 			const double l1 = w1 / flArea;
 			const double l2 = w2 / flArea;
+			if ( nDoor < 16 && !IsScreenDoorPixel( x, y, nDoor ) )
+			{
+				continue;
+			}
 			const double flZ = l0 * a.m_flZ + l1 * b.m_flZ + l2 * c.m_flZ;
 			const std::size_t nPixel = static_cast<std::size_t>( y ) * static_cast<std::size_t>( m_Out.m_nWidth ) + static_cast<std::size_t>( x );
 			float &flDepth = m_Depth[ nPixel ];

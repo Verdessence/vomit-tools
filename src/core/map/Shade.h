@@ -132,6 +132,7 @@ struct ShadeInput_t
 	float m_flLod = 0.0f;                      // mip level, fractional
 	std::array<float, 4> m_Gradient{};         // texels the point moves a pixel right (u, v) and down (u, v)
 	CVec3 m_vecObjectColor{ 1, 1, 1 };         // the flat colour (Hammer's editor colour), 0-1
+	std::array<float, 4> m_RenderTint{ 1, 1, 1, 1 }; // its entity's rendercolor and opacity (map/RenderFx.h), 0-1
 	CVec3 m_vecDirection{ 1, 0, 0 };           // from the eye to the point (for the sky)
 	bool m_bSelected = false;
 	bool m_bInstance = false;                  // a func_instance's: tinted

@@ -55,6 +55,7 @@ enum class MapAction_t
 	MAP_ACTION_TOGGLE_SKY_FACES,     // the tool bar: the sky on sky faces, or tools/toolsskybox itself
 	MAP_ACTION_TOGGLE_SKY_2D,        // the tool bar: the 2D sky behind everything in the 3D views
 	MAP_ACTION_TOGGLE_ORIGIN_AXES,   // the tool bar: the world's axes at 0 0 0 in the 3D views
+	MAP_ACTION_TOGGLE_ENTITY_ANGLES, // the tool bar: which way point entities face, in the 3D views
 	MAP_ACTION_TOGGLE_FOG,           // the tool bar: the map's fog in the textured 3D views
 	MAP_ACTION_TOGGLE_WALKABLE,      // the tool bar: Hammer's Display walkable area, on the selected displacements
 	MAP_ACTION_TOGGLE_PARTICLES,     // the tool bar: particle systems playing in the 3D views

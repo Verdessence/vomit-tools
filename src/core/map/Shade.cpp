@@ -489,6 +489,10 @@ std::optional<std::array<float, 4>> ShadeFragment( const ShadeMaterial_t &materi
 		color[ 0 ] *= material.m_vecColor.m_flX;
 		color[ 1 ] *= material.m_vecColor.m_flY;
 		color[ 2 ] *= material.m_vecColor.m_flZ;
+		// The entity's rendercolor (map/RenderFx.h); its opacity is the rasteriser's.
+		color[ 0 ] *= input.m_RenderTint[ 0 ];
+		color[ 1 ] *= input.m_RenderTint[ 1 ];
+		color[ 2 ] *= input.m_RenderTint[ 2 ];
 		if ( material.m_bTinted )
 		{
 			color[ 0 ] *= input.m_vecObjectColor.m_flX;

@@ -58,6 +58,7 @@ const MapActionInfo_t ACTIONS[] = {
 	{ A::MAP_ACTION_TOGGLE_SKY_FACES, "View_Toggle_Sky_Faces", QT_TRANSLATE_NOOP( "MapKeys", "Show the sky on sky faces" ), "View", BOTH },
 	{ A::MAP_ACTION_TOGGLE_SKY_2D, "View_Toggle_2D_Sky", QT_TRANSLATE_NOOP( "MapKeys", "Show the 2D sky" ), "View", BOTH },
 	{ A::MAP_ACTION_TOGGLE_ORIGIN_AXES, "View_Toggle_Origin_Axes", QT_TRANSLATE_NOOP( "MapKeys", "Show the axes at the origin" ), "View", BOTH },
+	{ A::MAP_ACTION_TOGGLE_ENTITY_ANGLES, "View_Toggle_Entity_Angles", QT_TRANSLATE_NOOP( "MapKeys", "Show which way entities face" ), "View", BOTH },
 	{ A::MAP_ACTION_TOGGLE_FOG, "View_Toggle_Fog", QT_TRANSLATE_NOOP( "MapKeys", "Show fog" ), "View", BOTH },
 	{ A::MAP_ACTION_TOGGLE_WALKABLE, "View_Toggle_Walkable", QT_TRANSLATE_NOOP( "MapKeys", "Show walkable area" ), "View", BOTH },
 	{ A::MAP_ACTION_TOGGLE_PARTICLES, "View_Toggle_Particles", QT_TRANSLATE_NOOP( "MapKeys", "Play particles" ), "View", BOTH },

@@ -90,6 +90,9 @@ inline const QColor PHYSICS_MOVING_EDGES{ 255, 150, 40 };
 inline const QColor PHYSICS_STATIC_EDGES{ 80, 160, 255, 150 };
 inline constexpr double ORIGIN_AXIS_LENGTH = 64.0; // the world axes at 0 0 0 in the 3D views, in units
 inline constexpr double ORIGIN_AXIS_WIDTH = 2.0;   // and their lines' width in pixels
+inline constexpr double ENTITY_AXIS_LENGTH = 24.0;  // a point entity's own axes in the 3D views (forward; the others half), in units
+inline constexpr double ENTITY_AXIS_RANGE = 2048.0; // drawn for entities this near the camera
+inline const QColor LIGHT_AIM{ 255, 220, 64 };      // where a light shines, as the compile reads its keys
 inline constexpr int GIZMO_SIZE = 28;             // the axes' length in pixels
 inline constexpr double GIZMO_PIXELS = 140.0;     // the selection gizmo's axes, on screen (Verd: bigger)
 inline constexpr double GIZMO_THICKNESS = 1.0;    // [General] GizmoThiccness: times our lines' widths

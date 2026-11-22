@@ -26,13 +26,24 @@
 #include <QKeyEvent>
 #include <QMouseEvent>
 #include <QPainter>
+#include <QPainterPath>
+#include <QFontMetricsF>
+#include <QLinearGradient>
+#include <QPolygonF>
+#include <QTransform>
 #include <QTimer>
 #include <QWheelEvent>
 
 #include "Preferences.h"
 #include "DebugLog.h"
 #include "map/Cordon.h"
+#include "map/Fgd.h"
+#include "kv1/Kv1.h"
+#include "util/Numbers.h"
+#include "map/Trace.h"
 #include "map/Helpers.h"
+#include "map/Instance.h"
+#include "map/Lighting.h"
 #include "map/MapSprinkle.h"
 #include "map/DispEdit.h"
 #include "map/Overlay.h"
@@ -141,6 +152,80 @@ CMapEventClock &CMapEventClock::Get()
 namespace
 {
 
+// World texts are laid out at this size in pixels (a font's size: a line), then mapped into the
+// world.
+constexpr int WORLD_TEXT_PIXELS = 64;
+// A rainbow point_worldtext's letters each take a hue (saturation 0.7, full value), this many
+// degrees on from the letter before, all moving on this many degrees a second.
+constexpr double WORLD_TEXT_RAINBOW_LETTER_DEGREES = 15.0;
+constexpr double WORLD_TEXT_RAINBOW_DEGREES_A_SECOND = 100.0;
+// The game draws its letters from distance-field sheets whose edges ramp over about this many of
+// the sheet's pixels (measured from CS:S's editor/worldtextsheet_* textures); a material's outline
+// and shadow reach out over parts of that ramp.
+constexpr double WORLD_TEXT_SHEET_RAMP = 6.5;
+// editor_text's letters are outlined in black, this wide (of the font's size) all round.
+constexpr double EDITOR_TEXT_OUTLINE = 0.08;
+
+// The typefaces point_worldtext's font key chooses among: the faces the game's sheets were made
+// from, by name where they are installed, else the nearest kind; and the size each sheet was
+// made at, which its spacing keys count in.
+struct WorldTextFace_t
+{
+	QStringList m_Families;
+	QFont::StyleHint m_nHint;
+	bool m_bBold;
+	bool m_bSmallCaps; // the sheet has capitals only: its small letters are smaller capitals
+	double m_flSheetSize;
+};
+
+//-----------------------------------------------------------------------------
+// Purpose: TF2 Build, TF2, Liberation Sans, TF2 Professor and Roboto Mono, in that order.
+//-----------------------------------------------------------------------------
+const std::array<WorldTextFace_t, 5> &WorldTextFaces()
+{
+	static const std::array<WorldTextFace_t, 5> faces{ {
+		{ { QStringLiteral( "TF2 Build" ), QStringLiteral( "Impact" ), QStringLiteral( "DejaVu Sans" ) }, QFont::SansSerif, true, true, 64.0 },
+		{ { QStringLiteral( "TF2 Secondary" ), QStringLiteral( "TF2" ), QStringLiteral( "DejaVu Sans" ) }, QFont::SansSerif, true, true, 64.0 },
+		{ { QStringLiteral( "Liberation Sans" ), QStringLiteral( "Arial" ), QStringLiteral( "Helvetica" ) }, QFont::SansSerif, false, false, 64.0 },
+		{ { QStringLiteral( "TF2 Professor" ), QStringLiteral( "Comic Neue" ), QStringLiteral( "Comic Sans MS" ) }, QFont::Cursive, false, true, 128.0 },
+		{ { QStringLiteral( "Roboto Mono" ), QStringLiteral( "DejaVu Sans Mono" ), QStringLiteral( "Courier New" ) }, QFont::Monospace, false, false, 128.0 },
+	} };
+	return faces;
+}
+
+// What a font key draws, from the game's editor/worldtext_<key + 1> materials: the face, and the
+// outline, drop shadow and glow those give its letters (none where invalid), and the colour one
+// keeps whatever the entity's ($vertexcolor 0).
+struct WorldTextLook_t
+{
+	int m_nFace = 0;
+	QColor m_Outline;
+	bool m_bShadow = false;
+	QColor m_Glow;
+	QColor m_Fixed;
+};
+
+//-----------------------------------------------------------------------------
+// Purpose: The font key's look: a number (0 to 12; more is 12), or the material's own name.
+//-----------------------------------------------------------------------------
+WorldTextLook_t WorldTextLookOf( std::string_view szFont )
+{
+	int nKey = 0;
+	if ( const auto nNumber = xv::ParseNumber<int>( szFont ) )
+		nKey = *nNumber;
+	else if ( const std::size_t nAt = szFont.rfind( "worldtext_" ); nAt != std::string_view::npos )
+		nKey = xv::ParseNumber<int>( szFont.substr( nAt + 10 ) ).value_or( 1 ) - 1;
+	nKey = std::clamp( nKey, 0, 12 );
+	const QColor black( 0, 0, 0 );
+	if ( nKey == 12 )
+		return { 0, black, false, {}, {} };
+	if ( nKey == 11 )
+		return { 4, {}, false, QColor( 0, 255, 0 ), QColor( 153, 255, 102 ) };
+	if ( nKey == 10 )
+		return { 4, QColor( 255, 255, 255 ), true, {}, {} };
+	const bool bPlain = nKey % 2 == 1;
+	return { nKey / 2, bPlain ? QColor{} : black, !bPlain, {}, {} };
+}
 // The orbit's point: this far ahead when nothing is under the pointer or selected; the wheel
 // brings the camera no nearer than this.
 constexpr double ORBIT_AHEAD = 256.0;
@@ -612,6 +697,271 @@ void CMapView3D::PaintGameTexts( QPainter &painter ) const
 }
 
 //-----------------------------------------------------------------------------
+// Purpose: Hammer++'s editor_text and the games' point_worldtext (any class with the FGD's
+//          worldtext() helper), as the game draws point_worldtext: the message from the
+//          entity's origin, the first line's baseline there and the others below; stationary
+//          text (orientation 0) starts there and reads along the entity's right (Source's
+//          angles), turning text faces the camera (1) or turns about z only (2) and is centred
+//          across; every line starts at the same edge. textsize is a line, in units (less than
+//          0 turns it over); the spacing keys count in the font sheet's pixels; it shows from
+//          both sides (its materials don't cull). Drawn over the picture through a perspective
+//          transform of the text's plane; one whose origin something drawn stands in front of
+//          is left out.
+//-----------------------------------------------------------------------------
+void CMapView3D::PaintWorldTexts( QPainter &painter )
+{
+	const xv::map::CScene *pScene = GetDocument().GetScene();
+	if ( !pScene )
+		return;
+	std::vector<std::size_t> texts;
+	for ( std::size_t e = 0; e < pScene->m_Map.m_Entities.size(); e++ )
+	{
+		const xv::map::Entity_t &entity = pScene->m_Map.m_Entities[ e ];
+		if ( entity.m_bDeleted || !pScene->m_Entities[ e ].m_bPoint )
+			continue;
+		const std::string_view szClass = entity.GetClassname();
+		bool bText = xv::kv1::EqualsIgnoreCase( szClass, "editor_text" ) || xv::kv1::EqualsIgnoreCase( szClass, "point_worldtext" );
+		if ( !bText && pScene->m_pFgd )
+			if ( const xv::map::FgdClass_t *pClass = pScene->m_pFgd->Find( szClass ) )
+				bText = pClass->FindHelper( "worldtext" ) != nullptr;
+		if ( bText && GetDocument().IsShown( pScene->EntityObject( e ) ) )
+			texts.push_back( e );
+	}
+	if ( texts.empty() )
+	{
+		m_WorldTexts.clear();
+		return;
+	}
+	const xv::map::CViewCamera camera = GetSizedCamera();
+	const MapFrame_t frame = MakeFrame( size() );
+	const xv::map::RasterScene_t scene = frame.MakeScene();
+	const MapViewSettings_t &settings = m_Editor.GetSettings();
+	const auto number = [ & ]( const xv::map::Entity_t &entity, std::string_view szKey, double flDefault ) {
+		return xv::ParseNumber<double>( entity.GetValue( szKey ) ).value_or( flDefault );
+	};
+	// Pictures of texts no longer shown go.
+	std::erase_if( m_WorldTexts, [ & ]( const auto &entry ) { return !std::ranges::binary_search( texts, entry.first ); } );
+	painter.save();
+	painter.setRenderHint( QPainter::Antialiasing, true );
+	for ( const std::size_t e : texts )
+	{
+		const xv::map::Entity_t &entity = pScene->m_Map.m_Entities[ e ];
+		const QString szMessage = QString::fromUtf8( entity.HasKey( "message" ) ? entity.GetValue( "message" ) : std::string_view{ "Hello World" } );
+		if ( szMessage.isEmpty() )
+			continue;
+		const xv::map::Point_t origin = pScene->m_Entities[ e ].m_Origin;
+		const xv::map::Point_t toText = xv::map::Subtract( origin, camera.m_Eye );
+		const double flDistance = xv::map::Length( toText );
+		if ( flDistance < 1.0 || flDistance > camera.m_flFar )
+			continue;
+		// Which way the text reads and which way is up.
+		xv::map::Point_t reading = camera.GetRight();
+		xv::map::Point_t up = camera.GetUp();
+		const int nOrientation = static_cast<int>( number( entity, "orientation", 0.0 ) );
+		if ( nOrientation == 2 )
+		{
+			up = { 0.0, 0.0, 1.0 };
+		}
+		else if ( nOrientation != 1 )
+		{
+			std::vector<double> angles;
+			if ( !xv::map::ParseNumbers( entity.GetValue( "angles" ), 3, angles ) )
+				angles = { 0.0, 0.0, 0.0 };
+			const xv::map::Transform_t turn = xv::map::Transform_t::FromAngles( {}, { angles[ 0 ], angles[ 1 ], angles[ 2 ] } );
+			reading = turn.Rotate( { 0, -1, 0 } ); // Source's right: its left turned around
+			up = turn.Rotate( { 0, 0, 1 } );
+		}
+		// Something drawn in front of its origin hides it.
+		bool bHidden = false;
+		const xv::map::Point_t dir = xv::map::Scale( toText, 1.0 / flDistance );
+		for ( const xv::map::TraceHit_t &hit : xv::map::TraceScene( scene, settings.m_bToolTextures, settings.m_bNodraw, camera.m_Eye, dir, flDistance - 1.0 ) )
+		{
+			if ( hit.m_nObject != pScene->EntityObject( e ) )
+			{
+				bHidden = true;
+				break;
+			}
+		}
+		if ( bHidden )
+			continue;
+		const double flSize = number( entity, "textsize", 10.0 );
+		if ( std::abs( flSize ) < 1e-3 )
+			continue;
+		// The face and its look: Hammer++'s editor_text is bold monospace letters outlined in
+		// black; point_worldtext's font key picks one of the game's.
+		const bool bEditorText = xv::kv1::EqualsIgnoreCase( entity.GetClassname(), "editor_text" );
+		WorldTextLook_t look;
+		QFont lettered;
+		double flSheet = WORLD_TEXT_PIXELS;
+		if ( bEditorText )
+		{
+			lettered = QFont( QStringLiteral( "Courier New" ) );
+			lettered.setStyleHint( QFont::Monospace );
+			lettered.setBold( true );
+		}
+		else
+		{
+			look = WorldTextLookOf( entity.HasKey( "font" ) ? entity.GetValue( "font" ) : std::string_view{ "0" } );
+			const WorldTextFace_t &face = WorldTextFaces()[ static_cast<std::size_t>( look.m_nFace ) ];
+			lettered.setFamilies( face.m_Families );
+			lettered.setStyleHint( face.m_nHint );
+			lettered.setBold( face.m_bBold );
+			if ( face.m_bSmallCaps )
+				lettered.setCapitalization( QFont::SmallCaps );
+			flSheet = face.m_flSheetSize;
+		}
+		lettered.setPixelSize( WORLD_TEXT_PIXELS );
+		const double flSheetPixel = WORLD_TEXT_PIXELS / flSheet; // one of the sheet's pixels, in the layout's
+		const double flScale = flSize / WORLD_TEXT_PIXELS;           // units a layout pixel
+		const double flSpacingX = number( entity, "textspacingx", 0.0 ) * flSheetPixel;
+		const double flLineStep = WORLD_TEXT_PIXELS + number( entity, "textspacingy", 0.0 ) * flSheetPixel;
+		const bool bCentred = nOrientation == 1 || nOrientation == 2;
+		// color is r g b, and a when given; rainbow gives each letter a hue instead, moving.
+		std::vector<double> rgba;
+		QColor color = Qt::white;
+		if ( const std::string_view szColor = entity.GetValue( "color" ); xv::map::ParseNumbers( szColor, 4, rgba ) || xv::map::ParseNumbers( szColor, 3, rgba ) )
+			color = QColor( std::clamp( static_cast<int>( rgba[ 0 ] ), 0, 255 ), std::clamp( static_cast<int>( rgba[ 1 ] ), 0, 255 ), std::clamp( static_cast<int>( rgba[ 2 ] ), 0, 255 ), rgba.size() > 3 ? std::clamp( static_cast<int>( rgba[ 3 ] ), 0, 255 ) : 255 );
+		const bool bRainbow = !look.m_Fixed.isValid() && number( entity, "rainbow", 0.0 ) != 0.0;
+		if ( look.m_Fixed.isValid() )
+			color = QColor( look.m_Fixed.red(), look.m_Fixed.green(), look.m_Fixed.blue(), color.alpha() );
+		const double flRamp = WORLD_TEXT_SHEET_RAMP * flSheetPixel;
+		// Laid out again only when what it is laid out from changes.
+		WorldTextPicture_t &picture = m_WorldTexts[ e ];
+		const QString szKey = QStringLiteral( "%1|%2|%3|%4|%5|%6|%7|%8|%9" ).arg( szMessage, lettered.toString() ).arg( flSpacingX ).arg( flLineStep ).arg( bCentred ).arg( color.rgba() ).arg( bRainbow ).arg( bEditorText ).arg( QStringLiteral( "%1 %2 %3 %4" ).arg( look.m_Outline.rgba() ).arg( look.m_bShadow ).arg( look.m_Glow.rgba() ).arg( flRamp ) );
+		if ( picture.m_szKey != szKey )
+		{
+			picture = WorldTextPicture_t{};
+			picture.m_szKey = szKey;
+			// Each letter at its pen position (no kerning: the game places letter by letter), and
+			// its place in the message, which a rainbow's hue counts.
+			const QFontMetricsF letters( lettered );
+			const QString szText = QString( szMessage ).replace( QStringLiteral( "\\n" ), QStringLiteral( "\n" ) );
+			double flPen = 0.0, flBaseline = 0.0, flWidth = 0.0;
+			for ( qsizetype i = 0; i < szText.size(); i++ )
+			{
+				const QChar ch = szText[ i ];
+				if ( ch == QLatin1Char( '\n' ) )
+				{
+					flWidth = std::max( flWidth, flPen );
+					flPen = 0.0;
+					flBaseline += flLineStep;
+					continue;
+				}
+				if ( !ch.isSpace() )
+				{
+					QPainterPath letter;
+					letter.addText( QPointF{ flPen, flBaseline }, lettered, QString( ch ) );
+					picture.m_Letters.emplace_back( std::move( letter ), i );
+				}
+				flPen += letters.horizontalAdvance( ch ) + flSpacingX;
+			}
+			flWidth = std::max( flWidth, flPen );
+			const double flLeft = bCentred ? -flWidth / 2.0 : 0.0;
+			for ( auto &[ letter, nIndex ] : picture.m_Letters )
+			{
+				letter.translate( flLeft, 0.0 );
+				picture.m_Path.addPath( letter );
+			}
+			picture.m_Bounds = QRectF{ flLeft, -letters.ascent(), std::max( flWidth, 1.0 ), letters.ascent() + flBaseline + letters.descent() };
+			const double flMargin = std::max( flRamp, EDITOR_TEXT_OUTLINE * WORLD_TEXT_PIXELS ) + 2.0;
+			picture.m_Area = picture.m_Bounds.adjusted( -flMargin, -flMargin, flMargin, flMargin );
+		}
+		const QRectF &bounds = picture.m_Bounds;
+		const auto corner = [ & ]( double x, double y ) { return xv::map::Add( origin, xv::map::Add( xv::map::Scale( reading, x * flScale ), xv::map::Scale( up, -y * flScale ) ) ); };
+		const std::array<xv::map::Point_t, 4> world{ corner( bounds.left(), bounds.top() ), corner( bounds.right(), bounds.top() ), corner( bounds.right(), bounds.bottom() ), corner( bounds.left(), bounds.bottom() ) };
+		QPolygonF screen;
+		for ( const xv::map::Point_t &point : world )
+		{
+			const auto projected = camera.Project( point );
+			if ( !projected )
+				break;
+			screen << QPointF{ ( *projected )[ 0 ], ( *projected )[ 1 ] };
+		}
+		if ( screen.size() != 4 || screen.boundingRect().height() < 2.0 )
+			continue;
+		QTransform transform;
+		if ( !QTransform::quadToQuad( QPolygonF( bounds ), screen, transform ) )
+			continue;
+		// The pictures' resolution follows the size on screen, in steps of two, so they stay sharp
+		// close up and small far away.
+		const auto length = []( QPointF d ) { return std::hypot( d.x(), d.y() ); };
+		const double flOnScreen = std::max( { length( screen[ 1 ] - screen[ 0 ] ) / bounds.width(), length( screen[ 2 ] - screen[ 3 ] ) / bounds.width(), length( screen[ 3 ] - screen[ 0 ] ) / bounds.height(), length( screen[ 2 ] - screen[ 1 ] ) / bounds.height() } );
+		double flRaster = std::exp2( std::ceil( std::log2( std::max( flOnScreen, 1e-3 ) ) ) );
+		flRaster = std::clamp( flRaster, 1.0 / 16.0, 2.0 );
+		while ( flRaster > 1.0 / 16.0 && std::max( picture.m_Area.width(), picture.m_Area.height() ) * flRaster > 4096.0 )
+			flRaster /= 2.0;
+		const QSize pictureSize( std::max( 1, static_cast<int>( std::ceil( picture.m_Area.width() * flRaster ) ) ), std::max( 1, static_cast<int>( std::ceil( picture.m_Area.height() * flRaster ) ) ) );
+		const auto begin = [ & ]( QImage &image, QPainter &into ) {
+			image.fill( Qt::transparent );
+			into.begin( &image );
+			into.setRenderHint( QPainter::Antialiasing, true );
+			into.scale( flRaster, flRaster );
+			into.translate( -picture.m_Area.topLeft() );
+		};
+		if ( picture.m_flRaster != flRaster )
+		{
+			picture.m_flRaster = flRaster;
+			picture.m_flFillAt = -1.0;
+			picture.m_Effects = QImage( pictureSize, QImage::Format_ARGB32_Premultiplied );
+			picture.m_Fill = QImage( pictureSize, QImage::Format_ARGB32_Premultiplied );
+			QPainter into;
+			begin( picture.m_Effects, into );
+			// A soft halo out from the letters' edges: strokes narrowing as they darken.
+			const auto halo = [ & ]( const QColor &tint, double flReach, double flAlpha ) {
+				for ( int n = 4; n >= 1; n-- )
+				{
+					QColor step = tint;
+					step.setAlphaF( static_cast<float>( flAlpha / 4.0 * color.alphaF() ) );
+					into.strokePath( picture.m_Path, QPen( step, 2.0 * flReach * n / 4.0, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin ) );
+				}
+			};
+			if ( look.m_bShadow )
+				halo( QColor( 0, 0, 0 ), flRamp, 0.45 );
+			if ( look.m_Glow.isValid() )
+				halo( look.m_Glow, flRamp * 0.85, 1.0 );
+			if ( bEditorText )
+				into.strokePath( picture.m_Path, QPen( QColor( 0, 0, 0, color.alpha() ), 2.0 * EDITOR_TEXT_OUTLINE * WORLD_TEXT_PIXELS, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin ) );
+			else if ( look.m_Outline.isValid() )
+				into.strokePath( picture.m_Path, QPen( QColor( look.m_Outline.red(), look.m_Outline.green(), look.m_Outline.blue(), color.alpha() ), 2.0 * 0.43 * flRamp, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin ) );
+			into.end();
+		}
+		const double flHueAt = bRainbow ? std::fmod( m_Editor.GetRenderData().GetFxTime() * WORLD_TEXT_RAINBOW_DEGREES_A_SECOND, 360.0 ) : 0.0;
+		if ( picture.m_flFillAt != flHueAt )
+		{
+			picture.m_flFillAt = flHueAt;
+			QPainter into;
+			begin( picture.m_Fill, into );
+			if ( !bRainbow )
+			{
+				into.fillPath( picture.m_Path, color );
+			}
+			else
+			{
+				for ( const auto &[ letter, nIndex ] : picture.m_Letters )
+				{
+					const double flHue = std::fmod( flHueAt + static_cast<double>( nIndex ) * WORLD_TEXT_RAINBOW_LETTER_DEGREES, 360.0 );
+					into.fillPath( letter, QColor::fromHsvF( static_cast<float>( flHue / 360.0 ), 0.7f, 1.0f, color.alphaF() ) );
+				}
+			}
+			into.end();
+		}
+		painter.setTransform( transform );
+		painter.setRenderHint( QPainter::SmoothPixmapTransform, true );
+		painter.drawImage( picture.m_Area, picture.m_Effects );
+		painter.drawImage( picture.m_Area, picture.m_Fill );
+		// Selected, its rectangle is outlined, as Hammer++ boxes it.
+		if ( GetDocument().IsSelected( pScene->EntityObject( e ) ) )
+		{
+			painter.resetTransform();
+			painter.setPen( QPen( CPreferences::Instance().GetMapPreferences().m_Colors.m_ToolSelection, 1.0 ) );
+			painter.setBrush( Qt::NoBrush );
+			painter.drawPolygon( screen );
+		}
+	}
+	painter.restore();
+}
+
+//-----------------------------------------------------------------------------
 // Purpose:
 //-----------------------------------------------------------------------------
 void CMapView3D::paintEvent( QPaintEvent * )
@@ -676,6 +1026,75 @@ void CMapView3D::PaintOriginAxes( QPainter &painter ) const
 }
 
 //-----------------------------------------------------------------------------
+// Purpose: Which way each shown point entity near the camera faces, from its angles (or angle):
+//          its own forward (long), left and up (short) in the axes' colours, so a turn that
+//          went wrong shows. A light shows where the compile aims it instead, which reads the
+//          yaw and the pitch key and leaves roll out (map/Lighting's LightDirection), with its
+//          angles' forward dashed beside it when the two part: what turning a light in Hammer
+//          leaves behind.
+//-----------------------------------------------------------------------------
+void CMapView3D::PaintEntityAngles( QPainter &painter ) const
+{
+	const xv::map::CScene *pScene = GetDocument().GetScene();
+	if ( !m_Editor.GetSettings().m_bEntityAngles || !pScene )
+		return;
+	const xv::map::CViewCamera camera = GetSizedCamera();
+	const auto line = [ & ]( const xv::map::Point_t &from, const xv::map::Point_t &to, const QPen &pen ) {
+		if ( const auto projected = camera.ProjectLine( from, to ) )
+		{
+			painter.setPen( pen );
+			painter.drawLine( QPointF{ projected->first[ 0 ], projected->first[ 1 ] }, QPointF{ projected->second[ 0 ], projected->second[ 1 ] } );
+		}
+	};
+	const auto arrow = [ & ]( const xv::map::Point_t &from, const xv::map::Point_t &dir, double flLength, const QPen &pen ) {
+		const xv::map::Point_t tip = xv::map::Add( from, xv::map::Scale( dir, flLength ) );
+		line( from, tip, pen );
+		const xv::map::Point_t u = xv::map::Normalized( xv::map::Cross( dir, std::abs( dir[ 2 ] ) < 0.9 ? xv::map::Point_t{ 0, 0, 1 } : xv::map::Point_t{ 1, 0, 0 } ) );
+		const xv::map::Point_t v = xv::map::Cross( dir, u );
+		const xv::map::Point_t back = xv::map::Subtract( tip, xv::map::Scale( dir, flLength / 4.0 ) );
+		for ( const xv::map::Point_t &side : { u, xv::map::Scale( u, -1.0 ), v, xv::map::Scale( v, -1.0 ) } )
+			line( tip, xv::map::Add( back, xv::map::Scale( side, flLength / 8.0 ) ), pen );
+	};
+	painter.save();
+	painter.setRenderHint( QPainter::Antialiasing, true );
+	const double flLength = mapstyle::ENTITY_AXIS_LENGTH;
+	for ( std::size_t e = 0; e < pScene->m_Map.m_Entities.size(); e++ )
+	{
+		const xv::map::Entity_t &entity = pScene->m_Map.m_Entities[ e ];
+		if ( entity.m_bDeleted || !pScene->m_Entities[ e ].m_bPoint || !GetDocument().IsShown( pScene->EntityObject( e ) ) )
+			continue;
+		const std::string_view szClass = entity.GetClassname();
+		const bool bLight = szClass.size() >= 5 && xv::kv1::EqualsIgnoreCase( szClass.substr( 0, 5 ), "light" ) && ( entity.HasKey( "pitch" ) || entity.HasKey( "_cone" ) );
+		if ( !bLight && !entity.HasKey( "angles" ) && !entity.HasKey( "angle" ) )
+			continue;
+		const xv::map::Point_t origin = pScene->m_Entities[ e ].m_Origin;
+		if ( xv::map::Length( xv::map::Subtract( origin, camera.m_Eye ) ) > mapstyle::ENTITY_AXIS_RANGE )
+			continue;
+		std::array<double, 3> angles{};
+		std::vector<double> parsed;
+		if ( xv::map::ParseNumbers( entity.GetValue( "angles" ), 3, parsed ) )
+			angles = { parsed[ 0 ], parsed[ 1 ], parsed[ 2 ] };
+		else if ( const auto flAngle = xv::ParseNumber<double>( entity.GetValue( "angle" ) ) )
+			angles = *flAngle == -1.0 ? std::array<double, 3>{ -90.0, 0.0, 0.0 } : *flAngle == -2.0 ? std::array<double, 3>{ 90.0, 0.0, 0.0 }
+																									: std::array<double, 3>{ 0.0, *flAngle, 0.0 };
+		const xv::map::Transform_t turn = xv::map::Transform_t::FromAngles( {}, angles );
+		const xv::map::Point_t forward = turn.Rotate( { 1, 0, 0 } );
+		if ( bLight )
+		{
+			const xv::map::Point_t aim = xv::map::Normalized( xv::map::LightDirection( entity ) );
+			arrow( origin, aim, flLength * 1.5, QPen{ mapstyle::LIGHT_AIM, 2.0, Qt::SolidLine, Qt::RoundCap } );
+			if ( xv::map::Dot( aim, forward ) < std::cos( std::numbers::pi / 180.0 ) )
+				line( origin, xv::map::Add( origin, xv::map::Scale( forward, flLength * 1.5 ) ), QPen{ mapstyle::AXIS_X, 1.5, Qt::DashLine, Qt::RoundCap } );
+			continue;
+		}
+		arrow( origin, forward, flLength, QPen{ mapstyle::AXIS_X, 2.0, Qt::SolidLine, Qt::RoundCap } );
+		line( origin, xv::map::Add( origin, xv::map::Scale( turn.Rotate( { 0, 1, 0 } ), flLength / 2.0 ) ), QPen{ mapstyle::AXIS_Y, 2.0, Qt::SolidLine, Qt::RoundCap } );
+		line( origin, xv::map::Add( origin, xv::map::Scale( turn.Rotate( { 0, 0, 1 } ), flLength / 2.0 ) ), QPen{ mapstyle::AXIS_Z, 2.0, Qt::SolidLine, Qt::RoundCap } );
+	}
+	painter.restore();
+}
+
+//-----------------------------------------------------------------------------
 // Purpose: What goes over the picture: the statistics (O) and the focus frame.
 //-----------------------------------------------------------------------------
 void CMapView3D::PaintLabels( QPainter &painter )
@@ -727,8 +1146,10 @@ void CMapView3D::PaintLabels( QPainter &painter )
 			DebugLog() << "map 3D view:" << lines.join( QStringLiteral( "; " ) );
 		}
 	}
+	PaintWorldTexts( painter );
 	PaintGameTexts( painter );
 	PaintOriginAxes( painter );
+	PaintEntityAngles( painter );
 	PaintTools( painter );
 	PaintPortals( painter );
 	// The axes as the camera sees them, in the bottom left corner: which way is which.

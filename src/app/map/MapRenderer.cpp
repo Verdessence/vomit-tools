@@ -451,9 +451,11 @@ void CMapRenderer::UploadState( const MapFrame_t &frame, QRhiResourceUpdateBatch
 {
 	const std::size_t nObjects = frame.m_pScene ? frame.m_pScene->GetObjectCount() : 0;
 	const int nHeight = std::max( 1, static_cast<int>( ( nObjects + static_cast<std::size_t>( m_nStateWidth ) - 1 ) / static_cast<std::size_t>( m_nStateWidth ) ) );
-	if ( !m_pState || m_pState->pixelSize().height() != nHeight )
+	// The flat colours and flags, then as many rows again for the tints (map.vert).
+	m_nTintRow = nHeight;
+	if ( !m_pState || m_pState->pixelSize().height() != nHeight * 2 )
 	{
-		m_pState.reset( m_pRhi->newTexture( QRhiTexture::RGBA8, { m_nStateWidth, nHeight } ) );
+		m_pState.reset( m_pRhi->newTexture( QRhiTexture::RGBA8, { m_nStateWidth, nHeight * 2 } ) );
 		m_pState->create();
 		m_pLineColors.reset( m_pRhi->newTexture( QRhiTexture::RGBA8, { m_nStateWidth, nHeight } ) );
 		m_pLineColors->create();
@@ -467,12 +469,21 @@ void CMapRenderer::UploadState( const MapFrame_t &frame, QRhiResourceUpdateBatch
 		m_ModelLinesAll = {};
 		m_ModelLinesSelected = {};
 	}
-	if ( frame.m_pFlags.get() != m_pStateFlags || frame.m_pFlatColors.get() != m_pStateColors )
+	if ( frame.m_pFlags.get() != m_pStateFlags || frame.m_pFlatColors.get() != m_pStateColors || frame.m_pTints.get() != m_pStateTints )
 	{
 		m_pStateFlags = frame.m_pFlags.get();
 		m_pStateColors = frame.m_pFlatColors.get();
-		QImage image( m_nStateWidth, nHeight, QImage::Format_RGBA8888 );
+		m_pStateTints = frame.m_pTints.get();
+		QImage image( m_nStateWidth, nHeight * 2, QImage::Format_RGBA8888 );
 		image.fill( Qt::transparent );
+		{
+			std::uint8_t *pTints = image.bits() + static_cast<std::size_t>( nHeight ) * static_cast<std::size_t>( m_nStateWidth ) * 4;
+			for ( std::size_t n = 0; n < static_cast<std::size_t>( nHeight ) * static_cast<std::size_t>( m_nStateWidth ); n++ )
+			{
+				const std::array<std::uint8_t, 4> tint = frame.m_pTints && n < frame.m_pTints->size() ? ( *frame.m_pTints )[ n ] : std::array<std::uint8_t, 4>{ 255, 255, 255, 255 };
+				std::copy( tint.begin(), tint.end(), pTints + n * 4 );
+			}
+		}
 		for ( std::size_t n = 0; n < nObjects; n++ )
 		{
 			std::uint8_t *p = image.bits() + n * 4;
@@ -1172,6 +1183,7 @@ void CMapRenderer::Render( QRhiCommandBuffer *pCommands, QRhiRenderTarget *pTarg
 		uniforms.m_FaceShade[ 2 ] = shade.m_vecFaceShade.m_flZ;
 		uniforms.m_State[ 0 ] = static_cast<float>( m_nStateWidth );
 		uniforms.m_State[ 1 ] = static_cast<float>( shade.m_nAnisotropy );
+		uniforms.m_State[ 2 ] = static_cast<float>( m_nTintRow );
 		uniforms.m_Instance[ 0 ] = shade.m_vecInstance.m_flX;
 		uniforms.m_Instance[ 1 ] = shade.m_vecInstance.m_flY;
 		uniforms.m_Instance[ 2 ] = shade.m_vecInstance.m_flZ;

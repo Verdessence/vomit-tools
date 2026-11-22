@@ -65,6 +65,12 @@ struct RasterLine_t
 	bool m_bOnTop = false;       // drawn over everything (Hammer's selection edges)
 };
 
+// An opacity (0-255) as how many of a 4x4 block's 16 pixels show, and whether this pixel is one
+// of them (an ordered dither, so the pattern stays put as the view moves). The graphics card's
+// shader (map.frag) uses the same matrix.
+[[nodiscard]] int ScreenDoorLevel( std::uint8_t nAlpha );
+[[nodiscard]] bool IsScreenDoorPixel( int x, int y, int nLevel );
+
 struct RasterScene_t
 {
 	std::vector<const CMapMesh *> m_Meshes;            // the map's, then entity boxes and the like
@@ -75,6 +81,7 @@ struct RasterScene_t
 	std::span<const RasterMaterial_t> m_Materials;     // by the meshes' material indices
 	std::span<const std::uint8_t> m_ObjectFlags;       // RasterObject_t bits, by object
 	std::span<const std::array<std::uint8_t, 3>> m_ObjectColors; // flat colours, by object
+	std::span<const std::array<std::uint8_t, 4>> m_ObjectTints;  // rendercolor and opacity, by object (map/RenderFx.h)
 	std::span<const std::array<std::uint8_t, 3>> m_LineColors;   // wireframe colours, by object
 	std::span<const RasterLine_t> m_Lines;
 	// By mesh (as m_Meshes), per vertex: how the lighting preview lights it (map/Lighting.h's
