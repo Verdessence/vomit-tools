@@ -27,6 +27,7 @@
 #include <QCloseEvent>
 #include <QCryptographicHash>
 #include <QDesktopServices>
+#include <QEvent>
 #include <QFrame>
 #include <QGridLayout>
 #include <QDockWidget>
@@ -36,6 +37,7 @@
 #include <QFileInfo>
 #include <QHBoxLayout>
 #include <QHeaderView>
+#include <QIcon>
 #include <QComboBox>
 #include <QDialogButtonBox>
 #include <QFormLayout>
@@ -59,6 +61,7 @@
 #include <QSortFilterProxyModel>
 #include <QSplitter>
 #include <QStyle>
+#include <QPalette>
 #include <QPointer>
 #include <QSysInfo>
 #include <QStandardPaths>
@@ -408,6 +411,87 @@ QString DiskModelForCompanion( const QString &szPath )
 		return QFileInfo( szFound ).isFile() ? szFound : QString{};
 	} );
 }
+
+//-----------------------------------------------------------------------------
+// Purpose: The system's logo. Distributions name it by os-release's LOGO, which icon themes
+//          don't always carry (Arch's archlinux-logo lives only in /usr/share/pixmaps).
+//-----------------------------------------------------------------------------
+QIcon OsLogo( const QIcon &fallback )
+{
+#ifdef Q_OS_WIN
+	return QIcon::fromTheme( QStringLiteral( "distributor-logo-windows" ), fallback );
+#elif defined( Q_OS_MACOS )
+	return QIcon::fromTheme( QStringLiteral( "distributor-logo-apple" ), fallback );
+#else
+	QString szLogo;
+	for ( const QString &szFile : { QStringLiteral( "/etc/os-release" ), QStringLiteral( "/usr/lib/os-release" ) } )
+	{
+		QFile file( szFile );
+		if ( !file.open( QIODevice::ReadOnly | QIODevice::Text ) )
+			continue;
+		while ( !file.atEnd() )
+		{
+			const QString szLine = QString::fromUtf8( file.readLine() ).trimmed();
+			if ( szLine.startsWith( QLatin1String( "LOGO=" ) ) )
+				szLogo = szLine.mid( 5 ).remove( QLatin1Char( '"' ) ).remove( QLatin1Char( '\'' ) );
+		}
+		break;
+	}
+	QStringList names;
+	if ( !szLogo.isEmpty() )
+		names << szLogo;
+	names << QStringLiteral( "distributor-logo-%1" ).arg( QSysInfo::productType() );
+	for ( const QString &szName : names )
+	{
+		if ( QIcon::hasThemeIcon( szName ) )
+			return QIcon::fromTheme( szName );
+	}
+	if ( !szLogo.isEmpty() )
+	{
+		for ( const char *pszExtension : { ".svg", ".png" } )
+		{
+			const QString szPath = QStringLiteral( "/usr/share/pixmaps/" ) + szLogo + QLatin1String( pszExtension );
+			if ( QFileInfo::exists( szPath ) )
+				return QIcon( szPath );
+		}
+	}
+	return QIcon::fromTheme( QStringLiteral( "distributor-logo" ), fallback );
+#endif
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: A label drawn in its parent's text colour, faded, and kept so when the theme changes.
+//-----------------------------------------------------------------------------
+class CQuietLabel : public QLabel
+{
+public:
+	using QLabel::QLabel;
+
+protected:
+	void changeEvent( QEvent *pEvent ) override
+	{
+		QLabel::changeEvent( pEvent );
+		if ( ( pEvent->type() == QEvent::PaletteChange || pEvent->type() == QEvent::ParentChange ) && !m_bTinting )
+			Tint();
+	}
+
+private:
+	void Tint()
+	{
+		const QWidget *pParent = parentWidget();
+		QColor colour = ( pParent ? pParent->palette() : QApplication::palette() ).color( QPalette::WindowText );
+		colour.setAlphaF( 0.55f );
+		if ( palette().color( QPalette::WindowText ) == colour )
+			return;
+		m_bTinting = true;
+		QPalette pal = palette();
+		pal.setColor( QPalette::WindowText, colour );
+		setPalette( pal );
+		m_bTinting = false;
+	}
+
+	bool m_bTinting = false;
+};
 
 } // namespace
 
@@ -1158,35 +1242,37 @@ QWidget *CMainWindow::BuildFooter()
 	auto *pFooter = new QWidget( statusBar() );
 	pFooter->setObjectName( QStringLiteral( "footer" ) );
 	auto *pLayout = new QHBoxLayout( pFooter );
-	pLayout->setContentsMargins( 8, 0, 4, 0 );
-	auto *pText = new QLabel;
+	pLayout->setContentsMargins( 12, 0, 8, 0 );
+	pLayout->setSpacing( 0 );
+	auto *pText = new CQuietLabel;
 	pText->setObjectName( QStringLiteral( "footerVersion" ) );
 	pLayout->addWidget( pText );
+	auto *pOsGap = new QWidget;
+	pOsGap->setFixedWidth( 12 );
+	pLayout->addWidget( pOsGap );
 	auto *pOs = new QLabel;
-	const QSize iconSize( 16, 16 );
-#ifdef Q_OS_WIN
-	const QString szOsIcon = QStringLiteral( "distributor-logo-windows" );
-#elif defined( Q_OS_MACOS )
-	const QString szOsIcon = QStringLiteral( "distributor-logo-apple" );
-#else
-	const QString szOsIcon = QStringLiteral( "distributor-logo-%1" ).arg( QSysInfo::productType() );
-#endif
-	pOs->setPixmap( QIcon::fromTheme( szOsIcon, style()->standardIcon( QStyle::SP_ComputerIcon ) ).pixmap( iconSize, devicePixelRatioF() ) );
+	pOs->setPixmap( OsLogo( style()->standardIcon( QStyle::SP_ComputerIcon ) ).pixmap( QSize( 16, 16 ), devicePixelRatioF() ) );
 	pOs->setToolTip( QSysInfo::prettyProductName() );
 	pOs->setAccessibleName( pOs->toolTip() );
 	pLayout->addWidget( pOs );
-	auto *pMadeIn = new QLabel( tr( "made in" ) );
+	auto *pGap = new QWidget;
+	pGap->setFixedWidth( 12 );
+	pLayout->addWidget( pGap );
+	auto *pMadeIn = new CQuietLabel( tr( "made in" ) );
 	pLayout->addWidget( pMadeIn );
+	pLayout->addSpacing( 5 );
 	auto *pFlag = new QLabel;
 	pFlag->setPixmap( QIcon( QStringLiteral( ":/assets/flag-ph.png" ) ).pixmap( QSize( 20, 10 ), devicePixelRatioF() ) );
 	pFlag->setToolTip( tr( "Made in the Philippines" ) );
 	pFlag->setAccessibleName( tr( "Philippines" ) );
 	pLayout->addWidget( pFlag );
-	const auto updateInfo = [ pFooter, pText, pOs, pMadeIn, pFlag ]( FooterInfo_t nInfo ) {
+	const auto updateInfo = [ pFooter, pText, pOsGap, pOs, pGap, pMadeIn, pFlag ]( FooterInfo_t nInfo ) {
 		const bool bFull = nInfo == FooterInfo_t::FOOTER_INFO_FULL;
 		const QString szVersion = QString::fromUtf8( buildinfo::version );
 		pText->setText( bFull ? tr( "Free Edition · %1" ).arg( szVersion ) : szVersion );
+		pOsGap->setVisible( bFull );
 		pOs->setVisible( bFull );
+		pGap->setVisible( bFull );
 		pMadeIn->setVisible( bFull );
 		pFlag->setVisible( bFull );
 		pFooter->setToolTip( bFull ? CAboutDialog::BuildDetails() : QString{} );
