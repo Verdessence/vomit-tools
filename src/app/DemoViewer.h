@@ -16,6 +16,7 @@
 #include <array>
 #include <cstdint>
 #include <filesystem>
+#include <future>
 #include <map>
 #include <optional>
 #include <set>
@@ -105,11 +106,27 @@ struct PathCut_t
 	std::array<double, 3> m_flMax{};
 };
 
+// What the paths view's picture (Save Image…) holds.
+struct DemoPathPicture_t
+{
+	double m_flScale = 2.0;     // times the view's size
+	bool m_bMap = true;         // the radar or floors under the paths
+	bool m_bTransparent = false; // without the map: no background
+	bool m_bWholeDemo = false;  // every path strong, not only what played by the playhead
+	bool m_bPlayers = true;     // the players where they are at the playhead
+};
+
 class CDemoPathView : public QWidget
 {
 	Q_OBJECT
 public:
 	explicit CDemoPathView( CDemoViewer &viewer, QWidget *pParent = nullptr );
+	// Waits for paths being drawn on a worker (they read the viewer's players).
+	void StopWork();
+	// For tests: waits for the paths being drawn on a worker, and takes them.
+	void WaitForPaths();
+	// The view as a picture, the paths drawn again at its size.
+	[[nodiscard]] QImage RenderPicture( const DemoPathPicture_t &options );
 	// A place in the map to widget pixels (top: x right, y up, as Hammer's top view);
 	// pDepth gets how far into the picture it is (larger: further).
 	[[nodiscard]] QPointF ToWidget( const xv::CVec3 &vecAt, double *pDepth = nullptr ) const;
@@ -195,8 +212,38 @@ private:
 		QColor m_Color;
 	};
 	void FitBounds();
-	void BuildStretches();
-	void InvalidatePaths();
+	// What drawing the paths needs, copied, so a worker can draw them while the view moves on.
+	struct PathInputs_t
+	{
+		DemoPathMode_t m_nMode = DemoPathMode_t::DEMO_PATH_PLAYERS;
+		int m_nTeam = 0;
+		Projection_t m_Projection;
+		xv::CVec3 m_vecCentre;
+		const xv::demo::CPlayers *m_pPlayers = nullptr;
+		const std::vector<xv::demo::View_t> *m_pViews = nullptr;
+		double m_flTickInterval = 0.015;
+		QColor m_Highlight, m_Text;
+		QSize m_Pixels;
+		double m_flDpr = 1.0;
+	};
+	// The paths drawn for one projection: faint, strong once played, and each pixel's tick.
+	struct PathPictures_t
+	{
+		std::vector<Stretch_t> m_Stretches;
+		QImage m_Faint, m_Strong, m_Ticks;
+		Projection_t m_Projection;
+		int m_nGeneration = 0;
+	};
+	[[nodiscard]] static QPointF ProjectAround( const Projection_t &projection, const xv::CVec3 &vecCentre, double x, double y, double z, double *pDepth = nullptr );
+	[[nodiscard]] static std::vector<Stretch_t> BuildStretches( const PathInputs_t &inputs );
+	[[nodiscard]] static PathPictures_t DrawPaths( const PathInputs_t &inputs );
+	// Draws the paths for the view now: at once (bNow), else on a worker while the last
+	// pictures are warped to the view.
+	void StartPaths( bool bNow );
+	void TakePaths( PathPictures_t pictures );
+	// The paths are drawn again; bKeepShown leaves the last ones up (warped) until they are,
+	// for a change of view that doesn't change what they show.
+	void InvalidatePaths( bool bKeepShown = false );
 	void PaintPaths( QPainter &painter, int nTick );
 	void UpdatePlayedPath( int nTick );
 	struct CutPlane_t
@@ -212,6 +259,8 @@ private:
 	void PaintCutGrid( QPainter &painter ) const;
 	[[nodiscard]] bool HasRadarBackground() const { return m_bPreferRadar && m_nView == DemoPathView_t::DEMO_PATH_VIEW_TOP && !m_Radar.isNull(); }
 	void PaintRadar( QPainter &painter ) const;
+	void PaintUnder( QPainter &painter, bool bMap );
+	void PaintPlayers( QPainter &painter, int nTick ) const;
 	void BuildFloor();
 	// The heat in the world (where, how much), counted again when what it counts changes.
 	void GatherHeat();
@@ -228,9 +277,15 @@ private:
 	xv::CVec3 m_vecMaxs;
 	std::vector<Stretch_t> m_Stretches;
 	QImage m_FaintPaths;
-	QImage m_PlayedPaths;
+	QImage m_PlayedPaths; // m_StrongPaths where m_PathTicks is at or before the playhead
+	QImage m_StrongPaths; // every path as it shows once played
+	QImage m_PathTicks;   // each pixel's earliest tick a path reaches it, plus one, in its rgb; 0: none
 	Projection_t m_PathProjection;
 	int m_nPathTick = -1;
+	int m_nPathGeneration = 0;  // raised by each change the paths must follow
+	bool m_bPathsStale = false; // the pictures shown are for an older view
+	std::future<PathPictures_t> m_PathBuild;
+	QTimer *m_pPathPoll = nullptr; // looks for the worker's pictures
 	qint64 m_nPathPalette = 0;
 	QTimer *m_pPathTimer = nullptr;
 	QImage m_Radar;
@@ -279,6 +334,7 @@ public:
 	// szName: the game path or file name shown; disk: the file on disk, empty for a game file.
 	// players: the demo's players, followed through its packets (empty when they weren't).
 	CDemoViewer( const QString &szName, xv::demo::CDemo demo, const std::filesystem::path &disk, bool bFromGame, xv::demo::CPlayers players = {}, std::shared_ptr<const xv::demo::CContents> pContents = {}, QWidget *pParent = nullptr );
+	~CDemoViewer() override;
 
 	[[nodiscard]] const xv::demo::CDemo &GetDemo() const { return m_Demo; }
 	[[nodiscard]] const xv::demo::CPlayers &GetPlayers() const { return m_Players; }
@@ -317,6 +373,8 @@ public:
 
 	// A warning under the summary (the map shown isn't the demo's).
 	void AddWarning( const QString &szText );
+	// Takes the map warnings away (another map is being put under the demo).
+	void ClearWarnings();
 	// The game's files: the HUD's layout, scheme and icons, and the language the demo's texts
 	// are put in words with. Null for none.
 	// nAudio: where the demo's sound goes (tests: offline).
@@ -373,6 +431,8 @@ public:
 
 signals:
 	void TickChanged( int nTick );
+	// Map File… was clicked: the window asks which .bsp to show the demo on.
+	void MapFileWanted();
 
 protected:
 	void keyPressEvent( QKeyEvent *pEvent ) override;

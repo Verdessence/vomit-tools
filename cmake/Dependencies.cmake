@@ -208,3 +208,18 @@ if(VOMIT_TOOLS_BUILD_APP)
         set(VOMIT_TOOLS_JXL_TARGET jxl)
     endif()
 endif()
+
+# AVIF pictures (the demo viewer's Save Image) through the system's libavif and its AV1
+# encoders; without it (Windows), only through a Qt image plugin if one is installed.
+if(VOMIT_TOOLS_BUILD_APP AND NOT WIN32)
+    find_package(PkgConfig QUIET)
+    if(PkgConfig_FOUND)
+        pkg_check_modules(AVIF QUIET IMPORTED_TARGET libavif>=1.0)
+    endif()
+    if(TARGET PkgConfig::AVIF)
+        set(VOMIT_TOOLS_AVIF_TARGET PkgConfig::AVIF)
+        message(STATUS "AVIF pictures: libavif ${AVIF_VERSION}")
+    else()
+        message(STATUS "AVIF pictures: only through a Qt image plugin (no libavif)")
+    endif()
+endif()

@@ -493,6 +493,14 @@ private:
 	bool m_bTinting = false;
 };
 
+//-----------------------------------------------------------------------------
+// Purpose: Where the .bsp picked for a demo's map is kept, by the map's name.
+//-----------------------------------------------------------------------------
+QString DemoMapKey( const QString &szMap )
+{
+	return QStringLiteral( "demoViewer/mapFiles/%1" ).arg( szMap.toLower() );
+}
+
 } // namespace
 
 //-----------------------------------------------------------------------------
@@ -6278,7 +6286,9 @@ CDemoViewer *CMainWindow::OpenDemoFile( const QString &szPath )
 	}
 	const QString szMap = QString::fromUtf8( demo->GetHeader().m_szMap );
 	auto *pViewer = new CDemoViewer( szName, std::move( *demo ), bDisk ? ToPath( info.absoluteFilePath() ) : fs::path{}, !bDisk, std::move( players ), std::move( pContents ) );
-	LoadDemoMap( *pViewer, szMap, bDisk ? info.absolutePath() : QString{} );
+	const QString szDemoFolder = bDisk ? info.absolutePath() : QString{};
+	LoadDemoMap( *pViewer, szMap, szDemoFolder );
+	connect( pViewer, &CDemoViewer::MapFileWanted, this, [ this, pViewer, szMap, szDemoFolder ] { ChooseDemoMap( *pViewer, szMap, szDemoFolder ); } );
 	// The HUD and the language come from the mounted game.
 	if ( m_Game )
 		pViewer->SetGameFiles( [ this ]( const std::string &szFile ) { return m_pFileSystem->Read( szFile ); }, m_nAudio );
@@ -6289,16 +6299,14 @@ CDemoViewer *CMainWindow::OpenDemoFile( const QString &szPath )
 }
 
 //-----------------------------------------------------------------------------
-// Purpose: The map a demo was recorded on, for its 3D view: maps/<name>.bsp from the mounted
-//          game (which has the maps a server sent, too), else beside the demo or in a maps
-//          folder there.
+// Purpose: The map a demo was recorded on, for its 3D view: the file the user picked for that
+//          map (Map File…), then maps/<name>.bsp from each of the mounted game's search paths
+//          (which have the maps a server sent, too), then beside the demo or in a maps folder
+//          there. Of several, the one whose hash is the one the server sent (a map compiled
+//          again is another map to the demo); else the first. A file just picked is shown
+//          whatever the others are.
 //-----------------------------------------------------------------------------
-// Purpose: The map a demo was recorded on, for its 3D view: maps/<name>.bsp from each of the
-//          mounted game's search paths (which have the maps a server sent, too), then beside
-//          the demo or in a maps folder there. Of several, the one whose hash is the one the
-//          server sent (a map compiled again is another map to the demo); else the first.
-//-----------------------------------------------------------------------------
-void CMainWindow::LoadDemoMap( CDemoViewer &viewer, const QString &szMap, const QString &szDemoFolder )
+void CMainWindow::LoadDemoMap( CDemoViewer &viewer, const QString &szMap, const QString &szDemoFolder, const QString &szFile )
 {
 	if ( szMap.isEmpty() )
 	{
@@ -6330,7 +6338,20 @@ void CMainWindow::LoadDemoMap( CDemoViewer &viewer, const QString &szMap, const 
 		if ( file.read( reinterpret_cast<char *>( bytes.data() ), file.size() ) == file.size() )
 			candidates.push_back( { std::move( bytes ), szPath, QDir::fromNativeSeparators( szPath ) } );
 	};
-	if ( m_Game )
+	if ( !szFile.isEmpty() )
+	{
+		addDisk( szFile );
+		if ( candidates.empty() )
+		{
+			viewer.GetWorld().SetNoMap( tr( "%1 couldn't be read: the players are shown without their map." ).arg( QDir::fromNativeSeparators( szFile ) ) );
+			return;
+		}
+	}
+	else
+	{
+		addDisk( QSettings{}.value( DemoMapKey( szMap ) ).toString() );
+	}
+	if ( m_Game && szFile.isEmpty() )
 	{
 		const std::string szPath = szGamePath.toStdString();
 		for ( const xv::vfs::MountRecord_t &record : m_pFileSystem->GetRecords() )
@@ -6343,21 +6364,21 @@ void CMainWindow::LoadDemoMap( CDemoViewer &viewer, const QString &szMap, const 
 				candidates.push_back( { std::move( *bytes ), {}, ToQString( record.m_pMount->GetLocation() ) } );
 		}
 	}
-	if ( !szDemoFolder.isEmpty() )
+	if ( !szDemoFolder.isEmpty() && szFile.isEmpty() )
 	{
 		for ( const QString &szTry : { szDemoFolder + QStringLiteral( "/maps/%1.bsp" ).arg( szMap ), szDemoFolder + QStringLiteral( "/download/maps/%1.bsp" ).arg( szMap ), szDemoFolder + QStringLiteral( "/%1.bsp" ).arg( szMap ) } )
 			addDisk( szTry );
 	}
 	if ( candidates.empty() )
 	{
-		viewer.GetWorld().SetNoMap( m_Game ? tr( "%1 isn't among the game's files: the players are shown without their map." ).arg( szGamePath )
-										   : tr( "No game is mounted to read %1 from: the players are shown without their map." ).arg( szGamePath ) );
+		viewer.GetWorld().SetNoMap( m_Game ? tr( "%1 isn't among the game's files: the players are shown without their map. Map File… shows them on a .bsp you choose." ).arg( szGamePath )
+										   : tr( "No game is mounted to read %1 from: the players are shown without their map. Map File… shows them on a .bsp you choose." ).arg( szGamePath ) );
 		return;
 	}
 	std::size_t nPick = 0;
 	const xv::demo::CContents *pContents = viewer.GetContents();
 	const auto &info = pContents ? pContents->GetServerInfo() : std::nullopt;
-	if ( info && info->m_MapHash != std::array<std::uint8_t, 16>{} )
+	if ( info && info->m_MapHash != std::array<std::uint8_t, 16>{} && szFile.isEmpty() )
 	{
 		std::optional<std::size_t> match;
 		for ( std::size_t i = 0; i < candidates.size() && !match; i++ )
@@ -6378,6 +6399,20 @@ void CMainWindow::LoadDemoMap( CDemoViewer &viewer, const QString &szMap, const 
 	}
 	Candidate_t &picked = candidates[ nPick ];
 	viewer.GetWorld().LoadCompiledMap( std::move( picked.m_Bytes ), m_Game, szMap + QStringLiteral( ".bsp" ), picked.m_szDisk.isEmpty() ? fs::path{} : ToPath( picked.m_szDisk ) );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+void CMainWindow::ChooseDemoMap( CDemoViewer &viewer, const QString &szMap, const QString &szDemoFolder )
+{
+	const QString szKept = QSettings{}.value( DemoMapKey( szMap ) ).toString();
+	const QString szFile = AskOpenFile( this, tr( "Map for %1" ).arg( viewer.GetTabTitle() ), szKept.isEmpty() ? LastFolderOr( szDemoFolder ) : szKept, tr( "Compiled maps (*.bsp);;All files (*)" ) );
+	if ( szFile.isEmpty() )
+		return;
+	QSettings{}.setValue( DemoMapKey( szMap ), szFile );
+	viewer.ClearWarnings();
+	LoadDemoMap( viewer, szMap, szDemoFolder, szFile );
 }
 
 //-----------------------------------------------------------------------------

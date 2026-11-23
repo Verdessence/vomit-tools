@@ -170,6 +170,11 @@ vomit-tools is GPL-3.0-or-later; see [LICENSE](LICENSE). It's built with:
 | [spdlog](https://github.com/gabime/spdlog) (with its bundled fmt) | CoACD's logging | MIT |
 | [V-HACD](https://github.com/kmammou/v-hacd) | model to VMF: voxel decomposition | BSD-3-Clause |
 | [wayland-protocols](https://gitlab.freedesktop.org/wayland/wayland-protocols) | the map view's mouselook on Wayland | MIT |
+| [Box3D](https://github.com/erincatto/box3d) | the map viewer's physics tool | MIT |
+| [libjxl](https://github.com/libjxl/libjxl) | JPEG XL picture caches and saved pictures | BSD-3-Clause |
+| [Brotli](https://github.com/google/brotli), [Highway](https://github.com/google/highway), [skcms](https://github.com/google/skcms) | libjxl's support code (where libjxl is built with the app) | MIT, Apache-2.0, BSD-3-Clause |
+| [libavif](https://github.com/AOMediaCodec/libavif) | saving AVIF pictures (Linux, the system's) | BSD-2-Clause |
+| [libaom](https://aomedia.googlesource.com/aom), [dav1d](https://code.videolan.org/videolan/dav1d), [rav1e](https://github.com/xiph/rav1e), [SVT-AV1](https://gitlab.com/AOMediaCodec/SVT-AV1), [libyuv](https://chromium.googlesource.com/libyuv/libyuv) | libavif's AV1 codecs and colour conversion, as the system built it | BSD-2-Clause, BSD-3-Clause-Clear, BSD-3-Clause |
 
 CoACD also carries nanoflann (BSD-2-Clause), Bullet's convex hull (Zlib), QuickHull (public
 domain) and Sobol sequence routines (LGPL-3.0-only); CDT carries William C. Lenthe's robust

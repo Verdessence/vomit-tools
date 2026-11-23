@@ -9,7 +9,9 @@
 
 #include <algorithm>
 #include <cctype>
+#include <chrono>
 #include <cmath>
+#include <future>
 #include <cstdio>
 #include <initializer_list>
 #include <limits>
@@ -56,6 +58,7 @@
 #include <QVBoxLayout>
 
 #include "DemoGraphs.h"
+#include "DemoPathSave.h"
 #include "DemoHud.h"
 #include "DemoVoice.h"
 #include "Preferences.h"
@@ -83,7 +86,7 @@ constexpr float ISOMETRIC_CUT = 128.0f;
 constexpr int FLOOR_DELAY = 120;
 // Milliseconds between the floors drawn again while a cut is being changed.
 constexpr int CUT_INTERVAL = 40;
-constexpr int PATH_INTERVAL = 60;
+constexpr int PATH_INTERVAL = 150; // the view still this long (ms): its paths are drawn again
 constexpr int CUT_LIMIT = 65536;
 const std::array<QColor, 3> CUT_COLORS{ QColor( 230, 106, 96 ), QColor( 117, 201, 124 ), QColor( 108, 163, 246 ) };
 // Each wheel step zooms by this much.
@@ -390,7 +393,22 @@ CDemoPathView::CDemoPathView( CDemoViewer &viewer, QWidget *pParent )
 	m_pPathTimer = new QTimer( this );
 	m_pPathTimer->setSingleShot( true );
 	m_pPathTimer->setInterval( PATH_INTERVAL );
-	connect( m_pPathTimer, &QTimer::timeout, this, &CDemoPathView::InvalidatePaths );
+	connect( m_pPathTimer, &QTimer::timeout, this, [ this ] { InvalidatePaths( true ); } );
+	m_pPathPoll = new QTimer( this );
+	m_pPathPoll->setInterval( 16 );
+	connect( m_pPathPoll, &QTimer::timeout, this, [ this ] {
+		if ( !m_PathBuild.valid() )
+		{
+			m_pPathPoll->stop();
+			return;
+		}
+		if ( m_PathBuild.wait_for( std::chrono::seconds( 0 ) ) != std::future_status::ready )
+			return;
+		m_pPathPoll->stop();
+		PathPictures_t pictures = m_PathBuild.get();
+		m_PathBuild = {};
+		TakePaths( std::move( pictures ) );
+	} );
 	m_pHeatTimer = new QTimer( this );
 	m_pHeatTimer->setSingleShot( true );
 	m_pHeatTimer->setInterval( HEAT_INTERVAL );
@@ -441,9 +459,18 @@ void CDemoPathView::FitBounds()
 //-----------------------------------------------------------------------------
 QPointF CDemoPathView::Project( const Projection_t &projection, double x, double y, double z, double *pDepth ) const
 {
-	const double dx = x - ( m_vecMins.m_flX + m_vecMaxs.m_flX ) * 0.5;
-	const double dy = y - ( m_vecMins.m_flY + m_vecMaxs.m_flY ) * 0.5;
-	const double dz = z - ( m_vecMins.m_flZ + m_vecMaxs.m_flZ ) * 0.5;
+	const xv::CVec3 vecCentre{ ( m_vecMins.m_flX + m_vecMaxs.m_flX ) * 0.5f, ( m_vecMins.m_flY + m_vecMaxs.m_flY ) * 0.5f, ( m_vecMins.m_flZ + m_vecMaxs.m_flZ ) * 0.5f };
+	return ProjectAround( projection, vecCentre, x, y, z, pDepth );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: The view's projection about the paths' middle (for a worker, which has no view).
+//-----------------------------------------------------------------------------
+QPointF CDemoPathView::ProjectAround( const Projection_t &projection, const xv::CVec3 &vecCentre, double x, double y, double z, double *pDepth )
+{
+	const double dx = x - vecCentre.m_flX;
+	const double dy = y - vecCentre.m_flY;
+	const double dz = z - vecCentre.m_flZ;
 	const double flAcross = dx * projection.m_flCosYaw - dy * projection.m_flSinYaw;
 	const double flAway = dx * projection.m_flSinYaw + dy * projection.m_flCosYaw;
 	if ( pDepth )
@@ -504,12 +531,12 @@ void CDemoPathView::ViewChanged()
 	UpdateProjection();
 	if ( ( m_nMode == DemoPathMode_t::DEMO_PATH_PRESENCE || m_nMode == DemoPathMode_t::DEMO_PATH_DEATHS ) && !m_pHeatTimer->isActive() )
 		m_pHeatTimer->start();
-	if ( !m_FaintPaths.isNull() && !m_pPathTimer->isActive() )
+	// Drawn again once the view stops changing (on a worker, the last ones warped meanwhile).
+	if ( !m_FaintPaths.isNull() )
 		m_pPathTimer->start();
-	// At most every FLOOR_DELAY while the view keeps moving, so a long turn doesn't leave the
-	// warped floor drifting from the heat and paths drawn over it.
-	if ( !m_pFloorTimer->isActive() )
-		m_pFloorTimer->start();
+	// Drawn again once the view stops changing: a big map's floors take tens of milliseconds,
+	// and drawn while it moves they made zooming and turning stutter.
+	m_pFloorTimer->start();
 	update();
 }
 
@@ -534,7 +561,7 @@ void CDemoPathView::SetView( DemoPathView_t nView )
 	if ( nView == m_nView )
 		return;
 	m_nView = nView;
-	InvalidatePaths();
+	InvalidatePaths( true );
 	m_flZoom = 1.0;
 	m_Pan = {};
 	ViewChanged();
@@ -555,7 +582,7 @@ void CDemoPathView::SetYaw( double flYaw )
 //-----------------------------------------------------------------------------
 void CDemoPathView::ResetView()
 {
-	InvalidatePaths();
+	InvalidatePaths( true );
 	m_flZoom = 1.0;
 	m_Pan = {};
 	ViewChanged();
@@ -700,44 +727,44 @@ void CDemoPathView::PaintRadar( QPainter &painter ) const
 // Purpose: Project each continuous path and keep points at least a pixel apart. Break
 //          stretches on teleports, deaths, respawns and team changes.
 //-----------------------------------------------------------------------------
-void CDemoPathView::BuildStretches()
+std::vector<CDemoPathView::Stretch_t> CDemoPathView::BuildStretches( const PathInputs_t &inputs )
 {
-	m_Stretches.clear();
+	std::vector<Stretch_t> stretches;
 	const auto add = [ & ]( const xv::CVec3 &vecAt, int nTick, bool bBreak, const QColor &color ) {
-		const QPointF at = ToWidget( vecAt );
-		if ( m_Stretches.empty() || bBreak )
+		const QPointF at = ProjectAround( inputs.m_Projection, inputs.m_vecCentre, vecAt.m_flX, vecAt.m_flY, vecAt.m_flZ );
+		if ( stretches.empty() || bBreak )
 		{
-			m_Stretches.emplace_back();
-			m_Stretches.back().m_Color = color;
+			stretches.emplace_back();
+			stretches.back().m_Color = color;
 		}
-		Stretch_t &stretch = m_Stretches.back();
+		Stretch_t &stretch = stretches.back();
 		if ( !stretch.m_Points.isEmpty() && ( stretch.m_Points.back() - at ).manhattanLength() < 1.0 )
 			return;
 		stretch.m_Points.push_back( at );
 		stretch.m_Ticks.push_back( nTick );
 	};
 	const auto jump = []( const xv::CVec3 &a, const xv::CVec3 &b ) { return std::abs( a.m_flX - b.m_flX ) > PATH_JUMP || std::abs( a.m_flY - b.m_flY ) > PATH_JUMP || std::abs( a.m_flZ - b.m_flZ ) > PATH_JUMP; };
-	if ( m_nMode == DemoPathMode_t::DEMO_PATH_CAMERA )
+	if ( inputs.m_nMode == DemoPathMode_t::DEMO_PATH_CAMERA && inputs.m_pViews )
 	{
 		const xv::CVec3 *pLast = nullptr;
-		for ( const xv::demo::View_t &view : m_Viewer.GetDemo().GetViews() )
+		for ( const xv::demo::View_t &view : *inputs.m_pViews )
 		{
 			const xv::CVec3 &vecAt = view.m_vecOrigin;
 			if ( vecAt.m_flX == 0.0f && vecAt.m_flY == 0.0f && vecAt.m_flZ == 0.0f )
 				continue;
-			add( vecAt, view.m_nTick, pLast && jump( vecAt, *pLast ), palette().color( QPalette::Highlight ) );
+			add( vecAt, view.m_nTick, pLast && jump( vecAt, *pLast ), inputs.m_Highlight );
 			pLast = &vecAt;
 		}
-		return;
+		return stretches;
 	}
-	if ( m_nMode != DemoPathMode_t::DEMO_PATH_PLAYERS )
-		return;
-	for ( const xv::demo::PlayerTrack_t &track : m_Viewer.GetPlayers().GetTracks() )
+	if ( inputs.m_nMode != DemoPathMode_t::DEMO_PATH_PLAYERS || !inputs.m_pPlayers )
+		return stretches;
+	for ( const xv::demo::PlayerTrack_t &track : inputs.m_pPlayers->GetTracks() )
 	{
 		const xv::demo::PlayerSample_t *pLast = nullptr;
 		for ( const xv::demo::PlayerSample_t &sample : track.m_Samples )
 		{
-			const bool bShown = sample.m_bAlive && sample.m_bThere && sample.m_nTeam >= 2 && ( m_nTeam == 0 || sample.m_nTeam == m_nTeam );
+			const bool bShown = sample.m_bAlive && sample.m_bThere && sample.m_nTeam >= 2 && ( inputs.m_nTeam == 0 || sample.m_nTeam == inputs.m_nTeam );
 			if ( !bShown )
 			{
 				pLast = nullptr;
@@ -748,19 +775,126 @@ void CDemoPathView::BuildStretches()
 			pLast = &sample;
 		}
 	}
+	return stretches;
 }
 
 //-----------------------------------------------------------------------------
-// Purpose: The next paint will draw both path layers for the current view and filters.
+// Purpose: The next paint draws the paths again. What they show changed: they go now (and are
+//          drawn at once). Only the view changed: the last ones stay up, warped, while a
+//          worker draws them.
 //-----------------------------------------------------------------------------
-void CDemoPathView::InvalidatePaths()
+void CDemoPathView::InvalidatePaths( bool bKeepShown )
 {
 	m_pPathTimer->stop();
-	m_FaintPaths = {};
-	m_PlayedPaths = {};
-	m_Stretches.clear();
+	m_nPathGeneration++;
+	if ( bKeepShown && !m_FaintPaths.isNull() )
+	{
+		m_bPathsStale = true;
+	}
+	else
+	{
+		m_FaintPaths = {};
+		m_PlayedPaths = {};
+		m_StrongPaths = {};
+		m_PathTicks = {};
+		m_Stretches.clear();
+		m_nPathTick = -1;
+		m_bPathsStale = false;
+	}
+	update();
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: The paths for the view as it is now: drawn here, or on a worker whose pictures the
+//          poll takes when they are done (a newer change by then sends them back).
+//-----------------------------------------------------------------------------
+void CDemoPathView::StartPaths( bool bNow )
+{
+	if ( m_PathBuild.valid() )
+	{
+		if ( !bNow )
+			return;
+		m_PathBuild.wait();
+		m_PathBuild = {};
+	}
+	if ( size() != m_ProjectedFor )
+		UpdateProjection();
+	PathInputs_t inputs;
+	inputs.m_nMode = m_nMode;
+	inputs.m_nTeam = m_nTeam;
+	inputs.m_Projection = m_Projection;
+	inputs.m_vecCentre = { ( m_vecMins.m_flX + m_vecMaxs.m_flX ) * 0.5f, ( m_vecMins.m_flY + m_vecMaxs.m_flY ) * 0.5f, ( m_vecMins.m_flZ + m_vecMaxs.m_flZ ) * 0.5f };
+	inputs.m_pPlayers = &m_Viewer.GetPlayers();
+	inputs.m_pViews = &m_Viewer.GetDemo().GetViews();
+	inputs.m_flTickInterval = m_Viewer.GetDemo().GetTickInterval() > 0.0 ? m_Viewer.GetDemo().GetTickInterval() : FALLBACK_TICK_INTERVAL;
+	inputs.m_Highlight = palette().color( QPalette::Highlight );
+	inputs.m_Text = palette().color( QPalette::Text );
+	inputs.m_flDpr = devicePixelRatioF();
+	inputs.m_Pixels = QSize( qCeil( width() * inputs.m_flDpr ), qCeil( height() * inputs.m_flDpr ) );
+	m_nPathPalette = palette().cacheKey();
+	const int nGeneration = m_nPathGeneration;
+	m_bPathsStale = false;
+	if ( bNow )
+	{
+		PathPictures_t pictures = DrawPaths( inputs );
+		pictures.m_nGeneration = nGeneration;
+		TakePaths( std::move( pictures ) );
+		return;
+	}
+	m_PathBuild = std::async( std::launch::async, [ inputs, nGeneration ] {
+		PathPictures_t pictures = DrawPaths( inputs );
+		pictures.m_nGeneration = nGeneration;
+		return pictures;
+	} );
+	m_pPathPoll->start();
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Finished pictures become the ones shown, unless a change has come since (then the
+//          paths are drawn again, the old ones still up).
+//-----------------------------------------------------------------------------
+void CDemoPathView::TakePaths( PathPictures_t pictures )
+{
+	if ( pictures.m_nGeneration != m_nPathGeneration )
+	{
+		m_bPathsStale = true;
+		update();
+		return;
+	}
+	m_Stretches = std::move( pictures.m_Stretches );
+	m_FaintPaths = std::move( pictures.m_Faint );
+	m_StrongPaths = std::move( pictures.m_Strong );
+	m_PathTicks = std::move( pictures.m_Ticks );
+	m_PathProjection = pictures.m_Projection;
+	m_PlayedPaths = QImage( m_StrongPaths.size(), QImage::Format_ARGB32_Premultiplied );
+	m_PlayedPaths.setDevicePixelRatio( m_StrongPaths.devicePixelRatio() );
+	m_PlayedPaths.fill( Qt::transparent );
 	m_nPathTick = -1;
 	update();
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+void CDemoPathView::StopWork()
+{
+	m_pPathPoll->stop();
+	if ( m_PathBuild.valid() )
+		m_PathBuild.wait();
+	m_PathBuild = {};
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+void CDemoPathView::WaitForPaths()
+{
+	if ( !m_PathBuild.valid() )
+		return;
+	m_pPathPoll->stop();
+	PathPictures_t pictures = m_PathBuild.get();
+	m_PathBuild = {};
+	TakePaths( std::move( pictures ) );
 }
 
 //-----------------------------------------------------------------------------
@@ -769,30 +903,115 @@ void CDemoPathView::InvalidatePaths()
 //-----------------------------------------------------------------------------
 void CDemoPathView::UpdatePlayedPath( int nTick )
 {
-	if ( nTick == m_nPathTick )
+	if ( nTick == m_nPathTick || m_StrongPaths.isNull() || m_PathTicks.isNull() )
 		return;
-	const bool bRestart = m_nPathTick < 0 || nTick < m_nPathTick;
-	if ( bRestart )
-		m_PlayedPaths.fill( Qt::transparent );
-
-	QPainter painter( &m_PlayedPaths );
-	painter.setRenderHint( QPainter::Antialiasing );
-	const bool bCamera = m_nMode == DemoPathMode_t::DEMO_PATH_CAMERA;
-	for ( const Stretch_t &stretch : m_Stretches )
-	{
-		const auto first = stretch.m_Ticks.begin();
-		const auto end = stretch.m_Ticks.end();
-		const auto nNow = std::upper_bound( first, end, nTick ) - first;
-		const auto nWas = bRestart ? 0 : std::upper_bound( first, end, m_nPathTick ) - first;
-		const auto nBegin = std::max<qsizetype>( 0, nWas - 1 );
-		if ( nNow - nBegin < 2 )
-			continue;
-		QColor strong = stretch.m_Color;
-		strong.setAlphaF( bCamera ? 1.0f : 0.7f );
-		painter.setPen( QPen( strong, bCamera ? 2.0 : 1.2 ) );
-		painter.drawPolyline( stretch.m_Points.constData() + nBegin, static_cast<int>( nNow - nBegin ) );
-	}
+	// The played paths are the strong picture where a path reached the pixel by now: a pass
+	// over the pixels, whichever way the playhead went and however many paths there are
+	// (painting them up to the playhead again took tens of milliseconds on a full server).
+	const std::uint32_t nUpTo = static_cast<std::uint32_t>( std::max( 0, nTick ) ) + 1;
+	const int nWide = m_PlayedPaths.width();
+	xv::ParallelFor( static_cast<std::size_t>( m_PlayedPaths.height() ), 64, [ & ]( std::size_t nBegin, std::size_t nEnd ) {
+		for ( std::size_t y = nBegin; y < nEnd; y++ )
+		{
+			const auto *pTicks = reinterpret_cast<const QRgb *>( m_PathTicks.constScanLine( static_cast<int>( y ) ) );
+			const auto *pStrong = reinterpret_cast<const QRgb *>( m_StrongPaths.constScanLine( static_cast<int>( y ) ) );
+			auto *pOut = reinterpret_cast<QRgb *>( m_PlayedPaths.scanLine( static_cast<int>( y ) ) );
+			for ( int x = 0; x < nWide; x++ )
+			{
+				const std::uint32_t nAt = pTicks[ x ] & 0xffffffu;
+				pOut[ x ] = nAt != 0 && nAt <= nUpTo ? pStrong[ x ] : 0u;
+			}
+		}
+	} );
 	m_nPathTick = nTick;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Every path faint, every path as it shows once played, and each pixel's earliest
+//          tick a path reaches it (a little wider than the strong pen, so its soft edge is
+//          covered), for the inputs' projection; on any thread.
+//-----------------------------------------------------------------------------
+CDemoPathView::PathPictures_t CDemoPathView::DrawPaths( const PathInputs_t &inputs )
+{
+	PathPictures_t pictures;
+	pictures.m_Projection = inputs.m_Projection;
+	pictures.m_Stretches = BuildStretches( inputs );
+	const std::vector<Stretch_t> &stretches = pictures.m_Stretches;
+	const bool bCamera = inputs.m_nMode == DemoPathMode_t::DEMO_PATH_CAMERA;
+	if ( inputs.m_Pixels.isEmpty() )
+		return pictures;
+	pictures.m_Faint = QImage( inputs.m_Pixels, QImage::Format_ARGB32_Premultiplied );
+	pictures.m_Strong = QImage( inputs.m_Pixels, QImage::Format_ARGB32_Premultiplied );
+	pictures.m_Ticks = QImage( inputs.m_Pixels, QImage::Format_RGB32 );
+	for ( QImage *pImage : { &pictures.m_Faint, &pictures.m_Strong, &pictures.m_Ticks } )
+		pImage->setDevicePixelRatio( inputs.m_flDpr );
+	pictures.m_Strong.fill( Qt::transparent );
+	pictures.m_Ticks.fill( 0u );
+	const double flPen = bCamera ? 2.0 : 1.2;
+	// The three at once, each on its own image: the strong and faint ones on workers.
+	std::future<void> strong = std::async( std::launch::async, [ &pictures, &stretches, bCamera, flPen ] {
+		QPainter painter( &pictures.m_Strong );
+		painter.setRenderHint( QPainter::Antialiasing );
+		for ( const Stretch_t &stretch : stretches )
+		{
+			if ( stretch.m_Points.size() < 2 )
+				continue;
+			QColor color = stretch.m_Color;
+			color.setAlphaF( bCamera ? 1.0f : 0.7f );
+			painter.setPen( QPen( color, flPen ) );
+			painter.drawPolyline( stretch.m_Points );
+		}
+	} );
+	std::future<void> faint = std::async( std::launch::async, [ &pictures, &stretches, &inputs, bCamera ] {
+		pictures.m_Faint.fill( Qt::transparent );
+		QPainter painter( &pictures.m_Faint );
+		painter.setRenderHint( QPainter::Antialiasing );
+		for ( const Stretch_t &stretch : stretches )
+		{
+			QColor color = bCamera ? inputs.m_Text : stretch.m_Color;
+			color.setAlphaF( bCamera ? 0.25f : 0.18f );
+			painter.setPen( QPen( color, 1 ) );
+			painter.drawPolyline( stretch.m_Points );
+		}
+	} );
+	// Stepped along each segment by hand, keeping the earlier tick in a square round each
+	// step: QPainter's wide pens took about 60 ms for a full server's paths.
+	QImage &ticks = pictures.m_Ticks;
+	const double flDpr = inputs.m_flDpr;
+	const int nRadius = std::max( 1, static_cast<int>( std::ceil( ( flPen + 1.0 ) * flDpr * 0.5 ) ) );
+	const int nWide = ticks.width(), nTall = ticks.height();
+	auto *pTicks = reinterpret_cast<QRgb *>( ticks.bits() );
+	const auto bytesPerLine = static_cast<std::size_t>( ticks.bytesPerLine() / 4 );
+	const auto mark = [ & ]( int x, int y, std::uint32_t nValue ) {
+		for ( int dy = std::max( 0, y - nRadius ); dy <= std::min( nTall - 1, y + nRadius ); dy++ )
+		{
+			QRgb *pRow = pTicks + static_cast<std::size_t>( dy ) * bytesPerLine;
+			for ( int dx = std::max( 0, x - nRadius ); dx <= std::min( nWide - 1, x + nRadius ); dx++ )
+			{
+				const std::uint32_t nHave = pRow[ dx ] & 0xffffffu;
+				if ( nHave == 0 || nValue < nHave )
+					pRow[ dx ] = 0xff000000u | nValue;
+			}
+		}
+	};
+	for ( const Stretch_t &stretch : stretches )
+	{
+		for ( qsizetype i = 1; i < stretch.m_Points.size(); i++ )
+		{
+			const std::uint32_t nValue = static_cast<std::uint32_t>( std::clamp( stretch.m_Ticks[ static_cast<std::size_t>( i ) ] + 1, 1, 0xffffff ) );
+			const QPointF from = stretch.m_Points[ i - 1 ] * flDpr, to = stretch.m_Points[ i ] * flDpr;
+			const double flLength = std::max( std::abs( to.x() - from.x() ), std::abs( to.y() - from.y() ) );
+			const int nSteps = std::max( 1, static_cast<int>( std::ceil( flLength / std::max( 1, nRadius ) ) ) );
+			for ( int n = 0; n <= nSteps; n++ )
+			{
+				const QPointF at = from + ( to - from ) * ( static_cast<double>( n ) / nSteps );
+				mark( static_cast<int>( std::lround( at.x() ) ), static_cast<int>( std::lround( at.y() ) ), nValue );
+			}
+		}
+	}
+	strong.wait();
+	faint.wait();
+	return pictures;
 }
 
 //-----------------------------------------------------------------------------
@@ -809,26 +1028,11 @@ void CDemoPathView::PaintPaths( QPainter &painter, int nTick )
 	if ( !m_FaintPaths.isNull() && ( m_FaintPaths.devicePixelRatio() != flDpr || m_nPathPalette != nPalette ) )
 		InvalidatePaths();
 	if ( m_FaintPaths.isNull() )
-	{
-		m_nPathPalette = nPalette;
-		BuildStretches();
-		m_PathProjection = m_Projection;
-		const QSize pixels( qCeil( width() * flDpr ), qCeil( height() * flDpr ) );
-		m_FaintPaths = QImage( pixels, QImage::Format_ARGB32_Premultiplied );
-		m_PlayedPaths = QImage( pixels, QImage::Format_ARGB32_Premultiplied );
-		m_FaintPaths.setDevicePixelRatio( flDpr );
-		m_PlayedPaths.setDevicePixelRatio( flDpr );
-		m_FaintPaths.fill( Qt::transparent );
-		QPainter faintPainter( &m_FaintPaths );
-		faintPainter.setRenderHint( QPainter::Antialiasing );
-		for ( const Stretch_t &stretch : m_Stretches )
-		{
-			QColor faint = bCamera ? palette().color( QPalette::Text ) : stretch.m_Color;
-			faint.setAlphaF( bCamera ? 0.25f : 0.18f );
-			faintPainter.setPen( QPen( faint, 1 ) );
-			faintPainter.drawPolyline( stretch.m_Points );
-		}
-	}
+		StartPaths( true );
+	else if ( m_bPathsStale )
+		StartPaths( false );
+	if ( m_FaintPaths.isNull() )
+		return;
 	UpdatePlayedPath( nTick );
 	const QTransform warp = Reprojection( m_PathProjection );
 	painter.save();
@@ -1592,29 +1796,7 @@ void CDemoPathView::paintEvent( QPaintEvent * )
 							  : tr( "This demo's packets don't say where the camera was." ) );
 		return;
 	}
-	if ( IsShowingRadar() )
-	{
-		PaintRadar( painter );
-	}
-	else if ( m_bShowMap && !m_Floor.isNull() )
-	{
-		// Drawn for another view: warped to fit until it is drawn again, so a turn never
-		// leaves the view blank between redraws.
-		const QTransform warp = Reprojection( m_FloorProjection );
-		painter.save();
-		painter.setTransform( warp, true );
-		painter.setRenderHint( QPainter::SmoothPixmapTransform, !warp.isIdentity() );
-		painter.drawImage( 0, 0, m_Floor );
-		painter.restore();
-	}
-	if ( !m_HeatImage.isNull() )
-	{
-		painter.save();
-		painter.setTransform( Reprojection( m_HeatProjection ), true );
-		painter.setRenderHint( QPainter::SmoothPixmapTransform, true );
-		painter.drawImage( QRectF( 0, 0, m_HeatImage.width() * m_flHeatCell, m_HeatImage.height() * m_flHeatCell ), m_HeatImage );
-		painter.restore();
-	}
+	PaintUnder( painter, true );
 	const int nTick = m_Viewer.GetTick();
 	PaintPaths( painter, nTick );
 	painter.setRenderHint( QPainter::Antialiasing );
@@ -1634,7 +1816,45 @@ void CDemoPathView::paintEvent( QPaintEvent * )
 		}
 		return;
 	}
-	// The players where they are now, each facing its way.
+	PaintPlayers( painter, nTick );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: The map (the radar, or the floors warped to the view) and the heat over it.
+//-----------------------------------------------------------------------------
+void CDemoPathView::PaintUnder( QPainter &painter, bool bMap )
+{
+	if ( bMap && IsShowingRadar() )
+	{
+		PaintRadar( painter );
+	}
+	else if ( bMap && m_bShowMap && !m_Floor.isNull() )
+	{
+		// Drawn for another view: warped to fit until it is drawn again, so a turn never
+		// leaves the view blank between redraws.
+		const QTransform warp = Reprojection( m_FloorProjection );
+		painter.save();
+		painter.setTransform( warp, true );
+		painter.setRenderHint( QPainter::SmoothPixmapTransform, !warp.isIdentity() );
+		painter.drawImage( 0, 0, m_Floor );
+		painter.restore();
+	}
+	if ( !m_HeatImage.isNull() )
+	{
+		painter.save();
+		painter.setTransform( Reprojection( m_HeatProjection ), true );
+		painter.setRenderHint( QPainter::SmoothPixmapTransform, true );
+		painter.drawImage( QRectF( 0, 0, m_HeatImage.width() * m_flHeatCell, m_HeatImage.height() * m_flHeatCell ), m_HeatImage );
+		painter.restore();
+	}
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: The players where they are at the tick, each facing its way.
+//-----------------------------------------------------------------------------
+void CDemoPathView::PaintPlayers( QPainter &painter, int nTick ) const
+{
+	painter.setRenderHint( QPainter::Antialiasing );
 	for ( const xv::demo::PlayerState_t &player : m_Viewer.GetPlayers().At( static_cast<double>( nTick ) ) )
 	{
 		if ( !player.m_bAlive || player.m_nTeam < 2 || ( m_nTeam != 0 && player.m_nTeam != m_nTeam ) || !IsInCut( player.m_vecOrigin ) )
@@ -1647,6 +1867,72 @@ void CDemoPathView::paintEvent( QPaintEvent * )
 		painter.setPen( QPen( DemoTeamColor( player.m_nTeam ), 1.5 ) );
 		painter.drawLine( at, at + QPointF( std::cos( flYaw ) * 8.0, -std::sin( flYaw ) * 8.0 ) );
 	}
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: The view as a picture flScale times its size: the map and heat as shown (scaled),
+//          the paths drawn again at that size so their lines stay sharp, played up to the
+//          playhead or the whole demo strong, and the players where they are.
+//-----------------------------------------------------------------------------
+QImage CDemoPathView::RenderPicture( const DemoPathPicture_t &options )
+{
+	if ( size() != m_ProjectedFor )
+		UpdateProjection();
+	const double flScale = std::clamp( options.m_flScale, 0.25, 8.0 );
+	QImage picture( QSize( qCeil( width() * flScale ), qCeil( height() * flScale ) ), QImage::Format_ARGB32_Premultiplied );
+	if ( picture.isNull() )
+		return picture;
+	picture.setDevicePixelRatio( flScale );
+	picture.fill( options.m_bTransparent && !options.m_bMap ? QColor( Qt::transparent ) : palette().color( QPalette::Base ) );
+	QPainter painter( &picture );
+	PaintUnder( painter, options.m_bMap );
+	const bool bCamera = m_nMode == DemoPathMode_t::DEMO_PATH_CAMERA;
+	const int nTick = m_Viewer.GetTick();
+	if ( bCamera || m_nMode == DemoPathMode_t::DEMO_PATH_PLAYERS )
+	{
+		PathInputs_t inputs;
+		inputs.m_nMode = m_nMode;
+		inputs.m_nTeam = m_nTeam;
+		inputs.m_Projection = m_Projection;
+		inputs.m_vecCentre = { ( m_vecMins.m_flX + m_vecMaxs.m_flX ) * 0.5f, ( m_vecMins.m_flY + m_vecMaxs.m_flY ) * 0.5f, ( m_vecMins.m_flZ + m_vecMaxs.m_flZ ) * 0.5f };
+		inputs.m_pPlayers = &m_Viewer.GetPlayers();
+		inputs.m_pViews = &m_Viewer.GetDemo().GetViews();
+		inputs.m_Highlight = palette().color( QPalette::Highlight );
+		inputs.m_Text = palette().color( QPalette::Text );
+		inputs.m_flDpr = flScale;
+		inputs.m_Pixels = picture.size();
+		PathPictures_t paths = DrawPaths( inputs );
+		if ( !paths.m_Faint.isNull() )
+		{
+			painter.drawImage( 0, 0, paths.m_Faint );
+			if ( options.m_bWholeDemo )
+			{
+				painter.drawImage( 0, 0, paths.m_Strong );
+			}
+			else
+			{
+				// The strong picture where a path had reached by the playhead.
+				QImage played( paths.m_Strong.size(), QImage::Format_ARGB32_Premultiplied );
+				played.setDevicePixelRatio( flScale );
+				const std::uint32_t nUpTo = static_cast<std::uint32_t>( std::max( 0, nTick ) ) + 1;
+				for ( int y = 0; y < played.height(); y++ )
+				{
+					const auto *pTicks = reinterpret_cast<const QRgb *>( paths.m_Ticks.constScanLine( y ) );
+					const auto *pStrong = reinterpret_cast<const QRgb *>( paths.m_Strong.constScanLine( y ) );
+					auto *pOut = reinterpret_cast<QRgb *>( played.scanLine( y ) );
+					for ( int x = 0; x < played.width(); x++ )
+					{
+						const std::uint32_t nAt = pTicks[ x ] & 0xffffffu;
+						pOut[ x ] = nAt != 0 && nAt <= nUpTo ? pStrong[ x ] : 0u;
+					}
+				}
+				painter.drawImage( 0, 0, played );
+			}
+		}
+	}
+	if ( options.m_bPlayers && m_nMode != DemoPathMode_t::DEMO_PATH_CAMERA )
+		PaintPlayers( painter, nTick );
+	return picture;
 }
 
 //-----------------------------------------------------------------------------
@@ -1832,6 +2118,11 @@ QWidget *CDemoViewer::BuildPaths()
 	pBar->addWidget( pBackground );
 	pBar->addWidget( BuildPathCut() );
 	pBar->addWidget( pView );
+	auto *pSave = new QPushButton( tr( "Save Image…" ) );
+	pSave->setObjectName( QStringLiteral( "demoPathSave" ) );
+	pSave->setToolTip( tr( "Save what this view shows as a picture: JPEG XL, AVIF or PNG, at up to four times its size" ) );
+	connect( pSave, &QPushButton::clicked, this, [ this ] { SaveDemoPathPicture( *m_pPath, this, m_szName ); } );
+	pBar->addWidget( pSave );
 	auto *pPage = new QWidget;
 	auto *pLayout = new QVBoxLayout( pPage );
 	pLayout->setContentsMargins( 0, 0, 0, 0 );
@@ -1896,6 +2187,15 @@ QWidget *CDemoViewer::BuildGraphs()
 	pLayout->addLayout( pBar );
 	pLayout->addWidget( pGraph, 1 );
 	return pPage;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: The paths view's worker reads the players, which go before Qt deletes the view.
+//-----------------------------------------------------------------------------
+CDemoViewer::~CDemoViewer()
+{
+	if ( m_pPath )
+		m_pPath->StopWork();
 }
 
 //-----------------------------------------------------------------------------
@@ -2255,6 +2555,10 @@ QWidget *CDemoViewer::BuildWorld()
 	pHud->setChecked( m_bHud );
 	pHud->setToolTip( tr( "Draw the followed player's HUD over the picture, in any camera (the recorder's in a free camera when no one is followed): health, armour, ammunition, money, the round's clock, chat, the kill feed and what the server showed (the logs beside say the same)" ) );
 	connect( pHud, &QCheckBox::toggled, this, &CDemoViewer::SetShowingHud );
+	auto *pMapFile = new QPushButton( tr( "Map File…" ) );
+	pMapFile->setObjectName( QStringLiteral( "demoMapFile" ) );
+	pMapFile->setToolTip( tr( "Show the demo on a map file you choose: for when the game doesn't have the map, or has another version of it. Remembered for this map" ) );
+	connect( pMapFile, &QPushButton::clicked, this, &CDemoViewer::MapFileWanted );
 	m_pRound = new QLabel;
 	m_pRound->setObjectName( QStringLiteral( "demoRound" ) );
 	auto *pBar = new QHBoxLayout;
@@ -2264,6 +2568,7 @@ QWidget *CDemoViewer::BuildWorld()
 	pBar->addWidget( pThrough );
 	pBar->addWidget( pHud );
 	pBar->addWidget( pLook );
+	pBar->addWidget( pMapFile );
 	pBar->addStretch( 1 );
 	pBar->addWidget( m_pRound );
 	auto *pView = new QWidget;
@@ -3821,6 +4126,15 @@ void CDemoViewer::AddWarning( const QString &szText )
 	QLabel *pWarning = ValueLabel( szText, true );
 	pWarning->setObjectName( QStringLiteral( "demoMapWarning" ) );
 	m_pSummaryForm->addRow( pWarning );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: The map's warnings go when another map is put under the demo.
+//-----------------------------------------------------------------------------
+void CDemoViewer::ClearWarnings()
+{
+	for ( QLabel *pWarning : m_pSummaryForm->parentWidget()->findChildren<QLabel *>( QStringLiteral( "demoMapWarning" ) ) )
+		m_pSummaryForm->removeRow( pWarning );
 }
 
 //-----------------------------------------------------------------------------

@@ -24,6 +24,8 @@ add_library(vomit_tools_ui STATIC
         DemoFigures.h
         DemoGraphs.cpp
         DemoGraphs.h
+        DemoPathSave.cpp
+        DemoPathSave.h
         DemoWorld.cpp
         DemoWorld.h
         StripperEditor.cpp
@@ -60,6 +62,8 @@ add_library(vomit_tools_ui STATIC
         GpuView.h
         Graphics.cpp
         Graphics.h
+        ImageExport.cpp
+        ImageExport.h
         ImageFiles.cpp
         ImageFiles.h
         InterfaceMode.cpp
@@ -348,6 +352,11 @@ qt_add_resources(vomit_tools_ui "vomit_tools_licenses"
         FILES "${CMAKE_SOURCE_DIR}/LICENSE" "${VOMIT_TOOLS_NOTICES}")
 target_link_libraries(vomit_tools_ui PUBLIC vomit_tools::core Qt6::Widgets Qt6::Network
         PRIVATE ${VOMIT_TOOLS_JXL_TARGET})
+# AVIF pictures through libavif when the system has it (cmake/Dependencies.cmake).
+if(VOMIT_TOOLS_AVIF_TARGET)
+    target_link_libraries(vomit_tools_ui PRIVATE ${VOMIT_TOOLS_AVIF_TARGET})
+    target_compile_definitions(vomit_tools_ui PRIVATE VOMIT_TOOLS_AVIF)
+endif()
 # On Linux, open and save windows ask the desktop's file chooser through the XDG portal, over D-Bus.
 if(TARGET Qt6::DBus)
     target_sources(vomit_tools_ui PRIVATE PortalFileChooser.cpp PortalFileChooser.h)

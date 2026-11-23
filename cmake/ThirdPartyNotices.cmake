@@ -172,6 +172,17 @@ if(VOMIT_TOOLS_JXL_TARGET)
     endif()
 endif()
 
+if(VOMIT_TOOLS_AVIF_TARGET)
+    vomit_tools_add_notice(NAME "libavif (AVIF pictures)"
+            FILE "${CMAKE_SOURCE_DIR}/LICENSES/libavif-BSD-2-Clause.txt"
+            URL "https://github.com/AOMediaCodec/libavif" LICENSE "BSD-2-Clause"
+            NOTE "The system's libavif, with the AV1 codec libraries it was built with, each under its own
+license: libaom (BSD-2-Clause, AOM patent license, https://aomedia.googlesource.com/aom),
+dav1d (BSD-2-Clause, https://code.videolan.org/videolan/dav1d), rav1e (BSD-2-Clause,
+https://github.com/xiph/rav1e), SVT-AV1 (BSD-3-Clause-Clear, AOM patent license,
+https://gitlab.com/AOMediaCodec/SVT-AV1) and libyuv (BSD-3-Clause, https://chromium.googlesource.com/libyuv/libyuv).")
+endif()
+
 file(WRITE "${VOMIT_TOOLS_NOTICES}.new" "${notices}")
 file(COPY_FILE "${VOMIT_TOOLS_NOTICES}.new" "${VOMIT_TOOLS_NOTICES}" ONLY_IF_DIFFERENT)
 file(REMOVE "${VOMIT_TOOLS_NOTICES}.new")
