@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.99.1 — The Um Uh (2026-11-23)
+
+- Demo viewer: a Graphs page (players on each team, scores, damage taken); smoother heatmaps
+  with a Granularity slider; Save Image… for the paths (JPEG XL, AVIF, PNG); Map File… to pick
+  the map; much faster paths, scrubbing and sound on long demos.
+- Map viewer: render keys (rendercolor, renderamt, renderfx), entity facing, Align, Move to
+  Floor/Ceiling, orbit camera; a compiled map's Textured view is unlit.
+- Preferences: style and colour scheme; changes wait for OK or Apply.
+- Textures: ATI2N and ATI1N.
+- The Game tree sorts by any column; the audio preview's waveform shows peaks and RMS.
+- Fixes: a crash closing the window, folded demo panels on reopen, unreadable chat colours.
+
 ## 0.99.0 — The Demo (2026-11-20)
 
 ### Demo viewer (new)
