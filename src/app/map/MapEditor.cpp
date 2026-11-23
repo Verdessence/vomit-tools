@@ -238,9 +238,10 @@ CMapEditor::CMapEditor( const QString &szPath, bool bFromGame, QWidget *pParent 
 	connect( m_pAutosaveTimer, &QTimer::timeout, this, &CMapEditor::Autosave );
 	UpdateAutosaveTimer();
 
-	// Hammer's default panes: the camera top left, then top, front and side.
+	// Hammer's default panes: the camera top left, then top, front and side. A compiled map's
+	// camera starts lit by its own light; switched to Textured, it shows the map unlit.
 	m_Panes = {
-		new CMapPane( *this, MapViewType_t::MAP_VIEW_TYPE_3D_TEXTURED ),
+		new CMapPane( *this, IsCompiled() ? MapViewType_t::MAP_VIEW_TYPE_3D_LIGHTING : MapViewType_t::MAP_VIEW_TYPE_3D_TEXTURED ),
 		new CMapPane( *this, MapViewType_t::MAP_VIEW_TYPE_TOP ),
 		new CMapPane( *this, MapViewType_t::MAP_VIEW_TYPE_FRONT ),
 		new CMapPane( *this, MapViewType_t::MAP_VIEW_TYPE_SIDE ),

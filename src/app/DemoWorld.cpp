@@ -1160,7 +1160,8 @@ MapFrame_t CDemoWorld::MakeFrame( QSize size )
 	camera.m_nWidth = std::max( 1, size.width() );
 	camera.m_nHeight = std::max( 1, size.height() );
 	xv::map::RasterOptions_t options;
-	options.m_Shade.m_nMode = xv::map::RasterMode_t::RASTER_MODE_TEXTURED_SHADED;
+	// Lit by the compile's light (CMapCompiled::Apply), unless fullbright.
+	options.m_Shade.m_nMode = xv::map::RasterMode_t::RASTER_MODE_LIGHTING;
 	options.m_bSelectionEdges = false;
 	MapViewSettings_t settings;
 	settings.m_bShowGrid = false;

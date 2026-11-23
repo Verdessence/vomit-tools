@@ -507,8 +507,10 @@ void CMapCompiled::Apply( MapFrame_t &frame, const std::vector<Drawn_t> &placed,
 	lightParts( frame.m_pOverlayParts, frame.m_pOverlayMesh, true );
 	frame.m_pMeshLights = std::move( pLights );
 
+	// The compile's light in a lighting view; the textured ones show the map unlit, as they
+	// would a map's text.
 	xv::map::ShadeOptions_t &shade = frame.m_Options.m_Shade;
-	if ( shade.m_nMode == xv::map::RasterMode_t::RASTER_MODE_TEXTURED || shade.m_nMode == xv::map::RasterMode_t::RASTER_MODE_TEXTURED_SHADED || shade.m_nMode == xv::map::RasterMode_t::RASTER_MODE_LIGHTING )
+	if ( shade.m_nMode == xv::map::RasterMode_t::RASTER_MODE_LIGHTING )
 	{
 		frame.m_pLighting = m_pCompiled->m_pLighting;
 		shade.m_nMode = xv::map::RasterMode_t::RASTER_MODE_LIGHTING;
@@ -519,6 +521,7 @@ void CMapCompiled::Apply( MapFrame_t &frame, const std::vector<Drawn_t> &placed,
 	else
 	{
 		frame.m_pLighting = nullptr;
+		frame.m_pMeshLights = nullptr;
 		shade.m_pLighting = nullptr;
 	}
 }
