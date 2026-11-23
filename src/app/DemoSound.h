@@ -17,6 +17,7 @@
 
 #include <array>
 #include <functional>
+#include <future>
 #include <map>
 #include <memory>
 #include <optional>
@@ -93,6 +94,12 @@ public:
 	[[nodiscard]] std::size_t GetPlayingCount() const { return m_Playing.size(); }
 	[[nodiscard]] const std::string &GetSoundscape() const { return m_szSoundscape; }
 	[[nodiscard]] xv::audio::CEngine *GetEngine() const { return m_pEngine.get(); }
+	// Sounds decode on worker threads, starting when they're in as far into them as they'd be
+	// by then (a map's music takes a large part of a second); offline output (tests) decodes
+	// them on the spot unless this says otherwise.
+	void SetDecodeOnThreads( bool bOnThreads ) { m_bDecodeOnThreads = bOnThreads; }
+	// For tests: sounds waiting for their clips.
+	[[nodiscard]] std::size_t GetWaitingCount() const { return m_Waiting.size(); }
 
 private:
 	struct Playing_t
@@ -113,6 +120,11 @@ private:
 	[[nodiscard]] bool OpenEngine();
 	[[nodiscard]] std::shared_ptr<const xv::audio::CClip> Clip( const std::string &szGamePath );
 	void Start( const xv::demo::Sound_t &sound, double flTick, double flSpeed, double flStartSeconds = 0.0 );
+	// A soundscape's looping sound, as the soundscape starts it.
+	void StartSoundscapeLoop( const xv::sound::PlayRequest_t &request, std::shared_ptr<const xv::audio::CClip> pClip, double flStartSeconds );
+	// The clips decoded since, kept; the sounds waiting for them started.
+	void TakeDecoded( double flTick, double flSpeed );
+	[[nodiscard]] bool IsDecoding( const std::string &szGamePath ) const { return m_Decoding.contains( szGamePath ); }
 	void Remix( double flTick, const xv::map::CViewCamera &camera, int nEar );
 	[[nodiscard]] std::optional<xv::map::Point_t> EntityPlace( int nEntity, double flTick ) const;
 	// After a seek: the sounds started before and not stopped that would still be playing
@@ -128,6 +140,13 @@ private:
 	const xv::demo::CPlayers &m_Players;
 	std::function<bool( int, int )> m_pfnPlayerMuted;
 	const xv::demo::LogicMap_t *m_pMap = nullptr;
+	struct SoundscapeSpot_t
+	{
+		xv::map::Point_t m_At;
+		double m_flRadius = 0.0; // below 0: everywhere
+		std::string m_szName;
+	};
+	std::vector<SoundscapeSpot_t> m_SoundscapeSpots;
 	CHudEditor::ReadFile_t m_pfnRead;
 	xv::audio::CEngine::Output_t m_nOutput = xv::audio::CEngine::Output_t::OUTPUT_DEVICE;
 	std::unique_ptr<xv::audio::CEngine> m_pEngine;
@@ -139,6 +158,26 @@ private:
 	std::map<std::string, std::shared_ptr<const xv::audio::CClip>> m_Clips; // null: won't load
 	std::size_t m_nClipBytes = 0;                                            // m_Clips' samples
 	std::map<std::string, double> m_ClipSeconds;                             // every clip decoded, kept or not
+	bool m_bDecodeOnThreads = true;
+	std::map<std::string, std::future<std::shared_ptr<const xv::audio::CClip>>> m_Decoding; // by game path
+	// A sound whose clip was still decoding when it was due: a demo sound (from as far in as
+	// it was to start), or a soundscape's loop.
+	struct Waiting_t
+	{
+		std::string m_szPath;
+		double m_flTick = 0.0; // the playhead when it was due
+		double m_flStartSeconds = 0.0;
+		std::optional<xv::demo::Sound_t> m_Sound;
+		std::optional<xv::sound::PlayRequest_t> m_Loop;
+		std::optional<std::size_t> m_Speech; // a stretch of talking, by GetSpeech()'s index
+	};
+	std::map<std::size_t, std::future<std::shared_ptr<const xv::audio::CClip>>> m_SpeechDecoding;
+	// The sounds and talking due in the next stretch of the demo, set decoding ahead of time.
+	void DecodeAhead( double flTick, double flSpeed );
+	// A stretch of talking from as far into it as it is at flTick; waits while it decodes.
+	void PlaySpeech( std::size_t nSpeech, double flTick, double flSpeed );
+	[[nodiscard]] static std::shared_ptr<const xv::audio::CClip> SpeechToClip( const xv::demo::CContents &contents, const xv::demo::Speech_t &speech );
+	std::vector<Waiting_t> m_Waiting;
 	std::vector<Playing_t> m_Playing;
 	double m_flLastTick = -1.0;
 	bool m_bWasPlaying = false;

@@ -160,6 +160,21 @@ struct CEngine::CImpl
 		ma_audio_buffer_uninit( &playing.m_Buffer );
 	}
 
+	// The voice if it plays still; a finished one-shot is let go first.
+	Playing_t *FindPlaying( Voice_t nVoice )
+	{
+		const auto it = m_Voices.find( nVoice );
+		if ( it == m_Voices.end() )
+			return nullptr;
+		if ( !it->second->m_bLoop && ma_sound_at_end( &it->second->m_Sound ) )
+		{
+			Release( *it->second );
+			m_Voices.erase( it );
+			return nullptr;
+		}
+		return it->second.get();
+	}
+
 	void ReleaseFinished()
 	{
 		for ( auto it = m_Voices.begin(); it != m_Voices.end(); )
@@ -344,8 +359,9 @@ void CEngine::StopAll()
 //-----------------------------------------------------------------------------
 bool CEngine::Playing( Voice_t nVoice )
 {
-	m_pImpl->ReleaseFinished();
-	return m_pImpl->m_Voices.contains( nVoice );
+	// Only the voice asked about: a caller asking after each of many voices would otherwise
+	// look through all of them each time.
+	return m_pImpl->FindPlaying( nVoice ) != nullptr;
 }
 
 //-----------------------------------------------------------------------------
@@ -354,18 +370,17 @@ bool CEngine::Playing( Voice_t nVoice )
 //-----------------------------------------------------------------------------
 std::optional<double> CEngine::Position( Voice_t nVoice )
 {
-	m_pImpl->ReleaseFinished();
-	const auto it = m_pImpl->m_Voices.find( nVoice );
-	if ( it == m_pImpl->m_Voices.end() )
+	CImpl::Playing_t *pPlaying = m_pImpl->FindPlaying( nVoice );
+	if ( !pPlaying )
 	{
 		return std::nullopt;
 	}
 	ma_uint64 nCursor = 0;
-	if ( ma_data_source_get_cursor_in_pcm_frames( &it->second->m_Buffer, &nCursor ) != MA_SUCCESS )
+	if ( ma_data_source_get_cursor_in_pcm_frames( &pPlaying->m_Buffer, &nCursor ) != MA_SUCCESS )
 	{
 		return std::nullopt;
 	}
-	return static_cast<double>( nCursor ) / it->second->m_pClip->m_nSampleRate;
+	return static_cast<double>( nCursor ) / pPlaying->m_pClip->m_nSampleRate;
 }
 
 //-----------------------------------------------------------------------------

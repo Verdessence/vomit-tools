@@ -7,6 +7,7 @@
 #include "DemoSound.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cctype>
 #include <cmath>
 #include <cstdio>
@@ -52,6 +53,9 @@ constexpr std::size_t CLIP_BYTES_KEPT = std::size_t{ 384 } << 20;
 constexpr double RESUME_SECONDS = 600.0;
 // Decoded stretches of talking kept, at most.
 constexpr std::size_t SPEECH_KEPT = 64;
+// How far ahead of the playhead sounds and talking start decoding (seconds of the demo), so
+// most are in by the time they're due.
+constexpr double DECODE_AHEAD_SECONDS = 1.5;
 // Proximity voice is heard at this sound level from the talker (the engine's talking level).
 constexpr double VOICE_SOUND_LEVEL = 80.0;
 
@@ -90,7 +94,10 @@ void CDemoSound::SetFiles( CHudEditor::ReadFile_t pfnRead, xv::audio::CEngine::O
 	StopAll();
 	m_pfnRead = std::move( pfnRead );
 	m_nOutput = nOutput;
+	m_bDecodeOnThreads = nOutput == xv::audio::CEngine::Output_t::OUTPUT_DEVICE;
 	m_Speech.clear();
+	m_SpeechDecoding.clear();
+	m_Decoding.clear();
 	m_Clips.clear();
 	m_nClipBytes = 0;
 	m_ClipSeconds.clear();
@@ -104,6 +111,20 @@ void CDemoSound::SetFiles( CHudEditor::ReadFile_t pfnRead, xv::audio::CEngine::O
 void CDemoSound::SetMap( const LogicMap_t *pMap )
 {
 	m_pMap = pMap;
+	// The env_soundscapes that can be heard, read once: looking through every entity's keys
+	// each frame cost milliseconds on a big map.
+	m_SoundscapeSpots.clear();
+	if ( !pMap )
+		return;
+	for ( const xv::bsp::Entity_t &entity : pMap->m_Entities )
+	{
+		if ( !xv::kv1::EqualsIgnoreCase( entity.Get( "classname" ), "env_soundscape" ) || entity.Get( "soundscape" ).empty() || entity.Get( "StartDisabled" ) == "1" )
+			continue;
+		double fl[ 3 ] = {};
+		if ( std::sscanf( std::string( entity.Get( "origin" ) ).c_str(), "%lf %lf %lf", &fl[ 0 ], &fl[ 1 ], &fl[ 2 ] ) != 3 )
+			continue;
+		m_SoundscapeSpots.push_back( { Point_t{ fl[ 0 ], fl[ 1 ], fl[ 2 ] }, std::atof( std::string( entity.Get( "radius" ) ).c_str() ), std::string( entity.Get( "soundscape" ) ) } );
+	}
 }
 
 //-----------------------------------------------------------------------------
@@ -169,6 +190,7 @@ void CDemoSound::StopAll()
 			m_pEngine->Stop( playing.m_nVoice );
 	}
 	m_Playing.clear();
+	m_Waiting.clear();
 	m_szSoundscape.clear();
 	m_Simulation.reset();
 }
@@ -196,7 +218,9 @@ bool CDemoSound::OpenEngine()
 }
 
 //-----------------------------------------------------------------------------
-// Purpose: A game sound decoded, kept; null when it can't be read or decoded.
+// Purpose: A game sound decoded, kept; null when it can't be read or decoded, or while it
+//          decodes on a worker thread (IsDecoding). The file is read here: the game's file
+//          system isn't for other threads.
 //-----------------------------------------------------------------------------
 std::shared_ptr<const xv::audio::CClip> CDemoSound::Clip( const std::string &szGamePath )
 {
@@ -204,14 +228,20 @@ std::shared_ptr<const xv::audio::CClip> CDemoSound::Clip( const std::string &szG
 		return nullptr;
 	if ( const auto found = m_Clips.find( szGamePath ); found != m_Clips.end() )
 		return found->second;
+	if ( IsDecoding( szGamePath ) )
+		return nullptr;
 	if ( m_Clips.size() >= CLIPS_KEPT || m_nClipBytes >= CLIP_BYTES_KEPT )
 	{
 		m_Clips.clear();
 		m_nClipBytes = 0;
 	}
-	std::shared_ptr<const xv::audio::CClip> pClip;
-	if ( const auto bytes = m_pfnRead( szGamePath ) )
-		pClip = xv::audio::Decode( *bytes );
+	std::optional<std::vector<std::byte>> bytes = m_pfnRead( szGamePath );
+	if ( bytes && m_bDecodeOnThreads )
+	{
+		m_Decoding.emplace( szGamePath, std::async( std::launch::async, [ data = std::move( *bytes ) ] { return xv::audio::Decode( data ); } ) );
+		return nullptr;
+	}
+	std::shared_ptr<const xv::audio::CClip> pClip = bytes ? xv::audio::Decode( *bytes ) : nullptr;
 	m_Clips[ szGamePath ] = pClip;
 	if ( pClip )
 	{
@@ -219,6 +249,73 @@ std::shared_ptr<const xv::audio::CClip> CDemoSound::Clip( const std::string &szG
 		m_ClipSeconds[ szGamePath ] = pClip->GetSeconds();
 	}
 	return pClip;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: The clips the workers have finished join the kept ones; each sound that waited
+//          for one starts as far into it as it would be by now (one that plays once and
+//          would be over is let go).
+//-----------------------------------------------------------------------------
+void CDemoSound::TakeDecoded( double flTick, double flSpeed )
+{
+	for ( auto it = m_Decoding.begin(); it != m_Decoding.end(); )
+	{
+		if ( it->second.wait_for( std::chrono::seconds( 0 ) ) != std::future_status::ready )
+		{
+			++it;
+			continue;
+		}
+		std::shared_ptr<const xv::audio::CClip> pClip = it->second.get();
+		if ( pClip )
+		{
+			m_nClipBytes += pClip->m_Samples.size() * sizeof( float );
+			m_ClipSeconds[ it->first ] = pClip->GetSeconds();
+		}
+		m_Clips[ it->first ] = std::move( pClip );
+		it = m_Decoding.erase( it );
+	}
+	for ( auto it = m_SpeechDecoding.begin(); it != m_SpeechDecoding.end(); )
+	{
+		if ( it->second.wait_for( std::chrono::seconds( 0 ) ) != std::future_status::ready )
+		{
+			++it;
+			continue;
+		}
+		if ( m_Speech.size() >= SPEECH_KEPT )
+			m_Speech.clear();
+		m_Speech[ it->first ] = it->second.get();
+		it = m_SpeechDecoding.erase( it );
+	}
+	if ( m_Waiting.empty() || !m_pContents )
+		return;
+	const double flInterval = m_pContents->GetTickInterval() > 0.0 ? m_pContents->GetTickInterval() : 0.015;
+	std::vector<Waiting_t> waiting = std::move( m_Waiting );
+	m_Waiting.clear();
+	for ( Waiting_t &wait : waiting )
+	{
+		if ( wait.m_Speech )
+		{
+			if ( m_SpeechDecoding.contains( *wait.m_Speech ) )
+				m_Waiting.push_back( std::move( wait ) );
+			else if ( CanPlaySpeech( *wait.m_Speech ) )
+				PlaySpeech( *wait.m_Speech, flTick, flSpeed );
+			continue;
+		}
+		if ( IsDecoding( wait.m_szPath ) )
+		{
+			m_Waiting.push_back( std::move( wait ) );
+			continue;
+		}
+		const auto found = m_Clips.find( wait.m_szPath );
+		if ( found == m_Clips.end() || !found->second )
+			continue;
+		const double flPitch = wait.m_Sound ? wait.m_Sound->m_nPitch / 100.0 : wait.m_Loop->m_flPitch / 100.0;
+		const double flLate = std::max( 0.0, ( flTick - wait.m_flTick ) * flInterval * flPitch );
+		if ( wait.m_Sound )
+			Start( *wait.m_Sound, flTick, flSpeed, wait.m_flStartSeconds + flLate );
+		else
+			StartSoundscapeLoop( *wait.m_Loop, found->second, wait.m_flStartSeconds + flLate );
+	}
 }
 
 //-----------------------------------------------------------------------------
@@ -274,6 +371,14 @@ void CDemoSound::Start( const Sound_t &sound, double flTick, double flSpeed, dou
 			m_pEngine->Stop( playing.m_nVoice );
 		return bEnds;
 	} );
+	// What waits for its clip on that channel ends the same way.
+	std::erase_if( m_Waiting, [ & ]( const Waiting_t &wait ) {
+		if ( !wait.m_Sound )
+			return false;
+		const Sound_t &other = *wait.m_Sound;
+		const bool bSame = other.m_nEntity == sound.m_nEntity && other.m_nChannel == sound.m_nChannel;
+		return bSame && ( sound.IsStop() ? ( sound.m_nSound == 0 || other.m_nSound == sound.m_nSound ) : bReplaces );
+	} );
 	if ( sound.IsStop() || sound.m_bSentence || !m_pContents )
 		return;
 	const std::string szName = LowerName( m_pContents->SoundName( sound ) );
@@ -282,7 +387,20 @@ void CDemoSound::Start( const Sound_t &sound, double flTick, double flSpeed, dou
 	const std::string szPath = xv::sound::WaveGamePath( m_pContents->SoundName( sound ) );
 	const std::shared_ptr<const xv::audio::CClip> pClip = Clip( szPath );
 	if ( !pClip )
+	{
+		if ( IsDecoding( szPath ) )
+			m_Waiting.push_back( { szPath, flTick, flStartSeconds, sound, std::nullopt, std::nullopt } );
 		return;
+	}
+	// Started late (its clip was decoding), it may have played out or looped round by now.
+	const double flLength = pClip->GetSeconds();
+	if ( flStartSeconds >= flLength )
+	{
+		const double flLoopFrom = pClip->m_LoopStart && pClip->m_nSampleRate ? static_cast<double>( *pClip->m_LoopStart ) / pClip->m_nSampleRate : -1.0;
+		if ( flLoopFrom < 0.0 || flLength <= flLoopFrom )
+			return;
+		flStartSeconds = flLoopFrom + std::fmod( flStartSeconds - flLoopFrom, flLength - flLoopFrom );
+	}
 	xv::audio::PlayParams_t params;
 	params.m_flVolume = 0.0f; // the mix sets it, from where it is
 	params.m_flPitch = static_cast<float>( sound.m_nPitch / 100.0 * flSpeed );
@@ -388,9 +506,22 @@ void CDemoSound::ResumeLoops( double flTick, double flSpeed )
 		if ( flSince > RESUME_SECONDS && !m_Clips.contains( szPath ) )
 			continue;
 		const std::shared_ptr<const xv::audio::CClip> pClip = Clip( szPath );
-		if ( !pClip )
-			continue;
 		const double flIn = ( flTick - pSound->m_nTick ) * flInterval * pSound->m_nPitch / 100.0;
+		if ( !pClip )
+		{
+			// Still decoding: it waits, and starts from as far in as it is by then (Start
+			// wraps a loop, and lets go of one that's over).
+			if ( IsDecoding( szPath ) )
+			{
+				Sound_t sound = *pSound;
+				sound.m_nFlags &= ~( SOUND_FLAG_CHANGE_VOLUME | SOUND_FLAG_CHANGE_PITCH );
+				if ( const auto volume = volumes.find( key ); volume != volumes.end() )
+					sound.m_flVolume = volume->second;
+				if ( sound.m_flVolume > 0.0f )
+					Start( sound, flTick, flSpeed, flIn );
+			}
+			continue;
+		}
 		const double flLength = pClip->GetSeconds();
 		// One that plays once is picked up while it would still be playing (a map's music).
 		if ( !pClip->m_LoopStart && flIn >= flLength )
@@ -416,21 +547,36 @@ std::shared_ptr<const xv::audio::CClip> CDemoSound::SpeechClip( std::size_t nSpe
 {
 	if ( const auto found = m_Speech.find( nSpeech ); found != m_Speech.end() )
 		return found->second;
+	if ( m_SpeechDecoding.contains( nSpeech ) )
+		return nullptr;
 	if ( m_Speech.size() >= SPEECH_KEPT )
 		m_Speech.clear();
-	int nRate = 0;
-	std::vector<float> samples = DecodeSpeech( *m_pContents, m_pContents->GetSpeech()[ nSpeech ], &nRate );
-	std::shared_ptr<const xv::audio::CClip> pClip;
-	if ( !samples.empty() && nRate > 0 )
+	const Speech_t &speech = m_pContents->GetSpeech()[ nSpeech ];
+	// The contents outlive this (the viewer holds them longer), and nothing in them changes.
+	if ( m_bDecodeOnThreads )
 	{
-		auto pDecoded = std::make_shared<xv::audio::CClip>();
-		pDecoded->m_Samples = std::move( samples );
-		pDecoded->m_nChannels = 1;
-		pDecoded->m_nSampleRate = static_cast<std::uint32_t>( nRate );
-		pClip = std::move( pDecoded );
+		m_SpeechDecoding.emplace( nSpeech, std::async( std::launch::async, [ pContents = m_pContents, speech ] { return SpeechToClip( *pContents, speech ); } ) );
+		return nullptr;
 	}
+	std::shared_ptr<const xv::audio::CClip> pClip = SpeechToClip( *m_pContents, speech );
 	m_Speech[ nSpeech ] = pClip;
 	return pClip;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: The talking's samples as a clip; null when nothing decodes.
+//-----------------------------------------------------------------------------
+std::shared_ptr<const xv::audio::CClip> CDemoSound::SpeechToClip( const xv::demo::CContents &contents, const xv::demo::Speech_t &speech )
+{
+	int nRate = 0;
+	std::vector<float> samples = DecodeSpeech( contents, speech, &nRate );
+	if ( samples.empty() || nRate <= 0 )
+		return nullptr;
+	auto pDecoded = std::make_shared<xv::audio::CClip>();
+	pDecoded->m_Samples = std::move( samples );
+	pDecoded->m_nChannels = 1;
+	pDecoded->m_nSampleRate = static_cast<std::uint32_t>( nRate );
+	return pDecoded;
 }
 
 //-----------------------------------------------------------------------------
@@ -508,7 +654,6 @@ void CDemoSound::StartSpeech( double flFrom, double flTo, double flSpeed, bool b
 		return;
 	const double flInterval = m_pContents->GetTickInterval();
 	const std::vector<Speech_t> &speech = m_pContents->GetSpeech();
-	const std::vector<VoicePacket_t> &packets = m_pContents->GetVoicePackets();
 	for ( std::size_t i = 0; i < speech.size() && speech[ i ].m_nFrom <= flTo; i++ )
 	{
 		const Speech_t &talk = speech[ i ];
@@ -516,30 +661,72 @@ void CDemoSound::StartSpeech( double flFrom, double flTo, double flSpeed, bool b
 		const bool bUnderWay = bResume && talk.m_nFrom <= flTo && talk.m_nTo >= flTo - 1;
 		if ( ( !bStarts && !bUnderWay ) || !CanPlaySpeech( i ) )
 			continue;
-		const std::shared_ptr<const xv::audio::CClip> pClip = SpeechClip( i );
-		if ( !pClip )
+		PlaySpeech( i, flTo, flSpeed );
+	}
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+void CDemoSound::PlaySpeech( std::size_t nSpeech, double flTick, double flSpeed )
+{
+	const Speech_t &talk = m_pContents->GetSpeech()[ nSpeech ];
+	const std::shared_ptr<const xv::audio::CClip> pClip = SpeechClip( nSpeech );
+	if ( !pClip )
+	{
+		if ( m_SpeechDecoding.contains( nSpeech ) )
+			m_Waiting.push_back( { {}, flTick, 0.0, std::nullopt, std::nullopt, nSpeech } );
+		return;
+	}
+	const double flIn = std::max( 0.0, ( flTick - talk.m_nFrom ) * m_pContents->GetTickInterval() );
+	if ( flIn >= pClip->GetSeconds() )
+		return;
+	xv::audio::PlayParams_t params;
+	params.m_flVolume = 0.0f; // the mix sets it
+	params.m_flPitch = static_cast<float>( flSpeed );
+	params.m_flStartSeconds = flIn;
+	Playing_t playing;
+	playing.m_nVoice = m_pEngine->Play( pClip, params );
+	if ( playing.m_nVoice == 0 )
+		return;
+	playing.m_nEntity = talk.m_nEntity;
+	playing.m_nChannel = -1;
+	playing.m_Speech = nSpeech;
+	const std::vector<VoicePacket_t> &packets = m_pContents->GetVoicePackets();
+	const auto first = std::ranges::lower_bound( packets, talk.m_nFrom, {}, &VoicePacket_t::m_nTick );
+	const bool bProximity = first != packets.end() && first->m_bProximity;
+	playing.m_bPositioned = bProximity;
+	if ( bProximity )
+		playing.m_SoundLevel = VOICE_SOUND_LEVEL;
+	m_Playing.push_back( playing );
+	m_nVoices++;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: The sounds and talking that start in the next DECODE_AHEAD_SECONDS of the demo
+//          (at this speed) set decoding now, so they're in when they're due.
+//-----------------------------------------------------------------------------
+void CDemoSound::DecodeAhead( double flTick, double flSpeed )
+{
+	if ( !m_bDecodeOnThreads || !m_pContents )
+		return;
+	const double flInterval = m_pContents->GetTickInterval() > 0.0 ? m_pContents->GetTickInterval() : 0.015;
+	const double flUntil = flTick + DECODE_AHEAD_SECONDS * std::max( 1.0, flSpeed ) / flInterval;
+	const std::vector<Sound_t> &sounds = m_pContents->GetSounds();
+	const auto from = std::upper_bound( sounds.begin(), sounds.end(), flTick, []( double flAt, const Sound_t &sound ) { return flAt < sound.m_nTick; } );
+	for ( auto sound = from; sound != sounds.end() && sound->m_nTick <= flUntil; ++sound )
+	{
+		if ( sound->IsStop() || sound->m_bSentence || m_Muted.contains( LowerName( m_pContents->SoundName( *sound ) ) ) )
 			continue;
-		const double flIn = std::max( 0.0, ( flTo - talk.m_nFrom ) * flInterval );
-		if ( flIn >= pClip->GetSeconds() )
-			continue;
-		xv::audio::PlayParams_t params;
-		params.m_flVolume = 0.0f; // the mix sets it
-		params.m_flPitch = static_cast<float>( flSpeed );
-		params.m_flStartSeconds = flIn;
-		Playing_t playing;
-		playing.m_nVoice = m_pEngine->Play( pClip, params );
-		if ( playing.m_nVoice == 0 )
-			continue;
-		playing.m_nEntity = talk.m_nEntity;
-		playing.m_nChannel = -1;
-		playing.m_Speech = i;
-		const auto first = std::ranges::lower_bound( packets, talk.m_nFrom, {}, &VoicePacket_t::m_nTick );
-		const bool bProximity = first != packets.end() && first->m_bProximity;
-		playing.m_bPositioned = bProximity;
-		if ( bProximity )
-			playing.m_SoundLevel = VOICE_SOUND_LEVEL;
-		m_Playing.push_back( playing );
-		m_nVoices++;
+		(void)Clip( xv::sound::WaveGamePath( m_pContents->SoundName( *sound ) ) );
+	}
+	if ( !m_bVoiceDecoded || !*m_bVoiceDecoded )
+		return;
+	const std::vector<Speech_t> &speech = m_pContents->GetSpeech();
+	for ( std::size_t i = 0; i < speech.size() && speech[ i ].m_nFrom <= flUntil; i++ )
+	{
+		if ( speech[ i ].m_nFrom > flTick && CanPlaySpeech( i ) )
+			(void)SpeechClip( i );
 	}
 }
 
@@ -594,26 +781,19 @@ const xv::kv1::CNode *CDemoSound::FindSoundscape( std::string_view szName )
 //-----------------------------------------------------------------------------
 void CDemoSound::UpdateSoundscape( double flTick, const xv::map::CViewCamera &camera )
 {
-	(void)flTick;
 	if ( !m_pMap )
 		return;
 	std::string szBest;
 	double flBest = std::numeric_limits<double>::infinity();
-	const xv::bsp::Entity_t *pBest = nullptr;
-	for ( const xv::bsp::Entity_t &entity : m_pMap->m_Entities )
+	const SoundscapeSpot_t *pBest = nullptr;
+	for ( const SoundscapeSpot_t &spot : m_SoundscapeSpots )
 	{
-		if ( !xv::kv1::EqualsIgnoreCase( entity.Get( "classname" ), "env_soundscape" ) || entity.Get( "soundscape" ).empty() || entity.Get( "StartDisabled" ) == "1" )
-			continue;
-		double fl[ 3 ] = {};
-		if ( std::sscanf( std::string( entity.Get( "origin" ) ).c_str(), "%lf %lf %lf", &fl[ 0 ], &fl[ 1 ], &fl[ 2 ] ) != 3 )
-			continue;
-		const double flAway = xv::map::Length( xv::map::Subtract( camera.m_Eye, Point_t{ fl[ 0 ], fl[ 1 ], fl[ 2 ] } ) );
-		const double flRadius = std::atof( std::string( entity.Get( "radius" ) ).c_str() );
-		if ( ( flRadius < 0.0 || flAway <= flRadius ) && flAway < flBest )
+		const double flAway = xv::map::Length( xv::map::Subtract( camera.m_Eye, spot.m_At ) );
+		if ( ( spot.m_flRadius < 0.0 || flAway <= spot.m_flRadius ) && flAway < flBest )
 		{
 			flBest = flAway;
-			szBest = entity.Get( "soundscape" );
-			pBest = &entity;
+			szBest = spot.m_szName;
+			pBest = &spot;
 		}
 	}
 	if ( !pBest || xv::kv1::EqualsIgnoreCase( szBest, m_szSoundscape ) )
@@ -640,6 +820,7 @@ void CDemoSound::UpdateSoundscape( double flTick, const xv::map::CViewCamera &ca
 			m_pEngine->Stop( playing.m_nVoice );
 		return playing.m_bSoundscape;
 	} );
+	std::erase_if( m_Waiting, []( const Waiting_t &wait ) { return wait.m_Loop.has_value(); } );
 	m_szSoundscape = szBest;
 	m_Simulation.reset();
 	const xv::kv1::CNode *pNode = FindSoundscape( szBest );
@@ -650,21 +831,37 @@ void CDemoSound::UpdateSoundscape( double flTick, const xv::map::CViewCamera &ca
 	m_SoundscapeClock.restart();
 	for ( const xv::sound::PlayRequest_t &request : m_Simulation->Start() )
 	{
-		const auto pClip = Clip( request.m_szGamePath );
-		if ( !pClip )
-			continue;
-		xv::audio::PlayParams_t params;
-		params.m_flVolume = static_cast<float>( request.m_flVolume );
-		params.m_flPitch = static_cast<float>( request.m_flPitch / 100.0 );
-		params.m_bLoop = request.m_bLoop;
-		Playing_t playing;
-		playing.m_nVoice = m_pEngine->Play( pClip, params );
-		playing.m_bPositioned = false;
-		playing.m_flVolume = static_cast<float>( request.m_flVolume );
-		playing.m_bSoundscape = true;
-		if ( playing.m_nVoice )
-			m_Playing.push_back( playing );
+		if ( const auto pClip = Clip( request.m_szGamePath ) )
+			StartSoundscapeLoop( request, pClip, 0.0 );
+		else if ( IsDecoding( request.m_szGamePath ) )
+			m_Waiting.push_back( { request.m_szGamePath, flTick, 0.0, std::nullopt, request, std::nullopt } );
 	}
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+void CDemoSound::StartSoundscapeLoop( const xv::sound::PlayRequest_t &request, std::shared_ptr<const xv::audio::CClip> pClip, double flStartSeconds )
+{
+	const double flLength = pClip->GetSeconds();
+	if ( flStartSeconds >= flLength )
+	{
+		if ( !request.m_bLoop || flLength <= 0.0 )
+			return;
+		flStartSeconds = std::fmod( flStartSeconds, flLength );
+	}
+	xv::audio::PlayParams_t params;
+	params.m_flVolume = static_cast<float>( request.m_flVolume );
+	params.m_flPitch = static_cast<float>( request.m_flPitch / 100.0 );
+	params.m_bLoop = request.m_bLoop;
+	params.m_flStartSeconds = flStartSeconds;
+	Playing_t playing;
+	playing.m_nVoice = m_pEngine->Play( std::move( pClip ), params );
+	playing.m_bPositioned = false;
+	playing.m_flVolume = static_cast<float>( request.m_flVolume );
+	playing.m_bSoundscape = true;
+	if ( playing.m_nVoice )
+		m_Playing.push_back( playing );
 }
 
 //-----------------------------------------------------------------------------
@@ -685,6 +882,7 @@ void CDemoSound::Update( double flTick, bool bPlaying, double flSpeed, const xv:
 	}
 	if ( !OpenEngine() )
 		return;
+	TakeDecoded( flTick, flSpeed );
 	const double flInterval = m_pContents->GetTickInterval() > 0.0 ? m_pContents->GetTickInterval() : 0.015;
 	const bool bStep = m_bWasPlaying && m_flLastTick >= 0.0 && flTick >= m_flLastTick && ( flTick - m_flLastTick ) * flInterval <= STEP_MOST_SECONDS * std::max( 1.0, flSpeed );
 	if ( !bStep )
@@ -703,6 +901,7 @@ void CDemoSound::Update( double flTick, bool bPlaying, double flSpeed, const xv:
 	}
 	UpdateSoundscape( flTick, camera );
 	Remix( flTick, camera, nEar );
+	DecodeAhead( flTick, flSpeed );
 	m_bWasPlaying = true;
 	m_flLastTick = flTick;
 }
